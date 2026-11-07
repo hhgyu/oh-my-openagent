@@ -24,6 +24,8 @@ describe("OpenCode 2 TUI notice", () => {
     expect(shown[0]?.variant).toBe("warning")
     expect(shown[0]?.message).toContain(NATIVE_EDITION_INSTALL_COMMAND)
     expect(shown[0]?.message).toContain(NATIVE_EDITION_GUIDE_URL)
+    expect(shown[0]?.message).toContain("native OmO agents are active")
+    expect(shown[0]?.message).not.toContain("agents, tools and hooks are not active")
   })
 
   it("keeps the V1 tui entry and adds a V2 setup that shows the notice on every start", async () => {
