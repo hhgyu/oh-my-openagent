@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { withJoinedSessionCancellation } from "./session-cancellation"
 import { createOwnedChildObserver } from "./owned-child-observer"
 import type { OwnedChildObservationStore, ObservationRecord, ObservationSnapshot } from "./owned-child-observation-types"
 import type { ChildHandle } from "./session-backend"
@@ -12,6 +13,7 @@ function fixture(emitBarrier = true) {
  function end(){ended=true;if(wake){wake({done:true,value:undefined});wake=undefined}}
  function emit(type:string,data:Record<string,unknown>={}){const value={id:`evt_${sequence}`,type,created:sequence,durable:{aggregateID:"child",seq:sequence++,version:1},data:{sessionID:"child",...data}};if(wake){const yes=wake;wake=undefined;yes({done:false,value})}else queue.push(value)}
  const ctx:any={event:{subscribe({signal}:any){signal.addEventListener("abort",end,{once:true});return {[Symbol.asyncIterator](){return {async next(){if(queue.length)return {done:false,value:queue.shift()};if(ended)return {done:true,value:undefined};return new Promise<IteratorResult<any>>(yes=>wake=yes)},async return(){streamClosed++;end();return {done:true,value:undefined}}}}}}},session:{async hook(name:string,callback:any){hooks.set(name,callback);return {dispose(){hookDisposed++;hooks.delete(name)}}},async update({title}:any){if(emitBarrier)emit("session.title.updated",{title})}}}
+ withJoinedSessionCancellation(ctx.session,"controlled-test")
  const options={key:"task",child,guard,store,title:"Actual task title",timeoutMs:1000}
  async function finish(text="final"){
   await hooks.get("model.request")?.({sessionID:"child",kind:"primary",model:{providerID:"actual",id:"observed"}})
@@ -63,4 +65,12 @@ test("readiness timeout also aborts a pending public title request",async()=>{
  f.ctx.session.update=async(_input:any,{signal}:any)=>new Promise((_yes,no)=>{const stop=()=>{aborted=true;no(signal.reason)};if(signal.aborted)stop();else signal.addEventListener("abort",stop,{once:true})})
  await expect(createOwnedChildObserver(f.ctx,{...f.options,timeoutMs:10})).rejects.toThrow("readiness-timeout")
  expect(aborted).toBe(true);expect(f.metrics().hookDisposed).toBe(1);expect(f.metrics().ended).toBe(true)
+})
+
+
+test("bare Promise session cannot claim title-request cancellation through a truthy config flag",async()=>{
+ const f=fixture();let updateCalled=false
+ const bare={hook:f.ctx.session.hook,async update(){updateCalled=true},joinedCancellation:true}
+ await expect(createOwnedChildObserver({...f.ctx,session:bare},f.options)).rejects.toThrow("joined session cancellation")
+ expect(updateCalled).toBe(false);expect(f.records).toEqual([]);expect(f.hooks.size).toBe(0)
 })

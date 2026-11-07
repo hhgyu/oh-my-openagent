@@ -107,3 +107,10 @@ test("synchronous observation refuses corrupted durable custody", async () => {
  const db=new Database(file);db.query("UPDATE children SET body=? WHERE key=?").run('{"key":"child"}',"child");db.close()
  expect(()=>journal.assertCurrent(first)).toThrow("Corrupt")
 })
+test("synchronous checkpoint commits exact SQLite CAS before immediate current-row observation",async()=>{
+ const journal=await open(),first=await journal.claim("child",journal.owner,record(journal.owner)),next={...first,revision:first.revision+1,phase:"staged" as const}
+ expect(journal.writeSync(first,next)).toBeUndefined();expect(journal.assertCurrent(next)).toBeUndefined();expect(()=>journal.assertCurrent(first)).toThrow("fence")
+ expect(()=>journal.writeSync(first,next)).toThrow("Stale");expect(await journal.read("child")).toEqual(next)
+ const accepted={...next,revision:next.revision+1,phase:"accepted" as const};await journal.write(next,accepted);expect(()=>journal.assertCurrent(accepted)).not.toThrow()
+ journal.close();expect(()=>journal.writeSync(accepted,{...accepted,revision:accepted.revision+1})).toThrow("closed")
+})

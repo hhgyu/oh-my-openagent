@@ -2,6 +2,7 @@ import type { Context } from "@opencode/plugin/promise/plugin"
 import { randomUUID } from "node:crypto"
 import type { ChildHandle } from "./session-backend"
 import { normalizeOwnedChildEvent, observedModelSchema, type ObservationRecord, type OwnedChildObservationStore, type OwnedChildOutcome } from "./owned-child-observation-types"
+import { hasJoinedSessionCancellation } from "./session-cancellation"
 import { projectOwnedChildOutcome } from "./owned-child-outcome"
 
 type Host = Pick<Context, "session" | "event">
@@ -26,6 +27,7 @@ export interface OwnedChildObserver {
 
 /** Internal real-host port; no task tools or automatic orchestration registration. */
 export async function createOwnedChildObserver(ctx: Host, options: OwnedChildObserverOptions): Promise<OwnedChildObserver> {
+  if (!hasJoinedSessionCancellation(ctx.session)) throw new Error("Child observation requires joined session cancellation")
   if (!options.title.trim() || options.title.length > 4096) throw new Error("Observation requires a bounded task title")
   const timeout = options.timeoutMs ?? 5000
   if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 60_000) throw new Error("Invalid observation readiness timeout")

@@ -63,7 +63,8 @@ export function resolveTrustedChildStatePath(path: string) {
 
 export interface DurableChildJournal extends ChildJournal {
   readonly owner: string
-  assertCurrent(expected: ChildRecord): void
+  assertCurrent(expected: ChildRecord): undefined
+  writeSync(previous: ChildRecord, next: ChildRecord): undefined
   /** Release custody only after all backend work has joined. Future calls fail. */
   close(): void
 }
@@ -109,6 +110,21 @@ export async function openChildJournal(options: ChildJournalOptions): Promise<Du
       catch { return fail("Corrupt or missing child journal owner") }
     }
     function store(record: ChildRecord) { db.query("INSERT INTO children (key,body) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET body=excluded.body").run(record.key, JSON.stringify(record)) }
+    function writeSync(previous: ChildRecord, next: ChildRecord): undefined {
+      active()
+      const before = validate(previous), value = validate(next)
+      if (before.owner !== owner.token || value.owner !== owner.token || before.key !== value.key || value.revision !== advance(before.revision)) fail("Invalid child journal fence transition")
+      const { generation: oldGeneration, ...oldLocator } = before.locator
+      const { generation: newGeneration, ...newLocator } = value.locator
+      if (JSON.stringify(oldLocator) !== JSON.stringify(newLocator) || newGeneration < oldGeneration) fail("Child locator identity cannot change")
+      db.transaction(() => {
+        active()
+        const current = read(before.key)
+        if (JSON.stringify(current) !== JSON.stringify(before)) fail("Stale child journal custody fence")
+        store(value)
+      }).immediate()
+      return undefined
+    }
     return {
       owner: owner.token,
       async read(key) { return read(key) },
@@ -119,6 +135,7 @@ export async function openChildJournal(options: ChildJournalOptions): Promise<Du
         // Synchronous validation lets the observer fence its same-process append.
         // A separate observation database is not a transaction with this journal.
         if (JSON.stringify(read(value.key)) !== JSON.stringify(value)) fail("Stale child journal observation fence")
+        return undefined
       },
       async claim(key, requestedOwner, initial) {
         active()
@@ -143,20 +160,8 @@ export async function openChildJournal(options: ChildJournalOptions): Promise<Du
           store(next); return next
         }).immediate()
       },
-      async write(previous, next) {
-        active()
-        const before = validate(previous), value = validate(next)
-        if (before.owner !== owner.token || value.owner !== owner.token || before.key !== value.key || value.revision !== advance(before.revision)) fail("Invalid child journal fence transition")
-        const { generation: oldGeneration, ...oldLocator } = before.locator
-        const { generation: newGeneration, ...newLocator } = value.locator
-        if (JSON.stringify(oldLocator) !== JSON.stringify(newLocator) || newGeneration < oldGeneration) fail("Child locator identity cannot change")
-        db.transaction(() => {
-          active()
-          const current = read(before.key)
-          if (JSON.stringify(current) !== JSON.stringify(before)) fail("Stale child journal custody fence")
-          store(value)
-        }).immediate()
-      },
+      writeSync,
+      async write(previous, next) { writeSync(previous, next) },
       close() {
         if (closed) return
         db.transaction(() => { db.query("UPDATE owners SET body=? WHERE token=?").run(JSON.stringify({ ...owner, released: 1 }), owner.token) }).immediate()
