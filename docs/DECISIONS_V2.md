@@ -12,9 +12,9 @@ This file records the decisions for the additive OpenCode V2 host. It is the sou
 
 ## Context
 
-OpenCode 1 and OpenCode 2 use different plugin APIs. The normal package entry now loads native OmO agent registration and bootstrap RPC through its OpenCode 2 `setup` entry. The V1 runtime remains behind the `server` entry. The project has declined a full upstream V2 port and points users to OmO Native for the complete experience. This branch is a downstream implementation of the full plugin experience for OpenCode 2.
+OpenCode 1 and OpenCode 2 use different plugin APIs. The normal package entry now loads native OmO agent registration and bootstrap RPC through its OpenCode 2 `setup` entry. The V1 runtime remains behind the `server` entry. The project has declined a full upstream V2 port and points users to OmO Native for the complete experience. This branch is a downstream implementation of the current OmO Native runtime for OpenCode 2, preserving source-backed V1 compatibility.
 
-A public reference port exists at `fazulfi/omo-v2` on branch `port/v2`. It is used as behavioral and API reference material, not as a dependency. Its published parity matrix covers an owner-used subset. This branch targets full V1 parity, not that subset.
+A public reference port exists at `fazulfi/omo-v2` on branch `port/v2`. It is used as behavioral and API reference material, not as a dependency. Its published parity matrix covers an owner-used subset. The current Native inventory defines this branch's target; the reference subset and legacy V1 parity do not define its limits.
 
 ## Scope
 
@@ -52,7 +52,7 @@ packages/omo-opencode/src/v2/
   rpc/                  diagnostic RPCs
 ```
 
-The V1 source continues to live in `packages/omo-opencode/src/` and is bundled to `dist/index.js` and `dist/tui.js`. The V2 host is bundled to `dist/v2/index.js` and `dist/v2/tui.js`. The normal package entry exposes the existing V1 `server` and delegates its V2 `setup` to the same native setup as `dist/v2/index.js`. The native V2 implementation imports only the V2 SDK and harness-neutral workspace packages; it does not invoke the V1 pipeline.
+The V1 source continues to live in `packages/omo-opencode/src/` and is bundled to `dist/index.js` and `dist/tui.js`. The V2 server is bundled to `dist/v2/index.js`; a V2 TUI entry remains pending. The normal package entry exposes the existing V1 `server` and delegates its V2 `setup` to the same native setup as `dist/v2/index.js`. The native V2 implementation uses the public V2 SDK, harness-neutral workspace packages and proven pure public Native seams; it does not invoke the V1 pipeline.
 
 ## Decision log
 
@@ -72,13 +72,13 @@ Rationale: the bridge approach has known semantic holes in command interception,
 
 Status: accepted.
 
-### D-003: target the repository V2 pin
+### D-003: exact current SDK and host runtime identity
 
-Decision: author against `@opencode/plugin` 2.0.32, the version pinned by the repository, and validate on the installed OpenCode 2.2.6 host (verified 2026-11-07).
+Decision: author against the exact `@opencode/plugin` 2.2.6 pin and validate on the installed OpenCode 2.2.6 host. The V1 `@opencode-ai/plugin` and `@opencode-ai/sdk` pins remain 1.18.31. Local Effect types use 4.1.0 with an `effect` peer range of `^4.0.0`; runtime SDK and Effect imports, including public subpaths, stay external so the host supplies their shared instances.
 
-Rationale: the repository already pins 2.0.32. The host loads plugins built against that surface. The real-host smoke is authoritative for compatibility.
+The normal root loads V2 setup lazily through split chunks. Node can import its V1 `server` and named `omoPlugin` without the V2 SDK present; both normal-root V2 setup and `./v2` use the host SDK. Isolated real-host and emitted-bundle checks establish this foundation, not full Native parity.
 
-Status: accepted. Revisit when the repository pin changes.
+Status: accepted and verified on 2026-11-08.
 
 ### D-004: no V1 imports in the V2 host
 
@@ -241,6 +241,18 @@ Decision: both `dist/index.js` and `dist/v2/index.js` register native V2 agents.
 Rationale: a failed V2 deploy must not require a rebuild or a config migration.
 
 Status: accepted.
+
+### D-023: the entire current Native runtime is canonical
+
+Decision: use the entire current OmO Native runtime as the target, including its engine facilities. The private source inventory records 248 rows across 34 components and 57 engine groups. The eleven existing legacy roles remain provisional compatibility entries, not the new Native architecture. Preserve aliases only where current source establishes them. Existing live agent-registration and visibility evidence remains valid for that slice.
+
+F05 tool-kernel, F06 owned-session/settlement, and F07 config/model/prompt libraries are staged foundations. Their tests and isolated probes do not make them production Native features or complete the task runtime. Activation requires the canonical consumers, durable ownership and one event/turn normalizer and arbiter; real failure, retry, abort and manual-compaction checks remain gates.
+
+### D-024: public host boundaries and reusable Native seams
+
+Decision: treat `experimental.idle` as the successful model-work boundary immediately before idle: admitted input can continue the same execution. It is not generic Native `agent_settled` and does not cover failure, interruption or manual compaction. Admission is distinct from consumption and terminal outcome. `ctx.session.context` supplies current context, not full transcript history. Missing history/inbox/log operations require an explicitly granted public client binding; never inspect private host APIs, scrape auth files or select a convenient global server. Headless child lifecycle must remain independent of GUI availability.
+
+The pure public `@code-yeongyu/senpi/prompt-presets` seam is ported behind an internal adapter, pending runtime integration. Future codemode reuse must prove the public factory's complete import closure is suitably pure; its narrow signature alone does not establish that. Worker/process mode is not hostile-code isolation; QuickJS WASI isolation needs its own verification. Bunshin redistribution remains restricted to its existing license grants: use an authorized service or a host-equivalent backend rather than copying restricted assets into OpenCode or core. These are source-backed constraints and future integration obligations, not feature claims.
 
 ## V1 to V2 mapping
 
