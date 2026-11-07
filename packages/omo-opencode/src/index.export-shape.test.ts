@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import type * as Plugin from "@opencode/plugin/promise/plugin"
 import pluginModule, { omoPlugin } from "./index"
+import { opencodeV2Server } from "./opencode-v2/server-entry"
 
 describe("oh-my-openagent plugin export shape", () => {
   it("keeps default module and named server exports aligned", () => {
@@ -13,6 +14,9 @@ describe("oh-my-openagent plugin export shape", () => {
     // then
     expect(typeof defaultServer).toBe("function")
     expect(namedServer).toBe(defaultServer)
+    expect(pluginModule.setup).toBe(opencodeV2Server.setup)
+    expect(pluginModule.effect).toBe(opencodeV2Server.effect)
+    expect(typeof pluginModule.effect).toBe("function")
   })
 
   it("exposes and registers the native OpenCode 2 setup beside the V1 server entry", async () => {

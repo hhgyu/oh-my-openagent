@@ -6,7 +6,7 @@ const pluginModule: PluginModule = createPluginModule()
 
 export const omoPlugin = pluginModule.server
 
-export default { ...pluginModule, setup: opencodeV2Server.setup }
+export default { ...pluginModule, setup: opencodeV2Server.setup, effect: opencodeV2Server.effect }
 
 export type {
   AgentName,

@@ -1,4 +1,5 @@
 import type * as Plugin from "@opencode/plugin/promise/plugin"
+import type * as EffectPlugin from "@opencode/plugin/effect/plugin"
 import { log } from "../shared/logger"
 import { OPENCODE_V2_NOTICE_MESSAGE } from "./startup-notice"
 
@@ -12,4 +13,12 @@ export const opencodeV2Server = {
     log("[opencode-v2] native agents registered", { notice: OPENCODE_V2_NOTICE_MESSAGE })
     return cleanup
   },
-} satisfies Plugin.Plugin
+  effect: (context: EffectPlugin.Context) => {
+    // V1 never invokes this thunk. Keep optional Effect/SDK runtime loads behind V2 selection.
+    const { Effect } = require("effect") as typeof import("effect")
+    return Effect.flatMap(
+      Effect.promise(() => import("../v2")),
+      ({ setupV2EffectHost }) => setupV2EffectHost(context),
+    )
+  },
+} satisfies Plugin.Plugin & Pick<EffectPlugin.Plugin, "effect">

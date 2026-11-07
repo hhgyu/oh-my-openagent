@@ -1,7 +1,11 @@
 import * as Plugin from "@opencode/plugin/promise/plugin"
+import type * as EffectPlugin from "@opencode/plugin/effect/plugin"
+import { fromPromise } from "@opencode/plugin/promise/adapter"
+import { Effect, type Scope } from "effect"
 import type { Rpc } from "@opencode/plugin"
 import { z } from "zod"
 import { registerAgents } from "./agents"
+import { acquireEffectSessionBackendApi } from "./host/effect-session-backend-api"
 
 export const PLUGIN_ID = "oh-my-openagent"
 export const BOOTSTRAP_STAGE = "bootstrap"
@@ -72,9 +76,27 @@ export async function setupV2Host(context: Plugin.Context): Promise<Cleanup> {
   }
 }
 
-export const omoV2Plugin = Plugin.define({
-  id: PLUGIN_ID,
-  setup: setupV2Host,
-})
+export function setupV2EffectHost(context: EffectPlugin.Context): Effect.Effect<void, never, Scope.Scope> {
+  return Effect.gen(function* () {
+    if (context.app.version !== "2.2.6") {
+      return yield* Effect.die(new Error("Effect session transport requires verified OpenCode 2.2.6"))
+    }
+    // Acquire first: component cleanup can still use this API before its owner finalizer joins requests.
+    const bridge = yield* acquireEffectSessionBackendApi(context.session)
+    console.info("[oh-my-openagent/v2] Effect session transport ready", context.app.version)
+    yield* fromPromise({
+      id: PLUGIN_ID,
+      setup: (promiseContext) => setupV2Host({
+        ...promiseContext,
+        session: { ...promiseContext.session, ...bridge },
+      }),
+    }).effect(context)
+  })
+}
+
+export const omoV2Plugin = {
+  ...Plugin.define({ id: PLUGIN_ID, setup: setupV2Host }),
+  effect: setupV2EffectHost,
+}
 
 export default omoV2Plugin
