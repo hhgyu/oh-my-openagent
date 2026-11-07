@@ -71,7 +71,7 @@ export function applyAgents(editor: AgentEditor, config: AgentsConfig): void {
   // naturally falls back to the first selectable OmO agent if Build is hidden.
   for (const id of ["build", "builder", "plan"]) {
     if (editor.get(id) !== undefined && (id === "plan" ? plannerAvailable : implementationAvailable)) {
-      editor.update(id, (agent) => { agent.hidden = true })
+      editor.update(id, (agent) => { agent.hidden = true; agent.mode = "subagent" })
     }
   }
 }

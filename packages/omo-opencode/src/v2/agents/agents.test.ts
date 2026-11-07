@@ -24,7 +24,7 @@ describe("native v2 agents", () => {
     const first = structuredClone([...entries])
     applyAgents(editor, emptyConfig)
     expect([...entries]).toEqual(first)
-    expect(entries.get("build")).toEqual({ ...build, hidden: true })
+    expect(entries.get("build")).toEqual({ ...build, hidden: true, mode: "subagent" })
     expect(AGENT_IDS).toHaveLength(11)
     for (const id of AGENT_IDS) {
       expect(editor.get(id)?.system?.length).toBeGreaterThan(450)
@@ -43,7 +43,10 @@ describe("native v2 agents", () => {
     editor.default = () => { defaultChanges++ }
     applyAgents(editor, emptyConfig)
     expect(defaultChanges).toBe(0)
-    for (const id of ["build", "builder", "plan"]) expect(editor.get(id)?.hidden).toBe(true)
+    for (const id of ["build", "builder", "plan"]) {
+      expect(editor.get(id)?.hidden).toBe(true)
+      expect(editor.get(id)?.mode).toBe("subagent")
+    }
     expect(editor.get("custom-host")?.hidden).toBe(false)
     expect(editor.get("sisyphus")?.hidden).toBe(false)
     expect(editor.get("prometheus")?.hidden).toBe(false)
@@ -56,6 +59,8 @@ describe("native v2 agents", () => {
     applyAgents(editor, { agents: {}, disabled_agents: [...AGENT_IDS] })
     expect(editor.get("build")?.hidden).toBe(false)
     expect(editor.get("plan")?.hidden).toBe(false)
+    expect(editor.get("build")?.mode).toBe("primary")
+    expect(editor.get("plan")?.mode).toBe("primary")
     expect(editor.list()).toHaveLength(2)
   })
 
