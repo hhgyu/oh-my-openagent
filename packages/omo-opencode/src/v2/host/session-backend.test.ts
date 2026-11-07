@@ -1,0 +1,48 @@
+import { expect, test } from "bun:test"
+import type { SessionLease } from "./session-state"
+const sessionID = (value: string) => value as SessionLease["sessionID"]
+import { createSessionScopes } from "./session-state"
+import { createSessionBackend, type ChildJournal, type ChildRecord, type SessionBackendApi } from "./session-backend"
+
+function deferred<T>() { let resolve!: (value:T)=>void; let reject!: (error:Error)=>void; const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no}); return {promise,resolve,reject} }
+function fixture() {
+ const scopes=createSessionScopes(); const parent=scopes.open(sessionID("parent"),{tools:[],authorize:()=>{}})
+ let active=true; const events:string[]=[]; const records=new Map<string,ChildRecord>(); const sessions=new Map<string,{id:SessionLease["sessionID"];parentID?:SessionLease["sessionID"];location:{directory:string}}>()
+ sessions.set(parent.sessionID,{id:parent.sessionID,location:{directory:"/project"}})
+ const journal:ChildJournal={
+  async claim(key,owner,initial){const old=records.get(key);if(old && old.owner!==owner)throw Error("live owner");if(old && initial)throw Error("already exists");const value=old?{...old,revision:old.revision+1}:initial;if(!value)throw Error("missing");records.set(key,value);return structuredClone(value)},
+  async read(key){return records.has(key)?structuredClone(records.get(key)!):undefined},
+  async write(previous,next){const old=records.get(previous.key);if(!old||old.revision!==previous.revision||old.owner!==previous.owner)throw Error("stale fence"); records.set(next.key,structuredClone(next))},
+ }
+ const api:SessionBackendApi={
+  async create(input){events.push("create");const value={id:sessionID(input.id!),parentID:parent.sessionID,location:{directory:"/project"}};sessions.set(value.id,value);return value},
+  async get({sessionID}){const value=sessions.get(sessionID);if(!value)throw Error("not found");return value},
+  async list(){return {data:[...sessions.values()],cursor:{}}},
+  async prompt(input){events.push("prompt");return {id:input.id!,sessionID:sessionID(input.sessionID)}},
+  async synthetic(input){events.push("synthetic");return {id:input.id!,sessionID:sessionID(input.sessionID)}},
+  async interrupt(){events.push("interrupt");return {interrupted:true}},async wait(){events.push("wait")},
+  async remove({sessionID}){events.push("remove");sessions.delete(sessionID)},async context(){return []},
+  instructions:{entry:{async list(){return []},async put(){},async remove(){}}},
+ }
+ const options={backendID:"bound-host",owner:"worker-1",parent,scopes,journal,policy:{tools:[],authorize:()=>{}},gate:{assertActive(){if(!active)throw Error("paused")}}}
+ const backend=createSessionBackend({app:{name:"opencode",version:"2.2.6",channel:"stable"},location:{directory:"/project"},session:api},options)
+ return {backend,options,api,events,records,sessions,scopes,parent,pause(){active=false},stage(){return backend.stage({key:"child-task",sessionID:sessionID("child"),agent:"build"})}}
+}
+
+test("staging creates but never prompts; admission is distinct from consumption",async()=>{const f=fixture();const child=await f.stage();expect(f.events).toEqual(["create"]);const receipt=await f.backend.begin(child,{id:"initial",text:"work"});expect(receipt).toEqual({state:"accepted",inboxID:"initial",consumption:"unconfirmed"});expect(f.records.get("child-task")?.phase).toBe("accepted");await expect(f.backend.begin(child,{id:"again",text:"replay"})).rejects.toThrow();await f.backend.close(child);expect(f.events).toEqual(["create","prompt","interrupt","wait","remove"])})
+test("Stop during asynchronous create joins and removes late child without original prompt",async()=>{const f=fixture();const pending=deferred<Awaited<ReturnType<SessionBackendApi["create"]>>>();const original=f.api.create;f.api.create=async input=>{const value=await original(input);await pending.promise;return value};const stage=f.stage();await Bun.sleep(0);f.pause();pending.resolve({id:sessionID("child"),location:{directory:"/project"}});await expect(stage).rejects.toThrow();expect(f.events).toEqual(["create","interrupt","wait","remove"]);expect(f.sessions.has("child")).toBe(false)})
+test("Stop during initial admission cleans late acceptance and does not claim consumed",async()=>{const f=fixture();const child=await f.stage();const pending=deferred<Awaited<ReturnType<SessionBackendApi["prompt"]>>>();f.api.prompt=async()=>{f.events.push("prompt");return pending.promise};const begin=f.backend.begin(child,{id:"initial",text:"work"});await Bun.sleep(0);f.pause();pending.resolve({id:"initial",sessionID:sessionID("child")});await expect(begin).rejects.toThrow();expect(f.sessions.has("child")).toBe(false);expect(f.records.get("child-task")?.admission).toBe("accepted")})
+test("unknown admission remains durable uncertainty and cannot replay after reload",async()=>{const f=fixture();const child=await f.stage();f.api.prompt=async()=>{throw Error("transport lost")};await expect(f.backend.begin(child,{id:"initial",text:"work"})).rejects.toThrow();expect(f.records.get("child-task")?.admission).toBe("uncertain");const reload=createSessionBackend({app:{name:"opencode",version:"2.2.6",channel:"stable"},location:{directory:"/project"},session:f.api},f.options);const recovered=await reload.recover("child-task");await expect(reload.begin(recovered,{id:"initial",text:"work"})).rejects.toThrow();expect(f.events.filter(x=>x==="prompt")).toEqual([])})
+test("forged locator and stale durable owner cannot mutate a host child",async()=>{const f=fixture();const child=await f.stage();await expect(f.backend.close({...child})).rejects.toThrow();f.records.get("child-task")!.owner="replacement";await expect(f.backend.close(child)).rejects.toThrow();expect(f.events).toEqual(["create"])})
+test("foreign parent/location cannot be adopted or deleted",async()=>{const f=fixture();f.api.create=async()=>({id:sessionID("child"),parentID:sessionID("foreign"),location:{directory:"/other"}});await expect(f.stage()).rejects.toThrow();expect(f.events).not.toContain("remove")})
+test("cleanup failure retains uncertain custody and original parent scope stays alive",async()=>{const f=fixture();const child=await f.stage();f.api.remove=async()=>{throw Error("offline")};await expect(f.backend.close(child)).rejects.toThrow();expect(f.records.get("child-task")?.phase).toBe("uncertain");expect(()=>f.scopes.assert(f.parent)).not.toThrow()})
+test("dispose joins in-flight creation and is idempotent",async()=>{const f=fixture();const pending=deferred<void>();const original=f.api.create;f.api.create=async input=>{const result=await original(input);await pending.promise;return result};const stage=f.stage();await Bun.sleep(0);const disposed=f.backend.dispose();pending.resolve();await expect(stage).rejects.toThrow();await disposed;await f.backend.dispose();expect(f.events.filter(x=>x==="remove")).toHaveLength(1)})
+
+test("synthetic admission IDs are durable and cannot be reused after later messages",async()=>{const f=fixture();const child=await f.stage();await f.backend.begin(child,{id:"initial",text:"work"});await f.backend.synthetic(child,{id:"s1",text:"next",resume:true});await f.backend.synthetic(child,{id:"s2",text:"next",resume:true});await expect(f.backend.synthetic(child,{id:"s1",text:"replay",resume:true})).rejects.toThrow();expect(f.events.filter(x=>x==="synthetic")).toHaveLength(2)})
+test("old backend holder is fenced after recovery renews revision",async()=>{const f=fixture();const old=await f.stage();const reload=createSessionBackend({app:{name:"opencode",version:"2.2.6",channel:"stable"},location:{directory:"/project"},session:f.api},f.options);const recovered=await reload.recover("child-task");await expect(f.backend.close(old)).rejects.toThrow();await reload.close(recovered);expect(f.events.filter(x=>x==="remove")).toHaveLength(1)})
+test("full transcript and inbox operations are explicitly unavailable",()=>{const f=fixture();expect(()=>f.backend.unavailable("full-history")).toThrow("explicitly bound public client")})
+
+test("outstanding output wait permits continuation admissions and is cancelled by disposal",async()=>{const f=fixture();const child=await f.stage();await f.backend.begin(child,{id:"initial",text:"work"});f.api.wait=async(_input,options)=>{if(options?.signal)await new Promise<void>((_resolve,reject)=>{const signal=options.signal!;if(signal.aborted)reject(signal.reason);else signal.addEventListener("abort",()=>reject(signal.reason),{once:true})})};const waiting=f.backend.wait(child);await Bun.sleep(0);await f.backend.synthetic(child,{id:"during-wait",text:"next",resume:true});const disposal=f.backend.dispose();await expect(waiting).rejects.toThrow();await disposal;expect(f.sessions.has("child")).toBe(false)})
+test("retired child scopes cannot mutate persistent instructions",async()=>{const f=fixture();const child=await f.stage();f.scopes.retire(child.lease);await expect(f.backend.instructions(child).put("key","value")).rejects.toThrow()})
+
+test("verified journal recovery rebinds a retired parent generation without replay",async()=>{const f=fixture();const child=await f.stage();await f.backend.begin(child,{id:"initial",text:"work"});const parent=f.scopes.open(f.parent.sessionID,{tools:[],authorize:()=>{}});const reload=createSessionBackend({app:{name:"opencode",version:"2.2.6",channel:"stable"},location:{directory:"/project"},session:f.api},{...f.options,parent});const recovered=await reload.recover("child-task");expect(recovered.locator.generation).toBe(parent.generation);expect(child.lease.signal.aborted).toBe(true);await expect(reload.begin(recovered,{id:"initial",text:"replay"})).rejects.toThrow();await reload.close(recovered)})
