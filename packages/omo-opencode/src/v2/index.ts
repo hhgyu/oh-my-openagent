@@ -34,21 +34,25 @@ export async function statusHandler(): Promise<StatusOutput> {
 
 type Cleanup = () => Promise<void> | void
 
-export const omoV2Plugin = Plugin.define({
-  id: PLUGIN_ID,
-  async setup(context): Promise<Cleanup> {
-    const registrations = [await context.rpc.register(statusRpc, { status: statusHandler })]
+export type BootstrapRpc = Pick<Plugin.Context["rpc"], "register">
 
-    return async (): Promise<void> => {
-      for (const registration of registrations.reverse()) {
-        try {
-          await registration.dispose()
-        } catch (error) {
-          console.error("[oh-my-openagent/v2] cleanup failed", error)
-        }
+export async function registerBootstrap(rpc: BootstrapRpc): Promise<Cleanup> {
+  const registrations = [await rpc.register(statusRpc, { status: statusHandler })]
+
+  return async (): Promise<void> => {
+    for (const registration of registrations.reverse()) {
+      try {
+        await registration.dispose()
+      } catch (error) {
+        console.error("[oh-my-openagent/v2] cleanup failed", error)
       }
     }
-  },
+  }
+}
+
+export const omoV2Plugin = Plugin.define({
+  id: PLUGIN_ID,
+  setup: (context) => registerBootstrap(context.rpc),
 })
 
 export default omoV2Plugin

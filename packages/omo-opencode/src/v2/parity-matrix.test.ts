@@ -1,6 +1,6 @@
 import { describe, expect, it, test } from "bun:test"
 import v1Plugin from "../index"
-import v2Plugin, { BOOTSTRAP_STAGE, PLUGIN_ID, statusHandler } from "./index"
+import v2Plugin, { BOOTSTRAP_STAGE, PLUGIN_ID, registerBootstrap, statusHandler, statusRpc, type BootstrapRpc } from "./index"
 
 describe("OpenCode V2 parity matrix", () => {
   it("keeps the V1 server entry available", () => {
@@ -36,6 +36,31 @@ describe("OpenCode V2 parity matrix", () => {
 
     // then
     expect(result).toEqual(expected)
+  })
+
+  it("registers omo.status during setup and disposes it on cleanup", async () => {
+    // given
+    const registered: Array<{ id: string; methods: string[]; status: unknown }> = []
+    const disposed: string[] = []
+    const rpc: BootstrapRpc = {
+      register: async (definition, handlers) => {
+        registered.push({ id: definition.id, methods: Object.keys(definition.methods), status: Reflect.get(handlers, "status") })
+        return {
+          dispose: async () => {
+            disposed.push(definition.id)
+          },
+          events: { emit: async () => {} },
+        }
+      },
+    }
+
+    // when
+    const cleanup = await registerBootstrap(rpc)
+    await cleanup()
+
+    // then
+    expect(registered).toEqual([{ id: statusRpc.id, methods: ["status"], status: statusHandler }])
+    expect(disposed).toEqual([statusRpc.id])
   })
 
   test.todo("tools: glob")
