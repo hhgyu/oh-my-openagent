@@ -260,6 +260,16 @@ Decision: the OpenCode child backend has a concrete Bun SQLite journal with full
 
 The database path is trusted private application state, never model input. No-follow opening and ancestor/sidecar checks reject links; this does not claim isolation from a hostile OS user changing filesystem objects concurrently. Join backend work before closing its journal. The port is real-host and process-crash tested, but root registration, canonical task consumers, event normalization and settlement arbitration are still required before activation.
 
+### D-028: derive child outcomes from owned durable observations
+
+Decision: custody/admission and execution outcomes are separate ports. A private SQLite observation log requires the backend's issued child scope, synchronous current custody-row check and its own binding-token fence. Rebinding preserves observations and invalidates coverage; it never turns historical completion into a fresh task result. Conflicting IDs, corrupt or orphaned records, exhausted bounds, scope loss and incomplete coverage refuse a successful result. This is not a transaction spanning the custody and observation databases.
+
+The direct Promise plugin adapter in OpenCode 2.2.6 does not invoke the advertised onActivity callback. The observer installs the actual task title through the public session API and waits for an observed owned durable event before input admission. It subscribes to all event types for that child. A cursor discontinuity means coverage is insufficient; it does not by itself prove transport loss. There is no private history client or automatic input replay.
+
+Results use real execution-start event IDs, assistant IDs, completed text parts and observed step models. These IDs are not invented host execution IDs. Same-execution continuation returns the last completed assistant response. A repeated assistant start requires its matching scheduled-retry witness; the initial attempt is 1 and its first retry is 2. Tool terminals match observed calls within their step, and unfinished calls cannot imply task success. Counts of observed attempts are distinct from complete executed-tool statistics. Unknown usage remains absent. Raw reasoning, provider error bodies, headers and tool inputs are excluded from this log.
+
+wait() returning, text arriving, a local stop intent, an auxiliary generation, or a control-only compaction execution succeeding cannot establish task success. Empty successful output is an explicit error. Request-kind hooks are metadata, not a fabricated request-to-assistant correlation. Native TaskManager extraction, canonical routing, registered task tools, interruption/detachment and full Stop/Resume remain required consumers of these internal ports; this decision does not activate or claim those features.
+
 ## V1 to V2 mapping
 
 | V1 surface | V2 surface | Notes |
