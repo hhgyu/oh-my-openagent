@@ -3,7 +3,7 @@ import { Context, Effect, Schema, SchemaAST, DateTime, Scope, Exit } from "effec
 import { ClientApi } from "@opencode/protocol/client"
 import type * as EffectPlugin from "@opencode/plugin/effect/plugin"
 import type * as PromisePlugin from "@opencode/plugin/promise/plugin"
-import { createEffectSessionBackendApi, type EffectSessionBackendApi } from "./effect-session-backend-api"
+import { acquireEffectSessionBackendApi, createEffectSessionBackendApi, type EffectSessionBackendApi } from "./effect-session-backend-api"
 import { hasJoinedSessionCancellation } from "./session-cancellation"
 
 const testScope=Scope.makeUnsafe()
@@ -84,4 +84,77 @@ test("scoped host resource finalizers join successful calls too; plain objects c
  await f.api.wait({sessionID:"ses_child"});order.push("returned");expect(order).toEqual(["body","finalized","returned"])
  expect(hasJoinedSessionCancellation({cancellable:true,cancellation:"effect-runtime"})).toBe(false)
  expect(hasJoinedSessionCancellation(JSON.parse(JSON.stringify(f.api)))).toBe(false)
+})
+test("owner scope closes no-caller-signal requests and joins asynchronous finalizers before scope end",async()=>{
+ const scope=Scope.makeUnsafe(),order:string[]=[];let entered!:()=>void;const ready=new Promise<void>(resolve=>{entered=resolve})
+ const f=fake({wait:()=>Effect.gen(function*(){entered();yield*Effect.never}).pipe(Effect.onInterrupt(()=>Effect.promise(async()=>{await Bun.sleep(10);order.push("request-finalizer")})))})
+ const api=await Effect.runPromise(Effect.provideService(acquireEffectSessionBackendApi(f.session),Scope.Scope,scope))
+ const waiting=api.wait({sessionID:"ses_child"}).catch(error=>{order.push("request-rejected");return error})
+ await ready;await Effect.runPromise(Scope.close(scope,Exit.succeed(undefined)));order.push("scope-ended")
+ expect(await waiting).toBeInstanceOf(Error);expect(order).toEqual(["request-finalizer","request-rejected","scope-ended"])
+ const calls=f.calls.length;await expect(api.get({sessionID:"ses_child"})).rejects.toThrow("closed");expect(f.calls).toHaveLength(calls)
+ let decoded=0;const invalid=Object.defineProperty({},"sessionID",{get(){decoded++;throw Error("must not decode after close")}})
+ await expect(api.get(invalid as never)).rejects.toThrow("closed");expect(decoded).toBe(0)
+})
+test("later component cleanup may call the API before owner finalizer closes it",async()=>{
+ const scope=Scope.makeUnsafe(),order:string[]=[];const f=fake({remove:()=>Effect.sync(()=>{order.push("host-remove")})})
+ let api!:EffectSessionBackendApi
+ await Effect.runPromise(Effect.provideService(Effect.gen(function*(){
+  api=yield*acquireEffectSessionBackendApi(f.session)
+  yield*Effect.addFinalizer(()=>Effect.promise(async()=>{order.push("component-cleanup");await api.remove({sessionID:"ses_child"});order.push("component-cleaned")}))
+ }),Scope.Scope,scope))
+ await Effect.runPromise(Scope.close(scope,Exit.succeed(undefined)));order.push("scope-ended")
+ expect(order).toEqual(["component-cleanup","host-remove","component-cleaned","scope-ended"])
+ await expect(api.wait({sessionID:"ses_child"})).rejects.toThrow("closed")
+})
+test("setup failure closes the owner and joins a request that had no caller signal",async()=>{
+ const order:string[]=[];let entered!:()=>void;const ready=new Promise<void>(resolve=>{entered=resolve});let waiting:Promise<unknown>|undefined;let api:EffectSessionBackendApi|undefined
+ const failure={setupFailed:true};const f=fake({wait:()=>Effect.gen(function*(){entered();yield*Effect.never}).pipe(Effect.onInterrupt(()=>Effect.promise(async()=>{await Bun.sleep(10);order.push("request-finalizer")})))})
+ const program=Effect.scoped(Effect.gen(function*(){
+  api=yield*acquireEffectSessionBackendApi(f.session)
+  waiting=api.wait({sessionID:"ses_child"}).catch(error=>{order.push("request-rejected");return error})
+  yield*Effect.promise(()=>ready)
+  return yield*Effect.fail(failure)
+ }))
+ await expect(Effect.runPromise(program)).rejects.toBe(failure);order.push("setup-rejected")
+ expect(await waiting).toBeInstanceOf(Error);expect(order).toEqual(["request-finalizer","request-rejected","setup-rejected"])
+ await expect(api!.remove({sessionID:"ses_child"})).rejects.toThrow("closed")
+})
+test("owner pretracks before genuine host effect reenters its scope close",async()=>{
+ const scope=Scope.makeUnsafe(),order:string[]=[];let entered!:()=>void;const ready=new Promise<void>(resolve=>{entered=resolve});let closing:Promise<void>|undefined
+ const f=fake({wait:()=>Effect.gen(function*(){
+  yield*Effect.addFinalizer(()=>Effect.promise(async()=>{await Bun.sleep(10);order.push("request-finalizer")}))
+  yield*Effect.sync(()=>{order.push("host-entry");closing=Effect.runPromise(Scope.close(scope,Exit.succeed(undefined))).then(()=>{order.push("scope-ended")});entered()})
+  yield*Effect.never
+ })})
+ const api=await Effect.runPromise(Effect.provideService(acquireEffectSessionBackendApi(f.session),Scope.Scope,scope))
+ const waiting=api.wait({sessionID:"ses_child"}).catch(error=>{order.push("request-rejected");return error})
+ await ready;await closing;await waiting
+ expect(order).toEqual(["host-entry","request-finalizer","request-rejected","scope-ended"])
+})
+test("immediate scope close owns queued calls before any host entry",async()=>{
+ const scope=Scope.makeUnsafe();let entries=0;const f=fake({wait:()=>{entries++;return Effect.never}})
+ const api=await Effect.runPromise(Effect.provideService(acquireEffectSessionBackendApi(f.session),Scope.Scope,scope))
+ const waiting=api.wait({sessionID:"ses_child"}).catch(error=>error)
+ await Effect.runPromise(Scope.close(scope,Exit.succeed(undefined)))
+ expect(await waiting).toBeInstanceOf(Error);expect(entries).toBe(0)
+})
+test("pre-cancelled caller never enters host and does not close the still-owned API",async()=>{
+ const scope=Scope.makeUnsafe();let entries=0;const f=fake({wait:()=>{entries++;return Effect.never}})
+ const api=await Effect.runPromise(Effect.provideService(acquireEffectSessionBackendApi(f.session),Scope.Scope,scope))
+ try {
+  const controller=new AbortController(),reason={callerCancelled:true};controller.abort(reason)
+  await expect(api.wait({sessionID:"ses_child"},{signal:controller.signal})).rejects.toBe(reason)
+  expect(entries).toBe(0);expect(await api.get({sessionID:"ses_child"}) as unknown).toEqual(wireSession)
+ } finally {await Effect.runPromise(Scope.close(scope,Exit.succeed(undefined)))}
+})
+test("caller cancellation joins only its request while other owner work remains pending",async()=>{
+ const scope=Scope.makeUnsafe(),ended:string[]=[];let both!:()=>void;const ready=new Promise<void>(resolve=>{both=resolve});let count=0
+ const f=fake({wait:(input:{sessionID:string})=>Effect.gen(function*(){if(++count===2)both();yield*Effect.never}).pipe(Effect.onInterrupt(()=>Effect.promise(async()=>{await Bun.sleep(5);ended.push(input.sessionID)})))})
+ const api=await Effect.runPromise(Effect.provideService(acquireEffectSessionBackendApi(f.session),Scope.Scope,scope))
+ const controller=new AbortController(),reason={onlyCaller:true};let otherSettled=false
+ const one=api.wait({sessionID:"ses_one"},{signal:controller.signal}).catch(error=>error)
+ const other=api.wait({sessionID:"ses_other"}).catch(error=>{otherSettled=true;return error})
+ await ready;controller.abort(reason);expect(await one).toBe(reason);expect(ended).toEqual(["ses_one"]);expect(otherSettled).toBe(false)
+ await Effect.runPromise(Scope.close(scope,Exit.succeed(undefined)));await other;expect(ended).toEqual(["ses_one","ses_other"])
 })

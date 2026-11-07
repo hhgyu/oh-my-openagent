@@ -20,6 +20,13 @@ export class SessionCodecError extends Error {
   override readonly name = "SessionCodecError"
   constructor() { super("Invalid session API value") }
 }
+export class SessionTransportClosedError extends Error {
+  override readonly name = "SessionTransportClosedError"
+  constructor() { super("Session transport owner closed") }
+}
+interface SessionRequestOwner {
+  request<T>(work: (signal: AbortSignal) => Promise<T>, callerSignal?: AbortSignal): Promise<T>
+}
 const json = Schema.fromJsonString(Schema.Unknown)
 const opaque = () => new SessionCodecError()
 
@@ -45,11 +52,44 @@ function compile(endpoint: Endpoint) {
 /** The caller captures this context in the genuine Effect plugin scope. All operations
  * terminate their scoped fiber/finalizers before the returned promise rejects on abort. */
 export function createEffectSessionBackendApi(session: EffectPlugin.Context["session"], runtime: Context.Context<Scope.Scope>): EffectSessionBackendApi {
+  return makeEffectSessionBackendApi(session,runtime)
+}
+
+/** Acquire before component setup: its later finalizers may still perform permanent
+ * cleanup through this API. This earlier owner finalizer then closes/aborts/joins leftovers. */
+export function acquireEffectSessionBackendApi(session: EffectPlugin.Context["session"]): Effect.Effect<EffectSessionBackendApi, never, Scope.Scope> {
+  return Effect.gen(function*(){
+    const runtime=yield*Effect.context<Scope.Scope>()
+    const lifetime=new AbortController()
+    const pending=new Set<Promise<unknown>>()
+    const reason=new SessionTransportClosedError()
+    let closed=false
+    const owner:SessionRequestOwner={
+      request<T>(work:(signal:AbortSignal)=>Promise<T>,callerSignal?:AbortSignal):Promise<T>{
+        if(closed)return Promise.reject(reason)
+        const signal=callerSignal?AbortSignal.any([lifetime.signal,callerSignal]):lifetime.signal
+        // Register the returned promise before callbacks/Effect runners can start or
+        // reenter scope closure. A queued call is owned even before its first host effect.
+        const promise=Promise.resolve().then(()=>{if(closed)throw reason;return work(signal)})
+        pending.add(promise)
+        void promise.finally(()=>pending.delete(promise)).catch(()=>{})
+        return promise
+      },
+    }
+    yield*Effect.addFinalizer(()=>Effect.promise(async()=>{
+      closed=true
+      lifetime.abort(reason)
+      await Promise.allSettled([...pending])
+    }))
+    return makeEffectSessionBackendApi(session,runtime,owner)
+  })
+}
+
+function makeEffectSessionBackendApi(session: EffectPlugin.Context["session"], runtime: Context.Context<Scope.Scope>, owner?:SessionRequestOwner): EffectSessionBackendApi {
   const run = Effect.runPromiseWith(runtime)
   function adapt<F extends WireCall, I, A>(endpoint: Endpoint, operation: (input: I) => Effect.Effect<A, unknown>) {
     const codec = compile(endpoint)
-    return async (input?: Parameters<F>[0], options?: { signal?: AbortSignal }): Promise<Awaited<ReturnType<F>>> => {
-      const signal = options?.signal
+    const execute = async (input?: Parameters<F>[0], signal?:AbortSignal): Promise<Awaited<ReturnType<F>>> => {
       signal?.throwIfAborted()
       const effect = Effect.gen(function* () {
         const normalized = yield* Schema.encodeUnknownEffect(json)(input ?? {}).pipe(Effect.flatMap(Schema.decodeUnknownEffect(json)), Effect.mapError(opaque))
@@ -64,6 +104,8 @@ export function createEffectSessionBackendApi(session: EffectPlugin.Context["ses
       try { return await run(Effect.scoped(effect), { signal }) }
       catch (error) { if (signal?.aborted) throw signal.reason; throw error }
     }
+    return (input?:Parameters<F>[0],options?:{signal?:AbortSignal}):Promise<Awaited<ReturnType<F>>> =>
+      owner?owner.request(signal=>execute(input,signal),options?.signal):execute(input,options?.signal)
   }
   const endpoints = ClientApi.groups["server.session"].endpoints
   return withJoinedSessionCancellation({
