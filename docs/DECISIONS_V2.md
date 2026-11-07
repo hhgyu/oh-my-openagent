@@ -282,6 +282,16 @@ Durable journal commits and the corresponding local revision update occur in one
 
 This completes the internal raw-control prerequisite identified in D-028. Default root Effect composition, the existing Native TaskManager extraction and consumers, canonical routing, task tools and full orchestration remain separate implementation and verification work. Candidate-loader proof alone does not establish their activation.
 
+### D-030: activate the scoped Effect producer at both V2 roots
+
+Decision: normal and explicit V2 entries expose effect beside the existing setup. The normal root keeps its V1 server and named omoPlugin identity. Its Effect runtime load remains inside an invocation-only thunk followed by a lazy V2 import, so importing the V1 root requires no optional V2 SDK or Effect runtime. Installed OpenCode 2.2.6 chooses effect when both fields exist. The Effect route requires that verified version before registering domains; legacy setup remains available without claiming equivalent cancellation for a raw Promise context.
+
+The genuine Effect program acquires the scoped session API before composing existing Promise components through the SDK's public fromPromise adapter. The verified API overrides mapped session methods after the original session spread. Its owner pretracks requests before host callbacks can start or reenter teardown, combines owner and caller cancellation, and closes against new calls when its Scope finalizer runs. Later component finalizers may perform permanent cleanup first; the owner then aborts and joins remaining mapped request fibers and asynchronous finalizers. No fake Effect environment or private client is introduced. Other SDK domains are not silently assigned this session-specific cancellation contract.
+
+Current emitted normal and explicit entries select Effect and retain their existing working-tree agent, LSP and mutation behavior. The same emitted normal entry retains actual V1 agent/tool/model behavior. A separate SDK file-watcher replacement probe delegates the emitted production Effect function a genuine public session wait behind an active mutation authorization. An explicit release barrier proves request finalization precedes old Scope completion and replacement activation; the old file operation never runs. The independent producer commit excludes the still-gated C02 mutation setup and its dependent integration-test block, while their working-tree integration proof is retained separately.
+
+This activates the transport prerequisite; it does not register Native task tools or complete the existing Native TaskManager extraction, canonical model/auth routing, durable Stop/Resume, teams/DAG/workpool or memory/Kibitzer. Those remain required under the full Native parity goal.
+
 ## V1 to V2 mapping
 
 | V1 surface | V2 surface | Notes |
