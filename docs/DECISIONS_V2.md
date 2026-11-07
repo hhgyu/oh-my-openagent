@@ -270,6 +270,18 @@ Results use real execution-start event IDs, assistant IDs, completed text parts 
 
 wait() returning, text arriving, a local stop intent, an auxiliary generation, or a control-only compaction execution succeeding cannot establish task success. Empty successful output is an explicit error. Request-kind hooks are metadata, not a fabricated request-to-assistant correlation. Native TaskManager extraction, canonical routing, registered task tools, interruption/detachment and full Stop/Resume remain required consumers of these internal ports; this decision does not activate or claim those features.
 
+### D-029: use joined Effect requests for owned child controls
+
+Decision: the raw child interrupt and detach ports require an opaque cancellation capability produced by the public Effect session bridge. In SDK 2.2.6, direct Promise session methods ignore their options.signal argument. Bare Promise contexts therefore cannot provide these controls or abort-dependent readers; the observer also refuses them before binding, registering hooks or installing its title. This capability records trusted transport composition, not a user permission or host outcome.
+
+The bridge runs thirteen session operations in scoped fibers using the actual plugin's captured Effect context. Abort rejection occurs after the fiber and its finalizers finish. Public protocol 2.2.6 endpoint codecs preserve wire identifiers, attachments, JSON metadata, query values and numeric timestamps. Protocol/schema code bundles with the adapter; Effect and the plugin SDK retain host identity. There is no private client, SDK patch, or abandoned Promise race.
+
+Interrupt requests resume:false and preserves the session and lease. Its actual boolean acknowledgement remains settlement-unconfirmed. Detach revokes only the issued local handle, retires its lease and joins existing child readers before returning; it issues no new host interrupt/wait/remove request. Backend disposal joins tracked parent listings too and excludes detached children from deletion. Explicit recovery renews custody and preserves admission receipts; historical observation is still uncertain and original input is never replayed. Permanent close remains a separate end-and-remove operation. These raw controls do not supply Native's durable Stop/Resume policy.
+
+Durable journal commits and the corresponding local revision update occur in one JavaScript turn through the same synchronous SQLite CAS implementation. Observation requires both synchronous current-row validation and synchronous commit. Both methods must return undefined; asynchronous or non-undefined substitutes are refused before granting observation or admitting new model input. This fixes a reproduced same-owner stale-revision window without relaxing fences or changing the database schema. The observation and custody databases remain separate transactions.
+
+This completes the internal raw-control prerequisite identified in D-028. Default root Effect composition, the existing Native TaskManager extraction and consumers, canonical routing, task tools and full orchestration remain separate implementation and verification work. Candidate-loader proof alone does not establish their activation.
+
 ## V1 to V2 mapping
 
 | V1 surface | V2 surface | Notes |
