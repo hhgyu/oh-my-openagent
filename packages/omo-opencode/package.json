@@ -25,6 +25,12 @@
   "scripts": {
     "typecheck": "tsgo --noEmit -p tsconfig.json"
   },
+  "peerDependencies": {
+    "effect": "^4.0.0"
+  },
+  "devDependencies": {
+    "effect": "4.1.0"
+  },
   "dependencies": {
     "@clack/prompts": "^1.8.1",
     "@code-yeongyu/senpi": "2026.11.5-1",
@@ -51,7 +57,7 @@
     "@oh-my-opencode/utils": "workspace:*",
     "@opencode-ai/plugin": "1.18.31",
     "@opencode-ai/sdk": "1.18.31",
-    "@opencode/plugin": "2.0.32",
+    "@opencode/plugin": "2.2.6",
     "commander": "^15.0.0",
     "jsonc-parser": "^3.3.1",
     "picocolors": "^1.1.1",
