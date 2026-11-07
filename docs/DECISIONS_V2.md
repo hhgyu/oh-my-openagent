@@ -254,6 +254,12 @@ Decision: treat `experimental.idle` as the successful model-work boundary immedi
 
 The pure public `@code-yeongyu/senpi/prompt-presets` seam is ported behind an internal adapter, pending runtime integration. Future codemode reuse must prove the public factory's complete import closure is suitably pure; its narrow signature alone does not establish that. Worker/process mode is not hostile-code isolation; QuickJS WASI isolation needs its own verification. Bunshin redistribution remains restricted to its existing license grants: use an authorized service or a host-equivalent backend rather than copying restricted assets into OpenCode or core. These are source-backed constraints and future integration obligations, not feature claims.
 
+### D-025: child custody uses a durable transactional journal
+
+Decision: the OpenCode child backend has a concrete Bun SQLite journal with full synchronous commits, a dedicated application/version marker, insert-only claims and revision fencing. A claim for existing custody must advance revision even for the same owner. An independent owner can recover only after explicit release or verified process death; PID liveness alone never establishes a different process lifetime. Unknown ownership remains unavailable. Reopening preserves input admission receipts and never authorizes automatic replay.
+
+The database path is trusted private application state, never model input. No-follow opening and ancestor/sidecar checks reject links; this does not claim isolation from a hostile OS user changing filesystem objects concurrently. Join backend work before closing its journal. The port is real-host and process-crash tested, but root registration, canonical task consumers, event normalization and settlement arbitration are still required before activation.
+
 ## V1 to V2 mapping
 
 | V1 surface | V2 surface | Notes |
