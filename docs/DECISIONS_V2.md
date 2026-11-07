@@ -2,7 +2,7 @@
 
 Status: active
 
-Branch: `plan-b-v2-full`
+Branch: `feat/opencode-v2-host-scaffold`
 
 Date opened: 2026-10-21
 
@@ -12,7 +12,7 @@ This file records the decisions for the additive OpenCode V2 host. It is the sou
 
 ## Context
 
-OpenCode 1 and OpenCode 2 use different plugin APIs. The current `dev` branch loads on OpenCode 2 through a `setup` entry that only logs a notice. The V1 runtime remains behind the `server` entry. The project has declined a full upstream V2 port and points users to OmO Native for the complete experience. This branch is a downstream implementation of the full plugin experience for OpenCode 2.
+OpenCode 1 and OpenCode 2 use different plugin APIs. The normal package entry now loads native OmO agent registration and bootstrap RPC through its OpenCode 2 `setup` entry. The V1 runtime remains behind the `server` entry. The project has declined a full upstream V2 port and points users to OmO Native for the complete experience. This branch is a downstream implementation of the full plugin experience for OpenCode 2.
 
 A public reference port exists at `fazulfi/omo-v2` on branch `port/v2`. It is used as behavioral and API reference material, not as a dependency. Its published parity matrix covers an owner-used subset. This branch targets full V1 parity, not that subset.
 
@@ -52,7 +52,7 @@ packages/omo-opencode/src/v2/
   rpc/                  diagnostic RPCs
 ```
 
-The V1 source continues to live in `packages/omo-opencode/src/` and is bundled to `dist/index.js` and `dist/tui.js`. The V2 host is bundled to `dist/v2/index.js` and `dist/v2/tui.js`. The two hosts share only harness-neutral workspace packages.
+The V1 source continues to live in `packages/omo-opencode/src/` and is bundled to `dist/index.js` and `dist/tui.js`. The V2 host is bundled to `dist/v2/index.js` and `dist/v2/tui.js`. The normal package entry exposes the existing V1 `server` and delegates its V2 `setup` to the same native setup as `dist/v2/index.js`. The native V2 implementation imports only the V2 SDK and harness-neutral workspace packages; it does not invoke the V1 pipeline.
 
 ## Decision log
 
@@ -60,7 +60,7 @@ The V1 source continues to live in `packages/omo-opencode/src/` and is bundled t
 
 Decision: keep V1 untouched and add a separate V2 host.
 
-Rationale: the project requires zero V1 regressions and the maintainer rejected a V1 import of V2 SDK code. A separate package export keeps the V1 module graph unchanged.
+Rationale: the project requires zero V1 regressions and the maintainer rejected a V1 import of V2 SDK code. The V1 server export stays independent; both the normal package entry and the separate V2 export reach native V2 setup.
 
 Status: accepted.
 
@@ -74,7 +74,7 @@ Status: accepted.
 
 ### D-003: target the repository V2 pin
 
-Decision: author against `@opencode/plugin` 2.0.32, the version pinned by the repository, and validate on the installed OpenCode 2.0.25 host.
+Decision: author against `@opencode/plugin` 2.0.32, the version pinned by the repository, and validate on the installed OpenCode 2.2.6 host (verified 2026-11-07).
 
 Rationale: the repository already pins 2.0.32. The host loads plugins built against that surface. The real-host smoke is authoritative for compatibility.
 
@@ -88,21 +88,23 @@ Rationale: the V1 SDK types and client semantics differ from V2. Allowing them i
 
 Status: accepted.
 
-### D-005: configuration is loaded once and projected through transforms
+### D-005: configuration is projected through transforms
 
-Decision: `.omo/omo.jsonc` remains the source of truth. Load and validate it in memory. Apply it through `agent.transform`, `command.transform`, `mcp.transform`, `provider.transform`, `model.transform`, `tool.transform`, and `skill.transform`. Do not rewrite the user's config file.
+Decision: `.omo/omo.jsonc` remains the source of truth. Load and validate it in memory with `omo-config-core`; the agents transform rereads it when the host replays registrations on reload. Apply it through `agent.transform`, `command.transform`, `mcp.transform`, `provider.transform`, `model.transform`, `tool.transform`, and `skill.transform`. Do not rewrite the user's config file.
 
 Rationale: V2 has no single `config` mutation hook. Per-domain transforms are the supported surface. In-memory normalization preserves rollback and avoids destructive config edits.
 
 Status: accepted.
 
-### D-006: agents use transform upsert, with markdown fallback
+### D-006: agents use native transform upsert
 
-Decision: register agents through `agent.transform`. If the host does not allow adding a new agent through the editor, write agent markdown under the OpenCode agents directory and use the editor only for updates.
+Decision: register all eleven OmO role agents through `ctx.agent.transform` and `AgentEditor.update`. The host inserts an absent ID before invoking the update callback; markdown files and a V1 bridge are unnecessary. Hide existing host `build`/`builder` picker entries when a selectable OmO implementation agent is active, and hide `plan` when selectable Prometheus is active. Keep those builtin entries for explicit and internal dispatch. Leave unrelated agents and the configured default untouched: the host skips hidden defaults and selects the first available primary agent; without an enabled replacement, builtin visibility remains unchanged. Dispose the registration on shutdown and roll it back if later setup fails.
 
-Rationale: the V2 `AgentEditor` surface has changed across 2.0.x. The implementation must detect the capability and use the supported path.
+Configuration: the core unified loader owns user and walked project `.omo/omo.json[c]` discovery, JSONC validation, harness/profile precedence and model catalog expansion. Shared `agents` fields are supported; OpenCode-only `displayName`, modes, `permissions` rule arrays and `disabled_agents` belong in `[opencode]`. Canonical `permission` maps also project to native rules. Historical `bash` permissions, tool toggles and denylist entries additionally target the native `shell` action; `write`/`apply_patch`/`patch` target the native `edit` permission and delegation aliases target `subagent`. Original action rules remain for older hosts. Read-only and planner restrictions explicitly deny native `shell` after user allowances. `models[0]` is the primary model when an ordered chain is set; fallback execution is not part of this slice. Unconfigured models inherit the host selection. The supplied SDK maps `displayName` to agent `name`.
 
-Status: accepted. Verify at runtime on 2.0.25 and 2.0.32.
+Roles: Sisyphus, Hephaestus and Atlas are primary execution agents; Prometheus is a primary planner allowed to edit Markdown only under `.omo/plans/`. Sisyphus Junior is a bounded subagent with delegation denied. Oracle, Metis, Momus, Librarian, Explore and Multimodal Looker are read-only subagents with shell, mutation and delegation denied. Restrictions are appended after configured allowances and therefore remain effective. Prompts describe only available host capabilities and explicitly disclose that OmO tools, lifecycle hooks and orchestration are not supplied by registration.
+
+Status: native registration, configuration projection and cleanup covered by behavior tests. Real installed host evidence is captured separately under `.omo/evidence/20261107-v2-agents/`; registration alone does not establish full V1 parity.
 
 ### D-007: one ordered context composer
 
@@ -226,7 +228,7 @@ Status: accepted.
 
 ### D-021: build outputs are additive
 
-Decision: add a `v2-index` build node that emits `dist/v2/index.js`. Add `v2-tui` when the TUI slice lands. Keep the existing `index`, `tui`, and `cli` nodes unchanged.
+Decision: add a `v2-index` build node that emits `dist/v2/index.js`. Add `v2-tui` when the TUI slice lands. Keep the existing build nodes; the normal `index` entry now reaches the native V2 setup as well. The `tui` and `cli` build nodes are unchanged.
 
 Rationale: V1 and V2 must remain independently buildable and rollback-safe.
 
@@ -234,7 +236,7 @@ Status: accepted.
 
 ### D-022: rollback stays one config change
 
-Decision: the V2 config points at `dist/v2`. Switching back to `dist` returns to the current V1/load-only behavior. No user config is rewritten.
+Decision: both `dist/index.js` and `dist/v2/index.js` register native V2 agents. To roll back this slice, restore a prior plugin build; changing between those two current entry paths does not disable registration. No user config is rewritten.
 
 Rationale: a failed V2 deploy must not require a rebuild or a config migration.
 
@@ -258,7 +260,7 @@ Status: accepted.
 | `experimental.compaction.autocontinue` | event-driven resume | No direct flag |
 | `command.execute.before` | `ctx.command.transform` for own commands | Foreign interception is a gap |
 | `event` | `ctx.event.subscribe` | Typed events and name map |
-| `config` agents | `ctx.agent.transform` | Upsert or markdown fallback |
+| `config` agents | `ctx.agent.transform` | Native update upserts absent IDs |
 | `config` commands | `ctx.command.transform` | Add commands |
 | `config` MCPs | `ctx.mcp.transform` | Add and override servers |
 | `config` providers/models | `ctx.provider.transform` / `ctx.model.transform` | Lazy catalog |
@@ -268,7 +270,7 @@ Status: accepted.
 
 ## Parity matrix
 
-The matrix is implemented as behavior tests, not as a prose claim. Each row has a status and an owning slice.
+The matrix records behavior tests and captured real-host assertions. Each row has a status and an owning slice; a live QA pass does not silently convert an automated test TODO into a pass.
 
 | Row | Behavior | Owner | Status |
 |---|---|---|---|
@@ -282,9 +284,9 @@ The matrix is implemented as behavior tests, not as a prose claim. Each row has 
 | 8 | context hook mutates system and messages | prompt | pending |
 | 9 | tool-call/tool-result pairing survives a message insert | prompt | pending |
 | 10 | compaction hook preserves context and todos | prompt | pending |
-| 11 | agents list contains the OmO agents | agents | pending |
-| 12 | agent dispatch reaches an OmO agent | agents | pending |
-| 13 | unknown agent returns a clear error | agents | pending |
+| 11 | agents list contains the OmO agents | agents | unit pass; installed 2.2.6 live pass |
+| 12 | agent dispatch reaches an OmO agent | agents | installed 2.2.6 live pass; automated live test pending |
+| 13 | unknown agent returns a clear error | agents | installed 2.2.6 live pass; automated live test pending |
 | 14 | commands list contains the OmO commands | commands | pending |
 | 15 | built-in MCP servers connect | mcp | pending |
 | 16 | shared skills load | skills | pending |
@@ -298,6 +300,18 @@ The matrix is implemented as behavior tests, not as a prose claim. Each row has 
 | 24 | TUI sidebar slot renders | tui | pending |
 | 25 | TUI keymap layer dispatches | tui | pending |
 
+### Agent slice evidence (2026-11-07)
+
+The isolated installed OpenCode 2.2.6 host loaded the normal `dist/index.js` entry. `GET /api/agent` returned the enabled OmO roles alongside the preserved host Build agent; the configured disabled role was absent. A real Sisyphus prompt reached the loopback mock provider with `QA_AGENT_SENTINEL`, and session-message readback identified the completed Sisyphus assistant response with `finish: stop` and `OMO_AGENT_DISPATCH_OK`. Dispatching `omo-unknown-qa` produced the host's `Session.AgentNotFoundError`.
+
+Local evidence under `.omo/evidence/20261107-v2-agents/` includes `dispatch-http.json`, `dispatch-run.txt`, `dispatch-server.log`, `dispatch-summary.md` and artifact hashes in `dispatch-hashes.json`. All twelve live checks passed. The real database session count remained 4733 before and after; the server and mock stopped and the sandbox was removed. The fixture uses the installed host's provider schema, recorded in `installed-openapi.json`, and a loopback provider with QA-only credentials.
+
+A reviewer forced the native `shell` tool and reproduced a read-only Oracle bypass before this action mapping fix. The corrected real-host probes reject the same forced call for Oracle even with explicit shell allowances, and reject Sisyphus shell execution when canonical `permission.bash` is denied. Captures `permission-fixed-oracle-http.json` and `permission-fixed-sisyphus-http.json` record tool error states, no completed shell execution, unchanged session counts and cleanup. This proves enforcement uses actual host actions rather than prompt-only restrictions.
+
+The builtin-visibility correction is verified separately in `visibility-enabled-http.json` and `visibility-disabled-http.json`: Build and Plan are hidden with enabled replacements, a no-agent session completes under Sisyphus, explicit Build selection remains accepted, and disabling every OmO role leaves builtins visible with default completion under Build. OpenCode defers no-agent session selection until prompt execution, so the assertion reads the completed assistant agent rather than expecting a stored agent at creation. Both probes preserve the real session count and clean up their servers and sandboxes.
+
+The automated agent-list parity test passes. The dispatch and unknown-agent unit TODOs remain until the real-host driver is integrated into the automated test harness; the live evidence above establishes their observed behavior without claiming those TODOs passed. OmO tools, hooks and orchestration remain outside this completed registration slice.
+
 ## Known gaps and mitigations
 
 | Gap | Mitigation | Status |
@@ -305,7 +319,7 @@ The matrix is implemented as behavior tests, not as a prose claim. Each row has 
 | No general slash-command interception | Own commands register their behavior; foreign interception is documented as unsupported | accepted |
 | No compaction auto-continue flag | Event-driven resume; if unsafe, log a startup warning and leave auto-continue off | open |
 | No single config hook | Per-domain transforms with in-memory config | accepted |
-| Agent add may be unavailable | Markdown agent files plus transform updates | open |
+| Agent registration | Native editor update upserts absent IDs | resolved |
 | No toast API | TUI notification or log | accepted |
 | No native todo API | Session metadata | accepted |
 | No `session_prompt` TUI slot | `prompt.footer` plus reactive data | accepted |
@@ -328,6 +342,5 @@ The real-host harness uses the installed OpenCode binary, a temporary config roo
 ## Open decisions
 
 - The exact auto-continue mechanism after compaction.
-- The agent registration path when `AgentEditor` cannot add a new agent.
 - The minimum TUI surface for the first TUI slice.
 - Whether the V2 host ships as a package `./v2` export, a separate `dist/v2` directory, or both. The current plan is both: the export for package consumers and the directory for local plugin configs.
