@@ -1,6 +1,7 @@
 import * as Plugin from "@opencode/plugin/promise/plugin"
 import type { Rpc } from "@opencode/plugin"
 import { z } from "zod"
+import { registerAgents } from "./agents"
 
 export const PLUGIN_ID = "oh-my-openagent"
 export const BOOTSTRAP_STAGE = "bootstrap"
@@ -50,9 +51,30 @@ export async function registerBootstrap(rpc: BootstrapRpc): Promise<Cleanup> {
   }
 }
 
+export async function setupV2Host(context: Plugin.Context): Promise<Cleanup> {
+  const cleanups: Cleanup[] = []
+  try {
+    cleanups.push(await registerAgents(context.agent, { cwd: context.location.directory }))
+    cleanups.push(await registerBootstrap(context.rpc))
+  } catch (error) {
+    for (const cleanup of cleanups.reverse()) {
+      try { await cleanup() } catch (cleanupError) { console.error("[oh-my-openagent/v2] setup cleanup failed", cleanupError) }
+    }
+    throw error
+  }
+  let disposed = false
+  return async () => {
+    if (disposed) return
+    disposed = true
+    for (const cleanup of cleanups.reverse()) {
+      try { await cleanup() } catch (error) { console.error("[oh-my-openagent/v2] cleanup failed", error) }
+    }
+  }
+}
+
 export const omoV2Plugin = Plugin.define({
   id: PLUGIN_ID,
-  setup: (context) => registerBootstrap(context.rpc),
+  setup: setupV2Host,
 })
 
 export default omoV2Plugin

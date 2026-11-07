@@ -1,5 +1,7 @@
 import { describe, expect, it, test } from "bun:test"
 import v1Plugin from "../index"
+import { AGENT_IDS, applyAgents } from "./agents"
+import { recordingEditor } from "./agents/test-support"
 import v2Plugin, { BOOTSTRAP_STAGE, PLUGIN_ID, registerBootstrap, statusHandler, statusRpc, type BootstrapRpc } from "./index"
 
 describe("OpenCode V2 parity matrix", () => {
@@ -70,7 +72,13 @@ describe("OpenCode V2 parity matrix", () => {
   test.todo("context: system and messages")
   test.todo("context: tool-call and tool-result pairing")
   test.todo("compaction: context and todo preservation")
-  test.todo("agents: list")
+  it("agents: list contains every native OmO role and preserves host agents", () => {
+    const { editor } = recordingEditor()
+    applyAgents(editor, { agents: {}, disabled_agents: [] })
+    const ids = editor.list().map((agent) => agent.id)
+    for (const id of AGENT_IDS) expect(ids).toContain(id)
+    expect(ids).toContain("build")
+  })
   test.todo("agents: dispatch")
   test.todo("agents: unknown agent error")
   test.todo("commands: list")
