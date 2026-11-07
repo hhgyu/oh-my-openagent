@@ -51,6 +51,8 @@ export interface ChildJournal {
   claim(key: string, owner: string, initial?: ChildRecord): Promise<ChildRecord>
   read(key: string): Promise<ChildRecord | undefined>
   write(previous: ChildRecord, next: ChildRecord): Promise<void>
+  /** Optional synchronous exact-row fence for event persistence. Async reads cannot substitute. */
+  assertCurrent?(expected: ChildRecord): void
 }
 export interface ChildHandle { readonly locator: ChildLocator; readonly lease: SessionLease }
 export interface AdmissionReceipt {
@@ -169,6 +171,21 @@ export function createSessionBackend(host: { app: Context["app"]; location: { di
     })
   }
   const backend = {
+    /** Observations must remain possible after the run gate stops, until custody retires. */
+    observationGuard(child: ChildHandle): () => void {
+      const entry = lookup(child)
+      const assertCurrent = journal.assertCurrent
+      if (!assertCurrent) throw new SessionBackendError("unavailable", "Observation requires a synchronous child custody fence", child.locator)
+      const guard = () => {
+        if (disposed) throw new SessionBackendError("stopped", "Session backend disposed")
+        scopes.assert(parent); scopes.assert(child.lease)
+        validate(child.locator)
+        if (issued.get(child) !== entry || entry.handle !== child || entry.record.phase === "closed") throw new SessionBackendError("conflict", "Observation child custody retired", child.locator)
+        assertCurrent.call(journal, entry.record)
+      }
+      guard()
+      return guard
+    },
     stage(input: { key: string; sessionID: SessionLease["sessionID"]; agent: string; model?: Input<"create">["model"]; permissions?: Input<"create">["permissions"] }): Promise<ChildHandle> {
       return track(async () => {
         await readiness()

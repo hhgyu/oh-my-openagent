@@ -42,7 +42,7 @@ function advance(revision: number): number {
   if (revision >= Number.MAX_SAFE_INTEGER) fail("Child journal revision exhausted")
   return revision + 1
 }
-function securePath(path: string) {
+export function resolveTrustedChildStatePath(path: string) {
   if (!isAbsolute(path)) fail("Child journal requires an absolute trusted state path")
   const absolute = resolve(path)
   let current = parse(absolute).root
@@ -63,6 +63,7 @@ function securePath(path: string) {
 
 export interface DurableChildJournal extends ChildJournal {
   readonly owner: string
+  assertCurrent(expected: ChildRecord): void
   /** Release custody only after all backend work has joined. Future calls fail. */
   close(): void
 }
@@ -75,7 +76,7 @@ export interface ChildJournalOptions {
 
 /** SQLite is the durable CAS boundary. This is not an OS-user filesystem sandbox. */
 export async function openChildJournal(options: ChildJournalOptions): Promise<DurableChildJournal> {
-  const path = securePath(options.path)
+  const path = resolveTrustedChildStatePath(options.path)
   const start = await getProcessStartIdentity(process.pid)
   const owner: Owner = { token: randomUUID(), pid: process.pid, start, released: 0 }
   if (typeof constants.SQLITE_OPEN_NOFOLLOW !== "number") fail("SQLite no-follow open support is unavailable")
@@ -111,6 +112,14 @@ export async function openChildJournal(options: ChildJournalOptions): Promise<Du
     return {
       owner: owner.token,
       async read(key) { return read(key) },
+      assertCurrent(expected) {
+        active()
+        const value = validate(expected)
+        if (value.owner !== owner.token) fail("Foreign child journal observer")
+        // Synchronous validation lets the observer fence its same-process append.
+        // A separate observation database is not a transaction with this journal.
+        if (JSON.stringify(read(value.key)) !== JSON.stringify(value)) fail("Stale child journal observation fence")
+      },
       async claim(key, requestedOwner, initial) {
         active()
         if (requestedOwner !== owner.token) fail("Foreign child journal claimant")

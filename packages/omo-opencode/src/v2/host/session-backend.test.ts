@@ -46,3 +46,43 @@ test("outstanding output wait permits continuation admissions and is cancelled b
 test("retired child scopes cannot mutate persistent instructions",async()=>{const f=fixture();const child=await f.stage();f.scopes.retire(child.lease);await expect(f.backend.instructions(child).put("key","value")).rejects.toThrow()})
 
 test("verified journal recovery rebinds a retired parent generation without replay",async()=>{const f=fixture();const child=await f.stage();await f.backend.begin(child,{id:"initial",text:"work"});const parent=f.scopes.open(f.parent.sessionID,{tools:[],authorize:()=>{}});const reload=createSessionBackend({app:{name:"opencode",version:"2.2.6",channel:"stable"},location:{directory:"/project"},session:f.api},{...f.options,parent});const recovered=await reload.recover("child-task");expect(recovered.locator.generation).toBe(parent.generation);expect(child.lease.signal.aborted).toBe(true);await expect(reload.begin(recovered,{id:"initial",text:"replay"})).rejects.toThrow();await reload.close(recovered)})
+
+
+function observationFixture() {
+ const f=fixture()
+ f.options.journal.assertCurrent=expected=>{
+  if(JSON.stringify(f.records.get(expected.key))!==JSON.stringify(expected))throw Error("stale observation fence")
+ }
+ return f
+}
+
+test("observation requires a synchronous custody capability instead of an async-only journal",async()=>{
+ const f=fixture(),child=await f.stage()
+ expect(()=>f.backend.observationGuard(child)).toThrow("synchronous")
+ await f.backend.dispose()
+})
+
+test("observation remains possible after Stop but never after child retirement or backend disposal",async()=>{
+ const f=observationFixture(),child=await f.stage(),guard=f.backend.observationGuard(child)
+ expect(()=>guard()).not.toThrow();f.pause();expect(()=>guard()).not.toThrow()
+ f.scopes.retire(child.lease);expect(()=>guard()).toThrow()
+ await f.backend.dispose();expect(()=>guard()).toThrow("disposed")
+})
+
+test("observation follows this backend's admission revisions but rejects same-owner recovery and forged handles",async()=>{
+ const f=observationFixture(),child=await f.stage(),guard=f.backend.observationGuard(child)
+ expect(()=>f.backend.observationGuard({...child})).toThrow("Unknown")
+ await f.backend.begin(child,{id:"observed-initial",text:"work"});expect(()=>guard()).not.toThrow()
+ const reload=createSessionBackend({app:{name:"opencode",version:"2.2.6",channel:"stable"},location:{directory:"/project"},session:f.api},f.options)
+ const next=await reload.recover("child-task");expect(()=>guard()).toThrow()
+ expect(()=>reload.observationGuard(next)()).not.toThrow()
+ await reload.dispose()
+})
+
+test("observation rejects a retired parent and completed close",async()=>{
+ const f=observationFixture(),child=await f.stage(),guard=f.backend.observationGuard(child)
+ await f.backend.close(child);expect(()=>guard()).toThrow()
+ const g=observationFixture(),other=await g.stage(),otherGuard=g.backend.observationGuard(other)
+ g.scopes.retire(g.parent);expect(()=>otherGuard()).toThrow()
+ await g.backend.dispose()
+})

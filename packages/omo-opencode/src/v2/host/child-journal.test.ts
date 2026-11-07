@@ -88,3 +88,22 @@ test("unsafe SQLite versions are rejected even on an otherwise empty file", asyn
  const file=path(),db=new Database(file);db.exec("PRAGMA user_version=2");db.close()
  await expect(openChildJournal({path:file})).rejects.toThrow("unsupported")
 })
+
+
+test("synchronous observation custody validates the whole current row and rejects renewed fences", async () => {
+ const journal=await open(), first=await journal.claim("child",journal.owner,record(journal.owner))
+ expect(()=>journal.assertCurrent(first)).not.toThrow()
+ expect(()=>journal.assertCurrent({...first,phase:"accepted"})).toThrow("fence")
+ expect(()=>journal.assertCurrent({...first,owner:"foreign"})).toThrow("Foreign")
+ const renewed=await journal.claim("child",journal.owner)
+ expect(()=>journal.assertCurrent(first)).toThrow("fence")
+ expect(()=>journal.assertCurrent(renewed)).not.toThrow()
+ journal.close()
+ expect(()=>journal.assertCurrent(renewed)).toThrow("closed")
+})
+
+test("synchronous observation refuses corrupted durable custody", async () => {
+ const file=path(),journal=await open(file),first=await journal.claim("child",journal.owner,record(journal.owner))
+ const db=new Database(file);db.query("UPDATE children SET body=? WHERE key=?").run('{"key":"child"}',"child");db.close()
+ expect(()=>journal.assertCurrent(first)).toThrow("Corrupt")
+})
