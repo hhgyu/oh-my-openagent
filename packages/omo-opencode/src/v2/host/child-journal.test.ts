@@ -1,0 +1,90 @@
+import { afterEach, expect, test } from "bun:test"
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { Database } from "bun:sqlite"
+import { openChildJournal, probeJournalOwner, type DurableChildJournal } from "./child-journal"
+import type { ChildRecord } from "./session-backend"
+const directories: string[] = [], opened: DurableChildJournal[] = []
+afterEach(() => { for (const journal of opened.splice(0)) journal.close(); for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }) })
+function path() { const dir = mkdtempSync(join(tmpdir(), "omo-child-journal-")); directories.push(dir); return join(dir, "state.sqlite") }
+async function open(file = path(), probeOwner?: typeof probeJournalOwner) { const journal = await openChildJournal({ path: file, probeOwner }); opened.push(journal); return journal }
+function record(owner: string, key = "child"): ChildRecord { return { key, owner, revision: 0, locator: { format: 1, backendID: "host", location: "/project", hostVersion: "2.2.6", parentID: "parent" as never, sessionID: "child" as never, generation: 1 }, phase: "creating", admission: "none", receipts: {} } }
+
+test("insert is exclusive across actual SQLite connections and never overwrites an existing key", async () => {
+ const file=path(), a=await open(file), b=await open(file)
+ await a.claim("child",a.owner,record(a.owner))
+ await expect(b.claim("child",b.owner,record(b.owner))).rejects.toThrow("already exists")
+ expect((await b.read("child"))?.owner).toBe(a.owner)
+})
+test("same-owner reload advances a durable fence and stale writes fail", async () => {
+ const a=await open();const first=await a.claim("child",a.owner,record(a.owner));const next=await a.claim("child",a.owner)
+ expect(next.revision).toBe(1)
+ await expect(a.write(first,{...first,revision:1,phase:"staged"})).rejects.toThrow("Stale")
+ await a.write(next,{...next,revision:2,phase:"staged"})
+ expect((await a.read("child"))?.phase).toBe("staged")
+})
+test("committed bytes survive close/reopen and released custody transfers with a newer revision", async () => {
+ const file=path(), a=await open(file);await a.claim("child",a.owner,record(a.owner));a.close()
+ const b=await open(file);const recovered=await b.claim("child",b.owner)
+ expect(recovered.owner).toBe(b.owner);expect(recovered.revision).toBe(1)
+ await expect(a.read("child")).rejects.toThrow("closed")
+})
+test("live and unknown owners are never stolen", async () => {
+ for (const verdict of ["alive","unknown"] as const) {
+  const file=path(),a=await open(file),b=await open(file,async()=>verdict);await a.claim("child",a.owner,record(a.owner))
+  await expect(b.claim("child",b.owner)).rejects.toThrow("live or unverified")
+  expect((await a.read("child"))?.revision).toBe(0)
+ }
+})
+test("OS probe sees the actual process alive and null identity is not proof of death", async () => {
+ expect(await probeJournalOwner({pid:process.pid,start:null})).toBe("unknown")
+ const file=path(),a=await open(file),b=await open(file);await a.claim("child",a.owner,record(a.owner))
+ expect(b.owner).not.toBe(a.owner)
+ await expect(b.claim("child",b.owner)).rejects.toThrow("live or unverified")
+})
+test("competing dead-owner claims compare the post-probe snapshot atomically", async () => {
+ const file=path(),a=await open(file);await a.claim("child",a.owner,record(a.owner))
+ let release!:()=>void;const wait=new Promise<void>(yes=>release=yes)
+ const b=await open(file,async()=>{await wait;return "dead"}),c=await open(file,async()=>{await wait;return "dead"})
+ const claims=[b.claim("child",b.owner),c.claim("child",c.owner)];release()
+ const results=await Promise.allSettled(claims)
+ expect(results.filter(x=>x.status==="fulfilled")).toHaveLength(1)
+ expect(results.filter(x=>x.status==="rejected")).toHaveLength(1)
+})
+test("closing during an owner probe prevents a late transfer", async () => {
+ const file=path(),a=await open(file);await a.claim("child",a.owner,record(a.owner))
+ let release!:()=>void;const wait=new Promise<void>(yes=>release=yes)
+ const b=await open(file,async()=>{await wait;return "dead"});const pending=b.claim("child",b.owner);b.close();release()
+ await expect(pending).rejects.toThrow("closed");expect((await a.read("child"))?.owner).toBe(a.owner)
+})
+test("foreign owner, identity replacement, revision jumps and malformed records are refused", async () => {
+ const a=await open(),initial=record(a.owner);await a.claim("child",a.owner,initial)
+ await expect(a.claim("child","foreign")).rejects.toThrow("Foreign")
+ await expect(a.write(initial,{...initial,revision:2})).rejects.toThrow("fence")
+ await expect(a.write(initial,{...initial,revision:1,locator:{...initial.locator,sessionID:"other" as never}})).rejects.toThrow("identity")
+ await expect(a.claim("bad",a.owner,{...initial,key:"bad",phase:"invalid" as never})).rejects.toThrow("Invalid")
+})
+test("foreign databases and symlink database paths are rejected without adopting their data", async () => {
+ const file=path();const db=new Database(file);db.exec("CREATE TABLE unrelated (value TEXT)");db.close()
+ await expect(openChildJournal({path:file})).rejects.toThrow("Foreign")
+ const alias=join(directories.at(-1)!,"alias.sqlite");symlinkSync(file,alias,"file")
+ await expect(openChildJournal({path:alias})).rejects.toThrow("link")
+})
+test("a corrupted record fails closed instead of erasing custody", async () => {
+ const file=path(),a=await open(file);await a.claim("child",a.owner,record(a.owner));const db=new Database(file)
+ db.query("UPDATE children SET body=? WHERE key=?").run('{"key":"child"}',"child");db.close()
+ await expect(a.read("child")).rejects.toThrow("Corrupt")
+})
+
+test("prototype-shaped receipt IDs cannot disappear during schema normalization", async () => {
+ const a=await open(),initial=record(a.owner)
+ for (const key of ["__proto__","constructor","prototype"]) {
+  await expect(a.claim("child",a.owner,{...initial,receipts:{[key]:"pending"}})).rejects.toThrow("Unsafe")
+  expect(await a.read("child")).toBeUndefined()
+ }
+})
+test("unsafe SQLite versions are rejected even on an otherwise empty file", async () => {
+ const file=path(),db=new Database(file);db.exec("PRAGMA user_version=2");db.close()
+ await expect(openChildJournal({path:file})).rejects.toThrow("unsupported")
+})
