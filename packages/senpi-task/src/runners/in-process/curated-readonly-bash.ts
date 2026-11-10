@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process"
+import { type ChildProcess, execFile } from "node:child_process"
 
 import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
 import { capCuratedReadonlyResult, type CuratedReadonlyFormatter } from "@oh-my-opencode/utils/curated-readonly-presentation"
@@ -38,12 +38,15 @@ export type CuratedReadonlyCommand = {
   readonly args: readonly string[]
 }
 
-type CuratedReadonlyExecutor = (
+export type CuratedReadonlyExecutor = (
   command: CuratedReadonlyCommand,
   cwd: string,
   timeoutSeconds: number,
   signal: AbortSignal | undefined,
 ) => Promise<string>
+
+/** Trusted observer of the ORIGINAL process handle returned by the same execFile call. */
+export type CuratedReadonlyChildObserver = (child: ChildProcess) => void
 
 const CURL_BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "-f", "--fail", "--fail-with-body", "-I", "--head", "-L", "--location",
@@ -177,9 +180,10 @@ function executeCommand(
   cwd: string,
   timeoutSeconds: number,
   signal: AbortSignal | undefined,
+  observeChild?: CuratedReadonlyChildObserver,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command.program, command.args, {
+    const child = execFile(command.program, command.args, {
       cwd,
       encoding: "utf8",
       maxBuffer: 512 * 1024,
@@ -197,5 +201,17 @@ function executeCommand(
       }
       resolve([stdout.trim(), stderr.trim()].filter((part) => part.length > 0).join("\n") || "(no output)")
     })
+    // Synchronously after the SAME execFile call returns. An observer throw rejects this request
+    // while the original callback still settles the already-spawned process.
+    observeChild?.(child)
   })
 }
+
+/** The ORIGINAL executor by identity, so another host runs the same argv/env/timeout/buffer policy. */
+export const executeCuratedReadonlyCommand: (
+  command: CuratedReadonlyCommand,
+  cwd: string,
+  timeoutSeconds: number,
+  signal: AbortSignal | undefined,
+  observeChild?: CuratedReadonlyChildObserver,
+) => Promise<string> = executeCommand

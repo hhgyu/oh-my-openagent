@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import type { ChildProcess } from "node:child_process"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@code-yeongyu/senpi"
 import { curatedReadonlyFormatter } from "../../../../utils/src/curated-readonly-presentation"
@@ -6,6 +10,7 @@ import { curatedReadonlyFormatter } from "../../../../utils/src/curated-readonly
 import {
   createCuratedReadonlyBashTool,
   CuratedReadonlyCommandError,
+  executeCuratedReadonlyCommand,
   planCuratedReadonlyCommand,
 } from "./curated-readonly-bash"
 
@@ -156,6 +161,60 @@ describe("planCuratedReadonlyCommand", () => {
 
     for (const request of requests) {
       expect(() => planCuratedReadonlyCommand(request)).toThrow("read-only")
+    }
+  })
+})
+
+describe("executeCuratedReadonlyCommand", () => {
+  test("#given the factory default executor #then the exported executor is the SAME original function", async () => {
+    // given
+    const operations = await import("../../tools/task/operations")
+    // then
+    expect(operations.executeCuratedReadonlyCommand).toBe(executeCuratedReadonlyCommand)
+    expect(operations.createCuratedReadonlyBashTool).toBe(createCuratedReadonlyBashTool)
+  })
+
+  test("#given an observer #when the executable is missing #then it receives the original handle synchronously and the original error path rejects", async () => {
+    // given
+    const savedPath = process.env.PATH, savedWindowsPath = process.env.Path
+    const empty = mkdtempSync(join(tmpdir(), "omo-curated-empty-path-"))
+    process.env.PATH = empty
+    if (savedWindowsPath !== undefined) process.env.Path = empty
+    const observed: ChildProcess[] = []
+    try {
+      // when
+      const pending = executeCuratedReadonlyCommand({ program: "gh", args: ["--version"] }, empty, 5, undefined, child => { observed.push(child) })
+      // then
+      expect(observed).toHaveLength(1)
+      expect(typeof present(observed[0]).once).toBe("function")
+      await expect(pending).rejects.toBeInstanceOf(CuratedReadonlyCommandError)
+      await new Promise<void>(resolve => {
+        const child = present(observed[0])
+        if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) resolve()
+        else child.once("close", () => resolve())
+      })
+    } finally {
+      process.env.PATH = savedPath
+      if (savedWindowsPath !== undefined) process.env.Path = savedWindowsPath
+      rmSync(empty, { recursive: true, force: true })
+    }
+  })
+
+  test("#given an observer that throws #then the request rejects with that failure", async () => {
+    // given
+    const failure = Error("observer failed")
+    const empty = mkdtempSync(join(tmpdir(), "omo-curated-observer-throw-"))
+    let observed: ChildProcess | undefined
+    try {
+      // when
+      const pending = executeCuratedReadonlyCommand({ program: "gh", args: ["--version"] }, empty, 5, undefined, child => { observed = child; throw failure })
+      // then
+      await expect(pending).rejects.toBe(failure)
+    } finally {
+      // The original callback still owns the spawned process; join its close before removing its cwd.
+      const child = observed
+      if (child && child.exitCode === null && child.signalCode === null && child.pid !== undefined) await new Promise<void>(resolve => { child.once("close", () => resolve()) })
+      rmSync(empty, { recursive: true, force: true })
     }
   })
 })
