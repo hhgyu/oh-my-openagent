@@ -10,6 +10,11 @@ import type { MemoryModelChain } from "./memory-model-attempts"
 import { runMemoryModelAttempts } from "./memory-model-attempts"
 import { identityMatches, killIfAlive, pidAlive, pidTerminalWithin, readPidFileWhenWritten, readPidOnce, readPidWhenWritten, waitForFileToExist } from "./process-liveness.test-support"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 const roots: string[] = []
 
 const HELPER_EXIT_BOUND_MS = 5_000
@@ -359,7 +364,7 @@ control.once("error", () => process.exit(0))
     expect(preflight.kind).toBe("unavailable")
     expect(attempted).toEqual([{
       candidate: { ...candidates[0], loadExtensions: true }, attempt: 1,
-      nextAttempt: { attempt: 2, model: candidates[1]!.model, thinking: candidates[1]!.thinking },
+      nextAttempt: { attempt: 2, model: present(candidates[1]).model, thinking: present(candidates[1]).thinking },
     }])
     expect(result.candidate).toEqual({ ...candidates[0], loadExtensions: true })
     expect(result.child.code).toBe(0)

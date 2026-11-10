@@ -39,9 +39,10 @@ test("an accepted reserved ID is not resent or mislabeled as exact payload equiv
 test("owner cancellation joins an actual pending input request without claiming host interruption", async () => {
   const entered = Promise.withResolvers<void>(); let joined = false
   const input = createOwnedManagedInput({ child, backend: { async promptContinuation(_child, _value, options) {
-    entered.resolve(); await new Promise<void>((_yes, no) => options!.signal!.addEventListener("abort", () => { joined = true; no(new SessionBackendError("uncertain", "controlled abort")) }, { once: true })); throw Error("unreachable")
+    entered.resolve(); await new Promise<void>((_yes, no) => defined(defined(options).signal).addEventListener("abort", () => { joined = true; no(new SessionBackendError("uncertain", "controlled abort")) }, { once: true })); throw Error("unreachable")
   } }, assertOwned() {}, identify() {}, expectInput() {}, async synchronize() {}, onUncertain() {} })
   const sending = input.send("hello", "steer"); const rejected = sending.catch(error => error)
   await entered.promise; await input.abortPending(); expect(await rejected).toBeInstanceOf(InputUncertainError)
   expect(joined).toBe(true); expect(input.diagnostics().pending).toBe(0); await input.close()
 })
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

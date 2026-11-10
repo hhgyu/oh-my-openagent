@@ -103,8 +103,8 @@ export function createToolKernel(options: { registry: ToolRegistry; scopes: Sess
   const callAuthority: ToolCallAuthority = Object.freeze({
     capture(caller: ToolContext): IssuedToolCall {
       const frame = authorized.getStore()
-      if (!frame || !frame.open || frame.caller !== caller) throw new Error("No active authorized tool callback")
-      frame.check!()
+      if (!frame || !frame.open || frame.caller !== caller || !frame.check) throw new Error("No active authorized tool callback")
+      frame.check()
       const lifetimeSignal = AbortSignal.any([frame.lease.signal, frame.retirement])
       const token = Object.freeze({
         sessionID: caller.sessionID, leaseGeneration: frame.lease.generation, registryGeneration: frame.generation,
@@ -118,8 +118,8 @@ export function createToolKernel(options: { registry: ToolRegistry; scopes: Sess
     assert(token: IssuedToolCall, expectedLease?: SessionLease) { lifetime(token, expectedLease) },
     assertCall(token: IssuedToolCall) {
       const frame = lifetime(token)
-      if (!frame.open || authorized.getStore() !== frame) throw new Error("No active authorized tool callback")
-      frame.check!()
+      if (!frame.open || authorized.getStore() !== frame || !frame.check) throw new Error("No active authorized tool callback")
+      frame.check()
     },
     parent(token: IssuedToolCall) { return lifetime(token).lease },
   })
@@ -178,8 +178,10 @@ export function createToolKernel(options: { registry: ToolRegistry; scopes: Sess
                     nativeTaskPermission.assertCurrent()
                     check()
                   } else {
-                    const permissions = adapter!(decoded)
-                    if (tool.options?.permission && !permissions.some(permission => permission.action === tool.options!.permission)) throw new Error("Permission adapter omits declared tool permission")
+                    if (!adapter) throw new Error("Tool has neither a permission adapter nor a native task permission")
+                    const permissions = adapter(decoded)
+                    const declaredPermission = tool.options?.permission
+                    if (declaredPermission && !permissions.some(permission => permission.action === declaredPermission)) throw new Error("Permission adapter omits declared tool permission")
                     const permissionWork = assertPermissions(options.permission, caller, permissions)
                     // Capture original work before waiting: the OUTER abortable can
                     // reject too. Genuine port work must still join before invoke

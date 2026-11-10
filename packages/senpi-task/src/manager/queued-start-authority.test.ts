@@ -9,6 +9,11 @@ import { enterStartAdmission, type HostStartAuthority } from "./start-admission"
 import type { LaunchContext } from "./launch-task"
 import { cleanupProjects, tempProject } from "./__fixtures__/manager-fakes"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 afterEach(cleanupProjects)
 function authority():HostStartAuthority {const c=new AbortController();return {admissionSignal:c.signal,lifetimeSignal:c.signal,assertAdmission(){c.signal.throwIfAborted()},assertLifetime(){c.signal.throwIfAborted()}}}
 function fixture(){
@@ -41,7 +46,7 @@ test("warm held resume replaces the old guard with fresh B and queued grant neve
  held.withdraw([f.record.task_id]);f.barrier.close("parent",1);const credential=f.barrier.resume("parent",1,"resume")
  current=b;expect(held.resume(f.participant,credential).kind).toBe("resumed");current=c
  expect(launched).toEqual([]);f.concurrency.releaseTask("foreign")
- expect(launched).toHaveLength(1);expect(launched[0]!.managedSpec.admission?.hostAuthority).toBe(b)
- expect(launched[0]!.managedSpec.admission?.hostAuthority).not.toBe(a);expect(launched[0]!.managedSpec.admission?.hostAuthority).not.toBe(c)
- launched[0]!.managedSpec.admission?.leave();f.concurrency.releaseTask(f.record.task_id);f.store.close()
+ expect(launched).toHaveLength(1);expect(present(launched[0]).managedSpec.admission?.hostAuthority).toBe(b)
+ expect(present(launched[0]).managedSpec.admission?.hostAuthority).not.toBe(a);expect(present(launched[0]).managedSpec.admission?.hostAuthority).not.toBe(c)
+ present(launched[0]).managedSpec.admission?.leave();f.concurrency.releaseTask(f.record.task_id);f.store.close()
 })

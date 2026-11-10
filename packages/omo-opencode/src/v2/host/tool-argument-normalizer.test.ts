@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { bindToolArgumentNormalizer, issueToolArgumentNormalizer, type ToolArgumentNormalizer } from "./tool-argument-normalizer"
 
-function fixture(normalizeUnknown: (value: any) => unknown | Promise<unknown> = value => value) {
+function fixture(normalizeUnknown: (value: unknown) => unknown | Promise<unknown> = value => value) {
   const tool = { id: "space_tool", name: "tool", description: "tool", input: { type: "object", properties: { text: { type: "string" } } }, options: { permission: "read" }, execute: async () => ({}) }
   const token = issueToolArgumentNormalizer(tool, { schema: tool.input, normalizeUnknown })
   const controller = new AbortController()
@@ -19,7 +19,7 @@ test("private issuance refuses spoof, equal definitions and mismatched schema", 
 
 test("provider mutates only detached arguments and cannot leak its shared result", async () => {
   const result = { text: "normalized" }
-  const f = fixture(value => { value.nested.text = "changed"; return result })
+  const f = fixture(value => { (value as { nested: { text: string } }).nested.text = "changed"; return result })
   const input = { nested: { text: "raw" } }
   const output = await f.normalize(input)
   expect(input.nested.text).toBe("raw")
@@ -34,15 +34,15 @@ test("detachment refuses getters, cycles, dropped JSON values and unsafe array p
   let reads = 0, calls = 0
   const f = fixture(value => { calls++; return value })
   const getter = Object.defineProperty({}, "text", { enumerable: true, get() { reads++; return "x" } })
-  const cycle: any = {}; cycle.self = cycle
-  const array: any = []; array.extra = true
+  const cycle: Record<string, unknown> = {}; cycle.self = cycle
+  const array = Object.assign([], { extra: true })
   for (const value of [getter, cycle, { value: undefined }, { value: NaN }, { value: () => 1 }, new Date(), array, [,]]) {
     await expect(f.normalize(value)).rejects.toThrow()
   }
   expect(reads).toBe(0); expect(calls).toBe(0)
   const dangerous = JSON.parse('{"__proto__":{"polluted":true}}')
   expect(await f.normalize(dangerous)).toEqual(dangerous)
-  expect(({} as any).polluted).toBeUndefined()
+  expect(({} as Record<string, unknown>).polluted).toBeUndefined()
 })
 
 test("schema, handler and options changes refuse without freezing provider globals", async () => {

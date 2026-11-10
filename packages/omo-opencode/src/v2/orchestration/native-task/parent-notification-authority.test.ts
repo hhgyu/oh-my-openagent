@@ -20,6 +20,8 @@ import { createParentNotificationAuthorityIssuer, type NotificationAcceptedCusto
   type NotificationClosedSource, type ParentNotificationAuthorityOptions, type ProvisionalNotificationGrant, type AcceptedNotificationTask,
   type NotificationInitialInputAssociation, type NotificationFailedStartAssociation, type NotificationRecoveredAssociation } from "./parent-notification-authority"
 
+function defined<T>(value: T | undefined | null, label = "value"): T { if (value === undefined || value === null) throw new Error(`expected ${label} to be defined`); return value }
+
 type Result = Awaited<ReturnType<TaskManager["start"]>>
 const cleanups: (() => Promise<void>)[] = []
 afterEach(async () => { for (const close of cleanups.splice(0)) await close() })
@@ -66,7 +68,7 @@ async function fixture() {
   }
   function source(row: TaskRecord) {
     let issued!: CompletionDeliverySource
-    const notifier = createCompletionNotifier({ store, notifier: { enqueue() { throw Error("source port expected") }, enqueueWithSource(_message, receipts) { issued = receipts[0]!; receipts.forEach(item => sources.add(item)) } }, schedule: () => () => {} })
+    const notifier = createCompletionNotifier({ store, notifier: { enqueue() { throw Error("source port expected") }, enqueueWithSource(_message, receipts) { issued = defined(receipts[0]); receipts.forEach(item => sources.add(item)) } }, schedule: () => () => {} })
     notifier.notifyTerminal({ record: row, parentState: { kind: "idle" }, runInBackground: true })
     if (!issued) throw Error("canonical source missing")
     return issued
@@ -84,7 +86,7 @@ async function fixture() {
     backends.push(backend)
     const child = await backend.stage({ key: row.task_id, sessionID: `unit-child-${++sequence}` as SessionLease["sessionID"], agent: "unit" })
     if (!initial) await backend.checkpointTurn(child, { nativeEpoch: 0, observationKey: `unit:${row.task_id}` })
-    let checkpoint = (await journal.read(row.task_id))!
+    let checkpoint = defined(await journal.read(row.task_id))
     function sync() { store.mutate(row.task_id, current => ({ ...current, runner_kind: "owned-session", child_session_id: child.locator.sessionID,
       residency_claim: "CONTROLLED-unit-claim", owned_session: { ...child.locator, journalKey: row.task_id, journalOwner: journal.owner, journalRevision: checkpoint.revision, runEpoch: current.notification.run_epoch, residencyClaim: "CONTROLLED-unit-claim" } })) }
     sync()
@@ -96,7 +98,7 @@ async function fixture() {
       return { turnId, outcome }
     }, handle: { task_id: row.task_id, assertOwned() {
       backend.observationGuard(child)(); journal.assertCurrent(checkpoint)
-      const current = store.load(row.task_id)!
+      const current = defined(store.load(row.task_id))
       if (current.owned_session?.journalRevision !== checkpoint.revision) throw Error("controlled private reference differs from real journal")
     } } } as unknown as OwnedTaskControl
     controls.set(row.task_id, control)
@@ -111,15 +113,15 @@ async function fixture() {
     }, parentLease)
     if (initial === true) {
       const begin = control.begin(); await begin.outcome
-      checkpoint = (await journal.read(row.task_id))!; sync()
+      checkpoint = defined(await journal.read(row.task_id)); sync()
       initialInputs.set(control, { identity, control, stageIdentity, nativeEpoch: 0, inputID: begin.turnId, begin })
     }
-    return { row: store.load(row.task_id)!, original, control, backend, child, task, grant, managed, identity,
+    return { row: defined(store.load(row.task_id)), original, control, backend, child, task, grant, managed, identity,
       setContinuationReply(reply: typeof continuationReply) { continuationReply = reply },
-      async syncJournal() { checkpoint = (await journal.read(row.task_id))!; sync() },
-      async steer(id: string) { try { return await backend.promptContinuation(child, { id, text: "controlled same-epoch steer" }) } finally { checkpoint = (await journal.read(row.task_id))!; sync() } },
-      async progress() { await backend.checkpointTurn(child, { nativeEpoch: 0, observationKey: `unit-progress:${++sequence}` }); checkpoint = (await journal.read(row.task_id))!; sync() },
-      async closeSource() { const referenceRevision = store.load(row.task_id)!.owned_session!.journalRevision; await backend.close(child); const actual = (await journal.read(row.task_id))!; await backend.confirmClosed(child); controls.delete(row.task_id); closed.set(row.task_id, { control, row: actual, referenceRevision }) } }
+      async syncJournal() { checkpoint = defined(await journal.read(row.task_id)); sync() },
+      async steer(id: string) { try { return await backend.promptContinuation(child, { id, text: "controlled same-epoch steer" }) } finally { checkpoint = defined(await journal.read(row.task_id)); sync() } },
+      async progress() { await backend.checkpointTurn(child, { nativeEpoch: 0, observationKey: `unit-progress:${++sequence}` }); checkpoint = defined(await journal.read(row.task_id)); sync() },
+      async closeSource() { const referenceRevision = defined(defined(store.load(row.task_id)).owned_session).journalRevision; await backend.close(child); const actual = defined(await journal.read(row.task_id)); await backend.confirmClosed(child); controls.delete(row.task_id); closed.set(row.task_id, { control, row: actual, referenceRevision }) } }
   }
   function deferredGet() {
     const gate = Promise.withResolvers<Awaited<ReturnType<SessionBackendApi["get"]>>>(), entered = Promise.withResolvers<void>()
@@ -136,7 +138,7 @@ async function fixture() {
 
 test("actual initial backend admission without a turn descriptor binds only its exact captured begin receipt", async () => {
   const f = await fixture(), initial = await f.stage(f.root, f.issuer, true, true)
-  const association = f.initialInputs.get(initial.control)!, row = (await f.journal.read(initial.row.task_id))!
+  const association = defined(f.initialInputs.get(initial.control)), row = defined(await f.journal.read(initial.row.task_id))
   expect(row.turn).toBeUndefined(); expect(row.admission).toBe("accepted")
   expect(row.inboxID).toBe(association.begin.turnId); expect(row.receipts[association.inputID]).toBe("accepted")
   await expect(f.issuer.bindCurrentOwnedRun(initial.task)).resolves.toBeDefined()
@@ -144,13 +146,13 @@ test("actual initial backend admission without a turn descriptor binds only its 
 
 test("initial accepted receipt remains valid after real same-epoch steering advances current inbox", async () => {
   const f = await fixture(), initial = await f.stage(f.root, f.issuer, true, true)
-  const original = f.initialInputs.get(initial.control)!
+  const original = defined(f.initialInputs.get(initial.control))
   await initial.steer("unit-next-accepted")
-  const actual = (await f.journal.read(initial.row.task_id))!
+  const actual = defined(await f.journal.read(initial.row.task_id))
   expect(actual.turn).toBeUndefined(); expect(actual.inboxID).toBe("unit-next-accepted")
-  expect(actual.receipts[original.inputID]).toBe("accepted"); expect(actual.receipts[actual.inboxID!]).toBe("accepted")
+  expect(actual.receipts[original.inputID]).toBe("accepted"); expect(actual.receipts[defined(actual.inboxID)]).toBe("accepted")
   const run = await f.issuer.bindCurrentOwnedRun(initial.task)
-  const permit = await f.issuer.validateForDispatch(run, f.source(f.store.load(initial.row.task_id)!))
+  const permit = await f.issuer.validateForDispatch(run, f.source(defined(f.store.load(initial.row.task_id))))
   expect(() => f.issuer.assertDispatchCurrent(permit)).not.toThrow()
 })
 
@@ -161,7 +163,7 @@ for (const disposition of ["pending", "uncertain"] as const) test(`initial accep
   const sending = initial.steer(`unit-next-${disposition}`); const observed = sending.catch(error => error)
   await entered.promise; await initial.syncJournal()
   if (disposition === "uncertain") { gate.reject(Error("controlled lost steering ACK")); await observed }
-  const actual = (await f.journal.read(initial.row.task_id))!
+  const actual = defined(await f.journal.read(initial.row.task_id))
   expect(actual.admission).toBe(disposition)
   try { await expect(f.issuer.bindCurrentOwnedRun(initial.task)).rejects.toThrow() }
   finally { if (disposition === "pending") { gate.resolve({ id: "unit-next-pending", sessionID: initial.child.locator.sessionID }); await observed } }
@@ -184,7 +186,7 @@ test("no-turn accepted ledger is fenced when real steering starts during the rec
 })
 
 for (const change of ["stage", "identity", "control", "epoch", "input", "begin"] as const) test(`initial input ${change} association cannot substitute matching journal fields`, async () => {
-  const f = await fixture(), initial = await f.stage(f.root, f.issuer, true, true), entry = f.initialInputs.get(initial.control)!
+  const f = await fixture(), initial = await f.stage(f.root, f.issuer, true, true), entry = defined(f.initialInputs.get(initial.control))
   f.initialInputs.set(initial.control, { ...entry,
     ...(change === "stage" ? { stageIdentity: {} } : {}), ...(change === "identity" ? { identity: {} } : {}),
     ...(change === "control" ? { control: { ...initial.control } } : {}), ...(change === "epoch" ? { nativeEpoch: 1 } : {}),
@@ -195,7 +197,7 @@ for (const change of ["stage", "identity", "control", "epoch", "input", "begin"]
 })
 
 test("initial proof is fenced again after actual receiving query and at synchronous dispatch", async () => {
-  const f = await fixture(), initial = await f.stage(f.root, f.issuer, true, true), entry = f.initialInputs.get(initial.control)!
+  const f = await fixture(), initial = await f.stage(f.root, f.issuer, true, true), entry = defined(f.initialInputs.get(initial.control))
   const run = await f.issuer.bindCurrentOwnedRun(initial.task), source = f.source(initial.row), deferred = f.deferredGet()
   const pending = f.issuer.validateForDispatch(run, source); await deferred.entered.promise
   f.initialInputs.set(initial.control, { ...entry })
@@ -215,26 +217,26 @@ test("accepted initial lifetime retains its stage witness after weak raw associa
 })
 
 test("actual staged no-input error requires registered exact returned failure and current empty ledger", async () => {
-  const f = await fixture(), staged = await f.stage(f.root, f.issuer, true, "none"), association = f.staged.get(staged.control)!
+  const f = await fixture(), staged = await f.stage(f.root, f.issuer, true, "none"), association = defined(f.staged.get(staged.control))
   const result: Extract<Result, { kind: "start_failed" }> = { kind: "start_failed", task_id: staged.row.task_id,
     name: staged.row.task_id, execution_mode: "in-process", model: "unit", run_in_background: true, error_message: "controlled before begin" }
   f.store.mutate(staged.row.task_id, row => ({ ...row, status: "error", error_message: result.error_message }))
-  f.failedStarts.set(staged.control, { identity: staged.identity, control: staged.control, stageIdentity: association.stageIdentity!, nativeEpoch: 0, result, beginInvoked: false })
-  const row = (await f.journal.read(staged.row.task_id))!
+  f.failedStarts.set(staged.control, { identity: staged.identity, control: staged.control, stageIdentity: defined(association.stageIdentity), nativeEpoch: 0, result, beginInvoked: false })
+  const row = defined(await f.journal.read(staged.row.task_id))
   expect(row.turn).toBeUndefined(); expect(row.admission).toBe("none"); expect(row.inboxID).toBeUndefined(); expect(Object.keys(row.receipts)).toHaveLength(0)
-  const run = await f.issuer.bindCurrentOwnedRun(staged.task), permit = await f.issuer.validateForDispatch(run, f.source(f.store.load(staged.row.task_id)!))
+  const run = await f.issuer.bindCurrentOwnedRun(staged.task), permit = await f.issuer.validateForDispatch(run, f.source(defined(f.store.load(staged.row.task_id))))
   expect(() => f.issuer.assertDispatchCurrent(permit)).not.toThrow()
   await staged.control.begin().outcome; await staged.progress()
   expect(() => f.issuer.assertDispatchCurrent(permit)).toThrow()
 })
 
 for (const change of ["missing", "stage", "identity", "result", "epoch"] as const) test(`no-input failure ${change} cannot infer acceptance from error status alone`, async () => {
-  const f = await fixture(), staged = await f.stage(f.root, f.issuer, true, "none"), association = f.staged.get(staged.control)!
+  const f = await fixture(), staged = await f.stage(f.root, f.issuer, true, "none"), association = defined(f.staged.get(staged.control))
   f.store.mutate(staged.row.task_id, row => ({ ...row, status: "error" }))
   const result: Extract<Result, { kind: "start_failed" }> = { kind: "start_failed", task_id: change === "result" ? "other" : staged.row.task_id,
     name: "unit", execution_mode: "in-process", model: "unit", run_in_background: true, error_message: "unit failure" }
   if (change !== "missing") f.failedStarts.set(staged.control, { identity: change === "identity" ? {} : staged.identity,
-    control: staged.control, stageIdentity: change === "stage" ? {} : association.stageIdentity!, nativeEpoch: change === "epoch" ? 1 : 0, result, beginInvoked: false })
+    control: staged.control, stageIdentity: change === "stage" ? {} : defined(association.stageIdentity), nativeEpoch: change === "epoch" ? 1 : 0, result, beginInvoked: false })
   await expect(f.issuer.bindCurrentOwnedRun(staged.task)).rejects.toThrow()
 })
 
@@ -244,7 +246,7 @@ async function recoveredFixture(initial = false, nested = false) {
   let receiver = f.bindings.root, parentLease = f.root
   if (nested) {
     const parent = await f.stage()
-    receiver = f.bindings.adopt(parent.backend.borrowParent(parent.child), 1, () => parent.control.handle.assertOwned!())
+    receiver = f.bindings.adopt(parent.backend.borrowParent(parent.child), 1, () => defined(parent.control.handle.assertOwned)())
     parentLease = parent.child.lease
   }
   const chosen = f.another({ rootToken: token, receiver })
@@ -253,11 +255,11 @@ async function recoveredFixture(initial = false, nested = false) {
   // actual journal, scopes and Kernel are real; this is NOT actual Native recovery QA.
   const control = { ...source.control }, identity = Object.freeze({ recovered: true })
   f.controls.set(source.row.task_id, control)
-  const accepted = f.accepted.get(source.row.task_id)!
+  const accepted = defined(f.accepted.get(source.row.task_id))
   f.accepted.set(source.row.task_id, { ...accepted, identity, control })
-  const actual = (await f.journal.read(source.row.task_id))!
+  const actual = defined(await f.journal.read(source.row.task_id))
   const association: NotificationRecoveredAssociation = { identity, control, birth: { ...accepted.birth }, beforeEpoch: 0, nativeEpoch: 0,
-    claim: source.row.residency_claim, result: { ok: true }, ...(initial ? { initialInput: { inputID: actual.inboxID!, row: structuredClone(actual) } } : {}) }
+    claim: source.row.residency_claim, result: { ok: true }, ...(initial ? { initialInput: { inputID: defined(actual.inboxID), row: structuredClone(actual) } } : {}) }
   f.recovered.set(control, association)
   return { f, chosen, source, control, identity, association, token, receiver }
 }
@@ -272,7 +274,7 @@ for (const nested of [false, true]) test(`recovered ${nested ? "nested receiver"
 
 test("recovered terminal initial run uses original claimed accepted ledger, not a fabricated new begin", async () => {
   const r = await recoveredFixture(true), task = r.chosen.bindRecovered(r.control)
-  const actual = (await r.f.journal.read(r.source.row.task_id))!
+  const actual = defined(await r.f.journal.read(r.source.row.task_id))
   expect(actual.turn).toBeUndefined(); expect(actual.admission).toBe("accepted")
   const run = await r.chosen.bindCurrentOwnedRun(task), permit = await r.chosen.validateForDispatch(run, r.f.source(r.source.row))
   expect(() => r.chosen.assertDispatchCurrent(permit)).not.toThrow()
@@ -338,7 +340,7 @@ test("staged original and DISTINCT managed spec association binds before begin, 
   const permit = await f.issuer.validateForDispatch(run, source); expect(() => f.issuer.assertDispatchCurrent(permit)).not.toThrow()
 })
 test("wrong staged association and control replacement cannot bind or refresh custody", async () => {
-  const f = await fixture(), staged = await f.stage(f.root, f.issuer, false), association = f.staged.get(staged.control)!
+  const f = await fixture(), staged = await f.stage(f.root, f.issuer, false), association = defined(f.staged.get(staged.control))
   f.staged.set(staged.control, { ...association, original: new WeakRef(f.spec()) })
   expect(() => f.issuer.bindStaged(staged.grant, staged.managed, staged.control)).toThrow("association")
   f.staged.set(staged.control, association); const task = f.issuer.bindStaged(staged.grant, staged.managed, staged.control)
@@ -380,12 +382,12 @@ test("same actual backend/journal progress passes while raw reference-only advan
   const pending = f.issuer.validateForDispatch(run, source); await deferred.entered.promise; await staged.progress()
   deferred.gate.resolve({ id: f.root.sessionID, location: { directory: "/unit/project" } }); const permit = await pending
   expect(() => f.issuer.assertDispatchCurrent(permit)).not.toThrow()
-  f.store.mutate(staged.row.task_id, row => ({ ...row, owned_session: { ...row.owned_session!, journalRevision: row.owned_session!.journalRevision + 1 } }))
+  f.store.mutate(staged.row.task_id, row => ({ ...row, owned_session: { ...defined(row.owned_session), journalRevision: defined(row.owned_session).journalRevision + 1 } }))
   expect(() => f.issuer.assertDispatchCurrent(permit)).toThrow("reference")
 })
 test("closed SOURCE needs real backend closed receipt but does not close original receiver", async () => {
   const f = await fixture(), staged = await f.stage(); await staged.closeSource()
-  const run = await f.issuer.bindCurrentOwnedRun(staged.task), permit = await f.issuer.validateForDispatch(run, f.source(f.store.load(staged.row.task_id)!))
+  const run = await f.issuer.bindCurrentOwnedRun(staged.task), permit = await f.issuer.validateForDispatch(run, f.source(defined(f.store.load(staged.row.task_id))))
   expect(() => f.issuer.assertDispatchCurrent(permit)).not.toThrow(); expect(f.root.signal.aborted).toBe(false)
 })
 test("retirement joins ORIGINAL held get, never races it or creates another query", async () => {
@@ -407,7 +409,7 @@ test("get error including falsey rejection is observed and retirement reports on
 test("only exact abort reason is expected joined cancellation, raced network failure stays history", async () => {
   for (const exact of [true,false]) {
     const f = await fixture(), q = await f.queued(), run = await f.issuer.bindCurrentOwnedRun(q.task), entered = Promise.withResolvers<void>()
-    f.setGet((_input, options) => new Promise((_resolve,reject) => { entered.resolve(); options!.signal!.addEventListener("abort",()=>reject(exact?options!.signal!.reason:Error("network raced abort")),{once:true}) }))
+    f.setGet((_input, options) => new Promise((_resolve,reject) => { entered.resolve(); defined(defined(options).signal).addEventListener("abort",()=>reject(exact?defined(defined(options).signal).reason:Error("network raced abort")),{once:true}) }))
     const pending = f.issuer.validateForDispatch(run,f.source(q.row)); void pending.catch(()=>{}); await entered.promise
     const retirement = f.issuer.retire(); await expect(pending).rejects.toThrow()
     if (exact) { await retirement; expect(f.issuer.diagnostics().queryFailures).toBe(0) }
@@ -418,7 +420,7 @@ test("only exact abort reason is expected joined cancellation, raced network fai
 for (const state of ["running","cancelled","interrupt-cause-removed"] as const) test(`canonical eligibility ${state} change during receiver GET cannot mint permit`, async () => {
   const f = await fixture(), q = await f.queued()
   if (state === "interrupt-cause-removed") f.store.mutate(q.row.task_id, row => ({ ...row, status: "interrupted", interrupt_cause: "session_replaced" }))
-  const row = f.store.load(q.row.task_id)!, run = await f.issuer.bindCurrentOwnedRun(q.task), source = f.source(row), deferred = f.deferredGet()
+  const row = defined(f.store.load(q.row.task_id)), run = await f.issuer.bindCurrentOwnedRun(q.task), source = f.source(row), deferred = f.deferredGet()
   const pending = f.issuer.validateForDispatch(run, source); await deferred.entered.promise
   f.store.mutate(q.row.task_id, current => state === "interrupt-cause-removed" ? { ...current, interrupt_cause: undefined } : { ...current, status: state })
   deferred.gate.resolve({ id: f.root.sessionID, location: { directory: "/unit/project" } })
@@ -426,20 +428,20 @@ for (const state of ["running","cancelled","interrupt-cause-removed"] as const) 
 })
 test("actual CLOSED journal receipt cannot corroborate raw ref revision advance during GET", async () => {
   const f = await fixture(), staged = await f.stage(); await staged.closeSource()
-  const closed = f.closed.get(staged.row.task_id)!, durableRevision = closed.row.revision
+  const closed = defined(f.closed.get(staged.row.task_id)), durableRevision = closed.row.revision
   // Closed path must use actual durable receipt, not the retired live handle/no-op guard.
   staged.control.handle.assertOwned = () => { throw Error("retired live guard is NOT closed proof") }
-  const run = await f.issuer.bindCurrentOwnedRun(staged.task), source = f.source(f.store.load(staged.row.task_id)!), deferred = f.deferredGet()
+  const run = await f.issuer.bindCurrentOwnedRun(staged.task), source = f.source(defined(f.store.load(staged.row.task_id))), deferred = f.deferredGet()
   const pending = f.issuer.validateForDispatch(run, source); await deferred.entered.promise
-  f.store.mutate(staged.row.task_id, row => ({ ...row, owned_session: { ...row.owned_session!, journalRevision: durableRevision + 1 } }))
+  f.store.mutate(staged.row.task_id, row => ({ ...row, owned_session: { ...defined(row.owned_session), journalRevision: durableRevision + 1 } }))
   deferred.gate.resolve({ id: f.root.sessionID, location: { directory: "/unit/project" } })
   await expect(pending).rejects.toThrow()
-  expect((await f.journal.read(staged.row.task_id))!.revision).toBe(durableRevision)
+  expect(defined(await f.journal.read(staged.row.task_id)).revision).toBe(durableRevision)
 })
 
 async function nested(f: Awaited<ReturnType<typeof fixture>>) {
   const parent = await f.stage()
-  const binding = f.bindings.adopt(parent.backend.borrowParent(parent.child), 1, () => parent.control.handle.assertOwned!())
+  const binding = f.bindings.adopt(parent.backend.borrowParent(parent.child), 1, () => defined(parent.control.handle.assertOwned)())
   const issuer = f.another({ receiver: binding })
   return { parent, binding, issuer }
 }
@@ -456,8 +458,8 @@ for (const field of ["root","parent","child","depth","claim","control","killed"]
   const run = await n.issuer.bindCurrentOwnedRun(q.task), source = f.source(q.row), deferred = f.deferredGet()
   const pending = n.issuer.validateForDispatch(run,source); await deferred.entered.promise
   if(field==="control") f.controls.set(n.parent.row.task_id,{...n.parent.control})
-  else f.store.mutate(n.parent.row.task_id,row=>field==="root"?{...row,root_session_id:"foreign"}:field==="parent"?{...row,parent_session_id:"foreign",owned_session:{...row.owned_session!,parentID:"foreign"}}
-    :field==="child"?{...row,child_session_id:"foreign",owned_session:{...row.owned_session!,sessionID:"foreign"}}:field==="depth"?{...row,depth:7}:field==="claim"?{...row,residency_claim:"foreign",owned_session:{...row.owned_session!,residencyClaim:"foreign"}}:{...row,killed:true})
+  else f.store.mutate(n.parent.row.task_id,row=>field==="root"?{...row,root_session_id:"foreign"}:field==="parent"?{...row,parent_session_id:"foreign",owned_session:{...defined(row.owned_session),parentID:"foreign"}}
+    :field==="child"?{...row,child_session_id:"foreign",owned_session:{...defined(row.owned_session),sessionID:"foreign"}}:field==="depth"?{...row,depth:7}:field==="claim"?{...row,residency_claim:"foreign",owned_session:{...defined(row.owned_session),residencyClaim:"foreign"}}:{...row,killed:true})
   deferred.gate.resolve({id:n.parent.child.locator.sessionID,parentID:f.root.sessionID,location:{directory:"/unit/project"}})
   await expect(pending).rejects.toThrow()
 })
@@ -477,11 +479,11 @@ test("revoking canonical source registration during GET prevents permit creation
   await expect(pending).rejects.toThrow("Unissued")
 })
 test("closed file ref cannot advance even BELOW durable CLOSED ceiling",async()=>{
-  const f=await fixture(),s=await f.stage();await s.closeSource();const known=f.closed.get(s.row.task_id)!
+  const f=await fixture(),s=await f.stage();await s.closeSource();const known=defined(f.closed.get(s.row.task_id))
   expect(known.row.revision).toBeGreaterThan(known.referenceRevision)
-  const run=await f.issuer.bindCurrentOwnedRun(s.task),source=f.source(f.store.load(s.row.task_id)!),deferred=f.deferredGet()
+  const run=await f.issuer.bindCurrentOwnedRun(s.task),source=f.source(defined(f.store.load(s.row.task_id))),deferred=f.deferredGet()
   const pending=f.issuer.validateForDispatch(run,source);await deferred.entered.promise
-  f.store.mutate(s.row.task_id,row=>({...row,owned_session:{...row.owned_session!,journalRevision:known.referenceRevision+1}}))
+  f.store.mutate(s.row.task_id,row=>({...row,owned_session:{...defined(row.owned_session),journalRevision:known.referenceRevision+1}}))
   deferred.gate.resolve({id:f.root.sessionID,location:{directory:"/unit/project"}})
   await expect(pending).rejects.toThrow("reference")
 })
@@ -497,20 +499,20 @@ test("returned acceptance birth captured BEFORE binding cannot adopt a replaced 
   expect(()=>f.issuer.bindAcceptedWithoutChild(grant,result)).toThrow("birth")
 })
 test("accepted opaque lifetime cannot adopt changed captured birth even with same identity",async()=>{
-  const f=await fixture(),q=await f.queued(),prior=f.accepted.get(q.row.task_id)!
+  const f=await fixture(),q=await f.queued(),prior=defined(f.accepted.get(q.row.task_id))
   f.accepted.set(q.row.task_id,Object.assign({},prior,{birth:{createdAt:"changed",parentSessionId:"root",rootSessionId:"root",depth:1}}))
   await expect(f.issuer.bindCurrentOwnedRun(q.task)).rejects.toThrow("birth")
 })
 test("CLOSED captured reference cannot be refreshed from mutable port DURING real journal read",async()=>{
   const f=await fixture(),gate=Promise.withResolvers<void>(),entered=Promise.withResolvers<void>()
-  const issuer=f.another({readers:{...f.options.readers!,journal:{owner:f.journal.owner,
+  const issuer=f.another({readers:{...defined(f.options.readers),journal:{owner:f.journal.owner,
     read(key){return f.journal.read(key).then(async row=>{entered.resolve();await gate.promise;return row})},assertCurrent(row){return f.journal.assertCurrent(row)}}}})
   const staged=await f.stage(f.root,issuer);await staged.closeSource()
   const pending=issuer.bindCurrentOwnedRun(staged.task);void pending.catch(()=>{})
   try{
-    await entered.promise;const entry=f.closed.get(staged.row.task_id)!,next=entry.referenceRevision+1
+    await entered.promise;const entry=defined(f.closed.get(staged.row.task_id)),next=entry.referenceRevision+1
     expect(next).toBeLessThanOrEqual(entry.row.revision)
-    f.store.mutate(staged.row.task_id,row=>({...row,owned_session:{...row.owned_session!,journalRevision:next}}))
+    f.store.mutate(staged.row.task_id,row=>({...row,owned_session:{...defined(row.owned_session),journalRevision:next}}))
     Reflect.set(entry,"referenceRevision",next) // Explicit mutable UNIT port alias race.
     gate.resolve();await expect(pending).rejects.toThrow()
   }finally{gate.resolve()}
@@ -546,7 +548,7 @@ let refused=false;try{issuer.assertDispatchCurrent({})}catch{refused=true}issuer
 })
 
 test("no-admission recovered-spec shape cannot be fed to the NEW-start branch",async()=>{
-  const f=await fixture(),s=await f.stage(f.root,f.issuer,false),prior=f.staged.get(s.control)!
+  const f=await fixture(),s=await f.stage(f.root,f.issuer,false),prior=defined(f.staged.get(s.control))
   const {admission:_admission,...recoveredShape}=s.managed
   f.staged.set(s.control,{...prior,managed:new WeakRef(recoveredShape)})
   expect(()=>f.issuer.bindStaged(s.grant,recoveredShape,s.control)).toThrow("association")

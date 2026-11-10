@@ -35,6 +35,12 @@ export class HeldAdmissions {
 
   constructor(ports: HeldAdmissionPorts) { this.#ports = ports }
 
+  #fallbackRunner(mode: "in-process" | "process"): ManagedRunner {
+    const runners = this.#ports.runners
+    if (runners === undefined) throw new Error(`Held admission has no runner for ${mode} mode: neither resolveRunner nor runners was provided`)
+    return runners[mode]
+  }
+
   enqueue(context: LaunchContext): number {
     this.#contexts.set(context.record.task_id, context)
     return this.#ports.concurrency.enqueue(context.model, context.record.task_id, context.record.notification.run_epoch,
@@ -95,7 +101,7 @@ export class HeldAdmissions {
       if (!claimed || owned === null) throw new HeldAdmissionError(taskId, "owner_changed")
       const context: LaunchContext = {
         record: owned, managedSpec: { ...prepared, admission: entered.scope },
-        runner: warm?.runner ?? (this.#ports.resolveRunner?.(owned.execution_mode === "in-process" ? "in-process" : "process") ?? this.#ports.runners![owned.execution_mode === "in-process" ? "in-process" : "process"]),
+        runner: warm?.runner ?? (this.#ports.resolveRunner?.(owned.execution_mode === "in-process" ? "in-process" : "process") ?? this.#fallbackRunner(owned.execution_mode === "in-process" ? "in-process" : "process")),
         model: allocation.model,
       }
       this.#contexts.set(taskId, context)

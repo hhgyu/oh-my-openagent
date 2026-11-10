@@ -83,21 +83,34 @@ export interface OwnedChildObservationView {
   }
 }
 
+/** Plain property read with JavaScript semantics on any non-nullish value; nullish yields undefined. */
+function field(value: unknown, key: string): unknown {
+  return value === null || value === undefined ? undefined : Reflect.get(Object(value), key)
+}
+
 /** Project only safe fields, never stringify raw provider errors, inputs or outputs. */
 export function normalizeOwnedChildEvent(raw: unknown, sessionID: string): SafeChildEvent | undefined {
   if (!raw || typeof raw !== "object") throw new Error("Invalid host event envelope")
-  const event = raw as Record<string, any>
-  const data = event.data && typeof event.data === "object" ? event.data : {}
-  if (data.sessionID !== sessionID && event.durable?.aggregateID !== sessionID) return undefined
-  if (data.sessionID !== undefined && event.durable?.aggregateID !== undefined && data.sessionID !== event.durable.aggregateID) throw new Error("Host event session identity mismatch")
+  const event = raw as Record<string, unknown>
+  const data = (event.data && typeof event.data === "object" ? event.data : {}) as Record<string, unknown>
+  const aggregateID = field(event.durable, "aggregateID")
+  if (data.sessionID !== sessionID && aggregateID !== sessionID) return undefined
+  if (data.sessionID !== undefined && aggregateID !== undefined && data.sessionID !== aggregateID) throw new Error("Host event session identity mismatch")
   const value: Record<string, unknown> = {}
   for (const key of ["assistantMessageID", "inboxID", "model", "agent", "ordinal", "finish", "cost", "title"] as const) if (data[key] !== undefined) value[key] = data[key]
-  if (data.model) value.model = { id: data.model.id, providerID: data.model.providerID, ...(data.model.variant === undefined ? {} : { variant: data.model.variant }) }
-  if (data.tokens) value.tokens = Object.fromEntries(["input", "output", "reasoning", "cacheRead", "cacheWrite"].filter(key => data.tokens[key] !== undefined).map(key => [key, data.tokens[key]]))
+  const model = data.model
+  if (model) {
+    const variant = field(model, "variant")
+    value.model = { id: field(model, "id"), providerID: field(model, "providerID"), ...(variant === undefined ? {} : { variant }) }
+  }
+  const tokens = data.tokens
+  if (tokens) value.tokens = Object.fromEntries(["input", "output", "reasoning", "cacheRead", "cacheWrite"].filter(key => field(tokens, key) !== undefined).map(key => [key, field(tokens, key)]))
   if (event.type === "session.text.ended") value.text = data.text
   if (event.type === "session.retry.scheduled" && data.attempt !== undefined) value.attempt = data.attempt
-  if (data.error && typeof data.error.type === "string") value.errorType = data.error.type
-  if (data.item && typeof data.item.type === "string") value.inputKind = data.item.type
+  const errorType = data.error ? field(data.error, "type") : undefined
+  if (typeof errorType === "string") value.errorType = errorType
+  const inputKind = data.item ? field(data.item, "type") : undefined
+  if (typeof inputKind === "string") value.inputKind = inputKind
   if (typeof event.type === "string" && event.type.startsWith("session.tool.")) {
     if (data.id !== undefined) value.callID = data.id
     if (data.name !== undefined) value.name = data.name

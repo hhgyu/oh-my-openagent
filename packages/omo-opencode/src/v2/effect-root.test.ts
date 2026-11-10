@@ -30,7 +30,7 @@ function fixture(options: { version?: string; failRpc?: boolean; mutation?: bool
     yield* Effect.addFinalizer(() => dispose)
     return { dispose, events: { emit: () => Effect.void } }
   })
-  const success = [...ClientApi.groups["server.session"].endpoints["session.get"].success][0]!
+  const success = defined([...ClientApi.groups["server.session"].endpoints["session.get"].success][0])
   const ast = Schema.toType(success).ast
   const field = SchemaAST.isObjects(success.ast) ? success.ast.propertySignatures.find(item => item.name === "data") : undefined
   const codec = Schema.make<Schema.Codec<unknown, unknown>>(SchemaAST.isObjects(ast) && ast.propertySignatures.length === 1 && field ? field.type : success.ast)
@@ -105,7 +105,7 @@ test("existing mutation consumer receives the joined native session producer and
     yield* rootPlugin.effect(f.host)
     const caller = { sessionID: "ses_effect_root", messageID: "msg_fixture", id: "call_fixture", agent: "build",
       signal: new AbortController().signal, progress: () => Effect.void }
-    request = Effect.runPromise(f.tools.get("write")!.execute({ path: "fixture.txt", content: "unused" }, caller)).catch(error => error)
+    request = Effect.runPromise(defined(f.tools.get("write")).execute({ path: "fixture.txt", content: "unused" }, caller)).catch(error => error)
     yield* Effect.promise(() => f.entered)
     expect(f.getCalls()).toBe(1)
   })))
@@ -115,3 +115,4 @@ test("existing mutation consumer receives the joined native session producer and
   expect(f.order.filter(item => item === "dispose:agents")).toHaveLength(1)
 })
 
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

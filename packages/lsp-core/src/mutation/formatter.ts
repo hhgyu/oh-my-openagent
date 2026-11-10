@@ -113,7 +113,7 @@ function isGitIgnored(filePath: string, cwd: string): boolean {
 
 async function formatOne(filePath: string, formatter: Formatter, cwd: string, timeoutMs: number, daemonFormat: FormatterDaemonPort, resolveBinary?: FormatterStepOptions["resolveBinary"], ports?: FormatterHostPorts): Promise<FormatterOutcome> {
   try {
-    const daemon = await daemonFormat!(filePath)
+    const daemon = await daemonFormat(filePath)
     const details = daemon.details as Record<string, unknown> | undefined
     if (details?.["status"] === "formatted") return { status: "formatted", added: Number(details["linesAdded"] ?? 0), removed: Number(details["linesRemoved"] ?? 0) }
     if (details?.["reason"] !== "capability_not_advertised" && details?.["status"] !== "unavailable") return { status: "unchanged", added: 0, removed: 0 }

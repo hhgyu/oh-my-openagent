@@ -70,7 +70,11 @@ interface Entry {
 export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
   const entries = new Map<string, Entry>(), closedLeases = new WeakSet<SessionLease>()
   const hostAuthorizer = options.hostGrant && createHostBuildAuthorizer({ callAuthority: options.callAuthority,
-    permission: options.hostGrant.permission, agents: ctx.agent, assertCurrent: () => options.hostGrant!.assertCurrent() })
+    permission: options.hostGrant.permission, agents: ctx.agent, assertCurrent: () => {
+      const grant = options.hostGrant
+      if (!grant) throw Error("Native task host grant is absent")
+      return grant.assertCurrent()
+    } })
   const targetBasis = { grant: options.hostGrant, permission: options.hostGrant?.permission,
     prepare: options.hostGrant?.preparationFor, current: options.hostGrant?.assertCurrent,
     guard: options.childToolGuard, bind: options.childGuardBinding }
@@ -81,7 +85,9 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
   }
   const targetState: TargetOwner = { assertCurrent() {
     assertTargetOwner()
-    targetBasis.current!.call(targetBasis.grant)
+    const assertGrantCurrent = targetBasis.current
+    if (!assertGrantCurrent) throw Error("Native task permission requires owned G2 authorizer and G3 binding")
+    assertGrantCurrent.call(targetBasis.grant)
     assertTargetOwner()
   } }
   const issuedTargets = new WeakMap<ListedTool, NativeTaskTargetPermission>()
@@ -120,7 +126,9 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
         const original = currentInvocation(), grantCall = original.grantCall
         if (!grantCall || !spec.admission) throw Error("Original host-grant call/admission missing")
         original.bodySignal.throwIfAborted()
-        const prepared = await options.hostGrant!.preparationFor(spec, plan, original.bodySignal)
+        const hostGrant = options.hostGrant
+        if (!hostGrant) throw Error("Native task host grant is absent")
+        const prepared = await hostGrant.preparationFor(spec, plan, original.bodySignal)
         if (currentInvocation() !== original) throw Error("Original planned invocation changed")
         original.bodySignal.throwIfAborted(); spec.admission.assertOpen()
         return grantCall.authorize({ ...prepared, spec, plan,
@@ -132,7 +140,9 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
         const original = currentInvocation(), grantCall = original.grantCall
         if (!grantCall) throw Error("Original host-grant call missing for recovery")
         original.bodySignal.throwIfAborted()
-        const prepared = await options.hostGrant!.preparationFor(spec, undefined, original.bodySignal)
+        const hostGrant = options.hostGrant
+        if (!hostGrant) throw Error("Native task host grant is absent")
+        const prepared = await hostGrant.preparationFor(spec, undefined, original.bodySignal)
         if (currentInvocation() !== original) throw Error("Original recovery invocation changed")
         original.bodySignal.throwIfAborted()
         return grantCall.authorizeRecovery({ ...prepared, spec, includeTaskTools: spec.includeTaskTools !== false, canonical: { filterSharedParentTools } }, original.bodySignal)
@@ -186,7 +196,8 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
     const work = (async () => {
       if (entry.root) {
         const runtime = await initialize(entry.root)
-        await runtime.releaseParent(entry.binding!)
+        if (!entry.binding) throw Error("Foreign root parent binding")
+        await runtime.releaseParent(entry.binding)
         entry.removeRetirement?.(); entry.state = "closed"
         if (entries.get(lease.sessionID) === entry) entries.delete(lease.sessionID)
         return
@@ -243,7 +254,8 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
       if (actual.parentID) {
         const roots = [...entries.values()].filter(entry => !entry.root && entry.state === "open" && entry.runtime?.ownsSession(caller.sessionID))
         if (roots.length !== 1) throw Error("Nested caller has no unique owned root manager")
-        const root = roots[0], runtime = root.runtime!
+        const root = roots[0], runtime = root.runtime
+        if (!runtime) throw Error("Nested caller has no unique owned root manager")
         const binding = await runtime.verifyParent(caller.sessionID, caller.signal), parent = runtime.parentInfo(binding, true)
         caller.signal.throwIfAborted(); open(root)
         const concurrent = entries.get(caller.sessionID)

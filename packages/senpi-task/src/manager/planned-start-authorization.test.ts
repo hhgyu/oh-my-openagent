@@ -12,6 +12,11 @@ import type { ChildPlanner, ManagedStartSpec, ManagerStartSpec, ResolvedChildPla
 import type { HostStartAuthority } from "./start-admission"
 import { baseSpec, categoryPlanner, cleanupProjects, FakeRunner, flush, settings, tempProject } from "./__fixtures__/manager-fakes"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 afterEach(cleanupProjects)
 const owner: DagTaskOwner = { kind: "dag", runId: "planned-run" as never, nodeId: "planned-node" as never, fingerprint: "planned-fingerprint" }
 type Authorize = (spec: ManagerStartSpec, plan: ResolvedChildPlan) => Promise<void>
@@ -59,7 +64,7 @@ function fixture(input: {
     createRecoveryRuntime: createNativeTaskRecoveryRuntime,
     preparePlanning: async () => { order.push("prepare"); await input.prepare?.() },
     ...(input.authorize ? { authorizePlannedStart: async (spec: ManagerStartSpec, plan: ResolvedChildPlan) => {
-      order.push("authorize"); await input.authorize!(spec, plan)
+      order.push("authorize"); await present(input.authorize).call(input, spec, plan)
     } } : {}),
   }
   const manager = createTaskManagerImplementation(options, preparation)
@@ -99,8 +104,8 @@ for (const owned of [false, true]) {
       ]))
       expect(first).toBe("authorize")
       expect(f.planned).toHaveLength(1)
-      expect(received?.spec).toBe(f.planned[0]!.spec)
-      expect(received?.plan).toBe(f.planned[0]!.plan)
+      expect(received?.spec).toBe(present(f.planned[0]).spec)
+      expect(received?.plan).toBe(present(f.planned[0]).plan)
       expect(f.admissions()).toBe(0)
       expect(f.store.list().records).toEqual([])
       expect(f.runner.startedSpecs).toEqual([])
@@ -260,11 +265,11 @@ for (const background of [false, true]) {
       if (holder.kind !== "started" || queued.kind !== "started") throw new Error("expected starts")
       expect(queued).toMatchObject({ status: "pending", queue_position: 1 })
       expect(calls).toBe(2)
-      const originalAdmission = f.planned[1]!.spec.admission
+      const originalAdmission = present(f.planned[1]).spec.admission
       const done = f.manager.waitFor(holder.task_id)
-      f.runner.handles.get(holder.task_id)!.settle({ status: "completed", finalResponse: "release" })
+      present(f.runner.handles.get(holder.task_id)).settle({ status: "completed", finalResponse: "release" })
       await bounded(done); await bounded(f.whenStarts(2)); await flush()
-      expect(f.runner.startedSpecs[1]!.admission).toBe(originalAdmission)
+      expect(present(f.runner.startedSpecs[1]).admission).toBe(originalAdmission)
       expect(calls).toBe(2); expect(f.planned).toHaveLength(2)
     } finally { await f.finish() }
   })
@@ -281,7 +286,7 @@ test("queue acceptance does not upgrade original call authority before first inp
     expect(queued).toMatchObject({ status: "pending" })
     queuedAuthority.call.abort(new Error("raw caller closed before ACK"))
     const done = f.manager.waitFor(holder.task_id)
-    f.runner.handles.get(holder.task_id)!.settle({ status: "completed", finalResponse: "release" })
+    present(f.runner.handles.get(holder.task_id)).settle({ status: "completed", finalResponse: "release" })
     await bounded(done)
     expect((await bounded(f.manager.waitFor(queued.task_id))).status).toBe("error")
     expect(f.runner.startedSpecs).toHaveLength(1)
@@ -295,12 +300,12 @@ test("unit first-input acceptance state switches only to retained lifetime autho
   try {
     const result = await f.manager.start(baseSpec())
     if (result.kind !== "started") throw new Error("expected start")
-    const admission = f.runner.startedSpecs[0]!.admission!
-    expect(admission.hostSignal!()).toBe(token.call.signal)
+    const admission = present(present(f.runner.startedSpecs[0]).admission)
+    expect(present(admission.hostSignal).call(admission)).toBe(token.call.signal)
     // UNIT protocol-state control only: actual SDK matching-ACK proof belongs to owned-runner QA.
-    admission.hostAccepted!()
+    present(admission.hostAccepted).call(admission)
     token.call.abort(new Error("raw caller closed after unit acceptance"))
-    expect(admission.hostSignal!()).toBe(token.lifetime.signal)
+    expect(present(admission.hostSignal).call(admission)).toBe(token.lifetime.signal)
     expect(() => admission.assertOpen()).not.toThrow()
     token.lifetime.abort(new Error("parent retired"))
     expect(() => admission.assertOpen()).toThrow()
@@ -321,8 +326,8 @@ test("authorization observes the original chain while Native spill selects the e
     const spilled = await f.manager.start(baseSpec({ name: "spill" }))
     if (holder.kind !== "started" || spilled.kind !== "started") throw new Error("expected starts")
     expect(seen).toHaveLength(2); expect(seen[1]).toBe(plan)
-    expect(seen[1]!.model).toBe(primary.display)
-    expect(f.runner.startedSpecs[1]!.model).toBe(fallback.display)
+    expect(present(seen[1]).model).toBe(primary.display)
+    expect(present(f.runner.startedSpecs[1]).model).toBe(fallback.display)
     expect(f.store.load(spilled.task_id)?.model).toBe(fallback.display)
   } finally { await f.finish() }
 })

@@ -83,7 +83,8 @@ export function createParentBindings(root: SessionLease, policy: SessionToolPoli
     stop(sessionID: string) {
       const binding = current.get(sessionID)
       if (!binding) return
-      const parent = issued.get(binding)!
+      const parent = issued.get(binding)
+      if (!parent) throw Error("Borrowed parent binding was not issued by this owner")
       parent.stop.abort(Error("Borrowed parent admission closed"))
       return binding
     },

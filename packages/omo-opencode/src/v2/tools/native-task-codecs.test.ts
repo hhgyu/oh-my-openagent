@@ -28,46 +28,46 @@ test("Native summary/padding/flags are prepared before strict SAME-value validat
   const f = fixture()
   const raw = { prompt: " actual prompt ", category: " general ", task_summary: "very   long ".repeat(30), tasks: [{ prompt: "unused" }], run_in_background: "true", tools: [" read ", "write"], ignored: "padding" }
   const rawBefore = structuredClone(raw)
-  await expect(f.entry.inputDecoder!(raw)).rejects.toThrow("Invalid")
-  const prepared: any = await f.entry.normalizeInput!(raw)
+  await expect(defined(f.entry.inputDecoder)(raw)).rejects.toThrow("Invalid")
+  const prepared = await defined(f.entry.normalizeInput)(raw) as ReturnType<typeof normalizeTaskToolArguments>
   expect(prepared).toEqual(normalizeTaskToolArguments(raw))
   expect(prepared.task_summary.length).toBeLessThanOrEqual(80)
   expect(prepared.tasks).toBeUndefined(); expect(prepared.run_in_background).toBeUndefined()
   expect(prepared.prompt).toBe(" actual prompt "); expect(prepared.category).toBe("general")
   expect(prepared.tools).toEqual(["read", "write"])
-  expect(await f.entry.inputDecoder!(prepared)).toBe(prepared)
-  expect(await decodeToolValue(f.issued.codec.input!, f.tool, "input", prepared)).toBe(prepared)
+  expect(await defined(f.entry.inputDecoder)(prepared)).toBe(prepared)
+  expect(await decodeToolValue(defined(f.issued.codec.input), f.tool, "input", prepared)).toBe(prepared)
   expect(raw).toEqual(rawBefore); expect(Object.isFrozen(raw)).toBe(false)
 })
 
 test("real batch normalization preserves tasks-only unused prompt and clamps item summaries", async () => {
   const f = fixture()
   const raw = { tasks: [{ prompt: "unused", task_summary: "x".repeat(120), load_skills: [" one ", "", 42] }, null, { prompt: " " }], run_in_background: true }
-  const prepared: any = await f.entry.normalizeInput!(raw)
+  const prepared = await defined(f.entry.normalizeInput)(raw) as ReturnType<typeof normalizeTaskToolArguments>
   expect(prepared).toEqual(normalizeTaskToolArguments(raw))
   expect(prepared.tasks).toHaveLength(1)
   expect(prepared.tasks[0].prompt).toBe("unused")
   expect(prepared.tasks[0].task_summary.length).toBeLessThanOrEqual(80)
-  expect(await f.entry.inputDecoder!(prepared)).toBe(prepared)
+  expect(await defined(f.entry.inputDecoder)(prepared)).toBe(prepared)
 })
 
 test("Native preparation throws honestly while missing prompt remains schema-valid semantic-invalid", async () => {
   const f = fixture()
   for (const raw of [{ isolated: "true" }, { apply: 1 }, { merge: "invalid" }]) {
-    await expect(f.entry.normalizeInput!(raw)).rejects.toThrow()
+    await expect(defined(f.entry.normalizeInput)(raw)).rejects.toThrow()
   }
-  const missing = await f.entry.normalizeInput!({ prompt: 42 })
+  const missing = await defined(f.entry.normalizeInput)({ prompt: 42 })
   expect(missing).toEqual({})
-  expect(await f.entry.inputDecoder!(missing)).toBe(missing)
+  expect(await defined(f.entry.inputDecoder)(missing)).toBe(missing)
   const bad = { prompt: 42 }
-  await expect(f.entry.inputDecoder!(bad)).rejects.toThrow("Invalid")
+  await expect(defined(f.entry.inputDecoder)(bad)).rejects.toThrow("Invalid")
 })
 
 test("other inputs validate their own schemas and never borrow task preparation", async () => {
   for (const name of ["task_send", "task_cancel", "task_output"] as const) {
     const f = fixture(name)
     expect(f.issued.normalizer).toBeUndefined()
-    await expect(f.entry.inputDecoder!({ task_id: 42 })).rejects.toThrow("Invalid")
+    await expect(defined(f.entry.inputDecoder)({ task_id: 42 })).rejects.toThrow("Invalid")
     expect(() => issueNativeTaskCodecs({ ...f.tool, input: TaskToolParams as unknown as ListedTool["input"] }, name)).toThrow("schema")
   }
 })
@@ -78,12 +78,13 @@ test("post-compile Native schema mutation invalidates BOTH issued paths without 
   const descriptor = Object.getOwnPropertyDescriptor(schema, "description")
   try {
     schema.description = "changed after compile"
-    await expect(f.entry.inputDecoder!({ prompt: "ok" })).rejects.toThrow("Changed")
-    await expect(f.entry.normalizeInput!({ prompt: "ok" })).rejects.toThrow("Changed")
+    await expect(defined(f.entry.inputDecoder)({ prompt: "ok" })).rejects.toThrow("Changed")
+    await expect(defined(f.entry.normalizeInput)({ prompt: "ok" })).rejects.toThrow("Changed")
   } finally {
     if (descriptor) Object.defineProperty(schema, "description", descriptor)
     else delete schema.description
   }
   expect(Object.isFrozen(TaskToolParams)).toBe(false)
-  expect(await f.entry.inputDecoder!({ prompt: "ok" })).toEqual({ prompt: "ok" })
+  expect(await defined(f.entry.inputDecoder)({ prompt: "ok" })).toEqual({ prompt: "ok" })
 })
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

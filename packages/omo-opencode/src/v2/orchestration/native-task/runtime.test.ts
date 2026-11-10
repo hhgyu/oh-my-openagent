@@ -17,6 +17,8 @@ import { prepareHostTaskGrant } from "./host-grant"
 import { filterSharedParentTools } from "@oh-my-opencode/senpi-task/task-operations"
 
 type RuntimeOverrides = Partial<Pick<Parameters<typeof createNativeOwnedTaskRuntime>[1], "authorizePlannedStart" | "authorizeRecovery" | "config" | "childToolGuard" | "childGuardBinding" | "captureStartAuthority">>
+type PlannedStartArgs = Parameters<NonNullable<RuntimeOverrides["authorizePlannedStart"]>>
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("Expected value to be defined in controlled fixture"); return value }
 /** Controlled protocol fixture only; real harness acceptance is a separate actual2.2.6 driver. */
 async function fixture(run: (runtime: Awaited<ReturnType<typeof createNativeOwnedTaskRuntime>>, state: { calls: string[]; contexts: unknown[]; createdAgents: string[]; holdUpdate(): void; updateEntered: Promise<void>; releaseUpdate(): void; failChildGetOnce(): void; failRemoveOnce(): void; receiptEntered: Promise<void>; releaseReceipt(): void; removeEntered: Promise<void>; holdRemove(): void; releaseRemove(): void; breakObservation(): void; callerAbort: AbortController; useStartSignal(signal:AbortSignal): void; createEntered: Promise<void>; holdCreate(): void; releaseCreate(): void; hostWaitEntered: Promise<void>; holdHostWait(): void; releaseHostWait(): void; policyActive(): boolean; hostActive(): boolean; inputEntered: Promise<void>; drainEvents(): Promise<void>; holdInputAck(): void; releaseInputAck(): void; finishFrame(sessionID: string): void; emit(type: string, sessionID: string, data?: object): void; session(sessionID: string): unknown; changeSession(sessionID: string, patch: object): void; onUpdate(hook: (input: { sessionID: string; permissions?: unknown; metadata?: unknown }) => void | Promise<void>): void; reopen(overrides?: RuntimeOverrides): Promise<Awaited<ReturnType<typeof createNativeOwnedTaskRuntime>>> }) => Promise<void>, optionalRuntime: RuntimeOverrides = {}, unitContextTools: readonly string[] = []) {
   const dir = mkdtempSync(join(tmpdir(), "omo-task-runtime-unit-")), scopes = createSessionScopes(), calls: string[] = [], contexts: unknown[] = []
@@ -37,24 +39,24 @@ async function fixture(run: (runtime: Awaited<ReturnType<typeof createNativeOwne
   const drained = new Set<() => void>()
   const hostWaitEntered=Promise.withResolvers<void>(),hostWaitGate=Promise.withResolvers<void>();let heldHostWait=false
   const blocked = new Set<string>()
-  const hooks = new Map<string, (value: any) => unknown>()
+  const hooks = new Map<string, (value: unknown) => unknown>()
   let updateHook: ((input: { sessionID: string; permissions?: unknown; metadata?: unknown }) => void | Promise<void>) | undefined
   function emit(type: string, sessionID: string, data: object = {}) {
     const value = { id: `event:${seq}`, created: seq, type, durable: { aggregateID: sessionID, seq: seq++, version: 1 }, data: { sessionID, ...data } }
     for(const stream of streams){if(stream.ended)continue;if(stream.wake){const yes=stream.wake;stream.wake=undefined;yes({done:false,value})}else stream.queue.push(value)}
   }
-  const api: any = {
-    async create(input: any) { calls.push("create"); createdAgents.push(input.agent); const value = { id: input.id, parentID: input.parentID, location: input.location, agent: input.agent }; sessions.set(input.id, value); if (heldCreate) { createEntered.resolve(); await createGate.promise }; return value },
-    async get({ sessionID }: any) { calls.push("get"); if(sessionID!==parentID&&failChildGet){failChildGet=false;throw Error("controlled transient child lookup")}; if (!sessions.has(sessionID)) throw Error("Missing controlled session"); return sessions.get(sessionID) },
+  const api = {
+    async create(input: { id: string; parentID?: string; location?: unknown; agent: string }) { calls.push("create"); createdAgents.push(input.agent); const value = { id: input.id, parentID: input.parentID, location: input.location, agent: input.agent }; sessions.set(input.id, value); if (heldCreate) { createEntered.resolve(); await createGate.promise }; return value },
+    async get({ sessionID }: { sessionID: string }) { calls.push("get"); if(sessionID!==parentID&&failChildGet){failChildGet=false;throw Error("controlled transient child lookup")}; if (!sessions.has(sessionID)) throw Error("Missing controlled session"); return sessions.get(sessionID) },
     async list() { return { data: [...sessions.values()], cursor: {} } },
-    async hook(name: string, callback: any) { hooks.set(name, callback); return { dispose() { if(name==="context")calls.push("policy-disposed");hooks.delete(name) } } },
-    async update(input: any,options?:{signal?:AbortSignal}) { if(heldUpdate){updateEntered.resolve();await new Promise<void>((yes,no)=>{const signal=options?.signal;const stop=()=>{signal?.removeEventListener("abort",stop);no(signal?.reason)};signal?.addEventListener("abort",stop,{once:true});updateGate.promise.then(()=>{signal?.removeEventListener("abort",stop);yes()},no);if(signal?.aborted)stop()})};await updateHook?.(input)
+    async hook(name: string, callback: (value: unknown) => unknown) { hooks.set(name, callback); return { dispose() { if(name==="context")calls.push("policy-disposed");hooks.delete(name) } } },
+    async update(input: { sessionID: string; permissions?: unknown; metadata?: unknown },options?:{signal?:AbortSignal}) { if(heldUpdate){updateEntered.resolve();await new Promise<void>((yes,no)=>{const signal=options?.signal;const stop=()=>{signal?.removeEventListener("abort",stop);no(signal?.reason)};signal?.addEventListener("abort",stop,{once:true});updateGate.promise.then(()=>{signal?.removeEventListener("abort",stop);yes()},no);if(signal?.aborted)stop()})};await updateHook?.(input)
       // Controlled host semantics: own-session permissions/metadata are replaced as sent.
       const session = sessions.get(input.sessionID) as Record<string, unknown> | undefined
       if (session && input.permissions) { calls.push("park-update"); session.permissions = structuredClone(input.permissions) }
       if (session && input.metadata) session.metadata = structuredClone(input.metadata)
       emit("session.renamed", input.sessionID) },
-    async prompt(input: any, options?: { signal?: AbortSignal }) {
+    async prompt(input: { id: string; sessionID: string; delivery?: string; text: string }, options?: { signal?: AbortSignal }) {
       calls.push("prompt")
       if (input.id.startsWith("msg_omo_")) {
         calls.push(`input:${input.delivery}`)
@@ -83,15 +85,15 @@ async function fixture(run: (runtime: Awaited<ReturnType<typeof createNativeOwne
       if (input.text.includes("hold-ack")) { receiptEntered.resolve(); await receipt.promise }
       return { id: input.id, sessionID: input.sessionID }
     },
-    async interrupt({ sessionID }: any) { calls.push("interrupt"); if (blocked.delete(sessionID)) { if (!initialEnded.has(sessionID)) emit("session.step.failed", sessionID, { assistantMessageID: "assistant", error: { type: "aborted" } }); emit("session.execution.interrupted", sessionID); return { interrupted: true } }; return { interrupted: false } }, async wait() { calls.push("host-wait");hostWaitEntered.resolve();if(heldHostWait)await hostWaitGate.promise },
-    async remove(input: any) { calls.push("remove"); if (heldRemove) { removeEntered.resolve(); await removeGate.promise }; if(failRemoval){failRemoval=false;throw Error("Controlled actual remove failure")}; sessions.delete(input.sessionID) },
+    async interrupt({ sessionID }: { sessionID: string }) { calls.push("interrupt"); if (blocked.delete(sessionID)) { if (!initialEnded.has(sessionID)) emit("session.step.failed", sessionID, { assistantMessageID: "assistant", error: { type: "aborted" } }); emit("session.execution.interrupted", sessionID); return { interrupted: true } }; return { interrupted: false } }, async wait() { calls.push("host-wait");hostWaitEntered.resolve();if(heldHostWait)await hostWaitGate.promise },
+    async remove(input: { sessionID: string }) { calls.push("remove"); if (heldRemove) { removeEntered.resolve(); await removeGate.promise }; if(failRemoval){failRemoval=false;throw Error("Controlled actual remove failure")}; sessions.delete(input.sessionID) },
     async context() { return {} }, instructions: { entry: { async list() { return [] }, async put() {}, async remove() {} } },
   }
   withJoinedSessionCancellation(api, "controlled-test")
   const ctx = { app: { version: "2.2.6" }, location: { directory: dir }, session: api,
     model: { async list() { return { data: [{ providerID: "qa", id: "model", modelID: "model", name: "model", type: "chat", status: "active", enabled: true, variants: [], capabilities: { tools: true, input: ["text"], output: ["text"] }, limit: { context: 32000, output: 1000 } }] } } },
     provider: { async list() { return { data: [{ id: "qa", activation: "enabled" }] } } },
-    event: { subscribe({signal}:any){const stream:{queue:unknown[];wake?:(value:IteratorResult<unknown>)=>void;ended:boolean}={queue:[],ended:false};streams.add(stream);signal.addEventListener("abort",()=>{stream.ended=true;stream.wake?.({done:true,value:undefined});stream.wake=undefined;streams.delete(stream)},{once:true});return {[Symbol.asyncIterator](){return {async next(){if(stream.queue.length)return {done:false,value:stream.queue.shift()};if(stream.ended||ended)return {done:true,value:undefined};if([...streams].every(x=>x===stream||x.queue.length===0&&!!x.wake)){for(const done of drained)done();drained.clear()}return new Promise<IteratorResult<unknown>>(resolve=>{stream.wake=resolve})}}}}} },
+    event: { subscribe({signal}:{signal:AbortSignal}){const stream:{queue:unknown[];wake?:(value:IteratorResult<unknown>)=>void;ended:boolean}={queue:[],ended:false};streams.add(stream);signal.addEventListener("abort",()=>{stream.ended=true;stream.wake?.({done:true,value:undefined});stream.wake=undefined;streams.delete(stream)},{once:true});return {[Symbol.asyncIterator](){return {async next(){if(stream.queue.length)return {done:false,value:stream.queue.shift()};if(stream.ended||ended)return {done:true,value:undefined};if([...streams].every(x=>x===stream||x.queue.length===0&&!!x.wake)){for(const done of drained)done();drained.clear()}return new Promise<IteratorResult<unknown>>(resolve=>{stream.wake=resolve})}}}}} },
   } as unknown as OwnedTaskHost
   try {
     await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
@@ -151,14 +153,14 @@ test("original planned work is joined by parent close and cannot publish child a
   expect(runtime.manager.list({scope:"all"})).toHaveLength(0);let closed=false
   const closing=runtime.close().then(()=>{closed=true});await new Promise<void>(yes=>setImmediate(yes));expect(closed).toBe(false)
   release.resolve();await original;await closing;expect(state.calls).not.toContain("create")
- },{authorizePlannedStart:async(spec:any,plan:any)=>{entered.resolve();await release.promise;return unitPlannedData(spec,plan)}})
+ },{authorizePlannedStart:async(spec,plan)=>{entered.resolve();await release.promise;return unitPlannedData(spec,plan)}})
 })
 
 for(const point of ["subagents","depth","mode"] as const)test(`same admission cannot expand original ${point} policy during approval`,async()=>{
  await fixture(async(runtime,state)=>{
   const result=await runtime.start({category:"qa",prompt:"never create"}).catch(error=>error)
   expect(String(result)).toContain("changed during authorization");expect(state.calls).not.toContain("create");expect(runtime.manager.list({scope:"all"})).toHaveLength(0)
- },{authorizePlannedStart:async(spec:any,plan:any)=>{
+ },{authorizePlannedStart:async(spec,plan)=>{
   const result=unitPlannedData(spec,plan)
   if(point==="subagents")plan.allowedSubagents=["new-child"]
   if(point==="depth")plan.maxDepth=999
@@ -172,23 +174,23 @@ test("model-only Native plan change does not claim or require final model pin",a
   const result=await runtime.start({category:"qa",prompt:"model coverage"});expect(result.kind).toBe("started")
   if(result.kind==="started")expect((await runtime.wait(result.task_id)).status).toBe("completed")
   expect(state.calls).toContain("create")
- },{authorizePlannedStart:async(spec:any,plan:any)=>{const result=unitPlannedData(spec,plan);plan.model="qa/changed-display-route";return result}})
+ },{authorizePlannedStart:async(spec,plan)=>{const result=unitPlannedData(spec,plan);plan.model="qa/changed-display-route";return result}})
 })
 
 for(const mutation of ["subagents","depth","mode"] as const)test(`queued SAME admission rejects ${mutation} expansion at final stage without reauthorization`,async()=>{
- const captured:Array<{spec:any;plan:any}>=[]
+ const captured:Array<{spec:PlannedStartArgs[0];plan:PlannedStartArgs[1]}>=[]
  await fixture(async(runtime,state)=>{
   const first=await runtime.start({category:"qa",prompt:"block-until-interrupt",run_in_background:true});if(first.kind!=="started")throw Error("first")
   const second=await runtime.start({category:"qa",prompt:"never stage expanded policy",run_in_background:true});if(second.kind!=="started")throw Error("second")
   expect(state.calls.filter(x=>x==="create")).toHaveLength(1);expect(captured).toHaveLength(2)
-  const originalAdmission=captured[1]!.spec.admission,originalAuthority=originalAdmission.hostAuthority
-  if(mutation==="subagents")captured[1]!.plan.allowedSubagents=["new-descendant"]
-  if(mutation==="depth")captured[1]!.plan.maxDepth=999
-  if(mutation==="mode")captured[1]!.plan.agentExecutionMode="process"
+  const originalAdmission=defined(captured[1]).spec.admission,originalAuthority=originalAdmission.hostAuthority
+  if(mutation==="subagents")defined(captured[1]).plan.allowedSubagents=["new-descendant"]
+  if(mutation==="depth")defined(captured[1]).plan.maxDepth=999
+  if(mutation==="mode")defined(captured[1]).plan.agentExecutionMode="process"
   await runtime.end(first.task_id)
   const record=await runtime.wait(second.task_id,AbortSignal.timeout(2000))
   expect(record.status).toBe("error");expect(state.calls.filter(x=>x==="create")).toHaveLength(1)
-  expect(captured[1]!.spec.admission).toBe(originalAdmission);expect(originalAdmission.hostAuthority).toBe(originalAuthority)
+  expect(defined(captured[1]).spec.admission).toBe(originalAdmission);expect(originalAdmission.hostAuthority).toBe(originalAuthority)
   expect(captured).toHaveLength(2)
  },{config:()=>({categories:{qa:{model:"qa/model"}},task:OmoTaskSettingsSchema.parse({max_depth:2,default_concurrency:1})}),authorizePlannedStart:async(spec,plan)=>{captured.push({spec,plan});return unitPlannedData(spec,plan)}})
 })
@@ -210,7 +212,7 @@ test.each(["cancel", "end", "detach"] as const)("immediate %s fences a queued se
 test("active detach aborts the actual pending input before its held ACK is released",async()=>{
   await fixture(async(runtime,state)=>{
     const start=await runtime.start({category:"qa",prompt:"block-until-interrupt"});if(start.kind!=="started")throw Error("start")
-    const before=runtime.get(start.task_id)!
+    const before=defined(runtime.get(start.task_id))
     state.holdInputAck();const sending=runtime.send({idOrName:start.task_id,message:"held detach input",deliverAs:"steer"}).catch(error=>error)
     await state.inputEntered
     const detaching=runtime.detach(start.task_id)
@@ -228,7 +230,7 @@ test("permanent END after detach closes the real retained child without executio
   await fixture(async(runtime,state)=>{
     const start=await runtime.start({category:"qa",prompt:"block-until-interrupt"});if(start.kind!=="started")throw Error("start")
     await runtime.detach(start.task_id)
-    const before=runtime.get(start.task_id)!
+    const before=defined(runtime.get(start.task_id))
     expect(before.residency_state).toBe("persisted_only")
     await runtime.end(start.task_id)
     expect(runtime.get(start.task_id)?.status).toBe("cancelled")
@@ -262,7 +264,7 @@ test("retained cleanup refuses a rebound reference before host effects and keeps
   await fixture(async(runtime,state)=>{
     const start=await runtime.start({category:"qa",prompt:"block-until-interrupt"});if(start.kind!=="started")throw Error("start")
     await runtime.detach(start.task_id)
-    const original=runtime.store.load(start.task_id)!,reference=original.owned_session!
+    const original=defined(runtime.store.load(start.task_id)),reference=defined(original.owned_session)
     for(const patch of [{sessionID:"foreign-child"},{location:join(reference.location,"foreign-directory")},{parentID:"foreign-parent"},{hostVersion:"2.2.7"},{backendID:"foreign-backend"}]){
       runtime.store.mutate(start.task_id,current=>({...current,child_session_id:patch.sessionID??reference.sessionID,
         parent_session_id:patch.parentID??reference.parentID,owned_session:{...reference,...patch}}))
@@ -303,7 +305,7 @@ test("reentrant close before handle input begins cannot miss a queued admission"
 test("active close keeps child policy until actual interrupt and host idle join without a fake terminal",async()=>{
   await fixture(async(runtime,state)=>{
     const start=await runtime.start({category:"qa",prompt:"block-until-interrupt"});if(start.kind!=="started")throw Error("start")
-    const before=runtime.get(start.task_id)!,path=join(runtime.store.stateDir,"tasks",`${start.task_id}.json`)
+    const before=defined(runtime.get(start.task_id)),path=join(runtime.store.stateDir,"tasks",`${start.task_id}.json`)
     state.holdHostWait();let closed=false
     const closing=runtime.close().then(()=>{closed=true})
     const witness=await Promise.race([closing.then(()=>"closed-without-idle-join"),state.hostWaitEntered.then(()=>"waiting-for-host-idle")])
@@ -321,7 +323,7 @@ test("active close keeps child policy until actual interrupt and host idle join 
 test("recovery settle joins the actual recover operation without disposing a healthy runner",async()=>{
   await fixture(async(runtime,state)=>{
     const start=await runtime.start({category:"qa",prompt:"block-until-interrupt"});if(start.kind!=="started")throw Error("start")
-    const record=runtime.get(start.task_id)!,handle=runtime.manager.getResidentHandle(start.task_id)!
+    const record=defined(runtime.get(start.task_id)),handle=defined(runtime.manager.getResidentHandle(start.task_id))
     const entered=Promise.withResolvers<void>(),finish=Promise.withResolvers<void>();let disposed=0,joined=false
     const recovery=createOwnedTaskRecovery({async recover(){entered.resolve();await finish.promise;return {handle}},async dispose(){disposed++}} as never,runtime.store.stateDir)
     const work=recovery.respawn({record,sessionPath:undefined,beforeLaunch(){}},{} as never,()=>0)
@@ -338,7 +340,7 @@ test("SAME manager sends active steer/queue inputs and its existing output follo
     const start=await runtime.start({category:"qa",prompt:"block-until-interrupt"});if(start.kind!=="started")throw Error("start")
     for(const [message,deliverAs] of [["A","steer"],["B","followUp"],["C","steer"]] as const)expect((await runtime.send({idOrName:start.task_id,message,deliverAs})).kind).toBe("steered")
     expect(state.calls.filter(call=>call.startsWith("input:"))).toEqual(["input:steer","input:queue","input:steer"])
-    state.finishFrame(runtime.get(start.task_id)!.child_session_id!)
+    state.finishFrame(defined(defined(runtime.get(start.task_id)).child_session_id))
     const record=await runtime.wait(start.task_id,AbortSignal.timeout(2000))
     expect(record.status).toBe("completed");expect(record.final_response).toBe("after managed inputs");expect(record.run_stats).toBeUndefined()
     expect(JSON.stringify(await runtime.output({task_id:start.task_id,mode:"full"}))).toContain("after managed inputs")
@@ -355,7 +357,7 @@ test("unknown active admission persists branded uncertainty without a signal wai
     const waiting=runtime.wait(start.task_id).then(()=>"wrong",error=>ChildObservationUncertain.is(error)?"uncertain":"wrong-error")
     const sent=await runtime.send({idOrName:start.task_id,message:"lose-input-ack",deliverAs:"steer"})
     expect(sent.kind).toBe("uncertain");expect(await waiting).toBe("uncertain")
-    const record=runtime.get(start.task_id)!
+    const record=defined(runtime.get(start.task_id))
     expect(record.status).toBe("running");expect(record.observation_uncertain).toBeDefined()
     expect(runtime.manager.concurrency?.leaseState(start.task_id,record.notification.run_epoch)).toBe("held")
     expect(state.calls.filter(call=>call.startsWith("input:"))).toHaveLength(1)
@@ -373,7 +375,7 @@ test("actual terminal before continuation ACK waits for its checkpoint instead o
     state.holdInputAck();let settled=false
     const waiting=runtime.wait(start.task_id,AbortSignal.timeout(2000)).then(record=>{settled=true;return record})
     const sending=runtime.send({idOrName:start.task_id,message:"held ACK",deliverAs:"steer"})
-    await state.inputEntered;state.finishFrame(runtime.get(start.task_id)!.child_session_id!);await state.drainEvents()
+    await state.inputEntered;state.finishFrame(defined(defined(runtime.get(start.task_id)).child_session_id));await state.drainEvents()
     expect(settled).toBe(false);expect(runtime.get(start.task_id)?.status).toBe("running")
     state.releaseInputAck();expect((await sending).kind).toBe("steered")
     expect((await waiting).final_response).toBe("after managed inputs");await runtime.end(start.task_id)
@@ -383,9 +385,9 @@ test("actual terminal before continuation ACK waits for its checkpoint instead o
 test.each(["abort","dispose","terminate"] as const)("direct Native handle %s stops a queued continuation before its dispatch",async control=>{
   await fixture(async(runtime,state)=>{
     const start=await runtime.start({category:"qa",prompt:"block-until-interrupt"});if(start.kind!=="started")throw Error("start")
-    const handle=runtime.manager.getResidentHandle(start.task_id)!
+    const handle=defined(runtime.manager.getResidentHandle(start.task_id))
     const sending=handle.steer("queued direct input").catch(error=>error)
-    await handle[control]!();const result=await sending
+    await defined(handle[control])();const result=await sending
     expect(result).toBeInstanceOf(Error);expect(state.calls.filter(call=>call.startsWith("input:"))).toEqual([])
     if(control==="abort")await runtime.end(start.task_id)
   })
@@ -394,9 +396,9 @@ test.each(["abort","dispose","terminate"] as const)("direct Native handle %s sto
 test.each(["abort","terminate"] as const)("direct Native handle %s aborts and joins an actual pending continuation",async control=>{
   await fixture(async(runtime,state)=>{
     const start=await runtime.start({category:"qa",prompt:"block-until-interrupt"});if(start.kind!=="started")throw Error("start")
-    state.holdInputAck();const handle=runtime.manager.getResidentHandle(start.task_id)!
+    state.holdInputAck();const handle=defined(runtime.manager.getResidentHandle(start.task_id))
     const sending=handle.steer("held direct input").catch(error=>error);await state.inputEntered
-    await handle[control]!();expect(await sending).toBeInstanceOf(Error)
+    await defined(handle[control])();expect(await sending).toBeInstanceOf(Error)
     expect(state.calls).toContain("input-abort-joined")
     if(control==="abort")await runtime.end(start.task_id)
   })
@@ -417,9 +419,9 @@ test("outcome custody loss rejects local waiters without mutating a changed owne
   await fixture(async(runtime,state)=>{
     const start=await runtime.start({category:"qa",prompt:"block-until-interrupt"});if(start.kind!=="started")throw Error("start")
     const waiting=runtime.wait(start.task_id).then(()=>"wrong",error=>ChildObservationUncertain.is(error)?"uncertain":"wrong-error")
-    const original=structuredClone(runtime.get(start.task_id)!)
-    const changed={...original,owned_session:{...original.owned_session!,journalOwner:"controlled-other-owner"}}
-    runtime.store.mutate(start.task_id,()=>changed);state.finishFrame(original.child_session_id!)
+    const original=structuredClone(defined(runtime.get(start.task_id)))
+    const changed={...original,owned_session:{...defined(original.owned_session),journalOwner:"controlled-other-owner"}}
+    runtime.store.mutate(start.task_id,()=>changed);state.finishFrame(defined(original.child_session_id))
     expect(await waiting).toBe("uncertain");expect(runtime.store.load(start.task_id)).toEqual(changed)
     runtime.store.mutate(start.task_id,()=>original);await runtime.end(start.task_id)
   })
@@ -492,7 +494,7 @@ test("lost observation keeps uncertainty and lane, but explicit permanent end st
     const waiting = runtime.wait(started.task_id).then(() => "wrong", error => ChildObservationUncertain.is(error) ? "uncertain" : "wrong-error")
     state.breakObservation()
     expect(await waiting).toBe("uncertain")
-    const record = runtime.get(started.task_id)!
+    const record = defined(runtime.get(started.task_id))
     expect(record.status).toBe("running")
     expect(record.observation_uncertain).toBeDefined()
     expect(runtime.manager.concurrency?.leaseState(started.task_id, record.notification.run_epoch)).toBe("held")
@@ -548,12 +550,12 @@ test("torn display log promptly rejects outcome without host terminal then retai
     if (started.kind !== "started") throw Error("No controlled task")
     const waiting = runtime.wait(started.task_id).then(() => "wrong", error => ChildObservationUncertain.is(error) ? "uncertain" : "wrong-error")
     appendFileSync(join(runtime.store.stateDir, "logs", `${started.task_id}.jsonl`), "{torn")
-    const child = runtime.get(started.task_id)!.child_session_id!
+    const child = defined(defined(runtime.get(started.task_id)).child_session_id)
     state.emit("session.text.started", child, { assistantMessageID: "assistant", ordinal: 0 })
     state.emit("session.text.ended", child, { assistantMessageID: "assistant", ordinal: 0, text: "partial covered step" })
     state.emit("session.step.ended", child, { assistantMessageID: "assistant", finish: "stop" })
     expect(await Promise.race([waiting, new Promise(resolve => setTimeout(() => resolve("hung"), 150))])).toBe("uncertain")
-    const record = runtime.get(started.task_id)!
+    const record = defined(runtime.get(started.task_id))
     expect(record.status).toBe("running")
     expect(runtime.manager.concurrency?.leaseState(started.task_id, record.notification.run_epoch)).toBe("held")
     await runtime.end(started.task_id)
@@ -605,7 +607,7 @@ test("same Native idle follow-up publishes a new epoch and waits for its own new
   expect(sent.kind).toBe("revived");expect(runtime.get(start.task_id)?.notification.run_epoch).toBe(1)
   let finished=false;const waiting=runtime.wait(start.task_id).then(result=>{finished=true;return result})
   await state.drainEvents();expect(finished).toBe(false)
-  state.finishFrame(first.child_session_id!)
+  state.finishFrame(defined(first.child_session_id))
   const second=await waiting;expect(second.final_response).toBe("after managed inputs");expect(second.notification.run_epoch).toBe(1)
   expect(second.child_session_id).toBe(first.child_session_id);expect(second.run_stats).toBeUndefined()
   expect(JSON.stringify(await runtime.output({task_id:start.task_id,mode:"full"}))).toContain("after managed inputs")
@@ -625,7 +627,7 @@ test("proven post-CAS pre-call abort restores prior output and burns epoch befor
   expect(state.calls.filter(x=>x==="prompt")).toHaveLength(1)
   expect((await runtime.send({idOrName:start.task_id,message:"higher explicit retry"})).kind).toBe("revived")
   expect(runtime.get(start.task_id)?.notification.run_epoch).toBe(2)
-  state.finishFrame(first.child_session_id!);expect((await runtime.wait(start.task_id)).final_response).toBe("after managed inputs")
+  state.finishFrame(defined(first.child_session_id));expect((await runtime.wait(start.task_id)).final_response).toBe("after managed inputs")
   await runtime.end(start.task_id)
  })
 })
@@ -700,8 +702,8 @@ test("mismatched recovered turn descriptor refuses before host mutation and expl
   const start=await runtime.start({category:"qa",prompt:"initial complete"});if(start.kind!=="started")throw Error("start")
   const first=await runtime.wait(start.task_id)
   expect((await runtime.send({idOrName:start.task_id,message:"second"})).kind).toBe("revived")
-  state.finishFrame(first.child_session_id!);await runtime.wait(start.task_id);await runtime.detach(start.task_id)
-  const ref=runtime.get(start.task_id)!.owned_session!,db=new Database(join(runtime.store.stateDir,"owned-children.sqlite"))
+  state.finishFrame(defined(first.child_session_id));await runtime.wait(start.task_id);await runtime.detach(start.task_id)
+  const ref=defined(defined(runtime.get(start.task_id)).owned_session),db=new Database(join(runtime.store.stateDir,"owned-children.sqlite"))
   const body=JSON.parse((db.query("SELECT body FROM children WHERE key=?").get(ref.journalKey) as {body:string}).body)
   body.turn.nativeEpoch=999;db.query("UPDATE children SET body=? WHERE key=?").run(JSON.stringify(body),ref.journalKey);db.close()
   const before=[...state.calls]
@@ -717,13 +719,13 @@ test("direct Native input queues behind the new-turn admission and never races i
   await runtime.wait(start.task_id);state.holdInputAck()
   const sending=runtime.send({idOrName:start.task_id,message:"new held turn"})
   await state.inputEntered
-  const handle=runtime.manager.getResidentHandle(start.task_id)!
+  const handle=defined(runtime.manager.getResidentHandle(start.task_id))
   let settled=false
   const direct=handle.steer("direct queued input").then(()=>{settled=true},error=>{settled=true;throw error})
   await Promise.resolve();expect(settled).toBe(false);expect(state.calls.filter(x=>x==="prompt")).toHaveLength(2)
   state.releaseInputAck();expect((await sending).kind).toBe("revived");await direct
   expect(state.calls.filter(x=>x==="prompt")).toHaveLength(3)
-  state.finishFrame(runtime.get(start.task_id)!.child_session_id!);expect((await runtime.wait(start.task_id)).status).toBe("completed")
+  state.finishFrame(defined(defined(runtime.get(start.task_id)).child_session_id));expect((await runtime.wait(start.task_id)).status).toBe("completed")
   await runtime.end(start.task_id)
  })
 })
@@ -744,10 +746,10 @@ test("new start C2 uses its own captured authority after initiating C1 has abort
 test("an arbitrary persisted epoch edit cannot grant the old handle reattach authority",async()=>{
  await fixture(async(runtime,state)=>{
   const start=await runtime.start({category:"qa",prompt:"block-until-interrupt"});if(start.kind!=="started")throw Error("start")
-  const before=runtime.store.load(start.task_id)!,handle=runtime.manager.getResidentHandle(start.task_id)!
+  const before=defined(runtime.store.load(start.task_id)),handle=defined(runtime.manager.getResidentHandle(start.task_id))
   const calls=[...state.calls]
   const next=before.notification.run_epoch+1
-  runtime.store.replace({...before,notification:{...before.notification,run_epoch:next},owned_session:{...before.owned_session!,runEpoch:next}})
+  runtime.store.replace({...before,notification:{...before.notification,run_epoch:next},owned_session:{...defined(before.owned_session),runEpoch:next}})
   expect(()=>handle.assertOwned?.()).toThrow("epoch or custody")
   expect(state.calls).toEqual(calls)
   // This test's untrusted disk edit is not a canonical Native publication receipt.
@@ -799,7 +801,7 @@ test("completed actual child END retains a durable closed journal receipt and re
     const started = await runtime.start({ category: "qa", prompt: "complete before explicit retirement" })
     if (started.kind !== "started") throw Error("start failed")
     const record = await runtime.wait(started.task_id)
-    const reference = record.owned_session!
+    const reference = defined(record.owned_session)
     await runtime.end(started.task_id)
     const db = new Database(join(runtime.store.stateDir, "owned-children.sqlite"), { readonly: true })
     try {
@@ -817,8 +819,8 @@ test("ancestor cleanup retains its original borrowed binding until descendant re
   await fixture(async (runtime, state) => {
     const parent = await runtime.start({ category: "qa", prompt: "block-until-interrupt" })
     if (parent.kind !== "started") throw Error("Parent did not start")
-    const parentRecord = runtime.get(parent.task_id)!
-    const binding = await runtime.verifyParent(parentRecord.child_session_id!)
+    const parentRecord = defined(runtime.get(parent.task_id))
+    const binding = await runtime.verifyParent(defined(parentRecord.child_session_id))
     const grandchild = await runtime.withParent(binding, () => runtime.start({ category: "qa", prompt: "block-until-interrupt" }))
     if (grandchild.kind !== "started") throw Error("Grandchild did not start")
     state.holdRemove()
@@ -842,8 +844,8 @@ test("failed descendant cleanup retains original borrowed custody until the same
   await fixture(async (runtime, state) => {
     const parent = await runtime.start({ category: "qa", prompt: "block-until-interrupt" })
     if (parent.kind !== "started") throw Error("Parent did not start")
-    const parentRecord = runtime.get(parent.task_id)!
-    const binding = await runtime.verifyParent(parentRecord.child_session_id!)
+    const parentRecord = defined(runtime.get(parent.task_id))
+    const binding = await runtime.verifyParent(defined(parentRecord.child_session_id))
     const grandchild = await runtime.withParent(binding, () => runtime.start({ category: "qa", prompt: "block-until-interrupt" }))
     if (grandchild.kind !== "started") throw Error("Grandchild did not start")
     state.failRemoveOnce()
@@ -858,7 +860,7 @@ test("failed descendant cleanup retains original borrowed custody until the same
 test("recovery cannot turn a foreign stored root into parent custody",async()=>{
  await fixture(async(runtime,state)=>{
   const started=await runtime.start({category:"qa",prompt:"block-until-interrupt"});if(started.kind!=="started")throw Error("start")
-  const original=runtime.get(started.task_id)!,before=state.calls.length
+  const original=defined(runtime.get(started.task_id)),before=state.calls.length
   runtime.store.replace({...original,root_session_id:"foreign"})
   try{await expect(runtime.recover(started.task_id)).rejects.toThrow("outside parent scope");expect(state.calls.length).toBe(before)}
   finally{runtime.store.replace(original)}

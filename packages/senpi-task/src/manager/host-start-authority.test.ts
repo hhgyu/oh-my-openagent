@@ -11,6 +11,11 @@ import type { ManagedRunner, ManagerStartSpec } from "./types"
 import { buildSpawnSpecV1, nextRungManagedSpec } from "./manager-helpers"
 import { enterStartAdmission } from "./start-admission"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 afterEach(cleanupProjects)
 function authority(){const raw=new AbortController(),lifetime=new AbortController();return {raw,lifetime,
  admissionSignal:AbortSignal.any([raw.signal,lifetime.signal]),lifetimeSignal:lifetime.signal,
@@ -28,13 +33,13 @@ test("optional host authority is captured once and raw abort stops admission bef
 test("Native transfer is not host acceptance; only explicit real-ACK notification releases raw caller dependence",async()=>{
  const a=authority(),create=createStartAdmissions as unknown as (...args:unknown[])=>ReturnType<typeof createStartAdmissions>
  const admissions=create(new AdmissionBarrier(),undefined,Date.now,()=>a)
- const scope=await admissions.run(baseSpec(),undefined,async spec=>{spec.admission!.transfer();return spec.admission!})
+ const scope=await admissions.run(baseSpec(),undefined,async spec=>{present(spec.admission).transfer();return present(spec.admission)})
  if("kind" in scope)throw Error("held")
  const host=scope as typeof scope & {hostAuthority?:typeof a;hostAccepted?():void}
  expect(host.hostAuthority).toBe(a);expect(typeof host.hostAccepted).toBe("function")
  expect(scope.hostSignal?.()).toBe(a.admissionSignal)
  a.raw.abort(new Error("still unadmitted"));expect(()=>scope.assertOpen()).toThrow("still unadmitted")
- host.hostAccepted!();expect(()=>scope.assertOpen()).not.toThrow()
+ present(host.hostAccepted).call(host);expect(()=>scope.assertOpen()).not.toThrow()
  expect(scope.hostSignal?.()).toBe(a.lifetimeSignal)
  a.lifetime.abort(new Error("parent retired"));expect(()=>scope.assertOpen()).toThrow("parent retired");scope.leave()
 })
@@ -66,7 +71,7 @@ test("fallback spec spread preserves exact transient admission while persisted s
 
 test.each(["cancel","owner","epoch"] as const)("outer queued host refusal leaves a newer %s untouched and releases only its old lease",async race=>{
  const cwd=tempProject(),store=createTaskRecordStore({project_dir:cwd}),a=authority(),fill=authority()
- let current=fill,queuedID:string|undefined,expected:ReturnType<typeof store.load>,handle:ReturnType<typeof makeHandle>|undefined
+ let current=fill,queuedID:string|undefined,expected:ReturnType<typeof store.load>|undefined,handle:ReturnType<typeof makeHandle>|undefined
  const checked=Promise.withResolvers<void>(),assert=a.assertAdmission.bind(a)
  a.assertAdmission=()=>{if(queuedID){store.mutate(queuedID,f=>({...f,...(race==="cancel"?{status:"cancelled" as const}:race==="owner"?{host_pid:999}:{notification:{...f.notification,run_epoch:1}})}));expected=store.load(queuedID);checked.resolve();a.raw.abort(new Error("queued caller retired"))};assert()}
  const runner:ManagedRunner={async start(spec){handle=makeHandle(spec.taskId);return handle.handle}}
@@ -74,13 +79,13 @@ test.each(["cancel","owner","epoch"] as const)("outer queued host refusal leaves
   {preparePlanning:async()=>{},createRecoveryRuntime:()=>({respawn:async()=>{throw Error("unused")},settleTeardowns:async()=>{}})})
  const first=await manager.start(baseSpec());current=a;const queued=await manager.start(baseSpec());if(first.kind!=="started"||queued.kind!=="started"||!handle)throw Error("start")
  queuedID=queued.task_id;handle.settle({status:"completed",finalResponse:"release"});await checked.promise;await launchSettled(manager,queued.task_id)
- expect(store.load(queued.task_id)).toEqual(expected!);expect(manager.concurrency?.leaseState(queued.task_id,0)).toBeUndefined()
+ expect(store.load(queued.task_id)).toEqual(present(expected));expect(manager.concurrency?.leaseState(queued.task_id,0)).toBeUndefined()
  for(const id of [first.task_id,queued.task_id]){manager.forget(id,{path:"end"});store.remove(id)};store.close()
 })
 
 test("absent host capture keeps original Native admission shape, transfer and barrier semantics",async()=>{
  const barrier=new AdmissionBarrier(),admissions=createStartAdmissions(barrier)
- const entered=await admissions.run(baseSpec(),undefined,async spec=>{spec.admission!.transfer();return spec.admission!})
+ const entered=await admissions.run(baseSpec(),undefined,async spec=>{present(spec.admission).transfer();return present(spec.admission)})
  if("kind" in entered)throw Error("held")
  expect(entered).not.toHaveProperty("hostAuthority");expect(entered).not.toHaveProperty("hostAccepted");expect(entered).not.toHaveProperty("hostSignal")
  barrier.close("parent-1",1);expect(entered.commit().kind).toBe("start_paused");expect(()=>entered.assertOpen()).toThrow("run admission is held")
@@ -98,7 +103,7 @@ test("queued A keeps its own captured authority when B wakes the lane; refused A
  if(first.kind!=="started"||queued.kind!=="started")throw Error("start")
  expect(queued.status).toBe("pending");a.raw.abort(new Error("A interrupted while queued"))
  const waiting=manager.waitFor(queued.task_id).then(record=>record.status)
- handles.get(first.task_id)!.settle({status:"completed",finalResponse:"wake from B context"});await manager.waitFor(first.task_id)
+ present(handles.get(first.task_id)).settle({status:"completed",finalResponse:"wake from B context"});await manager.waitFor(first.task_id)
  const observed=await Promise.race([waiting,Bun.sleep(80).then(()=>"still-pending")])
  const lease=manager.concurrency?.leaseState(queued.task_id,0),before=[...started]
  console.log("MI3_QUEUED_AUTHORITY_WITNESS",JSON.stringify({observed,lease:lease??null,runnerPrompts:before}))
@@ -133,7 +138,7 @@ test.each(["start-audit","failure-transition-audit","terminal-audit","persistent
  const originalLog=readAudit()
  let observed:{status:string;error:unknown}|undefined,snapshot:ReturnType<typeof store.load>,future:{status:string;error:unknown}|undefined,keys=-1,lease:unknown
  try{
-  a.raw.abort(new Error("queued raw caller retired"));handles.get(first.task_id)!.settle({status:"completed",finalResponse:"release"})
+  a.raw.abort(new Error("queued raw caller retired"));present(handles.get(first.task_id)).settle({status:"completed",finalResponse:"release"})
   await faultEntered.promise;await launchSettled(manager,queued.task_id)
   observed=await Promise.race([waiting,Bun.sleep(80).then(()=>({status:"STILL_PENDING",error:undefined}))])
   snapshot=store.load(queued.task_id);keys=manager.waiterKeyCount();lease=manager.concurrency?.leaseState(queued.task_id,0)
@@ -160,7 +165,7 @@ test.each(["start-audit","failure-transition-audit","terminal-audit","persistent
   handles.get(queued.task_id)?.settle({status:"completed",finalResponse:"test cleanup"})
   // RED-only fixture cleanup: a terminal record can have the old bugged waiter still registered.
   // Re-arm only this disposable record after capturing the decisive state, then use genuine cancel.
-  const repair=manager.waiterKeyCount()>0&&["error","completed","cancelled"].includes(store.load(queued.task_id)!.status)
+  const repair=manager.waiterKeyCount()>0&&["error","completed","cancelled"].includes(present(store.load(queued.task_id)).status)
   if(repair)store.mutate(queued.task_id,value=>({...value,status:"running"}))
   await manager.cancelTask(queued.task_id,"healthy explicit cleanup after bookkeeping fault");await waiting
   expect((await manager.waitFor(queued.task_id)).status).toBe(repair||fault==="start-write"||fault==="terminal-write"?"cancelled":"error")

@@ -1,6 +1,11 @@
 import { expect, it } from "bun:test"
 import { createPromptPresetPort, type PromptOptions } from "./prompt-preset"
 
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
+
 const options: PromptOptions = {
   appName: "OpenCode OmO", cwd: "/current/workspace", selectedTools: ["read", "custom_read"],
   toolSnippets: { custom_read: "CURRENT_TOOL_SNIPPET" }, promptGuidelines: ["CURRENT_GUIDELINE"],
@@ -16,7 +21,7 @@ it("renders exact public Native per-model presets with current host context and 
   const first = port.render({ model, settings: { promptPreset: "auto" }, options, appendSystemPrompt: "CURRENT_APPEND" })
   expect(first.source).toBe("preset")
   expect(first.preset).toBe("gpt-5.4")
-  expect(first.prompt).toBe(native.resolvePreset(model, { promptPreset: "auto" }, options)!.prompt + "\n\nCURRENT_APPEND")
+  expect(first.prompt).toBe(defined(native.resolvePreset(model, { promptPreset: "auto" }, options)).prompt + "\n\nCURRENT_APPEND")
   expect(first.prompt).toContain("CURRENT_PROJECT_RULE")
   expect(first.prompt).toContain("CURRENT_USER_RULE")
   expect(first.prompt).toContain("CURRENT_TOOL_SNIPPET")
@@ -79,7 +84,7 @@ it("loads only the public preset graph, without warming engine/session/settings 
   // Inspect the complete Bun graph as a second guard; no execution of a private module.
   const graph = await Bun.build({ entrypoints: [import.meta.dir + "/prompt-preset.ts"], target: "bun", metafile: true })
   expect(graph.success).toBe(true)
-  const inputs = Object.keys(graph.metafile!.inputs).join("\n").replaceAll("\\", "/")
+  const inputs = Object.keys(defined(graph.metafile).inputs).join("\n").replaceAll("\\", "/")
   expect(inputs).toContain("prompt-preset/public.js")
   expect(inputs).not.toMatch(/senpi\/dist\/index\.js|core\/agent-session\.js|core\/settings-manager\.js/)
   const process = Bun.spawn(["node", "--input-type=module", "--eval", await built.outputs[0].text() + "\n" + script], { stdout: "pipe", stderr: "pipe" })

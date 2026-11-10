@@ -6,6 +6,11 @@ import { z } from "zod"
 import type { Info, ToolContext, ToolEditor } from "@opencode/plugin/promise/tool"
 import { createMutationHooks, MutationHookFailure, type MutationHookOptions, type MutationReport } from "./mutation"
 
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
+
 const directories: string[] = []
 afterEach(() => { for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }) })
 function fixture() { const root = mkdtempSync(join(tmpdir(), "omo-mutation-unit-")); directories.push(root); return root }
@@ -23,7 +28,7 @@ function host(name: string, execute: Info["execute"]) {
     add: () => { throw Error("Unexpected add") }, remove: () => {}, namespace: () => {},
   }
   return {
-    tool, replay: () => callback!(editor), counts: () => ({ registrations, removals }),
+    tool, replay: () => defined(callback)(editor), counts: () => ({ registrations, removals }),
     context: { tool: { transform: async (transform: (editor: ToolEditor) => void) => {
       registrations++; callback = transform; transform(editor)
       return { dispose: async () => { removals++ } }

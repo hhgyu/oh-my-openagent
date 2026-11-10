@@ -6,12 +6,17 @@ import { join } from "node:path"
 import { openOwnedChildObservationStore } from "./owned-child-observation-store"
 import type { ChildLocator } from "./session-backend"
 import type { OwnedChildObservationStore, ObservationRecord } from "./owned-child-observation-types"
+
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
 const roots: string[] = [], stores: OwnedChildObservationStore[] = []
 afterEach(() => { for (const store of stores.splice(0)) store.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 function path() { const root = mkdtempSync(join(tmpdir(), "omo-observation-store-")); roots.push(root); return join(root, "observations.sqlite") }
 function open(file = path(), options = {}) { const store = openOwnedChildObservationStore({ path: file, ...options }); stores.push(store); return store }
 function locator(): ChildLocator { return { format: 1, backendID: "actual-host", location: process.cwd(), hostVersion: "2.2.6", parentID: "parent" as never, sessionID: "child" as never, generation: 1 } }
-function host(id = "event", seq = 0): ObservationRecord { return { kind: "host", id, event: { id, type: "session.execution.started", created: 1, sessionID: "child", durable: { aggregateID: "child", seq, version: 1 }, data: {} } } }
+function host(id = "event", seq = 0): Extract<ObservationRecord, { kind: "host" }> { return { kind: "host", id, event: { id, type: "session.execution.started", created: 1, sessionID: "child", durable: { aggregateID: "child", seq, version: 1 }, data: {} } } }
 const bind = (store: OwnedChildObservationStore, guard = () => {}) => store.bind({ key: "owned", locator: locator(), guard })
 
 test("real SQLite rows survive reopen; rebind fences old token and marks historic data uncertain", () => {
@@ -41,7 +46,7 @@ test("entry/byte overflow is sticky and never evicts earlier coverage", () => {
  const tiny=bind(open(undefined,{maxBytes:8}));expect(()=>tiny.append(host())).toThrow("limit");expect(tiny.snapshot().records).toEqual([])
 })
 test("foreign session/aggregate and unsafe secret fields fail closed without storing values", () => {
- for(const bad of [{...host(),event:{...(host() as any).event,sessionID:"foreign"}}, {...host(),event:{...(host() as any).event,durable:{aggregateID:"foreign",seq:1,version:1}}}, {...host(),headers:{Authorization:"synthetic-sensitive"}}, {...host(),event:{...(host() as any).event,data:{headers:{Authorization:"synthetic-sensitive"}}}}]) {
+ for(const bad of [{...host(),event:{...host().event,sessionID:"foreign"}}, {...host(),event:{...host().event,durable:{aggregateID:"foreign",seq:1,version:1}}}, {...host(),headers:{Authorization:"synthetic-sensitive"}}, {...host(),event:{...host().event,data:{headers:{Authorization:"synthetic-sensitive"}}}}]) {
   const child=bind(open());expect(()=>child.append(bad as never)).toThrow();expect(child.snapshot().records).toEqual([]);expect(JSON.stringify(child.snapshot())).not.toContain("synthetic-sensitive")
  }
 })
@@ -73,13 +78,13 @@ test("lost guard can replace binding but cannot poison replacement before throwi
  const store=open();const failure=Error("LOST");let lost=false;let replacement:ReturnType<typeof bind>|undefined
  const old=bind(store,()=>{if(lost){replacement=bind(store);throw failure}});old.append(host());lost=true
  try{old.snapshot();throw Error("unexpected")}catch(error){expect(error).toBe(failure)}
- expect(replacement!.snapshot().uncertainty).toEqual(["rebound"])
- expect(replacement!.snapshot().records).toEqual([host()])
+ expect(defined(replacement).snapshot().uncertainty).toEqual(["rebound"])
+ expect(defined(replacement).snapshot().records).toEqual([host()])
 })
 test("binding/snapshot objects cannot mutate persisted identity or append bodies", () => {
  const child=bind(open());const record=host();child.append(record)
- ;(record as any).event.data.title="later caller mutation"
- const view=child.snapshot();(view.records[0] as any).event.data.title="snapshot mutation"
+ ;record.event.data.title="later caller mutation"
+ const view=child.snapshot(),viewed=view.records[0];if(viewed?.kind!=="host")throw Error("expected a host record in the snapshot");viewed.event.data.title="snapshot mutation"
  expect(child.snapshot().records).toEqual([host()]);expect(Object.isFrozen(child.binding)).toBe(true);expect(Object.isFrozen(child.binding.locator)).toBe(true)
 })
 test("same key cannot bind foreign child, backwards generation or unsafe locator fields", () => {
@@ -89,8 +94,8 @@ test("same key cannot bind foreign child, backwards generation or unsafe locator
 })
 test("unsafe nested model/error/input fields are rejected without secret-bearing validation errors", () => {
  const child=bind(open())
- const record=host() as any;record.event.data={model:{providerID:"qa",id:"model",headers:{Authorization:"synthetic-sensitive"}}}
- try{child.append(record);throw Error("unexpected")}catch(error){expect(String(error)).toBe("Error: Invalid observation record");expect((error as Error).cause).toBeUndefined()}
+ const record={...host(),event:{...host().event,data:{model:{providerID:"qa",id:"model",headers:{Authorization:"synthetic-sensitive"}}}}}
+ try{child.append(record as never);throw Error("unexpected")}catch(error){expect(String(error)).toBe("Error: Invalid observation record");expect((error as Error).cause).toBeUndefined()}
  expect(child.snapshot().records).toEqual([])
 })
 test("orphaned history can never be adopted by a fresh binding in an open store or after reopen", () => {

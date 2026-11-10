@@ -17,8 +17,8 @@ function snapshot(value: unknown, ancestors = new Set<object>()): JSONValue {
   const keys = Reflect.ownKeys(value).filter(key => !(array && key === "length"))
   if (array && (keys.length !== value.length || keys.some((key, index) => key !== String(index)))) throw Error("Non-JSON Native task result array")
   for (const key of keys) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)!
-    if (typeof key !== "string" || !("value" in descriptor) || !descriptor.enumerable) throw Error("Non-JSON Native task result field")
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (typeof key !== "string" || !descriptor || !("value" in descriptor) || !descriptor.enumerable) throw Error("Non-JSON Native task result field")
     if (!array && descriptor.value === undefined) continue
     Object.defineProperty(copy, key, { value: snapshot(descriptor.value, ancestors), enumerable: true, writable: true, configurable: true })
   }

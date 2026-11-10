@@ -37,10 +37,10 @@ test("owned unknown state commits real FileStore terminal, preserves liveness/le
     let threw = false
     try { chain.store.mutate(record.task_id, current => ({ ...current, status: "completed", final_response: "unit result" })) }
     catch { threw = true }
-    expect(backing.load(record.task_id)!.status).toBe("completed")
+    expect(defined(backing.load(record.task_id)).status).toBe("completed")
     console.info("C2S_REALSTORE_READY_FALSE", JSON.stringify({ committed: true, threw, state, mode, live, edges, mutations, enqueues }))
     expect({ threw, state, mode, live, edges, mutations, enqueues }).toEqual({ threw: false, state: 0, mode: 0, live: 1, edges: 1, mutations: 1, enqueues: 0 })
-    expect(backing.load(record.task_id)!.notification.notified_epoch).toBe(-1)
+    expect(defined(backing.load(record.task_id)).notification.notified_epoch).toBe(-1)
   } finally { backing.close(); scopes.dispose(); rmSync(dir, { recursive: true, force: true }) }
 })
 
@@ -141,8 +141,8 @@ test("real canonical notifier emits once then liveness/mutation/ledger, without 
   const result = f.chain.store.transition(row.task_id, { type: "complete", timestamp: at, final_response: "actual unit content" })
   expect(result.applied).toBe(true)
   expect(f.trace).toEqual(["state:unit-root", "mode", "notify:unit-root", "live:" + row.task_id, "mutation:" + row.task_id, "edge:" + row.task_id])
-  expect(c.messages).toHaveLength(1); expect(c.messages[0]!.content).toContain(row.task_id)
-  expect(f.backing.load(row.task_id)!.notification.notified_epoch).toBe(0)
+  expect(c.messages).toHaveLength(1); expect(defined(c.messages[0]).content).toContain(row.task_id)
+  expect(defined(f.backing.load(row.task_id)).notification.notified_epoch).toBe(0)
   f.chain.store.mutate(row.task_id, fresh => ({ ...fresh, final_response: "bookkeeping" }))
   expect(c.messages).toHaveLength(1); expect(f.trace.filter(value => value.startsWith("edge:"))).toHaveLength(1)
 }))
@@ -150,7 +150,7 @@ test("real canonical notifier emits once then liveness/mutation/ledger, without 
 test("unknown channel commits once and outer ledger observes canonical replace/mutate without a fake notifier", async () => withFixture(f => {
   const row = f.draft("unregistered-parent"); f.backing.save(row)
   let callback = 0
-  const returned = f.chain.store.mutate(row.task_id, fresh => { callback++; return { ...fresh, status: "lost" } })!
+  const returned = defined(f.chain.store.mutate(row.task_id, fresh => { callback++; return { ...fresh, status: "lost" } }))
   expect(callback).toBe(1); expect(returned.status).toBe("lost")
   expect(f.calls.filter(call => call.method === "mutate")).toHaveLength(1)
   expect(f.trace).toEqual(["mutation:" + row.task_id, "edge:" + row.task_id])
@@ -171,8 +171,8 @@ test("two actual issued parent channels keep nested routing local", async () => 
     }
     f.chain.store.mutate(a.task_id, fresh => ({ ...fresh, status: "completed" }))
     expect(rootChannel.messages).toHaveLength(1); expect(childChannel.messages).toHaveLength(1)
-    expect(rootChannel.messages[0]!.details[0]!.task_id).toBe(a.task_id)
-    expect(childChannel.messages[0]!.details[0]!.task_id).toBe(b.task_id)
+    expect(defined(defined(rootChannel.messages[0]).details[0]).task_id).toBe(a.task_id)
+    expect(defined(defined(childChannel.messages[0]).details[0]).task_id).toBe(b.task_id)
     expect(f.trace.filter(value => value.startsWith("edge:"))).toEqual(["edge:" + b.task_id, "edge:" + a.task_id])
   } finally { await borrowed.backend.dispose() }
 }))
@@ -181,7 +181,7 @@ test("actual returned parent change denies original effects and NEVER retargets 
   const borrowed = await f.childBinding()
   try {
     const a = f.channel(), b = f.channel(borrowed.binding), row = f.draft(); f.backing.save(row)
-    const returned = f.chain.store.mutate(row.task_id, fresh => ({ ...fresh, parent_session_id: "unit-child", depth: 2, status: "completed" }))!
+    const returned = defined(f.chain.store.mutate(row.task_id, fresh => ({ ...fresh, parent_session_id: "unit-child", depth: 2, status: "completed" })))
     expect(returned.parent_session_id).toBe("unit-child"); expect(returned.notification.notified_epoch).toBe(-1)
     expect(a.messages).toHaveLength(0); expect(b.messages).toHaveLength(0)
     expect(f.trace).toEqual(["mutation:" + row.task_id, "edge:" + row.task_id])
@@ -204,7 +204,7 @@ for (const changed of ["root", "birth", "epoch", "claim"] as const) test(`post-w
     ...(changed === "epoch" ? { notification: { ...fresh.notification, run_epoch: 1 }, owned_session: { ...actual.owned_session, runEpoch: 1 } } : {}),
     ...(changed === "claim" ? { residency_claim: "new-claim", owned_session: { ...actual.owned_session, residencyClaim: "new-claim" } } : {}),
   }))
-  expect(c.messages).toHaveLength(0); expect(f.backing.load(actual.task_id)!.notification.notified_epoch).toBe(-1)
+  expect(c.messages).toHaveLength(0); expect(defined(f.backing.load(actual.task_id)).notification.notified_epoch).toBe(-1)
   expect(f.trace).toEqual(["mutation:" + actual.task_id, "edge:" + actual.task_id])
 }))
 
@@ -212,7 +212,7 @@ test("postwrite channel replacement is a normal hold and does not adopt replacem
   const old = f.channel(), row = f.draft(); f.backing.save(row)
   let replacement: ReturnType<typeof f.channel> | undefined
   f.chain.store.mutate(row.task_id, fresh => { replacement = f.channel(); return { ...fresh, status: "completed" } })
-  expect(old.messages).toHaveLength(0); expect(replacement!.messages).toHaveLength(0)
+  expect(old.messages).toHaveLength(0); expect(defined(replacement).messages).toHaveLength(0)
   expect(f.trace).toEqual(["mutation:" + row.task_id, "edge:" + row.task_id])
 }))
 
@@ -220,7 +220,7 @@ for (const thrown of [undefined, null, 0, Error("private proof failure")]) test(
   f.channel(); const row = f.draft(); f.backing.save(row); f.failRoot(thrown)
   let caught = false, value: unknown
   try { f.chain.store.mutate(row.task_id, fresh => ({ ...fresh, status: "completed" })) } catch (error) { caught = true; value = error }
-  expect(caught).toBe(true); expect(value).toBe(thrown); expect(f.backing.load(row.task_id)!.status).toBe("completed"); expect(f.trace).toEqual([])
+  expect(caught).toBe(true); expect(value).toBe(thrown); expect(defined(f.backing.load(row.task_id)).status).toBe("completed"); expect(f.trace).toEqual([])
 }))
 
 test("readiness false holds notification, later real canonical deferred-source reconcile settles exactly once", async () => withFixture(f => {
@@ -230,17 +230,17 @@ test("readiness false holds notification, later real canonical deferred-source r
   expect(c.messages).toHaveLength(0); expect(f.trace).toEqual(["live:" + row.task_id, "mutation:" + row.task_id, "edge:" + row.task_id])
   c.control.ready = true; c.control.state = { kind: "idle" }
   c.deferredNotifier.reconcileUnnotifiedNotifications({ sessionId: f.root.sessionID, parentState: c.control.state })
-  expect(c.sources).toHaveLength(1); expect(f.backing.load(row.task_id)!.notification.notified_epoch).toBe(-1)
-  c.sources[0]!.accepted(); c.sources[0]!.accepted()
+  expect(c.sources).toHaveLength(1); expect(defined(f.backing.load(row.task_id)).notification.notified_epoch).toBe(-1)
+  defined(c.sources[0]).accepted(); defined(c.sources[0]).accepted()
   c.deferredNotifier.reconcileUnnotifiedNotifications({ sessionId: f.root.sessionID, parentState: c.control.state })
-  expect(c.messages).toHaveLength(1); expect(f.backing.load(row.task_id)!.notification.notified_epoch).toBe(0)
+  expect(c.messages).toHaveLength(1); expect(defined(f.backing.load(row.task_id)).notification.notified_epoch).toBe(0)
   expect(f.trace.filter(value => value.startsWith("edge:"))).toHaveLength(1)
 }))
 
 test("readytrue but unknown state is postcommit protocol contradiction; knownfalse never calls a failing parent proof", async () => withFixture(f => {
   const c = f.channel(), a = f.draft(); c.control.state = undefined; f.backing.save(a)
   expect(() => f.chain.store.mutate(a.task_id, fresh => ({ ...fresh, status: "completed" }))).toThrow("state is unknown")
-  expect(f.backing.load(a.task_id)!.status).toBe("completed"); expect(f.trace).toEqual(["state:unit-root"])
+  expect(defined(f.backing.load(a.task_id)).status).toBe("completed"); expect(f.trace).toEqual(["state:unit-root"])
   const b = f.draft(); f.backing.save(b); f.trace.length = 0; c.control.owns = () => false; f.failRoot(Error("retired proof must not run"))
   f.chain.store.mutate(b.task_id, fresh => ({ ...fresh, status: "completed" }))
   expect(f.trace).toEqual(["mutation:" + b.task_id, "edge:" + b.task_id])
@@ -276,7 +276,7 @@ test("actual FileStore collision never publishes a creation witness or retries i
   const row = f.draft(); f.backing.save(row)
   f.scope = { identity: {}, open: true, onCreated(birth) { f.births.push(birth); return undefined } }
   expect(() => f.chain.store.save(row)).toThrow()
-  expect(f.births).toHaveLength(0); expect(f.backing.load(row.task_id)!.created_at).toBe(row.created_at)
+  expect(f.births).toHaveLength(0); expect(defined(f.backing.load(row.task_id)).created_at).toBe(row.created_at)
 }))
 
 for (const thrown of [undefined, null, 0, Error("creation receipt failed")]) test(`creation callback exact throw ${String(thrown)} leaves durable row, no retry/rollback`, async () => withFixture(f => {
@@ -285,7 +285,7 @@ for (const thrown of [undefined, null, 0, Error("creation receipt failed")]) tes
   let caught = false, value: unknown
   try { f.chain.store.save(row) } catch (error) { caught = true; value = error }
   expect(caught).toBe(true); expect(value).toBe(thrown); expect(count).toBe(1)
-  expect(f.backing.load(row.task_id)!.task_id).toBe(row.task_id)
+  expect(defined(f.backing.load(row.task_id)).task_id).toBe(row.task_id)
   expect(f.calls.filter(call => call.method === "save")).toHaveLength(1)
   expect(f.trace).toEqual([]) // canonical outer mutation/ledger boundary after inner failure
 }))
@@ -331,39 +331,39 @@ test("changing original scope callback/opaque identity during save cannot rebind
 
 test("canonical generation stamping retains planning generation AND sticky unknown", async () => withFixture(f => {
   const a = f.draft(); f.generation = 7; f.chain.store.save(a)
-  expect(f.backing.load(a.task_id)!.config_generation).toBe(7)
-  f.generation = 99; f.chain.store.replace(a); expect(f.backing.load(a.task_id)!.config_generation).toBe(7)
+  expect(defined(f.backing.load(a.task_id)).config_generation).toBe(7)
+  f.generation = 99; f.chain.store.replace(a); expect(defined(f.backing.load(a.task_id)).config_generation).toBe(7)
   const b = f.draft(); f.generation = undefined; f.chain.store.save(b)
-  f.generation = 100; f.chain.store.replace(b); expect(f.backing.load(b.task_id)!.config_generation).toBeUndefined()
+  f.generation = 100; f.chain.store.replace(b); expect(defined(f.backing.load(b.task_id)).config_generation).toBeUndefined()
 }))
 
 test("all fifteen actual store methods preserve receiver, results, callback/owner identities and two-phase TTL", async () => withFixture(f => {
   const row = f.draft(), store = f.chain.store
   store.save(row)
   expect(store.stateDir).toBe(f.backing.stateDir); expect("close" in store).toBe(false)
-  const loaded = store.load(row.task_id); expect(f.calls.findLast(call => call.method === "load")!.result).toBe(loaded)
-  const listed = store.list(); expect(f.calls.findLast(call => call.method === "list")!.result).toBe(listed)
+  const loaded = store.load(row.task_id); expect(defined(f.calls.findLast(call => call.method === "load")).result).toBe(loaded)
+  const listed = store.list(); expect(defined(f.calls.findLast(call => call.method === "list")).result).toBe(listed)
   const event = { type: "controlled-event", payload: { own: true } }
-  const eventPath = store.appendEvent(row.task_id, event); expect(f.calls.findLast(call => call.method === "appendEvent")!.result).toBe(eventPath)
-  expect(f.calls.findLast(call => call.method === "appendEvent")!.args[1]).toBe(event)
+  const eventPath = store.appendEvent(row.task_id, event); expect(defined(f.calls.findLast(call => call.method === "appendEvent")).result).toBe(eventPath)
+  expect(defined(f.calls.findLast(call => call.method === "appendEvent")).args[1]).toBe(event)
   let mutations = 0
   const returned = store.mutate(row.task_id, fresh => { mutations++; return { ...fresh, final_response: "one actual callback" } })
-  expect(mutations).toBe(1); expect(f.calls.findLast(call => call.method === "mutate")!.result).toBe(returned)
+  expect(mutations).toBe(1); expect(defined(f.calls.findLast(call => call.method === "mutate")).result).toBe(returned)
   const transition = { type: "complete" as const, timestamp: at, final_response: "complete" }
-  const transitioned = store.transition(row.task_id, transition); expect(f.calls.findLast(call => call.method === "transition")!.result).toBe(transitioned)
-  expect(f.calls.findLast(call => call.method === "transition")!.args[1]).toBe(transition)
-  store.replace(f.backing.load(row.task_id)!)
+  const transitioned = store.transition(row.task_id, transition); expect(defined(f.calls.findLast(call => call.method === "transition")).result).toBe(transitioned)
+  expect(defined(f.calls.findLast(call => call.method === "transition")).args[1]).toBe(transition)
+  store.replace(defined(f.backing.load(row.task_id)))
   const keep = () => true, drop = () => false, first = { pid: process.pid, token: "controlled-first" }, next = { pid: process.pid, token: "controlled-next" }
   expect(store.tombstoneIfExpired(row.task_id, keep, first).kind).toBe("retained")
   const tombstone = store.tombstoneIfExpired(row.task_id, drop, first)
-  expect(f.calls.findLast(call => call.method === "tombstoneIfExpired")!.result).toBe(tombstone)
-  expect(f.calls.findLast(call => call.method === "tombstoneIfExpired")!.args.slice(1)).toEqual([drop, first])
+  expect(defined(f.calls.findLast(call => call.method === "tombstoneIfExpired")).result).toBe(tombstone)
+  expect(defined(f.calls.findLast(call => call.method === "tombstoneIfExpired")).args.slice(1)).toEqual([drop, first])
   expect(store.load(row.task_id)).toBeNull(); expect(store.listExpunging()).toContain(row.task_id)
-  expect(store.loadExpunging(row.task_id)!.task_id).toBe(row.task_id)
+  expect(defined(store.loadExpunging(row.task_id)).task_id).toBe(row.task_id)
   expect(store.readExpungeOwner(row.task_id)).toEqual(first)
   expect(store.takeOverExpunging(row.task_id, first, next)).toBe(true)
-  expect(f.calls.findLast(call => call.method === "takeOverExpunging")!.args[1]).toBe(first)
-  expect(f.calls.findLast(call => call.method === "takeOverExpunging")!.args[2]).toBe(next)
+  expect(defined(f.calls.findLast(call => call.method === "takeOverExpunging")).args[1]).toBe(first)
+  expect(defined(f.calls.findLast(call => call.method === "takeOverExpunging")).args[2]).toBe(next)
   store.restoreExpunging(row.task_id, next); expect(store.load(row.task_id)).not.toBeNull()
   store.tombstoneIfExpired(row.task_id, drop, next)
   expect(store.completeExpunge(row.task_id, first)).toBe(false); expect(store.completeExpunge(row.task_id, next)).toBe(true)
@@ -380,7 +380,7 @@ test("mutation listeners unsubscribe and exact falsey listener error keeps canon
   f.chain.onMutation(() => { throw 0 }); const row = f.draft(); f.backing.save(row); f.trace.length = 0
   let caught = false, value: unknown
   try { f.chain.store.mutate(row.task_id, fresh => ({ ...fresh, status: "completed" })) } catch (error) { caught = true; value = error }
-  expect(caught).toBe(true); expect(value).toBe(0); expect(f.backing.load(row.task_id)!.status).toBe("completed")
+  expect(caught).toBe(true); expect(value).toBe(0); expect(defined(f.backing.load(row.task_id)).status).toBe("completed")
   expect(f.trace).toEqual(["mutation:" + row.task_id])
 }))
 
@@ -418,7 +418,7 @@ for (const which of ["ownsTerminal", "notificationReady"] as const) test(`invali
   f.backing.save(row); let caught: unknown
   try { f.chain.store.mutate(row.task_id, fresh => ({ ...fresh, status: "completed" })) } catch (error) { caught = error }
   expect(caught).toBeInstanceOf(TypeError); expect((caught as Error).cause).toBe(invalid)
-  expect(f.backing.load(row.task_id)!.status).toBe("completed"); expect(f.trace).toEqual([])
+  expect(defined(f.backing.load(row.task_id)).status).toBe("completed"); expect(f.trace).toEqual([])
 }))
 
 test("post-write falsey channel reader throw is exact, and absent creation scope adds no witness", async () => withFixture(f => {
@@ -426,7 +426,7 @@ test("post-write falsey channel reader throw is exact, and absent creation scope
   c.control.owns = () => { throw undefined }
   let caught = false, value: unknown
   try { f.chain.store.mutate(row.task_id, fresh => ({ ...fresh, status: "completed" })) } catch (error) { caught = true; value = error }
-  expect(caught).toBe(true); expect(value).toBeUndefined(); expect(f.backing.load(row.task_id)!.status).toBe("completed"); expect(f.trace).toEqual([])
+  expect(caught).toBe(true); expect(value).toBeUndefined(); expect(defined(f.backing.load(row.task_id)).status).toBe("completed"); expect(f.trace).toEqual([])
 }))
 
 test("transition routes by original parent hint but validates the actual post-write returned record", async () => withFixture(async f => {
@@ -438,7 +438,7 @@ test("transition routes by original parent hint but validates the actual post-wr
     // No SDK/control/acceptance result is fabricated by these unit records.
     f.afterTransition = result => {
       f.backing.replace({ ...result.record, parent_session_id: "unit-child", depth: 2 })
-      expect(Reflect.set(result, "record", f.backing.load(row.task_id)!)).toBe(true)
+      expect(Reflect.set(result, "record", defined(f.backing.load(row.task_id)))).toBe(true)
     }
     const result = f.chain.store.transition(row.task_id, { type: "complete", timestamp: at, final_response: "unit" })
     expect(result.record.parent_session_id).toBe("unit-child")
@@ -447,3 +447,4 @@ test("transition routes by original parent hint but validates the actual post-wr
     expect(result.record.notification.notified_epoch).toBe(-1)
   } finally { await borrowed.backend.dispose() }
 }))
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

@@ -25,7 +25,7 @@ function fixture(mode: "accepted" | "no-call" | "invoked-unknown") {
   const controller=new AbortController()
   const ticket=createOwnedTurnTicket({prior,nextEpoch:1,child,backend,observer,observationKey:"fresh",priorDescriptor:undefined,signal:controller.signal,
     assertOwned(){events.push("guard")},identify(){events.push("identify")},publish(actual,next,pending){events.push("publish");admissions.push(pending);return {...reference,runEpoch:next.notification.run_epoch,journalRevision:actual.revision}},
-    restoreReference(actual,old){return {...old.owned_session!,journalRevision:actual.revision}},async synchronize(){events.push("synchronize")},async accepted(){events.push("accepted")},failure(){events.push("failure")},async release(){events.push("release")},track(pending){work.push(pending)},serialize:operation=>operation()})
+    restoreReference(actual,old){return {...defined(old.owned_session),journalRevision:actual.revision}},async synchronize(){events.push("synchronize")},async accepted(){events.push("accepted")},failure(){events.push("failure")},async release(){events.push("release")},track(pending){work.push(pending)},serialize:operation=>operation()})
   return {ticket,prior,events,ids,work,admissions,controller,close:()=>scopes.dispose()}
 }
 
@@ -53,3 +53,4 @@ test("ticket invoked unknown is canonical, cannot restore, and retains a rejecte
   expect(f.events).toContain("failure");await f.ticket.release();expect(f.events).not.toContain("release");expect(f.work).toHaveLength(1)
  }finally{f.close()}
 })
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

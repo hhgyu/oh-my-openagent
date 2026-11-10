@@ -16,8 +16,8 @@ function watch(value: unknown, seen = new Set<object>()): () => void {
   seen.add(value)
   const keys = Reflect.ownKeys(value)
   const fields = keys.map(key => {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)!
-    if (!("value" in descriptor)) throw Error("Unstable codec definition")
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (!descriptor || !("value" in descriptor)) throw Error("Unstable codec definition")
     const original = descriptor.value
     const nested = watch(original, seen)
     return () => {

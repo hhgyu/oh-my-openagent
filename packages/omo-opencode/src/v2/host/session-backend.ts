@@ -191,7 +191,11 @@ export function createSessionBackend(host: { app: Context["app"]; location: { di
     if (!options.beforeLeaseRetire || !entry.handle || entry.retirementComplete) return Promise.resolve()
     entry.borrowingClosed = true
     if (entry.retirement) return entry.retirement
-    const work = Promise.resolve().then(() => options.beforeLeaseRetire!(entry.handle!, intent)).then(() => { entry.retirementComplete = true })
+    const work = Promise.resolve().then(() => {
+      const handle = entry.handle
+      if (!options.beforeLeaseRetire || !handle) throw new SessionBackendError("state", "Lease retirement hook or child handle vanished before retirement")
+      return options.beforeLeaseRetire(handle, intent)
+    }).then(() => { entry.retirementComplete = true })
     entry.retirement = work
     void work.catch(() => { if (entry.retirement === work) entry.retirement = undefined })
     return work

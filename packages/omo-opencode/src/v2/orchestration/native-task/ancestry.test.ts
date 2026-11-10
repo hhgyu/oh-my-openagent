@@ -21,7 +21,7 @@ test("unknown/ambiguous/cyclic/mismatched owned ancestry is never a new root",()
  expect(ownedAncestorPath("root",[a,b],"b").map(x=>x.child_session_id)).toEqual(["b","a"])
  expect(()=>ownedAncestorPath("root",[a,b],"unknown")).toThrow("missing")
  expect(()=>ownedAncestorPath("root",[a,a],"a")).toThrow("ambiguous")
- expect(()=>ownedAncestorPath("root",[{...a,parent_session_id:"b",owned_session:{...a.owned_session!,parentID:"b"}},b],"a")).toThrow("cycle")
+ expect(()=>ownedAncestorPath("root",[{...a,parent_session_id:"b",owned_session:{...defined(a.owned_session),parentID:"b"}},b],"a")).toThrow("cycle")
  expect(()=>ownedAncestorPath("root",[a,{...b,depth:3}],"b")).toThrow("depth")
  expect(()=>ownedAncestorPath("root",[{...a,root_session_id:"foreign"}],"a")).toThrow("identity")
 })
@@ -46,8 +46,8 @@ test.each(["root", "depth", "status", "killed", "residency", "host-owner", "pare
    else if(variant==="killed")Object.assign(row,{killed:true})
    else if(variant==="residency")Object.assign(row,{residency_state:"persisted_only"})
    else if(variant==="host-owner")Object.assign(row,{host_pid:123456})
-   else if(variant==="parent")Object.assign(row,{parent_session_id:"other-parent",owned_session:{...row.owned_session!,parentID:"other-parent"}})
-   else Object.assign(row,{child_session_id:"other-child",owned_session:{...row.owned_session!,sessionID:"other-child"}})
+   else if(variant==="parent")Object.assign(row,{parent_session_id:"other-parent",owned_session:{...defined(row.owned_session),parentID:"other-parent"}})
+   else Object.assign(row,{child_session_id:"other-child",owned_session:{...defined(row.owned_session),sessionID:"other-child"}})
   }
   return{id,parentID:id==="root"?undefined:"root",location:{directory:"/project"}}
  }})
@@ -82,11 +82,12 @@ test("only corroborated monotonic owned revisions may advance a retained admissi
  const tree=createOwnedAncestry({root,directory:"/project",hostVersion:"2.2.6",records:()=>[row],assertRoot:()=>scopes.assert(root),assertControl(current){if(current.owned_session?.journalRevision!==actualControlRevision)throw Error("private control/journal revision differs")},async get(id){return{id,parentID:id==="root"?undefined:"root",location:{directory:"/project"}}}})
  try{
   const verified=await tree.verify("a")
-  actualControlRevision=3;Object.assign(row,{owned_session:{...row.owned_session!,journalRevision:3}})
+  actualControlRevision=3;Object.assign(row,{owned_session:{...defined(row.owned_session),journalRevision:3}})
   expect(()=>verified.assertCurrent()).not.toThrow()
-  Object.assign(row,{owned_session:{...row.owned_session!,journalRevision:5}})
+  Object.assign(row,{owned_session:{...defined(row.owned_session),journalRevision:5}})
   expect(()=>verified.assertCurrent()).toThrow("private control")
-  actualControlRevision=2;Object.assign(row,{owned_session:{...row.owned_session!,journalRevision:2}})
+  actualControlRevision=2;Object.assign(row,{owned_session:{...defined(row.owned_session),journalRevision:2}})
   expect(()=>verified.assertCurrent()).toThrow("changed")
  }finally{scopes.dispose()}
 })
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

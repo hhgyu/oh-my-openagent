@@ -47,12 +47,12 @@ test("aliases collapse with deny winning, exact custom namespace and no ls-to-re
   expect(result.selected).toEqual([{ nativeName: "custom", hostID: "ns.lookup" }])
   expect(result.unavailableNativeNames).toEqual(["ls"])
   expect(() => prepareHostTaskGrant({ ...input, customCounterparts: [{ nativeName: "webfetch", hostID: "ns.lookup" }] })).toThrow("overriding")
-  expect(() => prepareHostTaskGrant({ ...input, catalog: [...input.catalog, input.catalog[0]!] })).toThrow("Ambiguous")
+  expect(() => prepareHostTaskGrant({ ...input, catalog: [...input.catalog, defined(input.catalog[0])] })).toThrow("Ambiguous")
 })
 
 test("curated floor uses actual builtin metadata and asks for original broker, never ordinary shell", () => {
   for (const name of CURATED_READONLY_AGENT_NAMES) {
-    const realFloor = BUILTIN_AGENTS[name]!.tools!.filter(rule => rule.allow).map(rule => rule.pattern)
+    const realFloor = defined(defined(BUILTIN_AGENTS[name]).tools).filter(rule => rule.allow).map(rule => rule.pattern)
     const result = prepareHostTaskGrant(selection({ plan: { model: "x", agentType: name, toolAllowlist: [...realFloor, "write"] } }))
     expect(result.selected.some(pair => pair.nativeName === "write" || pair.hostID === "shell")).toBe(false)
     expect(result.requirements).toContain("curated-readonly-broker")
@@ -95,7 +95,7 @@ test("pure later binding coverage resolves required slots without clearing requi
   // Only a pure DATA decision: the future wrapper must independently validate
   // actual broker producer/child custody before accepting this coverage.
   expect(checkHostGrantTarget(result, "actual-bound-broker-ID", coverage)).toBe("selected")
-  expect(checkHostGrantTarget(result, "unplanned", { ...coverage, targets: [...coverage.targets, { ...coverage.targets[0]!, nativeName: "unplanned", hostID: "unplanned" }] })).toBe("denied")
+  expect(checkHostGrantTarget(result, "unplanned", { ...coverage, targets: [...coverage.targets, { ...defined(coverage.targets[0]), nativeName: "unplanned", hostID: "unplanned" }] })).toBe("denied")
   expect(result.requirements).toEqual(["curated-readonly-broker"])
   expect(result.selected.some(pair => pair.hostID === "shell")).toBe(false)
 })
@@ -140,7 +140,7 @@ test("category/batch-like separate plans each authorize actual build, no raw cat
     for (const category of ["first", "second"]) await call.authorize(selection({ spec: { prompt: "x", parent_session_id: caller.sessionID, depth: 1, category }, plan: { model: `provider/${category}` } }), caller.signal)
   })
   await f.bound.invoke("entry", {}); expect(f.requests).toHaveLength(2)
-  expect(f.requests.every((request: any) => request.resources[0] === "build")).toBe(true)
+  expect(f.requests.every((request: unknown) => typeof request === "object" && request !== null && "resources" in request && Array.isArray(request.resources) && request.resources[0] === "build")).toBe(true)
   await f.close()
 })
 
@@ -148,7 +148,7 @@ test("retained closure, fake joined owner and foreign parent cannot authorize", 
   const f = await authorization(); let call: ReturnType<typeof f.authorizer.forCall> | undefined
   f.setRun(async caller => { call = f.authorizer.forCall(caller); await expect(call.authorize(selection({ spec: { prompt: "x", parent_session_id: "ses_foreign", depth: 1 } }), caller.signal)).rejects.toThrow("foreign") })
   await f.bound.invoke("entry", {})
-  await expect(call!.authorize(selection(), new AbortController().signal)).rejects.toThrow("authorized")
+  await expect(defined(call).authorize(selection(), new AbortController().signal)).rejects.toThrow("authorized")
   expect(f.requests).toEqual([])
   expect(() => createHostBuildAuthorizer({ callAuthority: f.kernel.callAuthority, permission: { ...f.permission }, agents: {} as never, assertCurrent() {} })).toThrow("genuine")
   await f.close()
@@ -173,7 +173,7 @@ for (const [index, failure] of [undefined, null, false, 0, new ToolError({ messa
     expect(settled).toBe(false)
     let ownerJoined = false; const joining = owned.join().then(() => { ownerJoined = true })
     await new Promise<void>(resolve => setImmediate(resolve)); expect(ownerJoined).toBe(false)
-    finish.resolve(); await expect(original!).rejects.toBe(failure); await joining
+    finish.resolve(); await expect(defined(original)).rejects.toBe(failure); await joining
     expect(settled).toBe(true)
   } finally { finish.resolve(); await outer; await original?.catch(() => {}); await owned.join(); await f.close() }
 })
@@ -199,13 +199,13 @@ test("persona/policy mutation during approval rejects even when selected leaves 
 test("model change alone is not falsely treated as pinned model authority", async () => {
   const entered = deferred<void>(), finish = deferred<void>(), plan = { model: "unit/first", agentType: "worker" }
   const f = await authorization(() => Effect.promise(async () => { entered.resolve(); await finish.promise }))
-  let prepared: unknown
+  let prepared: Awaited<ReturnType<ReturnType<typeof f.authorizer.forCall>["authorize"]>> | undefined
   f.setRun(async caller => { prepared = await f.authorizer.forCall(caller).authorize(selection({ plan }), caller.signal) })
   const original = f.bound.invoke("entry", {})
   try {
     await entered.promise; plan.model = "unit/spill"; finish.resolve(); await original
-    expect((prepared as any).selection.modelCoverage).toBe("native-selection-with-unchanged-persona-and-tool-policy")
-    expect((prepared as any).authorityIssued).toBe(false)
+    expect(defined(prepared).selection.modelCoverage).toBe("native-selection-with-unchanged-persona-and-tool-policy")
+    expect(defined(prepared).authorityIssued).toBe(false)
   } finally { finish.resolve(); await original.catch(() => {}); await f.close() }
 })
 
@@ -250,3 +250,4 @@ test("fresh recovery approval issues THIS call's real subagent request and refus
   expect(f.requests).toEqual([{ sessionID: "ses_grant_unit", agent: "actual-unit-parent", action: "subagent", resources: ["build"], source: { type: "tool", messageID: "unit-message", id: "unit-call" } }])
   expect(result?.buildAgentID).toBe("build"); expect(result?.selection).toEqual(prepareRecoveryHostGrant(recovery())); await f.close()
 })
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

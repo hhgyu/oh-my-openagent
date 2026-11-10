@@ -13,6 +13,11 @@ import type { ChildPlanner } from "./types"
 import { resolveKernelToolGrant } from "../kernel-tools/resolve"
 import { fakeKernelTools } from "../runners/in-process/__fixtures__/kernel-tools-fakes"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 afterEach(cleanupProjects)
 const owner:DagTaskOwner={kind:"dag",runId:"run-preparation" as never,nodeId:"node-preparation" as never,fingerprint:"prep-fingerprint"}
 function fixture(preparePlanning:()=>Promise<void>,planner?:ChildPlanner,inspectAdmission?:()=>void){
@@ -31,7 +36,7 @@ for(const owned of [false,true]){
   const manager=createTaskManagerImplementation({cwd,store,config:settings(),runners:{"in-process":runner,process:runner},
    planner:function(this:unknown,spec){calls.push("selected");receivers.push(this);return categoryPlanner()(spec)},
    admit:async function(this:object){copiedOptions=this;return {kind:"rejected",message:"controlled residency refusal"}},
-  },{createRecoveryRuntime:createNativeTaskRecoveryRuntime,preparePlanning:async()=>{if(++preparations===2){entered.resolve();await release.promise;Object.defineProperty(copiedOptions!,"planner",{value:replacement,writable:true,configurable:true})}}})
+  },{createRecoveryRuntime:createNativeTaskRecoveryRuntime,preparePlanning:async()=>{if(++preparations===2){entered.resolve();await release.promise;Object.defineProperty(present(copiedOptions),"planner",{value:replacement,writable:true,configurable:true})}}})
   const run=()=>owned?manager.startOwned(baseSpec(),owner):manager.start(baseSpec())
   expect(await run()).toMatchObject({kind:"residency_denied"});expect(copiedOptions).toBeDefined()
   const starting=run();await entered.promise;release.resolve();expect(await starting).toMatchObject({kind:"residency_denied"})
@@ -42,7 +47,7 @@ for(const owned of [false,true]){
   const f=fixture(async()=>{},function(this:unknown,spec){receivers.push(this);return categoryPlanner()(spec)})
   const result=owned?await f.manager.startOwned(baseSpec(),owner):await f.manager.start(baseSpec())
   try{expect(receivers).toEqual([undefined])}
-  finally{if(result.kind==="started"){f.runner.handles.get(result.task_id)!.settle({status:"completed",finalResponse:"RECEIVER_DONE"});await f.manager.waitFor(result.task_id)}}
+  finally{if(result.kind==="started"){present(f.runner.handles.get(result.task_id)).settle({status:"completed",finalResponse:"RECEIVER_DONE"});await f.manager.waitFor(result.task_id)}}
  })
  test(`${owned?"startOwned":"start"} prepares before synchronous planning/admission/runner with original owner lock ordering`,async()=>{
   let f!:ReturnType<typeof fixture>
@@ -50,7 +55,7 @@ for(const owned of [false,true]){
   const result=owned?await f.manager.startOwned(baseSpec(),owner):await f.manager.start(baseSpec())
   expect(result.kind).toBe("started");expect(f.order).toEqual(["prepare","planner","admit","runner"])
   if(result.kind!=="started")throw Error("expected started")
-  f.runner.handles.get(result.task_id)!.settle({status:"completed",finalResponse:"PREPARATION_DONE"});await f.manager.waitFor(result.task_id)
+  present(f.runner.handles.get(result.task_id)).settle({status:"completed",finalResponse:"PREPARATION_DONE"});await f.manager.waitFor(result.task_id)
  })
  test(`${owned?"startOwned":"start"} preparation failure claims no record/residency and never calls planner or runner`,async()=>{
   const failure=Error("host preparation unavailable"),f=fixture(async()=>{throw failure})
@@ -93,5 +98,5 @@ test("cold Native facade still warms the real Senpi barrel before calling the sy
  const cwd=tempProject(),managerPath=join(import.meta.dir,"manager.ts"),fakePath=join(import.meta.dir,"__fixtures__","manager-fakes.ts"),barrelPath=join(import.meta.dir,"..","lazy","senpi-barrel.ts"),storePath=join(import.meta.dir,"..","store","index.ts")
  const code=`import {createTaskManager,START_REPORT_WINDOW_MS} from ${JSON.stringify(managerPath)};import {FakeRunner,baseSpec,categoryPlanner,settings} from ${JSON.stringify(fakePath)};import {senpiBarrel} from ${JSON.stringify(barrelPath)};import {createTaskRecordStore} from ${JSON.stringify(storePath)};let cold=false,warm=false;try{senpiBarrel()}catch{cold=true}const runner=new FakeRunner();const manager=createTaskManager({cwd:${JSON.stringify(cwd)},store:createTaskRecordStore({project_dir:${JSON.stringify(cwd)}}),config:settings(),runners:{"in-process":runner,process:runner},planner:spec=>{warm=!!senpiBarrel();return categoryPlanner()(spec)}});const result=await manager.start(baseSpec());if(result.kind==="started"){runner.handles.get(result.task_id).settle({status:"completed",finalResponse:"NATIVE_DONE"});await manager.waitFor(result.task_id)}console.log(JSON.stringify({cold,warm,started:result.kind==="started",reportWindow:START_REPORT_WINDOW_MS}))`
  const result=spawnSync(process.execPath,["-e",code],{cwd:process.cwd(),env:process.env,encoding:"utf8",windowsHide:true,timeout:15000})
- expect(result.status).toBe(0);expect(JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1)!)).toEqual({cold:true,warm:true,started:true,reportWindow:250})
+ expect(result.status).toBe(0);expect(JSON.parse(present(result.stdout.trim().split(/\r?\n/).at(-1)))).toEqual({cold:true,warm:true,started:true,reportWindow:250})
 },20000)

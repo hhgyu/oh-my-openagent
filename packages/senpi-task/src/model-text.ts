@@ -21,7 +21,7 @@ import { normalizeRendererText } from "./renderer-text"
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 function couldBeEmoji(segment: string): boolean {
-    const cp = segment.codePointAt(0)!;
+    const cp = segment.codePointAt(0) ?? 0;
     return ((cp >= 0x1f000 && cp <= 0x1fbff) || // Emoji and Pictograph
         (cp >= 0x2300 && cp <= 0x23ff) || // Misc technical
         (cp >= 0x2600 && cp <= 0x27bf) || // Misc symbols, dingbats
@@ -86,7 +86,10 @@ function graphemeWidth(segment: string): number {
             followsMark = true;
         }
         else if (!nonPrintingCharRegex.test(char)) {
-            const c = char.codePointAt(0)!;
+            const c = char.codePointAt(0);
+            if (c === undefined) {
+                throw new Error("visible grapheme character has no code point");
+            }
             if (followsMark || (c >= 0xff00 && c <= 0xffef)) {
                 // halfwidth + fullwidth forms
                 width += eastAsianWidth(c);

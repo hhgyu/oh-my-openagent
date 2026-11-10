@@ -14,8 +14,8 @@ function watch(value: unknown, seen = new Set<object>()): () => void {
   seen.add(value)
   const keys = Reflect.ownKeys(value)
   const checks = keys.map(key => {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)!
-    if (!("value" in descriptor)) throw Error("Unstable normalizer definition")
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (!descriptor || !("value" in descriptor)) throw Error("Unstable normalizer definition")
     const original = descriptor.value
     const nested = watch(original, seen)
     return () => {
@@ -46,8 +46,8 @@ function detach(value: unknown, seen = new Set<object>(), top = true): unknown {
   const keys = Reflect.ownKeys(value).filter(key => !(array && key === "length"))
   if (array && (keys.length !== value.length || keys.some((key, index) => key !== String(index)))) throw Error("Unsupported non-JSON tool arguments")
   for (const key of keys) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)!
-    if (typeof key !== "string" || !("value" in descriptor) || !descriptor.enumerable) throw Error("Unsupported non-JSON tool arguments")
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (typeof key !== "string" || !descriptor || !("value" in descriptor) || !descriptor.enumerable) throw Error("Unsupported non-JSON tool arguments")
     Object.defineProperty(copy, key, { value: detach(descriptor.value, seen, false), enumerable: true, configurable: true, writable: true })
   }
   seen.delete(value)

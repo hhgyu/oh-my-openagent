@@ -1,12 +1,13 @@
 import { expect, test } from "bun:test"
 import { Effect, Scope, Exit } from "effect"
+import type { ToolDomain } from "@opencode/plugin/effect/tool"
 import { acquireEffectToolMetadataSource, openOwnedToolMetadataSubscription } from "./effect-tool-metadata-source"
 
 export async function metadataFixture(options = {}) {
- const scope=Scope.makeUnsafe();let callback:((input:any)=>any)|undefined,disposed=0
- const tool:any={hook(name:string,fn:any){expect(name).toBe("execute.after");return Effect.gen(function*(){callback=fn;const dispose=Effect.sync(()=>{disposed++;callback=undefined});yield*Effect.addFinalizer(()=>dispose);return {dispose}})}}
+ const scope=Scope.makeUnsafe();let callback:((input:unknown)=>Effect.Effect<void>)|undefined,disposed=0
+ const tool={hook(name:string,fn:(input:unknown)=>Effect.Effect<void>){expect(name).toBe("execute.after");return Effect.gen(function*(){callback=fn;const dispose=Effect.sync(()=>{disposed++;callback=undefined});yield*Effect.addFinalizer(()=>dispose);return {dispose}})}} as unknown as ToolDomain
  const source=await Effect.runPromise(Effect.provideService(acquireEffectToolMetadataSource(tool,options),Scope.Scope,scope))
- return {source,async emit(value:any){if(callback)await Effect.runPromise(callback(value))},async close(){await Effect.runPromise(Scope.close(scope,Exit.succeed(undefined)))},disposed:()=>disposed}
+ return {source,async emit(value:unknown){if(callback)await Effect.runPromise(callback(value))},async close(){await Effect.runPromise(Scope.close(scope,Exit.succeed(undefined)))},disposed:()=>disposed}
 }
 const after=(extra={})=>({sessionID:"child",messageID:"assistant",id:"call_actual",tool:"routed_final",status:"completed",input:{secret:"unsafe"},result:{content:"unsafe"},...extra})
 

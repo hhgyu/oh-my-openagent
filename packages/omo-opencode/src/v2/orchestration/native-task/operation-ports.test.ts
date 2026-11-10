@@ -125,11 +125,11 @@ test("four canonical Native operation bodies use the same manager through curren
       return result
     }), origin)
     const id = started.details.task_id
-    expect(retained!.task.get(id)?.task_id).toBe(id)
-    expect(() => retained!.task.start({ parent_session_id: origin.caller.sessionID, depth: 1, prompt: "forbidden" })).toThrow()
-    expect(() => retained!.send.sendToTask({ idOrName: id, message: "forbidden", deliverAs: "steer" })).toThrow()
-    expect(() => retained!.task.waitFor(id)).toThrow()
-    expect(() => retained!.cancel.cancelTask(id)).toThrow()
+    expect(defined(retained).task.get(id)?.task_id).toBe(id)
+    expect(() => defined(retained).task.start({ parent_session_id: origin.caller.sessionID, depth: 1, prompt: "forbidden" })).toThrow()
+    expect(() => defined(retained).send.sendToTask({ idOrName: id, message: "forbidden", deliverAs: "steer" })).toThrow()
+    expect(() => defined(retained).task.waitFor(id)).toThrow()
+    expect(() => defined(retained).cancel.cancelTask(id)).toThrow()
     const sent = await f.invoke((api, caller) => api.operation(async (_manager, _ancestry, signal, owner) =>
       runTaskSend(owner.send, { to: id, message: "block new input" }, caller.sessionID, undefined, { signal })), origin)
     expect(["steered", "queued"]).toContain(sent.details.kind)
@@ -223,21 +223,21 @@ test("genuine same-backend revision progress preserves an original receipt and q
     f.setConcurrency(1)
     const root = f.raw(); let rootOwner!: NativeOperationOwner
     const parent = await f.invoke(api => api.operation(async (_m, _a, _s, owner) => { rootOwner = owner; return owner.task.start({ parent_session_id: root.caller.sessionID, depth: 1, category: "qa", prompt: "block parent" }) }), root)
-    const before = rootOwner.task.get(parent.task_id)!
+    const before = defined(rootOwner.task.get(parent.task_id))
     const child = { caller: { ...root.caller, sessionID: before.child_session_id, id: "current-child", messageID: "current-child-message" } as ToolContext, controller: root.controller }
     let queuedOwner!: NativeOperationOwner
     const queued = await f.invoke(api => api.operation(async (_m, _a, _s, owner) => { queuedOwner = owner; return owner.task.start({ parent_session_id: child.caller.sessionID, root_session_id: root.caller.sessionID, depth: 2, category: "qa", prompt: "original queued descendant", run_in_background: true }) }), child)
     expect(queued.status).toBe("pending")
     await f.invoke(api => api.send({ idOrName: parent.task_id, message: "block own backend progress" }), root)
-    const after = rootOwner.task.get(parent.task_id)!
-    expect(after.owned_session!.journalRevision).toBe(before.owned_session!.journalRevision + 2)
+    const after = defined(rootOwner.task.get(parent.task_id))
+    expect(defined(after.owned_session).journalRevision).toBe(defined(before.owned_session).journalRevision + 2)
     await f.invoke(api => api.operation(async (manager, _a, _s, owner) => {
-      const token = owner.task.concurrency!.park(parent.task_id, after.notification.run_epoch)
+      const token = defined(owner.task.concurrency).park(parent.task_id, after.notification.run_epoch)
       expect(token).toBeDefined()
-      expect(() => owner.task.concurrency!.park(queued.task_id, 0)).toThrow()
+      expect(() => defined(owner.task.concurrency).park(queued.task_id, 0)).toThrow()
       try { return await owner.task.waitFor(queued.task_id) } finally {
-        await owner.task.concurrency!.unpark(token, undefined, { overflow: true })
-        expect(() => owner.task.concurrency!.unpark(token)).toThrow()
+        await defined(owner.task.concurrency).unpark(token, undefined, { overflow: true })
+        expect(() => defined(owner.task.concurrency).unpark(token)).toThrow()
       }
     }), child)
     expect(queuedOwner.task.get(queued.task_id)?.status).toBe("completed")
@@ -442,9 +442,9 @@ test.each([false, true])("canonical accepted start result delayed across raw abo
     release.resolve()
     const outcome = await nativeBody.catch(error => error)
     expect(outcome).not.toBeInstanceOf(Error)
-    const record = owner.task.get(taskID)!
+    const record = defined(owner.task.get(taskID))
     expect(record.status).toBe(background ? "running" : "cancelled")
-    expect(f.blocked.has(record.child_session_id!)).toBe(background)
+    expect(f.blocked.has(defined(record.child_session_id))).toBe(background)
   })
 })
 
@@ -500,7 +500,7 @@ test("settled late callback failure is reported once and retained after resource
     expect(history[0].phase).toBe("late")
     expect(history[0].source.sessionID).toBe(root.caller.sessionID)
     expect(history[0].reason).toBe("fixture original late callback failed")
-    expect(JSON.parse(history[0].originalOutcomeJSON!).result.details.task_id).toBe(start.task_id)
+    expect(JSON.parse(defined(history[0].originalOutcomeJSON)).result.details.task_id).toBe(start.task_id)
     expect(Object.isFrozen(history[0])).toBe(true)
     await f.service.retire(lease)
     expect(lease.signal.aborted).toBe(true)
@@ -510,3 +510,4 @@ test("settled late callback failure is reported once and retained after resource
 })
 
 
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

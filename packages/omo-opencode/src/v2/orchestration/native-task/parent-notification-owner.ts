@@ -65,8 +65,8 @@ function wire(value: unknown, ancestors = new Set<object>(), depth = 0, budget =
     for (const key of Reflect.ownKeys(value)) {
       if (typeof key !== "string" || key.length > 4096 || ["__proto__", "prototype", "constructor"].includes(key)) throw Error("Unsupported completion wire key")
       if ((budget.characters += key.length) > 2_097_152) throw Error("Completion wire key size limit")
-      const descriptor = Object.getOwnPropertyDescriptor(value, key)!
-      if (!descriptor.enumerable || !("value" in descriptor)) throw Error("Completion wire descriptor")
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      if (!descriptor || !descriptor.enumerable || !("value" in descriptor)) throw Error("Completion wire descriptor")
       if (descriptor.value !== undefined) result[key] = wire(descriptor.value, ancestors, depth + 1, budget)
     }
     return result
@@ -106,7 +106,7 @@ export function createParentNotificationOwner(options: ParentNotificationOwnerOp
     return promise
   }
   function known() { return !stopped && !compacting && streamAlive && edge?.open === true && edge.epoch === activity }
-  function state() { if (!known()) throw Error("No current actual receiving window"); return { kind: edge!.kind } }
+  function state() { if (!known() || !edge) throw Error("No current actual receiving window"); return { kind: edge.kind } }
   function current() {
     if (stopped) throw Error("Notification owner stopped")
     const parent = options.bindings.info(options.binding)
@@ -210,12 +210,14 @@ export function createParentNotificationOwner(options: ParentNotificationOwnerOp
     if (!previous || previous.owner !== options.journal.owner || !stableReceiver(previous.receiver)) throw Error("Notification journal custody changed")
     if (previous.phase === phase && (previous.bookkeeping === bookkeeping || previous.bookkeeping === "complete")) { item.intent = previous; return }
     const { reason: _reason, acceptance: _acceptance, ...base } = previous
+    const ack = item.ack
+    if (phase === "accepted" && !ack) throw Error("Notification accepted phase has no synthetic ACK")
     const next: CompletionIntent = { ...base, revision: previous.revision + 1, phase, bookkeeping,
-      ...(phase === "accepted" ? { acceptance: { kind: "synthetic" as const, id: item.ack!.id, sessionID: item.ack!.sessionID } } : {}),
+      ...(phase === "accepted" && ack ? { acceptance: { kind: "synthetic" as const, id: ack.id, sessionID: ack.sessionID } } : {}),
       ...(phase === "uncertain" || phase === "definitively_failed" ? { reason: reason(item.error) } : {}),
     }
     options.journal.writeSync(previous, next)
-    item.intent = options.journal.read(previous.intentID)!
+    item.intent = options.journal.read(previous.intentID)
   }
   function acceptedBookkeepingComplete(item: Item) {
     if (!item.intent) return false
@@ -279,7 +281,8 @@ export function createParentNotificationOwner(options: ParentNotificationOwnerOp
       const existing = members.map(member => options.journal.findBySource(member.logical)).filter((value): value is CompletionIntent => value !== undefined)
       if (existing.length) {
         // Never merge/rewrite a canonical envelope or spend another intent's ACK.
-        const first = existing[0]!
+        const first = existing[0]
+        if (!first) throw Error("Existing completion intent missing")
         if (existing.length !== members.length || existing.some(value => value.intentID !== first.intentID) || !stableReceiver(first.receiver)
           || members.some(member => !first.sources.some(source => logicalKey(source) === logicalKey(member.logical)))) {
           for (const item of batch) item.state = "held"
@@ -300,11 +303,17 @@ export function createParentNotificationOwner(options: ParentNotificationOwnerOp
       }
       const projected = wire(message), projectedItems = wire(admission)
       intent = options.journal.insertQueued({ intentID: `completion:${randomUUID()}`, receiver,
-        sources: members.map(member => ({ ...member.logical, provenance: { itemId: sourceOwners.get(member.source)!.id } })),
+        sources: members.map(member => {
+          const owner = sourceOwners.get(member.source)
+          if (!owner) throw Error("Notification source has no owning item")
+          return { ...member.logical, provenance: { itemId: owner.id } }
+        }),
         message: { canonical: projected, items: projectedItems, inputID, delivery: deliverAs === "followUp" ? "queue" : "steer" } })
       intentSources.set(intent.intentID, new Set(members.map(member => member.source)))
       for (const item of batch) item.intent = intent
-      write(batch[0]!, "dispatching"); intent = batch[0]!.intent
+      const lead = batch[0]
+      if (!lead) throw Error("Notification batch is empty")
+      write(lead, "dispatching"); intent = lead.intent
       for (const item of batch) item.intent = intent
       // Last same-stack fence. Edge closure never cancels an original accepted SDK promise.
       current(); if (!known()) throw Error("Receiving state window consumed before SDK call")
@@ -315,14 +324,15 @@ export function createParentNotificationOwner(options: ParentNotificationOwnerOp
       // in the same stack after the final await and immediately before transport.
       for (const permit of dispatchPermits) options.issuer.assertDispatchCurrent(permit)
       invoked = true; for (const item of batch) item.invoked = true
+      if (!intent) throw Error("Notification durable intent missing")
       const result = await options.ctx.session.synthetic({ sessionID: receiver.sessionID, id: inputID, text: message.content,
         delivery: deliverAs === "followUp" ? "queue" : "steer", resume: true,
-        metadata: { completionIntentID: intent!.intentID, nativeItems: projectedItems } }, { signal: transportStop.signal })
+        metadata: { completionIntentID: intent.intentID, nativeItems: projectedItems } }, { signal: transportStop.signal })
       if (result.id !== inputID || result.sessionID !== receiver.sessionID || result.type !== "synthetic" || result.payload.text !== message.content) throw Error("Foreign notification admission ACK")
       ack = { id: result.id, sessionID: result.sessionID }
       for (const item of batch) { item.ack = ack; item.state = "accepted"; item.needsRepair = true }
-      write(batch[0]!, "accepted")
-      for (const item of batch) item.intent = batch[0]!.intent
+      write(lead, "accepted")
+      for (const item of batch) item.intent = lead.intent
       return result // Non-array legacy success ONLY after genuine ACK + durable accepted.
     } catch (error) {
       for (const item of batch) {
@@ -337,7 +347,7 @@ export function createParentNotificationOwner(options: ParentNotificationOwnerOp
     const batch = delivery.items.map(value => items.get(value.itemId)).filter((value): value is Item => !!value)
     for (const item of batch) {
       item.state = "flushing"; item.callback = Promise.withResolvers<void>(); pending.set(item.callback.promise, "receipt")
-      void item.callback.promise.finally(() => pending.delete(item.callback!.promise)).catch(() => {})
+      void item.callback.promise.finally(() => { if (item.callback) pending.delete(item.callback.promise) }).catch(() => {})
     }
     return own("transport", () => deliver(message, delivery.items, delivery.deliverAs))
   }, { onChildWorkChange(count) { childWork = count }, onReceiptError(error) { note("coordinator-receipt", error) },
@@ -377,7 +387,9 @@ export function createParentNotificationOwner(options: ParentNotificationOwnerOp
           parentSessionId: row.parent_session_id, rootSessionId: row.root_session_id, createdAt: row.created_at } })
       }
       for (const detail of message.details) {
-        const member = members.get(detail.task_id)!, key = `task-completion:${detail.task_id}`, id = randomUUID()
+        const member = members.get(detail.task_id)
+        if (!member) throw Error("Unregistered or duplicate notification source")
+        const key = `task-completion:${detail.task_id}`, id = randomUUID()
         const itemMessage = message.details.length === 1 ? message : { ...buildCompletionMessage([detail]), triggerTurn: message.triggerTurn }
         const item: Item = { id, key, message: itemMessage, members: [member], state: "queued", invoked: false, needsRepair: false }
         const prior = byKey.get(key); if (prior?.state === "queued") prior.superseded = item

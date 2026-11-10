@@ -38,5 +38,5 @@ export function createOwnedTaskPlanner(options: {
     if (plan.variant !== undefined && !actual.reasoning.variants.includes(plan.variant)) throw new Error("Native reasoning variant is not declared by this host model")
     return { providerID: provider, id, ...(plan.variant === undefined ? {} : { variant: plan.variant }) }
   }
-  return { prepare, plan, binding, config: () => config! }
+  return { prepare, plan, binding, config: () => { if (!config) throw new Error("Native task planner config has not been prepared"); return config } }
 }

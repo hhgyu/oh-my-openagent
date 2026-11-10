@@ -142,7 +142,7 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
       removeCleanup = lifetime.cleanup(close)
       return close
     },
-    ...(manager.whenLaunched ? { whenLaunched(id: string) { foregroundSetup(id); receipt(id).read(); return lifetime.track(manager.whenLaunched!(id)) } } : {}),
+    ...(manager.whenLaunched ? { whenLaunched(id: string) { foregroundSetup(id); receipt(id).read(); const launched = manager.whenLaunched; if (!launched) throw Error("Native task manager no longer exposes whenLaunched"); return lifetime.track(launched.call(manager, id)) } } : {}),
     promoteToBackground(id) { current(); receipt(id).read(); return manager.promoteToBackground(id) },
     cancelTask(...args) {
       // Canonical foreground abort finally owns only its original waiting task.
@@ -155,7 +155,9 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
     ...(manager.findTaskByChildSession ? { findTaskByChildSession(sessionID: string) {
       foregroundParentSetup()
       if (sessionID !== access.parentSessionID) throw Error("Foreign child-session lookup")
-      return manager.findTaskByChildSession!(sessionID)
+      const find = manager.findTaskByChildSession
+      if (!find) throw Error("Native task manager no longer exposes findTaskByChildSession")
+      return find.call(manager, sessionID)
     } } : {}),
     ...(concurrency ? { concurrency } : {}),
   }

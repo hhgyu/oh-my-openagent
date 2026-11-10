@@ -3,6 +3,11 @@ import type * as Plugin from "@opencode/plugin/promise/plugin"
 import { COMMENT_CHECKER_FEEDBACK_HEADER, type CheckResult, type CommentCheckerLogger, type RunCommentCheckerInput } from "@oh-my-opencode/comment-checker-core"
 import { registerCommentChecker, type CommentCheckerRegistrationOptions } from "./index"
 
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
+
 type Content = string | { type: string; text?: string }[] | undefined
 interface FakeEvent {
   tool: string
@@ -48,8 +53,8 @@ describe("registerCommentChecker", () => {
     const f = fixture(); await f.register()
     const event = await f.fire()
     expect(f.calls).toHaveLength(1)
-    expect(f.calls[0]!.hookInput.tool_input).toMatchObject({ file_path: expect.stringContaining("a.ts"), old_string: "old", new_string: "new" })
-    expect(f.calls[0]!.hookInput.session_id).toBe("ses_1")
+    expect(defined(f.calls[0]).hookInput.tool_input).toMatchObject({ file_path: expect.stringContaining("a.ts"), old_string: "old", new_string: "new" })
+    expect(defined(f.calls[0]).hookInput.session_id).toBe("ses_1")
     expect(typeof event.result.content).toBe("string")
     expect(String(event.result.content).startsWith("Edit applied\n" + COMMENT_CHECKER_FEEDBACK_HEADER)).toBe(true)
     expect(String(event.result.content)).toContain(violation.message)

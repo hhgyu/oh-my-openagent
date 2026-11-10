@@ -98,9 +98,13 @@ async function deliverRevivedTerminal(
   let stamped: TaskRecord | undefined
   let dispatchEntered = false
   let retained = false
+  function requireTicket(): PreparedFollowUp {
+    if (ticket === undefined) throw new Error("revival follow-up ticket was not prepared")
+    return ticket
+  }
   function retain(reason: string): SendOutcome {
     retained = true
-    ticket!.retainFailure(reason)
+    requireTicket().retainFailure(reason)
     preparedReservation.commit()
     return lazyRevivalFailure(record, reason)
   }
@@ -110,7 +114,7 @@ async function deliverRevivedTerminal(
     revived ??= stamped
     if (!revived || !prior) { preparedReservation.release(); return lazyRevivalFailure(record, reason) }
     try {
-      const restored = restorePreparedRevival(port, prior, revived, handle, ticket!, nowIso)
+      const restored = restorePreparedRevival(port, prior, revived, handle, requireTicket(), nowIso)
       if (!restored) { preparedReservation.release(); return lazyRevivalFailure(record, "ownership changed before proven unstarted delivery could be restored") }
       preparedReservation.release()
       return lazyRevivalFailure(record, reason)

@@ -91,7 +91,10 @@ export function createMutationRuntime(options: MutationRuntimeOptions = {}) {
       function report(value: MutationReport, caller: ToolContext) {
         const key = `${caller.sessionID}:${caller.id}`
         summaries.set(key, { sessionID: caller.sessionID, callID: caller.id, tool: value.tool, status: value.status, committed: value.committed, paths: [...value.paths], ...(value.reason ? { reason: value.reason } : {}) })
-        if (summaries.size > 128) summaries.delete(summaries.keys().next().value!)
+        if (summaries.size > 128) {
+          const oldest = summaries.keys().next()
+          if (!oldest.done) summaries.delete(oldest.value)
+        }
       }
       const hooks = createMutationHooks({
         directory: root, authorize,

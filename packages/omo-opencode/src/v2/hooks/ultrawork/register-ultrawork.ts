@@ -60,7 +60,10 @@ export async function registerUltrawork(host: Host): Promise<() => Promise<void>
     if (classifyUltraworkPrompt(input.prompt) !== "arm") return
     if (await isChildSession(input.sessionID) || closed) return
     armed.add(input.sessionID)
-    if (armed.size > MAX_ARMED_SESSIONS) armed.delete(armed.values().next().value!)
+    if (armed.size > MAX_ARMED_SESSIONS) {
+      const oldest = armed.values().next()
+      if (!oldest.done) armed.delete(oldest.value)
+    }
   }
 
   function onContext(context: SessionContext): void {

@@ -138,7 +138,10 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
         const progress = operation.reportProgress
           ? (update: Parameters<NonNullable<Parameters<typeof execute>[3]>>[0]) => {
               const projected = adaptNativeTaskResult(update)
-              operation.reportProgress!({ nativeTask: projected.metadata!.native })
+              const report = operation.reportProgress, metadata = projected.metadata
+              if (!report) throw Error("Native task progress port is no longer available")
+              if (!metadata) throw Error("Native task progress result has no metadata")
+              report({ nativeTask: metadata.native })
             }
           : undefined
         return adaptNativeTaskResult(await execute(caller.id, input as TaskToolParamsStatic, signal, progress, context))
@@ -161,14 +164,16 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
   const ready = (async () => {
     const resources = await acquired
     current()
-    for (let index = 0; index < targets.length; index++) {
-      const target = targets[index]!, entry = resources.registry.get(target.name, resources.registry.generation)
+    for (const [index, target] of targets.entries()) {
+      const entry = resources.registry.get(target.name, resources.registry.generation)
       if (entry.nativeTaskPermission || resources.targetPermissions) {
         const associations = resources.targetPermissions?.filter(value => value.tool === target)
-        if (associations?.length !== 1 || entry.nativeTaskPermission?.permission !== associations[0]!.permission) throw Error("Native bridge permission association differs from canonical target")
+        if (associations?.length !== 1 || entry.nativeTaskPermission?.permission !== associations[0]?.permission) throw Error("Native bridge permission association differs from canonical target")
         entry.nativeTaskPermission.assertOwner(resources.service)
       }
-      const decoder = bindToolValueCodec(definitions.codecs[index]!.input!, target, "input")
+      const inputCodec = definitions.codecs[index]?.input
+      if (!inputCodec) throw Error("Native bridge canonical target has no input codec")
+      const decoder = bindToolValueCodec(inputCodec, target, "input")
       if (entry.tool.execute !== target.execute || entry.inputDecoder !== decoder.decode ||
         JSON.stringify(entry.tool.input) !== JSON.stringify(decoder.schema) ||
         (target.name === "task" && !entry.normalizeInput) || entry.tool.output !== undefined) throw Error("Native bridge registry does not own exact canonical targets")
@@ -183,18 +188,18 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
       const matches = publicDefinitions.map(tool => editor.list().filter(entry => entry.name === tool.name))
       if (matches.some(entries => entries.length > 1)) throw Error("Ambiguous public Native task tool")
       taskIDs.clear()
-      for (let index = 0; index < publicDefinitions.length; index++) {
-        const tool = publicDefinitions[index]!, previous = matches[index]![0]
+      for (const [index, tool] of publicDefinitions.entries()) {
+        const previous = matches[index]?.[0]
         if (previous) editor.update(previous.id, entry => {
           entry.name = tool.name; entry.description = tool.description; entry.input = tool.input; entry.execute = tool.execute
           delete entry.output; delete entry.options
         })
         else editor.add(tool)
-        const effective = editor.list().filter(entry => entry.name === tool.name)
-        if (effective.length !== 1 || effective[0]!.input !== tool.input ||
-          effective[0]!.description !== tool.description || effective[0]!.output !== undefined ||
-          effective[0]!.options !== undefined) throw Error("Public Native task tool replacement failed")
-        if (tool.name === "task") taskIDs.add(effective[0]!.id)
+        const effective = editor.list().filter(entry => entry.name === tool.name), replaced = effective[0]
+        if (effective.length !== 1 || !replaced || replaced.input !== tool.input ||
+          replaced.description !== tool.description || replaced.output !== undefined ||
+          replaced.options !== undefined) throw Error("Public Native task tool replacement failed")
+        if (tool.name === "task") taskIDs.add(replaced.id)
       }
     }))
     current()
@@ -216,7 +221,11 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
         await ready.catch(() => {})
         const failures: unknown[] = []
         for (let index = registrations.length - 1; index >= 0; index--) {
-          try { await registrations[index]!.dispose(); registrations.splice(index, 1) }
+          try {
+            const registration = registrations[index]
+            if (!registration) throw Error("Native task bridge registration is missing")
+            await registration.dispose(); registrations.splice(index, 1)
+          }
           catch (error) { failures.push(error) }
         }
         await Promise.all([...setups])

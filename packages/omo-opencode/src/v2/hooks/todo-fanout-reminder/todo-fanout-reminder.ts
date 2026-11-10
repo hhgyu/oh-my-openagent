@@ -50,8 +50,14 @@ function appendReminder(result: Result): Result {
 export async function registerTodoFanoutReminder(context: Host, options: TodoFanoutReminderOptions = {}): Promise<() => Promise<void>> {
   if (context.options?.[DISABLED_FLAG] === true || context.options?.["omo-senpi-disabled"] === true ||
       process.env.OMO_SENPI_DISABLED === "1") return async () => {}
-  const ownedLedger = options.arming === undefined ? createPromptArmingLedger() : undefined
-  const arming: TodoFanoutArming = options.arming ?? ownedLedger!
+  let ownedLedger: ReturnType<typeof createPromptArmingLedger> | undefined
+  let arming: TodoFanoutArming
+  if (options.arming === undefined) {
+    ownedLedger = createPromptArmingLedger()
+    arming = ownedLedger
+  } else {
+    arming = options.arming
+  }
   const reminded = new Set<string>()
   const registrations: Registration[] = []
   const stop = new AbortController()

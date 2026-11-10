@@ -2,14 +2,19 @@ import { expect, test } from "bun:test"
 import { projectOwnedChildOutcome } from "./owned-child-outcome"
 import type { ObservationRecord, ObservationSnapshot, SafeChildEvent } from "./owned-child-observation-types"
 
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
+
 function fixture(name: keyof typeof captured = "success"): ObservationSnapshot {
   const events: SafeChildEvent[] = structuredClone(captured[name])
   const inputs: ObservationRecord[] = events.filter(event => event.type === "session.inbox.enqueued" && event.data.inputKind !== "compact")
-    .map(event => ({ kind: "input", id: `local:${event.data.inboxID}`, inboxID: event.data.inboxID! }))
+    .map(event => ({ kind: "input", id: `local:${event.data.inboxID}`, inboxID: defined(event.data.inboxID) }))
   return {
     binding: { key: "task-fixture", token: "observation-binding", locator: {
       format: 1, backendID: "actual-host", location: "/isolated/fixture", hostVersion: "2.2.6",
-      parentID: "parent" as never, sessionID: events[0]!.sessionID as never, generation: 1,
+      parentID: "parent" as never, sessionID: defined(events[0]).sessionID as never, generation: 1,
     } },
     records: [...inputs, ...events.map(event => ({ kind: "host" as const, id: event.id, event }))], uncertainty: [],
   }
@@ -35,7 +40,7 @@ function retryFixture(): ObservationSnapshot {
   retry.event.data.attempt = 2
   const snapshot = fixture()
   return { ...snapshot, binding: { ...snapshot.binding, locator: { ...snapshot.binding.locator,
-    sessionID: events({ ...snapshot, records })[0]!.event.sessionID as never } }, records }
+    sessionID: defined(events({ ...snapshot, records })[0]).event.sessionID as never } }, records }
 }
 
 test("actual captured completed step returns exact full text, actual model, and only observed usage", () => {
@@ -68,8 +73,8 @@ test("explicit Native turn policy accepts a positively observed empty assistant 
 test("Native turn retains last nonempty current-turn text across an empty final step without changing default", () => {
   const snapshot = fixture("tool")
   for (const row of events(snapshot)) if (row.event.type === "session.text.ended") row.event.data.text = ""
-  const firstEnd = events(snapshot).find(row => row.event.type === "session.step.ended")!
-  const start = events(snapshot).find(row => row.event.type === "session.step.started")!
+  const firstEnd = defined(events(snapshot).find(row => row.event.type === "session.step.ended"))
+  const start = defined(events(snapshot).find(row => row.event.type === "session.step.started"))
   const index = snapshot.records.indexOf(firstEnd)
   const records = [...snapshot.records]
   records.splice(index, 0,
@@ -87,7 +92,7 @@ test("turn policy preserves failure Stop delivery cursor retry and tool coverage
   expect(projectOwnedChildOutcome({ ...empty, records: [...empty.records, { kind: "stop", id: "stop:policy" }] }, "turn").status).toBe("pending")
   expect(projectOwnedChildOutcome({ ...empty, records: empty.records.filter(row => row.kind !== "input") }, "turn").status).toBe("control-only")
   expect(projectOwnedChildOutcome(revise(empty, row => row.kind !== "host" || !row.event.type.startsWith("session.step.") && !row.event.type.startsWith("session.text.")), "turn").status).toBe("uncertain")
-  const gap = fixture("empty"); events(gap).at(-1)!.event.durable!.seq += 1
+  const gap = fixture("empty"); defined(defined(events(gap).at(-1)).event.durable).seq += 1
   expect(projectOwnedChildOutcome(gap, "turn").status).toBe("uncertain")
   const retry = retryFixture()
   expect(projectOwnedChildOutcome(revise(retry, row => row.kind !== "host" || row.event.type !== "session.retry.scheduled"), "turn").status).toBe("uncertain")
@@ -103,7 +108,7 @@ test("explicit Native policies never borrow nonempty text from an earlier execut
     if (row.kind === "input") row.inboxID = `next:${row.inboxID}`
     if (row.kind === "host") {
       row.event.id = row.id; row.event.sessionID = prior.binding.locator.sessionID
-      row.event.durable!.aggregateID = prior.binding.locator.sessionID
+      defined(row.event.durable).aggregateID = prior.binding.locator.sessionID
       if (row.event.data.inboxID) row.event.data.inboxID = `next:${row.event.data.inboxID}`
       if (row.event.data.assistantMessageID) row.event.data.assistantMessageID = `next:${row.event.data.assistantMessageID}`
     }
@@ -115,12 +120,12 @@ test("explicit Native policies never borrow nonempty text from an earlier execut
 
 test("both Native policies keep unknown version missing delivery and unfinished assistant gates", () => {
   for (const policy of ["turn", "final-text"] as const) {
-    const version = fixture("empty"); events(version).at(-1)!.event.durable!.version = 99
+    const version = fixture("empty"); defined(defined(events(version).at(-1)).event.durable).version = 99
     expect(projectOwnedChildOutcome(version, policy).status).toBe("uncertain")
     const delivery = fixture("empty")
     expect(projectOwnedChildOutcome(revise(delivery, row => row.kind !== "host" || row.event.type !== "session.inbox.delivered"), policy).status).toBe("control-only")
     const unfinished = fixture("empty")
-    events(unfinished).find(row => row.event.type === "session.step.ended")!.event.data.finish = "tool-calls"
+    defined(events(unfinished).find(row => row.event.type === "session.step.ended")).event.data.finish = "tool-calls"
     expect(projectOwnedChildOutcome(unfinished, policy)).toMatchObject({ status: "uncertain", reason: "unfinished-assistant-turn" })
     const pending = fixture("empty")
     expect(projectOwnedChildOutcome({ ...pending, records: [...pending.records, { kind: "input", id: "next:undelivered", inboxID: "undelivered" }] }, policy).status).toBe("pending")
@@ -163,12 +168,12 @@ test("request-kind metadata cannot invent an assistant step or override its obse
 test("unowned or locally unrecorded input in a real execution is control-only", () => {
   const snapshot = fixture()
   expect(projectOwnedChildOutcome({ ...snapshot, records: snapshot.records.filter(record => record.kind !== "input") }).status).toBe("control-only")
-  const input = snapshot.records.find(record => record.kind === "input")!
+  const input = defined(snapshot.records.find(record => record.kind === "input"))
   expect(projectOwnedChildOutcome({ ...snapshot, records: [...snapshot.records.filter(record => record.kind !== "input"), input] }).status).toBe("control-only")
 })
 test("own delivery from a preceding frame cannot authorize control-only compaction success", () => {
   const snapshot = fixture()
-  const seq = events(snapshot).at(-1)!.event.durable!.seq + 1
+  const seq = defined(defined(events(snapshot).at(-1)).event.durable).seq + 1
   const records = [...snapshot.records, { kind: "auxiliary" as const, id: "hook:compact", requestKind: "compaction" as const },
     host("session.execution.started", seq), host("session.compaction.started", seq + 1),
     host("session.compaction.failed", seq + 2, { errorType: "provider.invalid-request" }), host("session.execution.succeeded", seq + 3)]
@@ -191,14 +196,14 @@ test("cursor version is event schema version, not a monotonic aggregate counter"
   const snapshot = fixture()
   expect(events(snapshot).some(record => record.event.durable?.version === 2)).toBe(true)
   expect(projectOwnedChildOutcome(snapshot).status).toBe("completed")
-  events(snapshot).at(-1)!.event.durable!.version = 3
+  defined(defined(events(snapshot).at(-1)).event.durable).version = 3
   expect(projectOwnedChildOutcome(snapshot)).toMatchObject({ status: "uncertain", reason: "unknown-event-version" })
 })
 test("gap/reordering/missing cursor are insufficient coverage, not asserted transport loss", () => {
   for (const mutate of [
-    (rows: ReturnType<typeof events>) => { rows[5]!.event.durable!.seq += 1 },
-    (rows: ReturnType<typeof events>) => { rows[5]!.event.durable = undefined },
-    (rows: ReturnType<typeof events>) => { rows[5]!.event.durable!.seq = rows[4]!.event.durable!.seq },
+    (rows: ReturnType<typeof events>) => { defined(defined(rows[5]).event.durable).seq += 1 },
+    (rows: ReturnType<typeof events>) => { defined(rows[5]).event.durable = undefined },
+    (rows: ReturnType<typeof events>) => { defined(defined(rows[5]).event.durable).seq = defined(defined(rows[4]).event.durable).seq },
   ]) {
     const snapshot = fixture(); mutate(events(snapshot))
     expect(projectOwnedChildOutcome(snapshot).status).toBe("uncertain")
@@ -207,7 +212,7 @@ test("gap/reordering/missing cursor are insufficient coverage, not asserted tran
 })
 test("duplicate IDs, conflicting IDs, foreign sessions and malformed records fail closed", () => {
   const snapshot = fixture()
-  const first = events(snapshot)[0]!
+  const first = defined(events(snapshot)[0])
   expect(projectOwnedChildOutcome({ ...snapshot, records: [...snapshot.records, first] }).status).toBe("uncertain")
   expect(projectOwnedChildOutcome({ ...snapshot, records: [...snapshot.records, { ...first, event: { ...first.event, type: "session.execution.succeeded" } }] }).status).toBe("uncertain")
   first.event.sessionID = "foreign"
@@ -224,10 +229,10 @@ test("rebind/lost observation/local invalidation cannot expose historic success 
 test("unmatched text/step/model/terminal cannot manufacture output", () => {
   for (const modify of [
     (snapshot: ObservationSnapshot) => revise(snapshot, record => record.kind !== "host" || record.event.type !== "session.step.started"),
-    (snapshot: ObservationSnapshot) => { events(snapshot).find(record => record.event.type === "session.step.started")!.event.data.model = undefined; return snapshot },
-    (snapshot: ObservationSnapshot) => { events(snapshot).find(record => record.event.type === "session.text.ended")!.event.data.assistantMessageID = "unmatched"; return snapshot },
+    (snapshot: ObservationSnapshot) => { defined(events(snapshot).find(record => record.event.type === "session.step.started")).event.data.model = undefined; return snapshot },
+    (snapshot: ObservationSnapshot) => { defined(events(snapshot).find(record => record.event.type === "session.text.ended")).event.data.assistantMessageID = "unmatched"; return snapshot },
     (snapshot: ObservationSnapshot) => revise(snapshot, record => record.kind !== "host" || record.event.type !== "session.step.ended"),
-    (snapshot: ObservationSnapshot) => { events(snapshot).find(record => record.event.type === "session.step.ended")!.event.data.finish = "new-unknown-finish"; return snapshot },
+    (snapshot: ObservationSnapshot) => { defined(events(snapshot).find(record => record.event.type === "session.step.ended")).event.data.finish = "new-unknown-finish"; return snapshot },
   ]) expect(projectOwnedChildOutcome(modify(fixture())).status).toBe("uncertain")
 })
 test("full text ordinal parts join within a step with matched starts; reasoning ordinal gaps are valid", () => {
@@ -246,11 +251,11 @@ test("full text ordinal parts join within a step with matched starts; reasoning 
   records.splice(index + 1, 0, start, second)
   const modified = revise({ ...snapshot, records }, () => true)
   expect(projectOwnedChildOutcome(modified)).toMatchObject({ status: "completed", text: "first second" })
-  events(modified).find(record => record.id === "actual-part-two")!.event.data.ordinal = 3
+  defined(events(modified).find(record => record.id === "actual-part-two")).event.data.ordinal = 3
   expect(projectOwnedChildOutcome(modified).status).toBe("uncertain")
-  events(modified).find(record => record.id === "actual-part-two-start")!.event.data.ordinal = 3
+  defined(events(modified).find(record => record.id === "actual-part-two-start")).event.data.ordinal = 3
   expect(projectOwnedChildOutcome(modified)).toMatchObject({ status: "completed", text: "first second" })
-  events(modified).find(record => record.id === "actual-part-two")!.event.data.ordinal = 0
+  defined(events(modified).find(record => record.id === "actual-part-two")).event.data.ordinal = 0
   expect(projectOwnedChildOutcome(modified).status).toBe("uncertain")
 })
 test("thinking part ordinals do not require reading or retaining reasoning text", () => {
@@ -258,7 +263,7 @@ test("thinking part ordinals do not require reading or retaining reasoning text"
   for (const record of events(snapshot)) if (record.event.type.startsWith("session.text.")) record.event.data.ordinal = 1
   const rows = [...snapshot.records]
   const index = rows.findIndex(record => record.kind === "host" && record.event.type === "session.text.started")
-  const step = events(snapshot).find(record => record.event.type === "session.step.started")!.event.data.assistantMessageID!
+  const step = defined(defined(events(snapshot).find(record => record.event.type === "session.step.started")).event.data.assistantMessageID)
   rows.splice(index, 0, host("session.reasoning.started", 0, { assistantMessageID: step, ordinal: 0 }),
     host("session.reasoning.ended", 0, { assistantMessageID: step, ordinal: 0 }))
   expect(projectOwnedChildOutcome(revise({ ...snapshot, records: rows }, () => true))).toMatchObject({ status: "completed", text: "FINAL_SUCCESS_MARKER" })
@@ -270,7 +275,7 @@ test("missing text starts or ends remain uncertain even with complete durable cu
 })
 test("the public session.tool.success terminal is accepted; invented succeeded spelling is uncertain", () => {
   const snapshot = fixture("tool")
-  const tool = events(snapshot).find(record => record.event.type === "session.tool.failed")!
+  const tool = defined(events(snapshot).find(record => record.event.type === "session.tool.failed"))
   tool.event.type = "session.tool.success"
   delete tool.event.data.errorType
   expect(projectOwnedChildOutcome(snapshot)).toMatchObject({ status: "completed", observedToolCalls: 1 })
@@ -279,7 +284,7 @@ test("the public session.tool.success terminal is accepted; invented succeeded s
 })
 test("no missing usage field is inferred as zero; only complete per-key step coverage is aggregated", () => {
   const snapshot = fixture("continuation")
-  const first = events(snapshot).find(record => record.event.type === "session.step.ended")!
+  const first = defined(events(snapshot).find(record => record.event.type === "session.step.ended"))
   first.event.data.tokens = { input: 7 }
   first.event.data.cost = undefined
   const result = projectOwnedChildOutcome(snapshot)
@@ -293,7 +298,7 @@ test("no terminal yet stays pending even after receiving full assistant text", (
 })
 test("an unknown execution transition cannot leave an earlier completed result live", () => {
   const snapshot = fixture()
-  const seq = events(snapshot).at(-1)!.event.durable!.seq + 1
+  const seq = defined(defined(events(snapshot).at(-1)).event.durable).seq + 1
   expect(projectOwnedChildOutcome({ ...snapshot, records: [...snapshot.records, host("session.execution.unknown", seq)] }))
     .toMatchObject({ status: "uncertain", reason: "unknown-execution-event" })
 })
@@ -325,7 +330,7 @@ test("retry schedule is pending evidence, not a successful retry or completed ta
 test("actual next-attempt 2 capture remains pending rather than rejected or declared recovered", () => {
   const snapshot = fixture()
   const records = structuredClone(actualAttemptTwoRecords) as ObservationRecord[]
-  const sessionID = records.find(record => record.kind === "host")! as Extract<ObservationRecord, { kind: "host" }>
+  const sessionID = defined(records.find(record => record.kind === "host")) as Extract<ObservationRecord, { kind: "host" }>
   const result = projectOwnedChildOutcome({ ...snapshot, records,
     binding: { ...snapshot.binding, locator: { ...snapshot.binding.locator, sessionID: sessionID.event.sessionID as never } } })
   expect(result).toMatchObject({ status: "pending", observedSteps: 1 })
@@ -335,9 +340,9 @@ test("a later witnessed retry advances from attempt 2 to 3 without duplicating t
   const snapshot = retryFixture()
   const records = [...snapshot.records]
   const starts = events(snapshot).filter(record => record.event.type === "session.step.started")
-  const second = starts[1]!
+  const second = defined(starts[1])
   const index = records.findIndex(record => record.id === second.id)
-  const nextRetry = structuredClone(events(snapshot).find(record => record.event.type === "session.retry.scheduled")!)
+  const nextRetry = structuredClone(defined(events(snapshot).find(record => record.event.type === "session.retry.scheduled")))
   nextRetry.id = nextRetry.event.id = "retry-attempt-3"
   nextRetry.event.data.attempt = 3
   const restart = structuredClone(second)
@@ -349,18 +354,18 @@ test("a later witnessed retry advances from attempt 2 to 3 without duplicating t
 test("unwitnessed duplicate start, missing attempt, mismatched assistant or repeated attempt is uncertain", () => {
   for (const mutate of [
     (snapshot: ObservationSnapshot) => revise(snapshot, record => record.kind !== "host" || record.event.type !== "session.retry.scheduled"),
-    (snapshot: ObservationSnapshot) => { events(snapshot).find(record => record.event.type === "session.retry.scheduled")!.event.data.attempt = undefined; return snapshot },
-    (snapshot: ObservationSnapshot) => { events(snapshot).find(record => record.event.type === "session.retry.scheduled")!.event.data.assistantMessageID = "other-step"; return snapshot },
-    (snapshot: ObservationSnapshot) => { events(snapshot).find(record => record.event.type === "session.retry.scheduled")!.event.data.attempt = 1; return snapshot },
-    (snapshot: ObservationSnapshot) => { events(snapshot).find(record => record.event.type === "session.retry.scheduled")!.event.data.attempt = 3; return snapshot },
-    (snapshot: ObservationSnapshot) => { events(snapshot).filter(record => record.event.type === "session.step.started")[1]!.event.data.assistantMessageID = "other-step"; return snapshot },
+    (snapshot: ObservationSnapshot) => { defined(events(snapshot).find(record => record.event.type === "session.retry.scheduled")).event.data.attempt = undefined; return snapshot },
+    (snapshot: ObservationSnapshot) => { defined(events(snapshot).find(record => record.event.type === "session.retry.scheduled")).event.data.assistantMessageID = "other-step"; return snapshot },
+    (snapshot: ObservationSnapshot) => { defined(events(snapshot).find(record => record.event.type === "session.retry.scheduled")).event.data.attempt = 1; return snapshot },
+    (snapshot: ObservationSnapshot) => { defined(events(snapshot).find(record => record.event.type === "session.retry.scheduled")).event.data.attempt = 3; return snapshot },
+    (snapshot: ObservationSnapshot) => { defined(events(snapshot).filter(record => record.event.type === "session.step.started")[1]).event.data.assistantMessageID = "other-step"; return snapshot },
   ]) expect(projectOwnedChildOutcome(mutate(retryFixture())).status).toBe("uncertain")
 })
 test("an unmatched retry witness cannot be silently consumed by execution success or failure", () => {
   for (const terminalType of ["session.execution.succeeded", "session.execution.failed"]) {
     const snapshot = retryFixture()
     const retryIndex = snapshot.records.findIndex(record => record.kind === "host" && record.event.type === "session.retry.scheduled")
-    const terminal = structuredClone(events(snapshot).at(-1)!)
+    const terminal = structuredClone(defined(events(snapshot).at(-1)))
     terminal.event.type = terminalType
     if (terminalType.endsWith("failed")) terminal.event.data.errorType = "provider.internal"
     const records = [...snapshot.records.slice(0, retryIndex + 1), terminal]
@@ -376,14 +381,14 @@ test("a witnessed retry discards failed-attempt partial text and records the new
   const end = host("session.text.ended", 1, { assistantMessageID: retry.event.data.assistantMessageID, ordinal: 0, text: "discarded failed-attempt text" }, retry.event.sessionID)
   records.splice(index, 0, start, end)
   const modified = revise({ ...snapshot, records }, () => true)
-  events(modified).filter(record => record.event.type === "session.step.started")[1]!.event.data.model = { providerID: "actual-retry", id: "observed" }
+  defined(events(modified).filter(record => record.event.type === "session.step.started")[1]).event.data.model = { providerID: "actual-retry", id: "observed" }
   expect(projectOwnedChildOutcome(modified)).toMatchObject({ status: "completed", text: "FINAL_RETRY_MARKER", observedSteps: 1, model: { providerID: "actual-retry", id: "observed" } })
 })
 test("a retry witness is single-use and cannot authorize a third start without a new schedule", () => {
   const snapshot = retryFixture()
   const records = [...snapshot.records]
   const index = records.findIndex((record, i) => record.kind === "host" && record.event.type === "session.step.started" && i > 8)
-  const duplicate = structuredClone(records[index]!) as Extract<ObservationRecord, { kind: "host" }>
+  const duplicate = structuredClone(defined(records[index])) as Extract<ObservationRecord, { kind: "host" }>
   duplicate.id = duplicate.event.id = "unwitnessed-third-start"
   records.splice(index + 1, 0, duplicate)
   expect(projectOwnedChildOutcome(revise({ ...snapshot, records }, () => true)).status).toBe("uncertain")
@@ -402,12 +407,12 @@ test("missing call or terminal, mismatched call/assistant and duplicate tool ter
   for (const mutate of [
     (snapshot: ObservationSnapshot) => revise(snapshot, record => record.kind !== "host" || record.event.type !== "session.tool.called"),
     (snapshot: ObservationSnapshot) => revise(snapshot, record => record.kind !== "host" || record.event.type !== "session.tool.failed"),
-    (snapshot: ObservationSnapshot) => { events(snapshot).find(record => record.event.type === "session.tool.failed")!.event.data.callID = "unknown-call"; return snapshot },
-    (snapshot: ObservationSnapshot) => { events(snapshot).find(record => record.event.type === "session.tool.failed")!.event.data.assistantMessageID = "unknown-assistant"; return snapshot },
+    (snapshot: ObservationSnapshot) => { defined(events(snapshot).find(record => record.event.type === "session.tool.failed")).event.data.callID = "unknown-call"; return snapshot },
+    (snapshot: ObservationSnapshot) => { defined(events(snapshot).find(record => record.event.type === "session.tool.failed")).event.data.assistantMessageID = "unknown-assistant"; return snapshot },
     (snapshot: ObservationSnapshot) => {
       const records = [...snapshot.records]
       const index = records.findIndex(record => record.kind === "host" && record.event.type === "session.tool.failed")
-      const duplicate = structuredClone(records[index]!) as Extract<ObservationRecord, { kind: "host" }>
+      const duplicate = structuredClone(defined(records[index])) as Extract<ObservationRecord, { kind: "host" }>
       duplicate.id = duplicate.event.id = "duplicate-tool-terminal"
       records.splice(index + 1, 0, duplicate)
       return revise({ ...snapshot, records }, () => true)

@@ -31,13 +31,14 @@ export async function registerGitMasterReadHook(host: Host): Promise<() => Promi
     if (!Array.isArray(original)) return
     const firstTextIndex = original.findIndex(item => isRecord(item) && typeof item.text === "string")
     const texts = original.flatMap(item => isRecord(item) && typeof item.text === "string" ? [item.text] : [])
-    const append = additions.directive !== undefined && !carriesAttributionDirective(texts)
+    const directive = additions.directive
+    const append = directive !== undefined && !carriesAttributionDirective(texts)
     const content = original.map((item, index) => {
       if (index !== firstTextIndex || !isRecord(item) || typeof item.text !== "string") return item
       const text = additions.rewriteSkillText(item.text)
       return text === item.text ? item : { ...item, text }
     })
-    if (append) content.push({ type: "text", text: additions.directive! })
+    if (append && directive !== undefined) content.push({ type: "text", text: directive })
     if (append || content.some((item, index) => item !== original[index])) event.result = { ...event.result, content }
   })
   let disposal: Promise<void> | undefined

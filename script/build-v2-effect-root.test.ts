@@ -4,11 +4,16 @@ import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { BUILD_NODES } from "./build-nodes"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 test("hybrid roots keep both module systems lazy until native Effect activation", async()=>{
   const root=resolve(import.meta.dir,".."),base=join(root,".omo/evidence/20261108-v2-effect-root")
   mkdirSync(base,{recursive:true});const output=mkdtempSync(join(base,"root-build-"))
   async function run(command:string,args:string[]){const child=Bun.spawn([command,...args],{cwd:root,stdout:"pipe",stderr:"pipe"});const [exitCode,stdout,stderr]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);return {exitCode,stdout,stderr}}
-  for(const id of ["index","v2-index"]){const node=BUILD_NODES.find(value=>value.id===id)!;const args=[...node.args];args[args.indexOf("--outdir")+1]=id==="index"?output:join(output,"v2");const result=await run(process.execPath,args);expect(result.exitCode,result.stderr).toBe(0)}
+  for(const id of ["index","v2-index"]){const node=present(BUILD_NODES.find(value=>value.id===id));const args=[...node.args];args[args.indexOf("--outdir")+1]=id==="index"?output:join(output,"v2");const result=await run(process.execPath,args);expect(result.exitCode,result.stderr).toBe(0)}
   const shim=await run(process.execPath,["script/patch-node-require-shim.ts",output]);expect(shim.exitCode,shim.stderr).toBe(0)
   cpSync(join(root,"packages/shared-skills/skills"),join(output,"skills"),{recursive:true})
   const entry=pathToFileURL(join(output,"index.js")).href

@@ -100,7 +100,8 @@ function failRefusedHostAdmission(initial: LaunchContext, ports: LaunchPorts, er
     ports.hostRefusalUnsettled?.(initial, failure)
     throw failure
   }
-  return outcome!
+  if (outcome === undefined) throw new Error("Host refusal bookkeeping produced no launch outcome")
+  return outcome
 }
 async function launchAdmitted(initial: LaunchContext, ports: LaunchPorts): Promise<LaunchOutcome> {
   if (ports.isShuttingDown()) {

@@ -4,6 +4,11 @@ import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { BUILD_NODES } from "./build-nodes"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 test("published roots preserve host SDK identity and load V1 without the optional V2 runtime", async () => {
   const root = resolve(import.meta.dir, "..")
   async function run(command: string, args: string[]) {
@@ -15,7 +20,7 @@ test("published roots preserve host SDK identity and load V1 without the optiona
   mkdirSync(evidence, { recursive: true })
   const output = mkdtempSync(join(evidence, "runtime-"))
   for (const id of ["index", "v2-index"]) {
-    const node = BUILD_NODES.find((entry) => entry.id === id)!
+    const node = present(BUILD_NODES.find((entry) => entry.id === id))
     const args = [...node.args]
     args[args.indexOf("--outdir") + 1] = id === "index" ? output : join(output, "v2")
     const build = await run(process.execPath, args)

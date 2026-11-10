@@ -4,10 +4,6 @@ import { TRANSCRIPT_ASSISTANT_EVENT, TRANSCRIPT_ERROR_EVENT, TRANSCRIPT_TOOL_EVE
 import type { TranscriptEntry, TranscriptReadResult } from "../contracts/transcript"
 import { readBoundedFileText } from "./read-bounded"
 
-// Re-exported from the writer (manager/transcript-log.ts) so reader and writer share ONE contract for
-// the event-type names and can never drift.
-export { TRANSCRIPT_ASSISTANT_EVENT, TRANSCRIPT_ERROR_EVENT, TRANSCRIPT_TOOL_EVENT }
-
 // Reconstruct a child's transcript from OUR event log (logs/<taskId>.jsonl). Only the two transcript
 // event types are lifted; lifecycle/audit events on the same log are ignored. A missing log is an
 // empty transcript, never a throw (task_output is read-only and must tolerate absent state).

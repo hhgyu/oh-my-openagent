@@ -4,14 +4,19 @@ import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { BUILD_NODES } from "./build-nodes"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 test("Effect session bridge bundles public protocol codecs and keeps host Effect external", async () => {
   const root = resolve(import.meta.dir, "..")
   const evidence = join(root, ".omo/evidence/20261108-v2-owned-child-controls")
   mkdirSync(evidence, { recursive: true })
   const output = mkdtempSync(join(evidence, "effect-session-build-"))
   const entry = join(output, "session-api.mjs")
-  const node = BUILD_NODES.find(value => value.id === "v2-index")!
-  const external = node.args.flatMap((argument, index) => argument === "--external" ? ["--external", node.args[index + 1]!] : [])
+  const node = present(BUILD_NODES.find(value => value.id === "v2-index"))
+  const external = node.args.flatMap((argument, index) => argument === "--external" ? ["--external", present(node.args[index + 1])] : [])
   async function run(command: string, args: string[]) {
     const child = Bun.spawn([command, ...args], { cwd: root, stdout: "pipe", stderr: "pipe" })
     const [exitCode, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])

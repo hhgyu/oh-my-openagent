@@ -7,6 +7,11 @@ import { acquireEffectPermissionApi, hasJoinedPermissionCancellation } from "./e
 import { assertPermissions, locationPermissionAdapters, type ResourcePermission, type LegacyPermissionPort } from "./permission-adapters"
 import path from "node:path"
 
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(yes => { resolve = yes })
@@ -95,7 +100,7 @@ test("invalid resource mappings reject before request and existing location mapp
   }
   expect(calls).toBe(0)
   const cwd = path.resolve("unit-cwd"), adapters = locationPermissionAdapters(cwd)
-  expect(adapters.read!({ path: "a.txt" })).toEqual([{ action: "read", resources: [path.join(cwd, "a.txt")] }])
-  expect(adapters.grep!({ pattern: "needle" })).toEqual([{ action: "read", resources: [cwd] }, { action: "grep", resources: ["needle"] }])
-  expect(() => adapters.read!({ path: "a", filePath: "b" })).toThrow("Ambiguous")
+  expect(defined(adapters.read)({ path: "a.txt" })).toEqual([{ action: "read", resources: [path.join(cwd, "a.txt")] }])
+  expect(defined(adapters.grep)({ pattern: "needle" })).toEqual([{ action: "read", resources: [cwd] }, { action: "grep", resources: ["needle"] }])
+  expect(() => defined(adapters.read)({ path: "a", filePath: "b" })).toThrow("Ambiguous")
 })

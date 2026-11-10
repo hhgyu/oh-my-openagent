@@ -75,7 +75,8 @@ export function createOwnedCompletionStore(options: OwnedCompletionStoreOptions)
       options.baseStore.save(record)
       if (!scope || !originallyOpen || options.creationScope?.() !== scope || scope.identity !== identity
         || scope.open !== true || scope.onCreated !== callback) return
-      const result: unknown = callback!.call(scope, birth)
+      if (!callback) throw new TypeError("Creation scope has no onCreated callback")
+      const result: unknown = callback.call(scope, birth)
       if (result !== undefined) throw new TypeError("Creation callback must return synchronous undefined", { cause: result })
     },
   }

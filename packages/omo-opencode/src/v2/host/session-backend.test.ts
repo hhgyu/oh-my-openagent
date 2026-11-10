@@ -5,15 +5,20 @@ import { createSessionScopes } from "./session-state"
 import { createSessionBackend, readBorrowedChildParent, type ChildJournal, type ChildRecord, type SessionBackendApi } from "./session-backend"
 import { withJoinedSessionCancellation } from "./session-cancellation"
 
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
+
 function deferred<T>() { let resolve!: (value:T)=>void; let reject!: (error:Error)=>void; const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no}); return {promise,resolve,reject} }
 test("cleanup recovery retries a transient unissued lookup with a newer real journal fence",async()=>{
  const f=fixture();await f.stage();const get=f.api.get;let fail=true
  f.api.get=async input=>{if(input.sessionID==="child"&&fail){fail=false;throw Error("transient child lookup")};return get(input)}
  const reload=createSessionBackend({app:{name:"opencode",version:"2.2.6",channel:"stable"},location:{directory:"/project"},session:f.api},f.options)
  await expect(reload.recoverForCleanup("child-task")).rejects.toThrow("transient child lookup")
- const revision=f.records.get("child-task")!.revision
+ const revision=defined(f.records.get("child-task")).revision
  await expect(reload.recover("child-task")).rejects.toThrow("Custody already loaded")
- const child=await reload.recoverForCleanup("child-task");expect(f.records.get("child-task")!.revision).toBeGreaterThan(revision)
+ const child=await reload.recoverForCleanup("child-task");expect(defined(f.records.get("child-task")).revision).toBeGreaterThan(revision)
  await expect(reload.recoverForCleanup("child-task")).rejects.toThrow("Custody already loaded")
  await reload.close(child);expect(f.events).toEqual(["create","interrupt","wait","remove"])
 })
@@ -39,7 +44,7 @@ test("unissued cleanup retry refuses foreign or revised custody before another c
   f.api.get=async input=>{if(input.sessionID==="child"){lookups++;throw Error("child lookup failed")};return get(input)}
   const reload=createSessionBackend({app:{name:"opencode",version:"2.2.6",channel:"stable"},location:{directory:"/project"},session:f.api},f.options)
   await expect(reload.recoverForCleanup("child-task")).rejects.toThrow("child lookup failed")
-  const row=f.records.get("child-task")!;f.records.set("child-task",{...row,...(replace==="owner"?{owner:"foreign"}:{revision:row.revision+1})})
+  const row=defined(f.records.get("child-task"));f.records.set("child-task",{...row,...(replace==="owner"?{owner:"foreign"}:{revision:row.revision+1})})
   await expect(reload.recoverForCleanup("child-task")).rejects.toThrow("fence lost")
   expect(lookups).toBe(1);expect(f.events).toEqual(["create"])
  }
@@ -52,16 +57,16 @@ function fixture() {
  const writeSync=(previous:ChildRecord,next:ChildRecord):undefined=>{const old=records.get(previous.key);if(!old||old.revision!==previous.revision||old.owner!==previous.owner)throw Error("stale fence");records.set(next.key,structuredClone(next));return undefined}
  const journal:ChildJournal={
   async claim(key,owner,initial){const old=records.get(key);if(old && old.owner!==owner)throw Error("live owner");if(old && initial)throw Error("already exists");const value=old?{...old,revision:old.revision+1}:initial;if(!value)throw Error("missing");records.set(key,value);return structuredClone(value)},
-  async read(key){return records.has(key)?structuredClone(records.get(key)!):undefined},
+  async read(key){return records.has(key)?structuredClone(defined(records.get(key))):undefined},
   writeSync,
   async write(previous,next){writeSync(previous,next)},
  }
  const api:SessionBackendApi={
-  async create(input){events.push("create");const value={id:sessionID(input.id!),parentID:parent.sessionID,location:{directory:"/project"}};sessions.set(value.id,value);return value},
+  async create(input){events.push("create");const value={id:sessionID(defined(input.id)),parentID:parent.sessionID,location:{directory:"/project"}};sessions.set(value.id,value);return value},
   async get({sessionID}){const value=sessions.get(sessionID);if(!value)throw Error("not found");return value},
   async list(){return {data:[...sessions.values()],cursor:{}}},
-  async prompt(input){events.push("prompt");return {id:input.id!,sessionID:sessionID(input.sessionID)}},
-  async synthetic(input){events.push("synthetic");return {id:input.id!,sessionID:sessionID(input.sessionID)}},
+  async prompt(input){events.push("prompt");return {id:defined(input.id),sessionID:sessionID(input.sessionID)}},
+  async synthetic(input){events.push("synthetic");return {id:defined(input.id),sessionID:sessionID(input.sessionID)}},
   async interrupt(){events.push("interrupt");return {interrupted:true}},async wait(){events.push("wait")},
   async remove({sessionID}){events.push("remove");sessions.delete(sessionID)},async context(){return []},
   instructions:{entry:{async list(){return []},async put(){},async remove(){}}},
@@ -105,7 +110,7 @@ test("private pre-invocation cancellation restores prior turn without erasing re
  const f=fixture(),child=await f.stage();await f.backend.begin(child,{id:"initial",text:"work"})
  f.options.journal.assertCurrent=row=>{if(JSON.stringify(f.records.get(row.key))!==JSON.stringify(row))throw Error("stale synchronous fence");return undefined}
  const before={nativeEpoch:0,observationKey:"turn:0"};f.backend.checkpointTurn(child,before)
- const controller=new AbortController(),write=f.options.journal.writeSync!
+ const controller=new AbortController(),write=defined(f.options.journal.writeSync)
  f.options.journal.writeSync=(prior,next)=>{const result=write(prior,next);if(next.phase==="admitting")controller.abort(new Error("stopped before actual call"));return result}
  const attempt=f.backend.preparePromptContinuation(child,{id:"msg_unstarted",text:"new",delivery:"queue",resume:true},{signal:controller.signal})
  f.backend.checkpointTurn(child,{nativeEpoch:1,observationKey:"turn:1",firstInputID:"msg_unstarted"})
@@ -139,13 +144,13 @@ test("prompt continuation uses the existing once-only ledger and preserves actua
  const f=fixture(),child=await f.stage();await f.backend.begin(child,{id:"initial",text:"work"})
  const continuation=(f.backend as unknown as {promptContinuation?: Function}).promptContinuation
  expect(typeof continuation).toBe("function")
- const sent:unknown[]=[];f.api.prompt=async(input)=>{sent.push(input);return {id:input.id!,sessionID:input.sessionID}}
- const receipt=await continuation!(child,{id:"msg_next",text:"next",delivery:"queue",resume:true})
+ const sent:unknown[]=[];f.api.prompt=async(input)=>{sent.push(input);return {id:defined(input.id),sessionID:input.sessionID}}
+ const receipt=await defined(continuation)(child,{id:"msg_next",text:"next",delivery:"queue",resume:true})
  expect(receipt).toEqual({state:"accepted",inboxID:"msg_next",consumption:"unconfirmed"})
  expect(sent).toEqual([{id:"msg_next",text:"next",delivery:"queue",resume:true,sessionID:"child"}])
- await expect(continuation!(child,{id:"msg_next",text:"changed",delivery:"steer",resume:true})).rejects.toThrow()
+ await expect(defined(continuation)(child,{id:"msg_next",text:"changed",delivery:"steer",resume:true})).rejects.toThrow()
  expect(sent).toHaveLength(1)
- expect(f.records.get("child-task")!.receipts).toEqual({initial:"accepted",msg_next:"accepted"})
+ expect(defined(f.records.get("child-task")).receipts).toEqual({initial:"accepted",msg_next:"accepted"})
  await expect(f.backend.begin(child,{id:"again",text:"replay"})).rejects.toThrow()
  await f.backend.close(child)
 })
@@ -155,9 +160,9 @@ test("prompt continuation keeps unknown admission durable and never replays its 
  const continuation=(f.backend as unknown as {promptContinuation?: Function}).promptContinuation
  expect(typeof continuation).toBe("function")
  let sends=0;f.api.prompt=async()=>{sends++;throw Error("lost continuation ACK")}
- await expect(continuation!(child,{id:"msg_unknown",text:"next",delivery:"steer",resume:true})).rejects.toMatchObject({code:"uncertain"})
- await expect(continuation!(child,{id:"msg_unknown",text:"next",delivery:"steer",resume:true})).rejects.toThrow()
- expect(sends).toBe(1);expect(f.records.get("child-task")!.receipts.msg_unknown).toBe("uncertain")
+ await expect(defined(continuation)(child,{id:"msg_unknown",text:"next",delivery:"steer",resume:true})).rejects.toMatchObject({code:"uncertain"})
+ await expect(defined(continuation)(child,{id:"msg_unknown",text:"next",delivery:"steer",resume:true})).rejects.toThrow()
+ expect(sends).toBe(1);expect(defined(f.records.get("child-task")).receipts.msg_unknown).toBe("uncertain")
  await f.backend.close(child)
 })
 
@@ -166,10 +171,10 @@ test("prompt continuation refuses forged/retired custody before dispatch and joi
  const before=structuredClone(f.records.get("child-task"));await expect(f.backend.promptContinuation({...child},{id:"msg_forged",text:"bad",delivery:"steer",resume:true})).rejects.toMatchObject({code:"foreign"})
  expect(f.records.get("child-task")).toEqual(before)
  const entered=Promise.withResolvers<void>(),caller=new AbortController();let joined=false
- f.api.prompt=async(_input,options)=>{entered.resolve();await new Promise<void>((_yes,no)=>{const signal=options!.signal!;const abort=()=>{signal.removeEventListener("abort",abort);joined=true;no(signal.reason)};signal.addEventListener("abort",abort,{once:true});if(signal.aborted)abort()});throw Error("unreachable")}
+ f.api.prompt=async(_input,options)=>{entered.resolve();await new Promise<void>((_yes,no)=>{const signal=defined(defined(options).signal);const abort=()=>{signal.removeEventListener("abort",abort);joined=true;no(signal.reason)};signal.addEventListener("abort",abort,{once:true});if(signal.aborted)abort()});throw Error("unreachable")}
  const pending=f.backend.promptContinuation(child,{id:"msg_abort",text:"next",delivery:"steer",resume:true},{signal:caller.signal}).catch(error=>error)
  await entered.promise;caller.abort(new Error("controlled request abort"));expect(await pending).toMatchObject({code:"uncertain"})
- expect(joined).toBe(true);expect(f.records.get("child-task")!.receipts.msg_abort).toBe("uncertain");await f.backend.close(child)
+ expect(joined).toBe(true);expect(defined(f.records.get("child-task")).receipts.msg_abort).toBe("uncertain");await f.backend.close(child)
 })
 
 test("cleanup idle wait stays fenced after admission stops and joins the actual host wait",async()=>{
@@ -186,7 +191,7 @@ test("staging creates but never prompts; admission is distinct from consumption"
 test("Stop during asynchronous create joins and removes late child without original prompt",async()=>{const f=fixture();const pending=deferred<Awaited<ReturnType<SessionBackendApi["create"]>>>();const original=f.api.create;f.api.create=async input=>{const value=await original(input);await pending.promise;return value};const stage=f.stage();await Bun.sleep(0);f.pause();pending.resolve({id:sessionID("child"),location:{directory:"/project"}});await expect(stage).rejects.toThrow();expect(f.events).toEqual(["create","interrupt","wait","remove"]);expect(f.sessions.has("child")).toBe(false)})
 test("Stop during initial admission cleans late acceptance and does not claim consumed",async()=>{const f=fixture();const child=await f.stage();const pending=deferred<Awaited<ReturnType<SessionBackendApi["prompt"]>>>();f.api.prompt=async()=>{f.events.push("prompt");return pending.promise};const begin=f.backend.begin(child,{id:"initial",text:"work"});await Bun.sleep(0);f.pause();pending.resolve({id:"initial",sessionID:sessionID("child")});await expect(begin).rejects.toThrow();expect(f.sessions.has("child")).toBe(false);expect(f.records.get("child-task")?.admission).toBe("accepted")})
 test("unknown admission remains durable uncertainty and cannot replay after reload",async()=>{const f=fixture();const child=await f.stage();f.api.prompt=async()=>{throw Error("transport lost")};await expect(f.backend.begin(child,{id:"initial",text:"work"})).rejects.toThrow();expect(f.records.get("child-task")?.admission).toBe("uncertain");const reload=createSessionBackend({app:{name:"opencode",version:"2.2.6",channel:"stable"},location:{directory:"/project"},session:f.api},f.options);const recovered=await reload.recover("child-task");await expect(reload.begin(recovered,{id:"initial",text:"work"})).rejects.toThrow();expect(f.events.filter(x=>x==="prompt")).toEqual([])})
-test("forged locator and stale durable owner cannot mutate a host child",async()=>{const f=fixture();const child=await f.stage();await expect(f.backend.close({...child})).rejects.toThrow();f.records.set("child-task",{...f.records.get("child-task")!,owner:"replacement"});await expect(f.backend.close(child)).rejects.toThrow();expect(f.events).toEqual(["create"])})
+test("forged locator and stale durable owner cannot mutate a host child",async()=>{const f=fixture();const child=await f.stage();await expect(f.backend.close({...child})).rejects.toThrow();f.records.set("child-task",{...defined(f.records.get("child-task")),owner:"replacement"});await expect(f.backend.close(child)).rejects.toThrow();expect(f.events).toEqual(["create"])})
 test("foreign parent/location cannot be adopted or deleted",async()=>{const f=fixture();f.api.create=async()=>({id:sessionID("child"),parentID:sessionID("foreign"),location:{directory:"/other"}});await expect(f.stage()).rejects.toThrow();expect(f.events).not.toContain("remove")})
 test("cleanup failure retains uncertain custody and original parent scope stays alive",async()=>{const f=fixture();const child=await f.stage();f.api.remove=async()=>{throw Error("offline")};await expect(f.backend.close(child)).rejects.toThrow();expect(f.records.get("child-task")?.phase).toBe("uncertain");expect(()=>f.scopes.assert(f.parent)).not.toThrow()})
 test("dispose joins in-flight creation and is idempotent",async()=>{const f=fixture();const pending=deferred<void>();const original=f.api.create;f.api.create=async input=>{const result=await original(input);await pending.promise;return result};const stage=f.stage();await Bun.sleep(0);const disposed=f.backend.dispose();pending.resolve();await expect(stage).rejects.toThrow();await disposed;await f.backend.dispose();expect(f.events.filter(x=>x==="remove")).toHaveLength(1)})
@@ -195,7 +200,7 @@ test("synthetic admission IDs are durable and cannot be reused after later messa
 test("old backend holder is fenced after recovery renews revision",async()=>{const f=fixture();const old=await f.stage();const reload=createSessionBackend({app:{name:"opencode",version:"2.2.6",channel:"stable"},location:{directory:"/project"},session:f.api},f.options);const recovered=await reload.recover("child-task");await expect(f.backend.close(old)).rejects.toThrow();await reload.close(recovered);expect(f.events.filter(x=>x==="remove")).toHaveLength(1)})
 test("full transcript and inbox operations are explicitly unavailable",()=>{const f=fixture();expect(()=>f.backend.unavailable("full-history")).toThrow("explicitly bound public client")})
 
-test("outstanding output wait permits continuation admissions and is cancelled by disposal",async()=>{const f=fixture();const child=await f.stage();await f.backend.begin(child,{id:"initial",text:"work"});f.api.wait=async(_input,options)=>{if(options?.signal)await new Promise<void>((_resolve,reject)=>{const signal=options.signal!;if(signal.aborted)reject(signal.reason);else signal.addEventListener("abort",()=>reject(signal.reason),{once:true})})};const waiting=f.backend.wait(child);await Bun.sleep(0);await f.backend.synthetic(child,{id:"during-wait",text:"next",resume:true});const disposal=f.backend.dispose();await expect(waiting).rejects.toThrow();await disposal;expect(f.sessions.has("child")).toBe(false)})
+test("outstanding output wait permits continuation admissions and is cancelled by disposal",async()=>{const f=fixture();const child=await f.stage();await f.backend.begin(child,{id:"initial",text:"work"});f.api.wait=async(_input,options)=>{if(options?.signal)await new Promise<void>((_resolve,reject)=>{const signal=defined(options.signal);if(signal.aborted)reject(signal.reason);else signal.addEventListener("abort",()=>reject(signal.reason),{once:true})})};const waiting=f.backend.wait(child);await Bun.sleep(0);await f.backend.synthetic(child,{id:"during-wait",text:"next",resume:true});const disposal=f.backend.dispose();await expect(waiting).rejects.toThrow();await disposal;expect(f.sessions.has("child")).toBe(false)})
 test("retired child scopes cannot mutate persistent instructions",async()=>{const f=fixture();const child=await f.stage();f.scopes.retire(child.lease);await expect(f.backend.instructions(child).put("key","value")).rejects.toThrow()})
 
 test("verified journal recovery rebinds a retired parent generation without replay",async()=>{const f=fixture();const child=await f.stage();await f.backend.begin(child,{id:"initial",text:"work"});const parent=f.scopes.open(f.parent.sessionID,{tools:[],authorize:()=>{}});const reload=createSessionBackend({app:{name:"opencode",version:"2.2.6",channel:"stable"},location:{directory:"/project"},session:f.api},{...f.options,parent});const recovered=await reload.recover("child-task");expect(recovered.locator.generation).toBe(parent.generation);expect(child.lease.signal.aborted).toBe(true);await expect(reload.begin(recovered,{id:"initial",text:"replay"})).rejects.toThrow();await reload.close(recovered)})
@@ -245,7 +250,7 @@ test("raw interruption works after admission Stop and returns ACK without retiri
  let request:unknown;let signal:AbortSignal|undefined
  f.api.interrupt=async(input,opts)=>{request=input;signal=opts?.signal;f.events.push("interrupt");return {interrupted:false}}
  f.pause();expect(await f.backend.interrupt(child)).toEqual({state:"answered",interrupted:false,settlement:"unconfirmed"})
- expect(request).toEqual({sessionID:"child",resume:false});expect(signal).toBeInstanceOf(AbortSignal);expect(signal!.aborted).toBe(false)
+ expect(request).toEqual({sessionID:"child",resume:false});expect(signal).toBeInstanceOf(AbortSignal);expect(defined(signal).aborted).toBe(false)
  expect(child.lease.signal.aborted).toBe(false);expect(f.records.get("child-task")).toEqual(record);expect(f.sessions.has("child")).toBe(true)
  await f.backend.dispose()
 })
@@ -277,16 +282,16 @@ test("interruption rejects forged/stale/foreign host identity before any host co
  const f=fixture(),child=await f.stage();await expect(f.backend.interrupt({...child})).rejects.toMatchObject({code:"foreign"})
  const original=f.api.get;f.api.get=async input=>input.sessionID==="child"?{id:sessionID("child"),parentID:sessionID("wrong-parent"),location:{directory:"/project"}}:original(input)
  await expect(f.backend.interrupt(child)).rejects.toMatchObject({code:"foreign"});expect(f.events).toEqual(["create"])
- f.api.get=original;f.records.set("child-task",{...f.records.get("child-task")!,owner:"other-owner"})
+ f.api.get=original;f.records.set("child-task",{...defined(f.records.get("child-task")),owner:"other-owner"})
  await expect(f.backend.interrupt(child)).rejects.toMatchObject({code:"conflict"});await expect(f.backend.detach(child)).rejects.toMatchObject({code:"conflict"});expect(f.events).toEqual(["create"])
 })
 test("late owner after genuine get or host ACK cannot be overwritten or answered as owned",async()=>{
  for(const when of ["get","ack"]){
   const f=fixture(),child=await f.stage();await f.backend.begin(child,{id:"initial",text:"work"});const original=f.api.get
-  if(when==="get")f.api.get=async input=>{const value=await original(input);if(input.sessionID==="child")f.records.set("child-task",{...f.records.get("child-task")!,owner:"new-owner"});return value}
-  else f.api.interrupt=async()=>{f.events.push("interrupt");f.records.set("child-task",{...f.records.get("child-task")!,owner:"new-owner"});return {interrupted:true}}
+  if(when==="get")f.api.get=async input=>{const value=await original(input);if(input.sessionID==="child")f.records.set("child-task",{...defined(f.records.get("child-task")),owner:"new-owner"});return value}
+  else f.api.interrupt=async()=>{f.events.push("interrupt");f.records.set("child-task",{...defined(f.records.get("child-task")),owner:"new-owner"});return {interrupted:true}}
   await expect(f.backend.interrupt(child)).rejects.toMatchObject({code:"conflict"})
-  expect(f.records.get("child-task")!.owner).toBe("new-owner");expect(f.records.get("child-task")!.phase).toBe("accepted");expect(f.records.get("child-task")!.receipts).toEqual({initial:"accepted"})
+  expect(defined(f.records.get("child-task")).owner).toBe("new-owner");expect(defined(f.records.get("child-task")).phase).toBe("accepted");expect(defined(f.records.get("child-task")).receipts).toEqual({initial:"accepted"})
   expect(f.events.filter(x=>x==="interrupt")).toHaveLength(when==="get"?0:1)
  }
 })
@@ -333,7 +338,7 @@ test("bare Promise port cannot run cancellation-dependent controls or readers",a
 })
 test("detach receipt waits for asynchronous underlying reader cancellation cleanup",async()=>{
  const f=fixture(),child=await f.stage(),release=deferred<void>(),entered=deferred<void>();const order:string[]=[]
- f.api.wait=async(_input,opts)=>{entered.resolve();await new Promise<void>((_,reject)=>opts!.signal!.addEventListener("abort",()=>{void release.promise.then(()=>{order.push("finalizer");reject(opts!.signal!.reason)})},{once:true}))}
+ f.api.wait=async(_input,opts)=>{entered.resolve();await new Promise<void>((_,reject)=>defined(defined(opts).signal).addEventListener("abort",()=>{void release.promise.then(()=>{order.push("finalizer");reject(defined(defined(opts).signal).reason)})},{once:true}))}
  const waiting=f.backend.wait(child).catch(error=>{order.push("reader-rejected");return error});await entered.promise
  let detached=false;const detach=f.backend.detach(child).then(value=>{detached=true;order.push("detach-returned");return value})
  await Bun.sleep(0);expect(child.lease.signal.aborted).toBe(true);expect(detached).toBe(false)
@@ -368,7 +373,7 @@ test("async-only journals retain legacy admission checkpoint semantics without o
 })
 test("dispose aborts and joins parent listing through asynchronous request cleanup",async()=>{
  const f=fixture(),entered=deferred<void>(),release=deferred<void>(),order:string[]=[];let signal:AbortSignal|undefined
- f.api.list=async(_input,opts)=>{signal=opts?.signal;entered.resolve();if(!signal)throw Error("list missing cancellation signal");await new Promise<void>((_,reject)=>signal!.addEventListener("abort",()=>{void release.promise.then(()=>{order.push("list-finalizer");reject(signal!.reason)})},{once:true}));return {data:[],cursor:{}}}
+ f.api.list=async(_input,opts)=>{signal=opts?.signal;entered.resolve();if(!signal)throw Error("list missing cancellation signal");await new Promise<void>((_,reject)=>defined(signal).addEventListener("abort",()=>{void release.promise.then(()=>{order.push("list-finalizer");reject(defined(signal).reason)})},{once:true}));return {data:[],cursor:{}}}
  const listing=f.backend.list().catch(error=>{order.push("list-rejected");return error});await entered.promise
  let disposed=false;const disposal=f.backend.dispose().then(()=>{disposed=true;order.push("disposed")})
  try {await Bun.sleep(0);expect(signal?.aborted).toBe(true);expect(disposed).toBe(false)}finally{release.resolve();await listing;await disposal}

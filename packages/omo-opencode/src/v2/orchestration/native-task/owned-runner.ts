@@ -35,7 +35,7 @@ export interface OwnedRunnerOptions {
 }
 export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
   const backends = new Set<ReturnType<typeof createSessionBackend>>()
-  const custody = createGuardCustody({ owner: () => options.childGuard!.owner, journal: options.journal, scopes: options.scopes, hostVersion: options.ctx.app.version, location: options.ctx.location.directory })
+  const custody = createGuardCustody({ owner: () => { if (!options.childGuard) throw Error("Owned runner has no child guard owner"); return options.childGuard.owner }, journal: options.journal, scopes: options.scopes, hostVersion: options.ctx.app.version, location: options.ctx.location.directory })
   const guardClaims = custody.claims, stopGuard = custody.stop, releaseGuard = custody.release
   const retainedCleanup = new Map<string, { backend: ReturnType<typeof createSessionBackend>; child?: Awaited<ReturnType<ReturnType<typeof createSessionBackend>["recover"]>> }>()
   async function closeRetained(record: TaskRecord) {
@@ -154,25 +154,28 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
           if (!spec.admission?.hostAuthority) throw Error("Stage has no original Native admission")
           spec.admission.assertOpen()
         }), restoring)
-        guardClaim = { token, sessionID: candidateID, parent, key: journalKey, hooksClosed: false, released: false,
+        const claim: GuardClaim = { token, sessionID: candidateID, parent, key: journalKey, hooksClosed: false, released: false,
           parkedReceipt: () => child && backend.parkedReceipt(child), assertParked: (receipt, issued) => backend.assertParked(receipt, issued) }
-        guardClaim.closeHooks = async () => {
+        guardClaim = claim
+        claim.closeHooks = async () => {
           const cleaned = await Promise.allSettled([Promise.resolve().then(() => instructions?.dispose()), Promise.resolve().then(() => observer?.dispose())])
           if (cleaned.some(result => result.status === "rejected")) throw new AggregateError(cleaned.flatMap(result => result.status === "rejected" ? [result.reason] : []), "Original child registrations cleanup incomplete")
-          guardClaim!.hooksClosed = true
+          claim.hooksClosed = true
         }
-        guardClaims.set(journalKey, guardClaim)
+        guardClaims.set(journalKey, claim)
       }
       if (recoveringKey) child = await backend.recover(journalKey, { restoreParked: restoring })
       else {
-        child = await backend.stage({ key: journalKey, sessionID: candidateID!, agent: guarded?.buildAgentID ?? "build", model }, { signal: spec.admission?.hostSignal?.() })
+        if (!candidateID) throw Error("Native task stage has no candidate session")
+        child = await backend.stage({ key: journalKey, sessionID: candidateID, agent: guarded?.buildAgentID ?? "build", model }, { signal: spec.admission?.hostSignal?.() })
       }
       if (guarded && guardClaim) {
         const originalCurrent = backend.observationGuard(child)
         const binding = guarded.bind(child, originalCurrent)
         if (binding.child !== child || binding.agent !== guarded.buildAgentID) throw Error("Guard binding differs from actual approved child")
         assertBound = () => { guarded.assertLifetime(); originalCurrent(); binding.assertCurrent() }
-        options.childGuard!.owner.bind(guardClaim.token, { ...binding, child, agent: guarded.buildAgentID, assertCurrent: assertBound })
+        if (!options.childGuard) throw Error("Owned runner has no child guard owner")
+        options.childGuard.owner.bind(guardClaim.token, { ...binding, child, agent: guarded.buildAgentID, assertCurrent: assertBound })
       }
       firstInput()
       const ownedChild = child
@@ -193,7 +196,10 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
       firstInput()
       // New guard generation, producer bindings, context policy and observer are installed:
       // only now lift OUR deny rule and marker. Conflict refuses with the host deny retained.
-      if (restoring) await backend.restoreParked(ownedChild, guarded!.buildAgentID)
+      if (restoring) {
+        if (!guarded) throw Error("Parked restore requires the original guard approval")
+        await backend.restoreParked(ownedChild, guarded.buildAgentID)
+      }
       const control = await createOwnedTaskHandle({ spec, child: ownedChild, backend, journal: options.journal, observer, store: options.store, journalKey, stateDir: options.stateDir, openObserver, closeRetained,
         recovered: recoveringKey !== undefined,
         firstInputAccepted: () => spec.admission?.hostAccepted?.() })
@@ -208,7 +214,8 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
         void pending.catch(() => { if (hookClose === pending) hookClose = undefined })
         return pending
       }
-      if (guardClaim) guardClaim.closeHooks = async () => { await closeHooks(); guardClaim!.hooksClosed = true }
+      const retainedClaim = guardClaim
+      if (retainedClaim) retainedClaim.closeHooks = async () => { await closeHooks(); retainedClaim.hooksClosed = true }
       const originalDispose = control.handle.dispose
       control.handle.dispose = async () => { await stopGuard(guardClaim); await originalDispose(); await closeHooks(); if (guardClaim) guardClaim.hooksClosed = true; await custody.retireParked(guardClaim) }
       control.detach = async () => { await stopGuard(guardClaim); await detach(); await closeHooks(); if (guardClaim) guardClaim.hooksClosed = true; await custody.retireParked(guardClaim) }

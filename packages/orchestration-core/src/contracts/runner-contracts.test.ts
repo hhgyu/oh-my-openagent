@@ -5,6 +5,11 @@ import { RunnerError as DirectRunnerError } from "./runner-error"
 import { TASK_START_FAILURE_KINDS, TASK_START_FAILURE_REASONS } from "./task-start-failure"
 import type { ChildCompletionPolicy, RunnerFailure, RunnerOutcome, TaskInterruptCause } from "./child-outcome"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 test("public barrel and direct contract share the original branded constructor and cause", () => {
   const cause = new Error("fixture cause")
   const failure: RunnerFailure = { kind: "child-prompt-failed", message: "fixture failed", cause }
@@ -57,7 +62,7 @@ test("implemented core contract closure has only explicit local imports and no h
   const files = ["../index.ts", "task-start-failure.ts", "child-outcome.ts", "runner-error.ts"]
   for (const file of files) {
     const source = readFileSync(new URL(file, import.meta.url), "utf8")
-    const imports = [...source.matchAll(/(?:import|export)\s+(?:type\s+)?[\s\S]*?from\s*["']([^"']+)["']/g)].map(match => match[1]!)
+    const imports = [...source.matchAll(/(?:import|export)\s+(?:type\s+)?[\s\S]*?from\s*["']([^"']+)["']/g)].map(match => present(match[1]))
     expect(imports.every(specifier => specifier.startsWith("."))).toBe(true)
     expect(source).not.toMatch(/@code-yeongyu\/senpi|@opencode\/|@opencode-ai\/|senpi-barrel/)
   }

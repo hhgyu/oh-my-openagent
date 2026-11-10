@@ -25,6 +25,11 @@ export class LspToolFailure extends Error {
   constructor(readonly code: "missing_dependency" | "invalid_path" | "workspace_edit_rejected" | "diagnostics_unavailable" | "disposed" | "reentrant_operation", message: string) { super(message) }
 }
 
+function workspaceQuery(query: string | undefined): string {
+  if (query === undefined) throw new Error("query is required for workspace scope")
+  return query
+}
+
 /** Reuses the neutral transport and document tracker. No call acquires core's auto-write
  * mutation lease: unsolicited server applyEdit is refused, including during initialization. */
 export class RequestOnlyLspClient extends LspClient {
@@ -309,7 +314,7 @@ export function createLspRuntime(options: LspRuntimeOptions) {
     if (statSync(path).isDirectory()) throw new LspToolFailure("invalid_path", "Use a source file; only lsp_diagnostics accepts directories")
     if (name === "lsp_symbols" && "scope" in input) {
       return withClient(path, signal, input.scope === "workspace" ? "workspaceSymbols" : "documentSymbols", async client => {
-        const symbols = input.scope === "workspace" ? await client.workspaceSymbols(input.query!, signal) : await client.documentSymbols(path, signal)
+        const symbols = input.scope === "workspace" ? await client.workspaceSymbols(workspaceQuery(input.query), signal) : await client.documentSymbols(path, signal)
         await locations(caller, symbols, signal)
         const lines = symbols.slice(0, input.limit).map(symbol => "range" in symbol ? formatDocumentSymbol(symbol) : formatSymbolInfo(symbol))
         return result(symbols.length ? `${symbols.length > input.limit ? `Found ${symbols.length} symbols (showing first ${input.limit}):\n` : ""}${lines.join("\n")}` : "No symbols found", { ...base, symbols, totalSymbols: symbols.length, truncated: symbols.length > input.limit })

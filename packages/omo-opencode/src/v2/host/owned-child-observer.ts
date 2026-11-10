@@ -187,7 +187,7 @@ export async function createOwnedChildObserver(ctx: Host, options: OwnedChildObs
       observation() {
         if (disposed || fault) return safeView([], [fault ?? "observer-disposed"], false)
         try { drainMetadata(); const snapshot = bound.snapshot(); return safeView(snapshot.records, snapshot.uncertainty, toolMetadataSource !== undefined) }
-        catch { fail("observation-store-unavailable"); return safeView([], [fault!], false) }
+        catch { fail("observation-store-unavailable"); return safeView([], [fault ?? "observation-store-unavailable"], false) }
       },
       waitForOutcome(signal) {
         if (!expectedInput) return Promise.reject(new Error("Record the expected owned input before waiting"))

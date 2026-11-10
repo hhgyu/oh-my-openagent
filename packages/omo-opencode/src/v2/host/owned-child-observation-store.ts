@@ -92,7 +92,8 @@ export function openOwnedChildObservationStore(options: OwnedChildObservationSto
       }).immediate()
     }
     function totals(key: string) {
-      const value = db.query<{ count: number; bytes: number }, [string]>("SELECT count(*) AS count, coalesce(sum(length(cast(body as blob))),0) AS bytes FROM observation_records WHERE key=?").get(key)!
+      const value = db.query<{ count: number; bytes: number }, [string]>("SELECT count(*) AS count, coalesce(sum(length(cast(body as blob))),0) AS bytes FROM observation_records WHERE key=?").get(key)
+      if (!value) fail("Missing observation size")
       if (!Number.isSafeInteger(value.count) || !Number.isSafeInteger(value.bytes) || value.count < 0 || value.bytes < 0) fail("Corrupt observation size")
       if (value.count > maxEntries || value.bytes > maxBytes) fail("Observation limit exceeded")
       return value

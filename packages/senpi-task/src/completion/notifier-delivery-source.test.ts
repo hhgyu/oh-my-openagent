@@ -21,7 +21,7 @@ describe("optional completion source custody (actual FileStore)", () => {
       const notifier = createCompletionNotifier({ store, notifier: host, schedule: () => () => {} })
       const input = { record, parentState: { kind: "idle" as const }, runInBackground: true }
       expect(notifier.notifyTerminal(input)).toEqual({ kind: "pending", decision: "wake" })
-      expect(store.load(record.task_id)!.notification.notified_epoch).toBe(-1)
+      expect(present(store.load(record.task_id)).notification.notified_epoch).toBe(-1)
       expect(notifier.notifyTerminal(input)).toEqual({ kind: "pending", decision: "wake" })
       notifier.reconcileUnnotifiedNotifications({ sessionId: "parent", parentState: { kind: "idle" } })
       expect(calls).toBe(1)
@@ -31,6 +31,11 @@ describe("optional completion source custody (actual FileStore)", () => {
 
 import type { TaskRecord } from "../state"
 import type { CompletionDeliverySource, CompletionNotifierStore, ParentNotifierMessage } from "./types"
+
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
 
 type SourceCall = { message: ParentNotifierMessage; sources: readonly CompletionDeliverySource[] }
 function withFileStore(run: (h: ReturnType<typeof setup>) => void): void {
@@ -71,33 +76,33 @@ function setup() {
 describe("deferred source lifecycle", () => {
   test("accepted only commits once; contradictory and duplicate callbacks are inert", () => withFileStore(h => {
     const r = h.record(); h.notify(r)
-    const s = h.calls[0]!.sources[0]!
+    const s = present(present(h.calls[0]).sources[0])
     expect(Object.isFrozen(s)).toBe(true)
     expect([s.taskId, s.runEpoch, s.parentSessionId]).toEqual([r.task_id, 0, "parent"])
     s.accepted(); s.notDelivered(Error("contradictory")); s.accepted()
-    expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(0)
+    expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(0)
     expect(h.timers).toHaveLength(0)
     expect(h.notify(r)).toEqual({ kind: "skipped", reason: "already-notified" })
   }))
   test("reentrant accepted is latched until host returns; original message and receiver", () => withFileStore(h => {
     const r = h.record()
-    h.host(call => { call.sources[0]!.accepted(); expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(-1) })
+    h.host(call => { present(call.sources[0]).accepted(); expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(-1) })
     expect(h.notify(r)).toEqual({ kind: "delivered", decision: "wake" })
-    expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(0)
+    expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(0)
   }))
   test("reentrant failure is latched and falsey original errors remain failures", () => withFileStore(h => {
-    const r = h.record(); h.host(call => call.sources[0]!.notDelivered(undefined))
+    const r = h.record(); h.host(call => present(call.sources[0]).notDelivered(undefined))
     expect(h.notify(r)).toEqual({ kind: "failed" })
-    expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(-1)
-    expect(h.store.load(r.task_id)!.notification.notification_failed_epoch).toBe(0)
+    expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(-1)
+    expect(present(h.store.load(r.task_id)).notification.notification_failed_epoch).toBe(0)
     expect(h.timers).toHaveLength(1)
   }))
   test("physical accepted CAS write then throw retains pending ahead of notified skip", () => withFileStore(h => {
-    const r = h.record(); h.notify(r); const s = h.calls[0]!.sources[0]!
+    const r = h.record(); h.notify(r); const s = present(present(h.calls[0]).sources[0])
     let once = true
     h.mutate((id, fn) => { const result = h.store.mutate(id, fn); if (once) { once = false; throw Error("after actual write") }; return result })
     expect(() => s.accepted()).toThrow("after actual write")
-    expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(0)
+    expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(0)
     expect(h.notify(r)).toEqual({ kind: "pending", decision: "wake" })
     h.notifier.reconcileUnnotifiedNotifications({ sessionId: "parent", parentState: { kind: "idle" } })
     s.notDelivered(Error("cannot undo known acceptance")); s.accepted()
@@ -105,15 +110,15 @@ describe("deferred source lifecycle", () => {
     expect(h.notify(r).kind).toBe("skipped")
   }))
   test("accepted CAS before-write failure propagates, then retries only bookkeeping", () => withFileStore(h => {
-    const r = h.record(); h.notify(r); const s = h.calls[0]!.sources[0]!
+    const r = h.record(); h.notify(r); const s = present(present(h.calls[0]).sources[0])
     h.mutate(() => { throw Error("commit blocked") })
     expect(() => s.accepted()).toThrow("commit blocked")
     s.notDelivered(Error("contradiction"))
     h.mutate(h.store.mutate); s.accepted()
-    expect(h.calls).toHaveLength(1); expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(0)
+    expect(h.calls).toHaveLength(1); expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(0)
   }))
   for (const change of ["epoch", "parent", "running", "notifying"] as const) test(`atomic ${change} fence inside actual mutate`, () => withFileStore(h => {
-    const r = h.record(); h.notify(r); const s = h.calls[0]!.sources[0]!
+    const r = h.record(); h.notify(r); const s = present(present(h.calls[0]).sources[0])
     h.mutate((id, fn) => {
       h.store.mutate(id, current => change === "epoch" ? { ...current, notification: { ...current.notification, run_epoch: 1 } }
         : change === "parent" ? { ...current, parent_session_id: "other" }
@@ -121,21 +126,21 @@ describe("deferred source lifecycle", () => {
       return h.store.mutate(id, fn)
     })
     s.accepted()
-    expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(-1)
+    expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(-1)
     expect(h.calls).toHaveLength(1)
   }))
   test("delayed old epoch and same-epoch superseded failure cannot mutate accepted run", () => withFileStore(h => {
-    const r = h.record(); h.notify(r); const old = h.calls[0]!.sources[0]!
-    old.notDelivered(Error("definite")); h.timers[0]!.run()
-    const next = h.calls[1]!.sources[0]!; next.accepted(); old.notDelivered(Error("late")); old.accepted()
-    expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(0)
+    const r = h.record(); h.notify(r); const old = present(present(h.calls[0]).sources[0])
+    old.notDelivered(Error("definite")); present(h.timers[0]).run()
+    const next = present(present(h.calls[1]).sources[0]); next.accepted(); old.notDelivered(Error("late")); old.accepted()
+    expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(0)
     h.store.mutate(r.task_id, x => ({ ...x, notification: { ...x.notification, run_epoch: 1, notified_epoch: 0 } }))
-    h.notify(h.store.load(r.task_id)!); const newer = h.calls[2]!.sources[0]!; newer.accepted(); next.notDelivered(Error("old epoch"))
-    expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(1)
+    h.notify(present(h.store.load(r.task_id))); const newer = present(present(h.calls[2]).sources[0]); newer.accepted(); next.notDelivered(Error("old epoch"))
+    expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(1)
     expect(h.calls).toHaveLength(3)
   }))
   test("failure audit fault retains mutationDone; retry never mutates new epoch", () => withFileStore(h => {
-    const r = h.record(); h.notify(r); const s = h.calls[0]!.sources[0]!
+    const r = h.record(); h.notify(r); const s = present(present(h.calls[0]).sources[0])
     h.append(() => { throw Error("audit blocked") })
     expect(() => s.notDelivered("original")).toThrow("audit blocked")
     expect(h.notify(r).kind).toBe("pending")
@@ -146,10 +151,10 @@ describe("deferred source lifecycle", () => {
     s.notDelivered("replacement must not replace original")
     expect(event).toMatchObject({ epoch: 0, parent_session_id: "parent", error: "original" })
     expect(writes).toBe(0); expect(h.timers).toHaveLength(0)
-    expect(h.store.load(r.task_id)!.notification).toEqual({ run_epoch: 1, notified_epoch: 1 })
+    expect(present(h.store.load(r.task_id)).notification).toEqual({ run_epoch: 1, notified_epoch: 1 })
   }))
   test("unfinished audit across removal is retained and never recreates log", () => withFileStore(h => {
-    const r = h.record(); h.notify(r); const s = h.calls[0]!.sources[0]!
+    const r = h.record(); h.notify(r); const s = present(present(h.calls[0]).sources[0])
     h.append(() => { throw Error("audit blocked") }); expect(() => s.notDelivered(null)).toThrow()
     h.store.remove(r.task_id); let appends = 0
     h.append((id, event) => { appends++; return h.store.appendEvent(id, event) })
@@ -158,7 +163,7 @@ describe("deferred source lifecycle", () => {
     expect(h.notify(r).kind).toBe("pending")
   }))
   test("failure bookkeeping retry preserves original error and schedules only after audit", () => withFileStore(h => {
-    const r = h.record(); h.notify(r); const s = h.calls[0]!.sources[0]!
+    const r = h.record(); h.notify(r); const s = present(present(h.calls[0]).sources[0])
     h.append(() => { throw Error("audit fault") }); expect(() => s.notDelivered("original")).toThrow()
     expect(h.timers).toHaveLength(0)
     let error: unknown
@@ -168,7 +173,7 @@ describe("deferred source lifecycle", () => {
   }))
   test("missing actual source fails with zero host; removed receipt settles stale", () => withFileStore(h => {
     const r = h.record(); h.store.remove(r.task_id); expect(h.notify(r)).toEqual({ kind: "failed" }); expect(h.calls).toHaveLength(0)
-    h.store.save(r); h.notify(r); h.store.remove(r.task_id); h.calls[0]!.sources[0]!.accepted()
+    h.store.save(r); h.notify(r); h.store.remove(r.task_id); present(present(h.calls[0]).sources[0]).accepted()
     expect(h.store.load(r.task_id)).toBeNull(); expect(h.timers).toHaveLength(0)
   }))
   test("buffer transfer excludes stale entries, latches reentrant reconcile and counts actual handoff", () => withFileStore(h => {
@@ -178,9 +183,9 @@ describe("deferred source lifecycle", () => {
     h.store.remove(a.task_id)
     h.host(() => h.notifier.reconcileUnnotifiedNotifications({ sessionId: "parent", parentState: { kind: "idle" } }))
     expect(h.notifier.flushBuffered({ sessionId: "parent", replaced: false })).toEqual({ kind: "pending", count: 1 })
-    expect(h.calls).toHaveLength(1); expect(h.calls[0]!.sources.map(s => s.taskId)).toEqual([b.task_id])
-    expect(h.calls[0]!.message.details.map(d => d.task_id)).toEqual([b.task_id])
-    h.calls[0]!.sources[0]!.accepted()
+    expect(h.calls).toHaveLength(1); expect(present(h.calls[0]).sources.map(s => s.taskId)).toEqual([b.task_id])
+    expect(present(h.calls[0]).message.details.map(d => d.task_id)).toEqual([b.task_id])
+    present(present(h.calls[0]).sources[0]).accepted()
   }))
   test("all stale buffer flush returns empty; replacement drop never dispatches", () => withFileStore(h => {
     const a = h.record(1); h.notify(a, "compacting"); h.store.remove(a.task_id)
@@ -191,39 +196,39 @@ describe("deferred source lifecycle", () => {
   }))
   test("partial batch accepted retains remaining pending; both reentrant accepted returns flushed", () => withFileStore(h => {
     const a = h.record(1), b = h.record(2); h.notify(a, "compacting"); h.notify(b, "compacting")
-    h.host(call => call.sources[0]!.accepted())
+    h.host(call => present(call.sources[0]).accepted())
     expect(h.notifier.flushBuffered({ sessionId: "parent", replaced: false })).toEqual({ kind: "pending", count: 2 })
-    expect(h.store.load(a.task_id)!.notification.notified_epoch).toBe(0)
-    expect(h.store.load(b.task_id)!.notification.notified_epoch).toBe(-1)
-    h.calls[0]!.sources[1]!.accepted()
+    expect(present(h.store.load(a.task_id)).notification.notified_epoch).toBe(0)
+    expect(present(h.store.load(b.task_id)).notification.notified_epoch).toBe(-1)
+    present(present(h.calls[0]).sources[1]).accepted()
     const c = h.record(3); h.notify(c, "compacting"); h.host(call => call.sources.forEach(s => s.accepted()))
     expect(h.notifier.flushBuffered({ sessionId: "parent", replaced: false })).toEqual({ kind: "flushed", count: 1 })
   }))
   test("two immediate preadmission throws preserve message/receiver and falsey failure", () => withFileStore(h => {
     const r = h.record(); h.host(() => { throw undefined })
     expect(h.notify(r)).toEqual({ kind: "failed" }); expect(h.calls).toHaveLength(2)
-    expect(h.calls[0]!.message).toBe(h.calls[1]!.message)
-    expect(h.calls[0]!.sources[0]).not.toBe(h.calls[1]!.sources[0])
+    expect(present(h.calls[0]).message).toBe(present(h.calls[1]).message)
+    expect(present(h.calls[0]).sources[0]).not.toBe(present(h.calls[1]).sources[0])
     expect(h.timers).toHaveLength(1)
   }))
   test("accepted then host throw never triggers immediate resend", () => withFileStore(h => {
-    const r = h.record(); h.host(call => { call.sources[0]!.accepted(); throw Error("illegal host throw") })
+    const r = h.record(); h.host(call => { present(call.sources[0]).accepted(); throw Error("illegal host throw") })
     expect(() => h.notify(r)).toThrow("illegal host throw"); expect(h.calls).toHaveLength(1)
-    expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(0)
+    expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(0)
   }))
   test("queued custody retains retry counts; uncertain callbacks do not dispatch", () => withFileStore(h => {
     const r = h.record(); h.notify(r)
     h.notifier.reconcileUnnotifiedNotifications({ sessionId: "parent", parentState: { kind: "idle" } })
     expect(h.calls).toHaveLength(1); expect(h.timers).toHaveLength(0)
     for (let i = 0; i < 9; i++) {
-      h.calls.at(-1)!.sources[0]!.notDelivered(`failure${i}`)
-      if (i < 8) h.timers[i]!.run()
+      present(present(h.calls.at(-1)).sources[0]).notDelivered(`failure${i}`)
+      if (i < 8) present(h.timers[i]).run()
     }
     expect(h.calls).toHaveLength(9); expect(h.timers).toHaveLength(8)
   }))
   test("reconcile sources are canonical and duplicate pending is suppressed", () => withFileStore(h => {
     const r = h.record(); h.notifier.reconcileUnnotifiedNotifications({ sessionId: "parent", parentState: { kind: "streaming" } })
-    expect(h.calls[0]!.sources[0]!.runEpoch).toBe(r.notification.run_epoch)
+    expect(present(present(h.calls[0]).sources[0]).runEpoch).toBe(r.notification.run_epoch)
     expect(h.notify(r)).toEqual({ kind: "pending", decision: "deliver_streaming" })
   }))
 })
@@ -235,10 +240,10 @@ test("optional task-ID-only failure rejects without any store or transport side 
   h.append((id, event) => { events++; return h.store.appendEvent(id, event) })
   expect(() => h.notifier.recordDeliveryFailure({ taskIds: [r.task_id], error: "no provenance" })).toThrow("issued source receipt")
   expect([mutations, events, h.timers.length, h.calls.length]).toEqual([0, 0, 0, 1])
-  expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(-1)
+  expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(-1)
 }))
 test("audit refuses detectable task reincarnation and retains original obligation", () => withFileStore(h => {
-  const r = h.record(); h.notify(r); const s = h.calls[0]!.sources[0]!
+  const r = h.record(); h.notify(r); const s = present(present(h.calls[0]).sources[0])
   h.append(() => { throw Error("audit first failed") }); expect(() => s.notDelivered("original")).toThrow()
   h.store.remove(r.task_id); h.store.save({ ...r, created_at: "2026-11-09T00:00:00.000Z" })
   let appends = 0; h.append((id, event) => { appends++; return h.store.appendEvent(id, event) })
@@ -256,7 +261,7 @@ test("legacy absence retains one-argument receiver, exact message and immediate 
 test("optional source method retains original receiver and two-argument shape", () => withFileStore(h => {
   const r = h.record(); let receiver: unknown, argc = 0
   const host = { enqueue() { throw Error("legacy") }, enqueueWithSource(_m: ParentNotifierMessage, sources: readonly CompletionDeliverySource[]) {
-    receiver = this; argc = arguments.length; sources[0]!.accepted()
+    receiver = this; argc = arguments.length; present(sources[0]).accepted()
   } }
   const notifier = createCompletionNotifier({ store: h.store, notifier: host })
   expect(notifier.notifyTerminal({ record: r, parentState: { kind: "streaming" }, runInBackground: true })).toEqual({ kind: "delivered", decision: "deliver_streaming" })
@@ -265,28 +270,28 @@ test("optional source method retains original receiver and two-argument shape", 
 test("old refused same-epoch attempt cannot accept/fail the replacement", () => withFileStore(h => {
   const r = h.record(); h.host(() => { if (h.calls.length === 1) throw Error("before admission") })
   expect(h.notify(r).kind).toBe("pending")
-  const old = h.calls[0]!.sources[0]!, current = h.calls[1]!.sources[0]!
+  const old = present(present(h.calls[0]).sources[0]), current = present(present(h.calls[1]).sources[0])
   old.accepted(); old.notDelivered("stale")
-  expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(-1)
-  current.accepted(); expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(0)
+  expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(-1)
+  current.accepted(); expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(0)
   expect(h.timers).toHaveLength(0)
 }))
 test("pending old epoch callbacks cannot affect independently accepted new epoch", () => withFileStore(h => {
-  const r = h.record(); h.notify(r); const old = h.calls[0]!.sources[0]!
+  const r = h.record(); h.notify(r); const old = present(present(h.calls[0]).sources[0])
   h.store.mutate(r.task_id, x => ({ ...x, notification: { ...x.notification, run_epoch: 1 } }))
-  const newRecord = h.store.load(r.task_id)!; h.notify(newRecord); h.calls[1]!.sources[0]!.accepted()
+  const newRecord = present(h.store.load(r.task_id)); h.notify(newRecord); present(present(h.calls[1]).sources[0]).accepted()
   old.notDelivered("old epoch definitive failure")
-  expect(h.store.load(r.task_id)!.notification).toEqual({ run_epoch: 1, notified_epoch: 1 })
+  expect(present(h.store.load(r.task_id)).notification).toEqual({ run_epoch: 1, notified_epoch: 1 })
   expect(h.timers).toHaveLength(0)
 }))
 test("failure before mutation remains retryable, then stale settles without audit", () => withFileStore(h => {
-  const r = h.record(); h.notify(r); const source = h.calls[0]!.sources[0]!
+  const r = h.record(); h.notify(r); const source = present(present(h.calls[0]).sources[0])
   h.mutate(() => { throw Error("before mutation") }); expect(() => source.notDelivered("failure")).toThrow("before mutation")
   expect(h.notify(r).kind).toBe("pending")
   h.store.mutate(r.task_id, x => ({ ...x, parent_session_id: "new-parent" }))
   let audits = 0; h.mutate(h.store.mutate); h.append((id, event) => { audits++; return h.store.appendEvent(id, event) })
   source.notDelivered("different"); expect(audits).toBe(0); expect(h.timers).toHaveLength(0)
-  expect(h.store.load(r.task_id)!.notification.notification_failed_epoch).toBeUndefined()
+  expect(present(h.store.load(r.task_id)).notification.notification_failed_epoch).toBeUndefined()
 }))
 test("failed replacement drop retains buffered custody until actual audit succeeds", () => withFileStore(h => {
   const r = h.record(); h.notify(r, "compacting")
@@ -318,7 +323,7 @@ test("definitive refusal must revalidate original source before immediate attemp
   h.host(() => { h.store.mutate(r.task_id, x => ({ ...x, parent_session_id: "new-parent", notification: { ...x.notification, run_epoch: 1 } })); throw Error("refused before admission") })
   expect(h.notify(r)).toEqual({ kind: "failed" })
   expect(h.calls).toHaveLength(1)
-  expect(h.store.load(r.task_id)!.notification).toEqual({ run_epoch: 1, notified_epoch: -1 })
+  expect(present(h.store.load(r.task_id)).notification).toEqual({ run_epoch: 1, notified_epoch: -1 })
   expect(h.timers).toHaveLength(0)
 }))
 test("custom scheduler cancellation reentrant flush cannot replace reserved batch custody", () => withFileStore(h => {
@@ -326,24 +331,24 @@ test("custom scheduler cancellation reentrant flush cannot replace reserved batc
   // Explicit synchronous scheduling seam: buffer before schedule() returns its cancellation.
   // No claim that the default timer invokes synchronously; the public schedule contract permits it.
   h.scheduling(() => { h.scheduling(undefined); h.notify(r, "compacting") })
-  h.calls[0]!.sources[0]!.notDelivered("definitive")
+  present(present(h.calls[0]).sources[0]).notDelivered("definitive")
   expect(h.notifier.bufferedCount("parent")).toBe(1)
   h.cancelling(() => { h.cancelling(undefined); h.notifier.flushBuffered({ sessionId: "parent", replaced: false }) })
   expect(h.notifier.flushBuffered({ sessionId: "parent", replaced: false })).toEqual({ kind: "pending", count: 1 })
   expect(h.calls).toHaveLength(2) // original failed send plus exactly ONE batch handoff
-  h.calls[1]!.sources[0]!.accepted()
-  expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(0)
+  present(present(h.calls[1]).sources[0]).accepted()
+  expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(0)
 }))
 
 test("throwing retry canceller retains cleanup handle without inaccessible pending source", () => withFileStore(h => {
-  const r = h.record(); h.notify(r); h.calls[0]!.sources[0]!.notDelivered("definitive")
+  const r = h.record(); h.notify(r); present(present(h.calls[0]).sources[0]).notDelivered("definitive")
   let attempts = 0
   h.cancelling(() => { attempts++; if (attempts === 1) throw Error("cancel cleanup failed") })
   expect(() => h.notify(r)).toThrow("cancel cleanup failed")
   expect(h.calls).toHaveLength(1)
   expect(h.notify(r)).toEqual({ kind: "pending", decision: "wake" })
   expect(h.calls).toHaveLength(2); expect(attempts).toBe(2)
-  h.calls[1]!.sources[0]!.accepted()
+  present(present(h.calls[1]).sources[0]).accepted()
 }))
 
 test("refused batch attempt2 filters stale sources AND canonical details with actual handoff count", () => withFileStore(h => {
@@ -355,23 +360,23 @@ test("refused batch attempt2 filters stale sources AND canonical details with ac
   })
   expect(h.notifier.flushBuffered({ sessionId: "parent", replaced: false })).toEqual({ kind: "flushed", count: 2 })
   expect(h.calls).toHaveLength(2)
-  expect(h.calls[1]!.sources.map(s => s.taskId)).toEqual([b.task_id,c.task_id])
-  expect(h.calls[1]!.message.details.map(d => d.task_id)).toEqual([b.task_id,c.task_id])
-  expect(h.calls[1]!.message.content).toBe(buildCompletionMessage(h.calls[1]!.message.details).content)
-  expect(h.store.load(a.task_id)!.notification.notified_epoch).toBe(-1)
+  expect(present(h.calls[1]).sources.map(s => s.taskId)).toEqual([b.task_id,c.task_id])
+  expect(present(h.calls[1]).message.details.map(d => d.task_id)).toEqual([b.task_id,c.task_id])
+  expect(present(h.calls[1]).message.content).toBe(buildCompletionMessage(present(h.calls[1]).message.details).content)
+  expect(present(h.store.load(a.task_id)).notification.notified_epoch).toBe(-1)
 }))
 test("all batch sources stale after first refusal means empty not flushed0 or retry", () => withFileStore(h => {
   const r = h.record(); h.notify(r, "compacting")
   h.host(() => { h.store.mutate(r.task_id, x => ({ ...x, parent_session_id: "changed" })); throw Error("refused") })
   expect(h.notifier.flushBuffered({ sessionId: "parent", replaced: false })).toEqual({ kind: "empty" })
   expect(h.calls).toHaveLength(1); expect(h.timers).toHaveLength(0)
-  expect(h.store.load(r.task_id)!.notification.notified_epoch).toBe(-1)
+  expect(present(h.store.load(r.task_id)).notification.notified_epoch).toBe(-1)
 }))
 test("partial batch cancellation failure rolls back all unpublished owners, preserves buffer and failed handle", () => withFileStore(h => {
   const a = h.record(1), b = h.record(2)
   for (const r of [a,b]) {
     h.notify(r); h.scheduling(() => { h.scheduling(undefined); h.notify(r, "compacting") })
-    h.calls.at(-1)!.sources[0]!.notDelivered("definitive")
+    present(present(h.calls.at(-1)).sources[0]).notDelivered("definitive")
   }
   let cancellations = 0
   h.cancelling(() => { cancellations++; if (cancellations === 2) throw Error("second cleanup failed") })
@@ -379,42 +384,42 @@ test("partial batch cancellation failure rolls back all unpublished owners, pres
   expect(h.calls).toHaveLength(2); expect(h.notifier.bufferedCount("parent")).toBe(2)
   expect(h.notifier.flushBuffered({ sessionId: "parent", replaced: false })).toEqual({ kind: "pending", count: 2 })
   expect(h.calls).toHaveLength(3); expect(cancellations).toBe(3)
-  h.calls[2]!.sources.forEach(s => s.accepted())
+  present(h.calls[2]).sources.forEach(s => s.accepted())
 }))
 
 test("two-entry batch reserves ALL custody before first cancellation reenters flush", () => withFileStore(h => {
   const a = h.record(1), b = h.record(2)
   for (const r of [a,b]) {
     h.notify(r); h.scheduling(() => { h.scheduling(undefined); h.notify(r, "compacting") })
-    h.calls.at(-1)!.sources[0]!.notDelivered("definitive")
+    present(present(h.calls.at(-1)).sources[0]).notDelivered("definitive")
   }
   h.cancelling(() => { h.cancelling(undefined); h.notifier.flushBuffered({ sessionId: "parent", replaced: false }) })
   expect(h.notifier.flushBuffered({ sessionId: "parent", replaced: false })).toEqual({ kind: "pending", count: 2 })
   expect(h.calls).toHaveLength(3)
   expect(h.calls.slice(2).flatMap(call => call.sources.map(source => source.taskId))).toEqual([a.task_id,b.task_id])
-  h.calls[2]!.sources.forEach(source => source.accepted())
-  expect(h.store.load(a.task_id)!.notification.notified_epoch).toBe(0)
-  expect(h.store.load(b.task_id)!.notification.notified_epoch).toBe(0)
+  present(h.calls[2]).sources.forEach(source => source.accepted())
+  expect(present(h.store.load(a.task_id)).notification.notified_epoch).toBe(0)
+  expect(present(h.store.load(b.task_id)).notification.notified_epoch).toBe(0)
 }))
 
 test("stale buffer cleanup reentry cannot steal previously selected fresh source custody", () => withFileStore(h => {
   const fresh = h.record(1), stale = h.record(2)
   for (const r of [fresh,stale]) {
     h.notify(r); h.scheduling(() => { h.scheduling(undefined); h.notify(r, "compacting") })
-    h.calls.at(-1)!.sources[0]!.notDelivered("definitive")
+    present(present(h.calls.at(-1)).sources[0]).notDelivered("definitive")
   }
   h.store.mutate(stale.task_id, x => ({ ...x, notification: { ...x.notification, run_epoch: 1 } }))
   h.cancelling(() => { h.cancelling(undefined); h.notifier.flushBuffered({ sessionId: "parent", replaced: false }) })
   expect(h.notifier.flushBuffered({ sessionId: "parent", replaced: false })).toEqual({ kind: "empty" })
   expect(h.calls).toHaveLength(3)
-  expect(h.calls[2]!.sources.map(s => s.taskId)).toEqual([fresh.task_id])
-  h.calls[2]!.sources[0]!.accepted()
-  expect(h.store.load(fresh.task_id)!.notification.notified_epoch).toBe(0)
-  expect(h.store.load(stale.task_id)!.notification.notified_epoch).toBe(-1)
+  expect(present(h.calls[2]).sources.map(s => s.taskId)).toEqual([fresh.task_id])
+  present(present(h.calls[2]).sources[0]).accepted()
+  expect(present(h.store.load(fresh.task_id)).notification.notified_epoch).toBe(0)
+  expect(present(h.store.load(stale.task_id)).notification.notified_epoch).toBe(-1)
 }))
 
 test("actual FileStore removal at audit boundary cannot recreate its removed event log", () => withFileStore(h => {
-  const r = h.record(); h.notify(r); const source = h.calls[0]!.sources[0]!
+  const r = h.record(); h.notify(r); const source = present(present(h.calls[0]).sources[0])
   let calls = 0
   // The old load+append path exposes a post-read removal window. The guarded path must instead
   // see removal before acquiring its audit lock; never invoke remove recursively INSIDE a lock.
@@ -433,7 +438,7 @@ test("actual FileStore removal at audit boundary cannot recreate its removed eve
 }))
 
 test("audit append success followed by store-return throw retains cleanup without duplicate audit", () => withFileStore(h => {
-  const r = h.record(); h.notify(r); const source = h.calls[0]!.sources[0]!
+  const r = h.record(); h.notify(r); const source = present(present(h.calls[0]).sources[0])
   let mutations = 0, appends = 0
   h.mutate((id, fn) => { mutations++; const result = h.store.mutate(id, fn); if (mutations === 2) throw Error("after actual audit append"); return result })
   h.append((id, event) => { appends++; return h.store.appendEvent(id, event) })

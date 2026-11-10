@@ -18,6 +18,11 @@ test("same logical source cannot submit again under a random new intent ID", asy
 import { afterEach, spyOn } from "bun:test"
 import { Database } from "bun:sqlite"
 import { type CompletionIntent, type CompletionIntentEnvelope, type CompletionIntentJournal, type CompletionIntentJournalOptions } from "./completion-intent-journal"
+
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
 const dirs: string[] = [], journals: CompletionIntentJournal[] = []
 afterEach(async () => { for (const journal of journals.splice(0)) await journal.close(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
 function file() { const dir = mkdtempSync(join(tmpdir(), "omo-completion-C1J-")); dirs.push(dir); return join(dir, "intent.sqlite") }
@@ -31,12 +36,12 @@ function envelope(intentID = "one", taskId = "task"): CompletionIntentEnvelope {
 }
 function update(journal: CompletionIntentJournal, previous: CompletionIntent, change: Partial<CompletionIntent>): CompletionIntent {
   const next = { ...previous, ...change, revision: previous.revision + 1 }
-  journal.writeSync(previous, next); return journal.read(next.intentID)!
+  journal.writeSync(previous, next); return defined(journal.read(next.intentID))
 }
 function accepted(journal: CompletionIntentJournal, previous: CompletionIntent): CompletionIntent {
   const { reason: _reason, ...base } = previous
   const next: CompletionIntent = { ...base, revision: previous.revision + 1, phase: "accepted", acceptance: { kind: "prompt", id: "CONTROLLED-unit-ACK", sessionID: "parent" } }
-  journal.writeSync(previous, next); return journal.read(next.intentID)!
+  journal.writeSync(previous, next); return defined(journal.read(next.intentID))
 }
 function raw(path: string, run: (db: Database) => void) { const db = new Database(path); try { run(db) } finally { db.close() } }
 
@@ -46,7 +51,7 @@ test("strict SQLite rows survive reopen and snapshots have no mutable input alia
   expect(row).not.toBe(input)
   await a.close(); const b = await open(path); expect(b.read(row.intentID)).toEqual(row)
   const claimed = await b.claim(row.intentID); expect(claimed.owner).toBe(b.owner); expect(claimed.revision).toBe(1)
-  expect(b.findBySource(row.sources[0]!)).toEqual(claimed)
+  expect(b.findBySource(defined(row.sources[0]))).toEqual(claimed)
 })
 test("ephemeral custody, lease, registry, version and receiver changes cannot bypass logical uniqueness", async () => {
   const journal = await open(), input = envelope(); journal.insertQueued(input)
@@ -64,7 +69,7 @@ test("different logical epochs can coexist but duplicate sources in one envelope
 test("multi-source conflict rolls back all row and index writes atomically", async () => {
   const journal = await open(); journal.insertQueued(envelope("existing", "taken"))
   expect(() => journal.insertQueued({ ...envelope("batch", "free"), sources: [...envelope("x", "free").sources,...envelope("y", "taken").sources] })).toThrow("source")
-  expect(journal.read("batch")).toBeUndefined(); expect(journal.findBySource(envelope("x", "free").sources[0]!)).toBeUndefined()
+  expect(journal.read("batch")).toBeUndefined(); expect(journal.findBySource(defined(envelope("x", "free").sources[0]))).toBeUndefined()
   expect(journal.insertQueued(envelope("free-only", "free")).intentID).toBe("free-only")
 })
 test("strict envelope rejects unsupported/noninert JSON before inserting", async () => {
@@ -120,7 +125,7 @@ test("late same-intent ACK resolves uncertain without enabling another submit or
   expect(row.bookkeeping).toBe("pending")
   expect(() => update(journal, row, { acceptance: { kind: "prompt", id: "different", sessionID: "parent" } })).toThrow("immutable")
   const done = update(journal, row, { bookkeeping: "complete" })
-  expect(journal.findBySource(done.sources[0]!)).toEqual(done)
+  expect(journal.findBySource(defined(done.sources[0]))).toEqual(done)
   expect(() => journal.insertQueued({ ...envelope(), intentID: "after-repair" })).toThrow("source")
 })
 test("definitive failure retains membership until canonical bookkeeping complete then releases atomically", async () => {
@@ -128,14 +133,14 @@ test("definitive failure retains membership until canonical bookkeeping complete
   const failed = update(journal, first, { phase: "definitively_failed", reason: "CONTROLLED pre-admission refusal" })
   expect(() => journal.insertQueued({ ...envelope(), intentID: "too-early" })).toThrow("source")
   const complete = update(journal, failed, { bookkeeping: "complete" })
-  expect(journal.findBySource(first.sources[0]!)).toBeUndefined()
+  expect(journal.findBySource(defined(first.sources[0]))).toBeUndefined()
   const next = journal.insertQueued({ ...envelope(), intentID: "next" })
   expect(journal.read(first.intentID)).toEqual(complete)
   expect(() => accepted(journal, complete)).toThrow()
   expect(() => update(journal, complete, { bookkeeping: "pending" })).toThrow("reopen")
   const history = update(journal, complete, {})
   expect(history.phase).toBe("definitively_failed")
-  expect(journal.findBySource(next.sources[0]!)).toEqual(next)
+  expect(journal.findBySource(defined(next.sources[0]))).toEqual(next)
 })
 test("recovered accepted intent preserves business state and source no-resubmit across owner turnover", async () => {
   const path = file(), a = await open(path); const row = accepted(a, update(a, a.insertQueued(envelope()), { phase: "dispatching" }))
@@ -148,7 +153,7 @@ test("controlled alive/unknown owner probes cannot take custody", async () => {
   for (const verdict of ["alive","unknown"] as const) {
     const path = file(), a = await open(path), b = await open(path, { probeOwner: async () => verdict })
     a.insertQueued(envelope()); await expect(b.claim("one")).rejects.toThrow("live or unverified")
-    expect(a.read("one")!.owner).toBe(a.owner)
+    expect(defined(a.read("one")).owner).toBe(a.owner)
   }
 })
 test("controlled dead owner takeover checks post-probe row and owner snapshots", async () => {
@@ -177,11 +182,11 @@ test("close joins the ORIGINAL pending probe and cannot release owner or claim l
   let closed = false; const close = b.close(); expect(b.close()).toBe(close); void close.then(() => { closed = true })
   try {
     await Promise.resolve(); expect(closed).toBe(false)
-    raw(path, db => { expect(JSON.parse(db.query<{ body: string }, [string]>("SELECT body FROM owners WHERE token=?").get(b.owner)!.body).released).toBe(0) })
+    raw(path, db => { expect(JSON.parse(defined(db.query<{ body: string }, [string]>("SELECT body FROM owners WHERE token=?").get(b.owner)).body).released).toBe(0) })
     expect(() => b.read("one")).toThrow("closed"); expect(() => b.claim("one")).toThrow("closed")
   } finally { gate.resolve() }
   await expect(claim).rejects.toThrow("closed"); await close
-  expect(closed).toBe(true); expect(a.read("one")!.owner).toBe(a.owner)
+  expect(closed).toBe(true); expect(defined(a.read("one")).owner).toBe(a.owner)
 })
 test("failed physical database close stays visible and retryable", async () => {
   const journal = await open(); journal.insertQueued(envelope())
@@ -201,7 +206,7 @@ test("prototype-shaped logical JSON, malformed sources and forged bootstrap toke
 test("dangling source references and missing owner rows are corruption, never adopted as fresh work", async () => {
   const path = file(), journal = await open(path); journal.insertQueued(envelope())
   raw(path, db => { db.exec("DELETE FROM intents") })
-  expect(() => journal.findBySource(envelope().sources[0]!)).toThrow("reference")
+  expect(() => journal.findBySource(defined(envelope().sources[0]))).toThrow("reference")
   expect(() => journal.insertQueued({ ...envelope("one", "other") })).toThrow("orphan")
   const ownedPath = file(), other = await open(ownedPath); other.insertQueued(envelope())
   raw(ownedPath, db => { db.exec("DELETE FROM owners") })
@@ -251,7 +256,7 @@ for (const phase of ["accepted","uncertain"] as const) test(`missing source inde
     else update(journal, dispatching, { phase: "uncertain", reason: "CONTROLLED lost ACK" })
     raw(path, db => { db.exec("DELETE FROM sources") }) // Persisted-index corruption fixture, not an OS attack claim.
     let findFailure: unknown, insertFailure: unknown, inserted: unknown
-    try { journal.findBySource(envelope().sources[0]!) } catch (error) { findFailure = error }
+    try { journal.findBySource(defined(envelope().sources[0])) } catch (error) { findFailure = error }
     try { inserted = journal.insertQueued({ ...envelope(), intentID: "must-not-replay" }) } catch (error) { insertFailure = error }
     expect(Boolean(inserted)).toBe(false)
     expect(String(findFailure)).toContain("index")

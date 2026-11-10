@@ -51,7 +51,7 @@ function buildTruncationNotice(
 function truncateUtf8Prefix(text: string, maxBytes: number): string {
   const bytes = Buffer.from(text)
   let end = Math.min(maxBytes, bytes.length)
-  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end -= 1
+  while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end -= 1
   return bytes.subarray(0, end).toString("utf8")
 }
 
@@ -72,14 +72,17 @@ export const curatedReadonlyFormatter: CuratedReadonlyFormatter = Object.freeze(
     if (totalLines <= maxLines && totalBytes <= maxBytes) {
       return { content: text, truncated: false, truncatedBy: null, totalLines, totalBytes, firstLineExceedsLimit: false }
     }
-    if (Buffer.byteLength(lines[0]!, "utf-8") > maxBytes) {
+    const firstLine = lines[0]
+    if (firstLine === undefined) throw new TypeError("truncateHead requires at least one line when limits are exceeded")
+    if (Buffer.byteLength(firstLine, "utf-8") > maxBytes) {
       return { content: "", truncated: true, truncatedBy: "bytes", totalLines, totalBytes, firstLineExceedsLimit: true }
     }
     const output: string[] = []
     let outputBytes = 0
     let truncatedBy: "bytes" | "lines" = "lines"
     for (let index = 0; index < lines.length && index < maxLines; index += 1) {
-      const line = lines[index]!
+      const line = lines[index]
+      if (line === undefined) throw new Error(`truncateHead line ${index} is out of range`)
       const bytes = Buffer.byteLength(line, "utf-8") + (index > 0 ? 1 : 0)
       if (outputBytes + bytes > maxBytes) { truncatedBy = "bytes"; break }
       output.push(line)

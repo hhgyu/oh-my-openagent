@@ -14,6 +14,11 @@ import { issueToolValueCodec, decodeToolValue } from "./tool-value-codec"
 import { issueToolArgumentNormalizer } from "./tool-argument-normalizer"
 import { acquireEffectPermissionApi } from "./effect-permission-api"
 
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
+
 function fixture(input: Info["input"] = z.object({ marker: z.string() })) {
   const order: string[] = []
   let calls = 0
@@ -44,15 +49,15 @@ test("final route prepares detached input before normalized scope, resources and
   let wrongPreparations = 0, preparations = 0, targets = 0
   const route = { ...f.tool, id: "namespace_read", name: "read", options: { permission: "read" }, execute: async () => { targets++; return {} } }
   const sourceInput = issueToolArgumentNormalizer(f.tool, { schema: f.tool.input, normalizeUnknown: () => { wrongPreparations++; throw Error("wrong target") } })
-  const input = issueToolArgumentNormalizer(route, { schema: route.input, normalizeUnknown: (value: any) => { preparations++; value.marker = value.marker.trim(); return value } })
-  const registry = createToolRegistry([f.tool, route], { canary: () => [], read: value => [{ action: "read", resources: [(value as any).marker] }] }, [{ tool: route, input: strictMarker(route) }], [{ tool: f.tool, input: sourceInput }, { tool: route, input }])
+  const input = issueToolArgumentNormalizer(route, { schema: route.input, normalizeUnknown: (value: unknown) => { preparations++; const prepared = value as { marker: string }; prepared.marker = prepared.marker.trim(); return value } })
+  const registry = createToolRegistry([f.tool, route], { canary: () => [], read: value => [{ action: "read", resources: [(value as { marker: string }).marker] }] }, [{ tool: route, input: strictMarker(route) }], [{ tool: f.tool, input: sourceInput }, { tool: route, input }])
   const permissions: unknown[] = []
   const kernel = createToolKernel({ scopes: f.scopes, registry, pipeline: createPolicyPipeline({ before: call => { call.routed = "read" } }), permission: { assert: async request => { permissions.push(request); throw Error("DENIED_NORMALIZED") } } })
   const raw = { marker: "  allowed.txt  " }
   const bound = kernel.bind(f.context, f.lease)
   await expect(bound.invoke("canary", raw)).rejects.toThrow("DENIED_NORMALIZED")
   expect(wrongPreparations).toBe(0); expect(preparations).toBe(1); expect(targets).toBe(0)
-  expect((permissions[0] as any).resources).toEqual(["allowed.txt"])
+  expect((permissions[0] as { resources: unknown }).resources).toEqual(["allowed.txt"])
   expect(raw.marker).toBe("  allowed.txt  "); expect(Object.isFrozen(raw)).toBe(false)
   bound.dispose()
 })
@@ -92,7 +97,7 @@ test("asynchronous preparation cannot reach permissions or target after caller a
 test("successful preparation is checked and frozen while raw arguments remain writable", async () => {
   const f = fixture({ type: "object", properties: { marker: { type: "string" } }, required: ["marker"] })
   let checked: unknown
-  const tool = { ...f.tool, execute: async (value: any) => { checked = value; expect(Object.isFrozen(value)).toBe(true); return { content: value.marker } } }
+  const tool = { ...f.tool, execute: async (value: { marker: string }) => { checked = value; expect(Object.isFrozen(value)).toBe(true); return { content: value.marker } } }
   const input = issueToolArgumentNormalizer(tool, { schema: tool.input, normalizeUnknown: () => ({ marker: "prepared" }) })
   f.registry.replace([tool], [{ tool, input: strictMarker(tool) }], [{ tool, input }])
   const raw = { marker: 42 }
@@ -284,8 +289,8 @@ describe("native host kernel", () => {
   })
   test("resource adapters normalize the current host location and reject ambiguity", () => {
     const adapters = locationPermissionAdapters(process.cwd())
-    expect(adapters.grep!({ pattern: "needle", path: "folder/.." })).toEqual([{ action: "read", resources: [process.cwd()] }, { action: "grep", resources: ["needle"] }])
-    expect(() => adapters.read!({ path: "a", filePath: "b" })).toThrow("Ambiguous")
+    expect(defined(adapters.grep)({ pattern: "needle", path: "folder/.." })).toEqual([{ action: "read", resources: [process.cwd()] }, { action: "grep", resources: ["needle"] }])
+    expect(() => defined(adapters.read)({ path: "a", filePath: "b" })).toThrow("Ambiguous")
     expect(() => locationPermissionAdapters("relative")).toThrow()
   })
   test("closed outer binding cannot be retained by evaluated code", async () => {
@@ -490,7 +495,7 @@ describe("issued per-call host authority",()=>{
  })
  test("before and permission phases cannot issue; invalid input and denied permission never reach issuance",async()=>{
   const f=fixture();let kernel!:ReturnType<typeof createToolKernel>;let targets=0,before=0
-  const pipeline=createPolicyPipeline({before:call=>{before++;expect(()=>kernel.callAuthority.capture(call.context!)).toThrow("authorized")}})
+  const pipeline=createPolicyPipeline({before:call=>{before++;expect(()=>kernel.callAuthority.capture(defined(call.context))).toThrow("authorized")}})
   f.registry.replace([{...f.tool,execute:async(_args,caller)=>{targets++;kernel.callAuthority.capture(caller);return {content:"ok"}}}])
   kernel=createToolKernel({...f,pipeline,permission:{assert:async()=>{expect(()=>kernel.callAuthority.capture(f.context)).toThrow("authorized");throw Error("permission denied")}}})
   await expect(kernel.bind(f.context,f.lease).invoke("canary",{marker:123})).rejects.toThrow("Invalid tool value")
@@ -525,10 +530,10 @@ describe("issued per-call host authority",()=>{
   const one=f.kernel.bind({...f.context,id:"call-a",signal:a.signal} as ToolContext,f.lease),two=f.kernel.bind({...f.context,id:"call-b",signal:b.signal} as ToolContext,f.lease)
   const tasks=Promise.all([one.invoke("canary",{marker:"a"}),two.invoke("canary",{marker:"b"})]);await ready.promise;release.resolve();await tasks;one.dispose();two.dispose()
   a.abort(Error("only A interrupted"))
-  expect(tokens.get("a")!.admissionSignal.aborted).toBe(true);expect(tokens.get("b")!.admissionSignal.aborted).toBe(false)
-  tokens.get("b")!.assertAdmission();tokens.get("a")!.assertLifetime();tokens.get("b")!.assertLifetime()
+  expect(defined(tokens.get("a")).admissionSignal.aborted).toBe(true);expect(defined(tokens.get("b")).admissionSignal.aborted).toBe(false)
+  defined(tokens.get("b")).assertAdmission();defined(tokens.get("a")).assertLifetime();defined(tokens.get("b")).assertLifetime()
   f.scopes.retire(f.lease)
-  expect(tokens.get("a")!.lifetimeSignal.aborted).toBe(true);expect(tokens.get("b")!.lifetimeSignal.aborted).toBe(true)
+  expect(defined(tokens.get("a")).lifetimeSignal.aborted).toBe(true);expect(defined(tokens.get("b")).lifetimeSignal.aborted).toBe(true)
  })
 })
 
@@ -563,7 +568,7 @@ test.each([false,true])("nested invocation policy phases cannot borrow outer aut
  }}
  const inner={...f.tool,id:"route",name:"route",options:{permission:"route"},execute:async(_args:unknown,caller:ToolContext)=>{targets++;kernel.callAuthority.assertCall(kernel.callAuthority.capture(caller));return {content:"inner"}}}
  const registry=createToolRegistry([outer,inner],{canary:()=>[{action:"canary",resources:["fixture"]}],route:()=>[{action:"route",resources:["fixture"]}]})
- const pipeline=createPolicyPipeline({before:call=>{if(call.routed==="route")probe("before",call.context!)},after:call=>{if(call.routed==="route")probe("after",call.context!)},error:call=>{if(call.routed==="route")probe("error",call.context!)}})
+ const pipeline=createPolicyPipeline({before:call=>{if(call.routed==="route")probe("before",defined(call.context))},after:call=>{if(call.routed==="route")probe("after",defined(call.context))},error:call=>{if(call.routed==="route")probe("error",defined(call.context))}})
  kernel=createToolKernel({...f,registry,pipeline,permission:{assert:async request=>{if(request.action==="route"){probe("permission",outerCaller);if(denied)throw Error("nested denied")}}}})
  bound=kernel.bind(f.context,f.lease)
  try{expect((await bound.invoke("canary",{marker:"outer"})).content).toBe("outer");expect(minted).toEqual([]);expect(targets).toBe(denied?0:1)}finally{bound.dispose()}
@@ -790,7 +795,7 @@ test("legacy permission remains explicitly unjoined and receives one SDK argumen
 
 test("canonical Native owner entry keeps canonical input and expired binding fences without invented assertions",async()=>{
  await withNativeTargetPermissionService(async({service,registry,kernel,f,requests,targets})=>{
-  const target=targets.tools[0]!
+  const target=defined(targets.tools[0])
   registry.replace([target],targets.codecs.filter(x=>x.tool===target),targets.normalizers.filter(x=>x.tool===target),[{tool:target,permission:service.targetPermission(target)}])
   const caller=f.raw("ses_native_boundary").caller,lease=await service.parent(caller),bound=kernel.bind(caller,lease)
   try{
@@ -804,7 +809,7 @@ test("canonical Native owner entry keeps canonical input and expired binding fen
 
 test("ordinary route cannot borrow a service-owned target permission",async()=>{
  await withNativeTargetPermissionService(async({service,f,requests,targets})=>{
-  const target=targets.tools[0]!
+  const target=defined(targets.tools[0])
   const source={id:"read",name:"read",description:"unit route",input:z.object({}),execute:async()=>({})}
   const routed=createToolRegistry([],{read:()=>[{action:"read",resources:[f.dir]}]})
   routed.replace([source,target],targets.codecs.filter(x=>x.tool===target),targets.normalizers.filter(x=>x.tool===target),[{tool:target,permission:service.targetPermission(target)}])
@@ -816,7 +821,7 @@ test("ordinary route cannot borrow a service-owned target permission",async()=>{
 
 test("synchronous owner fence abort is rechecked before issuing a canonical target frame",async()=>{
  await withNativeTargetPermissionService(async({service,registry,kernel,f,targets,setFence,requests})=>{
-  const target=targets.tools[0]!
+  const target=defined(targets.tools[0])
   registry.replace([target],targets.codecs.filter(x=>x.tool===target),targets.normalizers.filter(x=>x.tool===target),[{tool:target,permission:service.targetPermission(target)}])
   const origin=f.raw("ses_owner_fence_abort"),lease=await service.parent(origin.caller),bound=kernel.bind(origin.caller,lease)
   setFence(()=>origin.controller.abort(false))

@@ -39,8 +39,8 @@ test("torn own frame and explicit log bound refuse before further append", () =>
   const store = createTaskRecordStore({ project_dir: dir, task: { state_dir: dir } })
   try {
     const path = join(dir, "logs/st_000000ef.jsonl")
-    for (const [text, reason] of [["{torn", "torn-own-log-frame"], ["x".repeat(101), "own-log-capacity-exceeded"]]) {
-      writeFileSync(path, text!)
+    for (const [text, reason] of [["{torn", "torn-own-log-frame"], ["x".repeat(101), "own-log-capacity-exceeded"]] as const) {
+      writeFileSync(path, text)
       const projection = createOwnedEventProjection("st_000000ef", 0, dir, () => {}, 100)
       expect(() => { for (const event of projection.events(view())) projection.persist(store, event) }).toThrow(ChildObservationUncertain)
       try { for (const event of projection.events(view())) projection.persist(store, event) } catch (error) { expect((error as ChildObservationUncertain).reason).toBe(reason) }

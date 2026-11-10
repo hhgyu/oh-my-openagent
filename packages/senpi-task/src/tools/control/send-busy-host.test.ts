@@ -6,6 +6,11 @@ import { runTaskSend } from "./send"
 import type { LateSendDelivery } from "./send"
 import type { SendManager, SendToolResult } from "./types"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 function busyManager(): { manager: SendManager; settle: (outcome: SendOutcome) => void; calls: () => number } {
   const pending = Promise.withResolvers<SendOutcome>()
   let calls = 0
@@ -117,14 +122,14 @@ test("a host retains the canonical mapped send and returned late delivery work",
     expect(work.map(row => row.phase)).toEqual(["sending", "late"])
     busy.settle({ kind: "revived", task_id: "st_00000001", run_epoch: 2 })
     await bounded(entered.promise)
-    expect(await bounded(work[0]!.promise)).toMatchObject({ content: expect.any(Array), details: { kind: "revived", run_epoch: 2 } })
+    expect(await bounded(present(work[0]).promise)).toMatchObject({ content: expect.any(Array), details: { kind: "revived", run_epoch: 2 } })
     let lateJoined = false
-    void work[1]!.promise.then(() => { lateJoined = true })
+    void present(work[1]).promise.then(() => { lateJoined = true })
     await Promise.resolve(); await Promise.resolve()
     expect(lateJoined).toBe(false)
     expect(deliveryFinished).toBe(false)
     gate.resolve()
-    await bounded(work[1]!.promise)
+    await bounded(present(work[1]).promise)
     expect(deliveryFinished).toBe(true)
     expect(busy.calls()).toBe(1)
   } finally {
@@ -148,8 +153,8 @@ test("retained late work exposes an asynchronous delivery rejection without rese
   controller.abort(Error("stop reporting"))
   expect((await bounded(reporting)).details.kind).toBe("delivering")
   busy.settle({ kind: "revived", task_id: "st_00000001", run_epoch: 2 })
-  expect(await bounded(work.find(row => row.phase === "sending")!.promise)).toMatchObject({ details: { kind: "revived" } })
-  await expect(bounded(work.find(row => row.phase === "late")!.promise)).rejects.toBe(failure)
+  expect(await bounded(present(work.find(row => row.phase === "sending")).promise)).toMatchObject({ details: { kind: "revived" } })
+  await expect(bounded(present(work.find(row => row.phase === "late")).promise)).rejects.toBe(failure)
   expect(busy.calls()).toBe(1)
 })
 

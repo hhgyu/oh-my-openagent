@@ -5,6 +5,11 @@ import { join } from "node:path"
 import { Database } from "bun:sqlite"
 import { openChildJournal, probeJournalOwner, type DurableChildJournal } from "./child-journal"
 import type { ChildRecord } from "./session-backend"
+
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
 const directories: string[] = [], opened: DurableChildJournal[] = []
 afterEach(() => { for (const journal of opened.splice(0)) journal.close(); for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }) })
 function path() { const dir = mkdtempSync(join(tmpdir(), "omo-child-journal-")); directories.push(dir); return join(dir, "state.sqlite") }
@@ -83,7 +88,7 @@ test("foreign owner, identity replacement, revision jumps and malformed records 
 test("foreign databases and symlink database paths are rejected without adopting their data", async () => {
  const file=path();const db=new Database(file);db.exec("CREATE TABLE unrelated (value TEXT)");db.close()
  await expect(openChildJournal({path:file})).rejects.toThrow("Foreign")
- const alias=join(directories.at(-1)!,"alias.sqlite");symlinkSync(file,alias,"file")
+ const alias=join(defined(directories.at(-1)),"alias.sqlite");symlinkSync(file,alias,"file")
  await expect(openChildJournal({path:alias})).rejects.toThrow("link")
 })
 test("a corrupted record fails closed instead of erasing custody", async () => {

@@ -6,6 +6,11 @@ import { baseSpec, categoryPlanner, cleanupProjects, makeHandle, settings, tempP
 import type { ManagedRunner } from "./types"
 import { AdmissionBarrier } from "../pause/admission-barrier"
 import type { ManagedChildHandle } from "./child-handle"
+
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
 afterEach(cleanupProjects)
 
 test.each(["partial","complete"] as const)("revival rearms %s coverage without inventing missing Native stats",async coverage=>{
@@ -31,12 +36,12 @@ test("retained prepared rollback failure rejects real no-signal manager waiters 
  fake.settle({status:"completed",finalResponse:"old success"});await manager.waitFor(started.task_id)
  const failed=Promise.withResolvers<never>()
  handle.prepareFollowUp=async()=>({stamp:next=>next,dispatch:async()=>({kind:"not-dispatched",reason:"private no-call witness"}),
-  restoreOwnedReference:()=>{throw Error("actual journal restore unavailable")},retainFailure:()=>{handle!.waitForOutcome=()=>failed.promise;failed.reject(new ChildObservationUncertain("known-unadmitted-rollback-unconfirmed"))},release:async()=>{throw Error("retained ticket must not release")}})
+  restoreOwnedReference:()=>{throw Error("actual journal restore unavailable")},retainFailure:()=>{present(handle).waitForOutcome=()=>failed.promise;failed.reject(new ChildObservationUncertain("known-unadmitted-rollback-unconfirmed"))},release:async()=>{throw Error("retained ticket must not release")}})
  expect((await manager.sendToTask({idOrName:started.task_id,message:"new"})).kind).toBe("not_continuable")
  await expect(manager.waitFor(started.task_id)).rejects.toBeInstanceOf(ChildObservationUncertain)
  expect(manager.get(started.task_id)?.notification.run_epoch).toBe(1);expect(manager.get(started.task_id)?.status).toBe("running")
  expect(manager.get(started.task_id)?.final_response).toBeUndefined();expect(manager.runStatsSnapshot?.(started.task_id)).toBeUndefined()
- expect(manager.concurrency?.hasFreeSlot(manager.get(started.task_id)!.model)).toBe(false);expect(manager.waiterKeyCount()).toBe(0)
+ expect(manager.concurrency?.hasFreeSlot(present(manager.get(started.task_id)).model)).toBe(false);expect(manager.waiterKeyCount()).toBe(0)
  manager.forget(started.task_id,{path:"end"});store.remove(started.task_id);store.close()
 })
 
@@ -82,7 +87,7 @@ test("closed staged activation uses existing branded held custody, sends zero in
     childCreationPort: { async startPaused(spec) {
       created.resolve(); await release.promise
       return { child: { ...makeHandle(spec.taskId).handle, terminate: async () => { ended++ } }, async activate() {
-        spec.admission!.assertOpen(); inputs++; return { turnId: "unit", outcome: Promise.resolve({ status: "completed", finalResponse: "unit" }) }
+        present(spec.admission).assertOpen(); inputs++; return { turnId: "unit", outcome: Promise.resolve({ status: "completed", finalResponse: "unit" }) }
       } }
     } },
   }, { preparePlanning: async () => {}, createRecoveryRuntime: () => ({ respawn: async () => { throw Error("unused unit recovery") }, settleTeardowns: async () => {} }) })
@@ -110,7 +115,7 @@ test("lost custody still settles only local uncertainty waiters without foreign 
   expect(await Promise.race([waiting, new Promise(resolve => setTimeout(() => resolve("hung"), 70))])).toBe("uncertain")
   expect(store.load(started.task_id)).toEqual(before)
   expect(manager.waiterKeyCount()).toBe(0)
-  expect(manager.concurrency?.hasFreeSlot(before!.model)).toBe(false)
+  expect(manager.concurrency?.hasFreeSlot(present(before).model)).toBe(false)
   await expect(manager.waitFor(started.task_id)).rejects.toBeInstanceOf(ChildObservationUncertain)
   manager.forget(started.task_id, { path: "end" }); store.remove(started.task_id); store.close()
 })

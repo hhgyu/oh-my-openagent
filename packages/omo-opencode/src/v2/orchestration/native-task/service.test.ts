@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Database } from "bun:sqlite"
-import type { Info, ToolContext } from "@opencode/plugin/promise/tool"
+import type { Info, ToolContext, ToolEditor } from "@opencode/plugin/promise/tool"
 import type { AgentDefinition } from "@oh-my-opencode/senpi-task"
 import type { TaskManager } from "@oh-my-opencode/senpi-task/manager-kernel"
 import { buildTaskExecute } from "@oh-my-opencode/senpi-task/task-operations"
@@ -26,6 +26,13 @@ import { acquireEffectPermissionApi } from "../../host/effect-permission-api"
 
 type Service = ReturnType<typeof createNativeTaskService>
 type Facade = Awaited<ReturnType<Service["forCall"]>>
+type PermissionRequest = Parameters<Parameters<typeof acquireEffectPermissionApi>[0]["assert"]>[0]
+type UnitPublicTool = Info & { readonly id: string }
+type UnitSyntheticInput = { id?: string; sessionID: string; delivery?: string; text: string; description?: string; metadata?: unknown }
+type UnitSyntheticAck = { id: string; sessionID: string; time: { created: number }; type: string; delivery: string; payload: { text: string; description?: string; metadata?: unknown } }
+function publicTool(tools: readonly UnitPublicTool[], name: string): UnitPublicTool { const found = tools.find(t => t.name === name); if (!found) throw new Error(`Missing controlled public tool ${name}`); return found }
+function nativeDetails(result: unknown): Record<string, unknown> { const metadata = typeof result === "object" && result !== null && "metadata" in result ? result.metadata : undefined; const native = typeof metadata === "object" && metadata !== null && "native" in metadata ? metadata.native : undefined; const details = typeof native === "object" && native !== null && "details" in native ? native.details : undefined; if (typeof details !== "object" || details === null) throw new Error("Missing controlled native result details"); return { ...details } }
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("Expected value to be defined in controlled fixture"); return value }
 export { fixture as withNativeOperationService }
 /** Controlled public-domain protocol fixture. Actual installed-host proof is separate. */
 async function fixture(run: (f: Awaited<ReturnType<typeof host>>) => Promise<void>) {
@@ -43,9 +50,9 @@ async function host(dir:string,closers:(()=>Promise<void>|void)[]) {
   const calls:string[]=[],blocked=new Set<string>(),sequence=new Map<string,number>(),sessions=new Map<string,unknown>()
   const createdChildren = new Set<string>(), idleParents = new Set<string>()
   const activeAssistants = new Map<string, string>()
-  const streams=new Set<{queue:unknown[];wake?:(r:IteratorResult<unknown>)=>void;ended:boolean}>(),hooks=new Map<string,Set<(value:any)=>unknown>>()
-  const toolHooks = new Map<string, Set<(value: any) => unknown>>()
-  const synthetics: Array<{ input: any; ack: any }> = []
+  const streams=new Set<{queue:unknown[];wake?:(r:IteratorResult<unknown>)=>void;ended:boolean}>(),hooks=new Map<string,Set<(value:unknown)=>unknown>>()
+  const toolHooks = new Map<string, Set<(value: unknown) => unknown>>()
+  const synthetics: Array<{ input: UnitSyntheticInput; ack: UnitSyntheticAck }> = []
   const syntheticEntered = Promise.withResolvers<void>(), syntheticRelease = Promise.withResolvers<void>()
   const syntheticSubmitted = Promise.withResolvers<void>()
   const observerUpdateEntered = Promise.withResolvers<void>(), observerUpdateRelease = Promise.withResolvers<void>()
@@ -60,14 +67,14 @@ async function host(dir:string,closers:(()=>Promise<void>|void)[]) {
     const value={id:`${sessionID}:${seq}`,created:seq,type,durable:{aggregateID:sessionID,seq,version:1},data:{sessionID,...data}}
     for(const s of streams){if(s.ended)continue;if(s.wake){const next=s.wake;s.wake=undefined;next({done:false,value})}else s.queue.push(value)}
   }
-  const api:any={
-    async create(input:any){calls.push("create");const value={id:input.id,parentID:input.parentID,location:input.location};sessions.set(input.id,value);createdChildren.add(input.id);if(holdCreate){createEntered.resolve();await createRelease.promise};return value},
-    async get({sessionID}:any){calls.push("get");const value=sessions.get(sessionID);if(!value)throw Error("Missing protocol session");if(failChildGet&&sessionID.startsWith("ses_native_")){failChildGet=false;throw Error("controlled child get failure")};return value},
+  const api={
+    async create(input:{id:string;parentID?:string;location?:unknown}){calls.push("create");const value={id:input.id,parentID:input.parentID,location:input.location};sessions.set(input.id,value);createdChildren.add(input.id);if(holdCreate){createEntered.resolve();await createRelease.promise};return value},
+    async get({sessionID}:{sessionID:string}){calls.push("get");const value=sessions.get(sessionID);if(!value)throw Error("Missing protocol session");if(failChildGet&&sessionID.startsWith("ses_native_")){failChildGet=false;throw Error("controlled child get failure")};return value},
     async list(){return {data:[...sessions.values()],cursor:{}}},
-    async hook(name:string,callback:(value:any)=>unknown){const list=hooks.get(name)??new Set();hooks.set(name,list);list.add(callback);return {dispose(){if(name==="context"){calls.push("policy-dispose-attempt");if(failPolicyDispose){failPolicyDispose=false;calls.push("policy-dispose-failed");throw Error("controlled policy dispose failed before removal")}};list.delete(callback);if(name==="context")calls.push("policy-disposed")}}},
-    async update(input:any){if(holdObserverUpdate){observerUpdateEntered.resolve();await observerUpdateRelease.promise};emit("session.renamed",input.sessionID)},
+    async hook(name:string,callback:(value:unknown)=>unknown){const list=hooks.get(name)??new Set();hooks.set(name,list);list.add(callback);return {dispose(){if(name==="context"){calls.push("policy-dispose-attempt");if(failPolicyDispose){failPolicyDispose=false;calls.push("policy-dispose-failed");throw Error("controlled policy dispose failed before removal")}};list.delete(callback);if(name==="context")calls.push("policy-disposed")}}},
+    async update(input:{sessionID:string}){if(holdObserverUpdate){observerUpdateEntered.resolve();await observerUpdateRelease.promise};emit("session.renamed",input.sessionID)},
     // Controlled protocol port only: this DTO and its events are unit data, never live SDK evidence.
-    async synthetic(input: any, options?: { signal?: AbortSignal }) {
+    async synthetic(input: UnitSyntheticInput, options?: { signal?: AbortSignal }) {
       calls.push("synthetic")
       syntheticSubmitted.resolve()
       const ack = { id: input.id ?? `msg_unit_notice_${++syntheticSequence}`, sessionID: input.sessionID,
@@ -89,7 +96,7 @@ async function host(dir:string,closers:(()=>Promise<void>|void)[]) {
       emit("session.inbox.delivered", input.sessionID, { inboxID: ack.id })
       return ack
     },
-    async prompt(input:any,options?:{signal?:AbortSignal}){calls.push("prompt");for(const cb of hooks.get("context")??[])await cb({sessionID:input.sessionID,system:[],tools:{}})
+    async prompt(input:{id:string;sessionID:string;text:string},options?:{signal?:AbortSignal}){calls.push("prompt");for(const cb of hooks.get("context")??[])await cb({sessionID:input.sessionID,system:[],tools:{}})
       if(input.id.startsWith("msg_omo_")&&holdInput){inputEntered.resolve();await new Promise<void>((resolve,reject)=>{const signal=options?.signal;const abort=()=>{signal?.removeEventListener("abort",abort);reject(signal?.reason)};signal?.addEventListener("abort",abort,{once:true});inputRelease.promise.then(()=>{signal?.removeEventListener("abort",abort);resolve()},reject);if(signal?.aborted)abort()})}
       const priorAssistant = activeAssistants.get(input.sessionID)
       if (input.id.startsWith("msg_omo_") && blocked.has(input.sessionID)) {
@@ -102,25 +109,25 @@ async function host(dir:string,closers:(()=>Promise<void>|void)[]) {
       if(input.text.includes("block")){blocked.add(input.sessionID);return {id:input.id,sessionID:input.sessionID}}
       emit("session.text.started",input.sessionID,{assistantMessageID:`assistant:${input.id}`,ordinal:0});emit("session.text.ended",input.sessionID,{assistantMessageID:`assistant:${input.id}`,ordinal:0,text:`result:${input.text}`})
       emit("session.step.ended",input.sessionID,{assistantMessageID:`assistant:${input.id}`,finish:"stop"});emit("session.execution.succeeded",input.sessionID);activeAssistants.delete(input.sessionID);blocked.delete(input.sessionID);return {id:input.id,sessionID:input.sessionID}},
-    async interrupt({sessionID}:any){calls.push("interrupt");if(blocked.delete(sessionID)){emit("session.execution.interrupted",sessionID);return {interrupted:true}};return {interrupted:false}},
-    async wait({sessionID}:any){
+    async interrupt({sessionID}:{sessionID:string}){calls.push("interrupt");if(blocked.delete(sessionID)){emit("session.execution.interrupted",sessionID);return {interrupted:true}};return {interrupted:false}},
+    async wait({sessionID}:{sessionID:string}){
       // This unit host has no parent agent loop unless the test explicitly
       // models it. A missing model is not a successful public idle observation.
       if (!createdChildren.has(sessionID) && !idleParents.has(sessionID)) { calls.push("parent-wait-unsupported"); throw Error("Controlled parent loop quiescence unavailable") }
       calls.push("wait");waitEntered.resolve();if(failWait){failWait=false;throw Error("controlled real idle wait failure")};if(holdWait){heldWaitEntered.resolve();await waitRelease.promise}
       if(blocked.has(sessionID)) throw Error("Controlled child loop is still running")
-    },async remove({sessionID}:any){calls.push("remove");sessions.delete(sessionID)},
+    },async remove({sessionID}:{sessionID:string}){calls.push("remove");sessions.delete(sessionID)},
     async context(){return {}},instructions:{entry:{async list(){return []},async put(){},async remove(){}}},
   }
   withJoinedSessionCancellation(api,"controlled-test")
   const ctx={app:{version:"2.2.6"},location:{directory:dir},session:api,
     agent:{async list(){return {data:[{id:"build"}]}}},
-    tool: { async hook(name: string, callback: (value: any) => unknown) {
+    tool: { async hook(name: string, callback: (value: unknown) => unknown) {
       const list = toolHooks.get(name) ?? new Set(); toolHooks.set(name, list); list.add(callback)
       return { async dispose() { list.delete(callback) } }
     } },
     model:{async list(){catalogs++;catalogEntered.resolve();if(holdCatalog)await catalogRelease.promise;if(catalogError)throw catalogError;return {data:[{providerID:"qa",id:"model",modelID:"model",name:"model",type:"chat",status:"active",enabled:true,variants:[],capabilities:{tools:true,input:["text"],output:["text"]},limit:{context:32000,output:1000}}]}}},
-    provider:{async list(){return {data:[{id:"qa",activation:"enabled"}]}}},event:{subscribe({signal}:any){const s:{queue:unknown[];wake?:(r:IteratorResult<unknown>)=>void;ended:boolean}={queue:[],ended:false};streams.add(s);signal.addEventListener("abort",()=>{s.ended=true;s.wake?.({done:true,value:undefined});streams.delete(s)},{once:true});return {[Symbol.asyncIterator](){return {async next(){if(s.queue.length)return {done:false,value:s.queue.shift()};if(s.ended)return {done:true,value:undefined};return new Promise<IteratorResult<unknown>>(resolve=>{s.wake=resolve})}}}}}}} as unknown as OwnedTaskHost
+    provider:{async list(){return {data:[{id:"qa",activation:"enabled"}]}}},event:{subscribe({signal}:{signal:AbortSignal}){const s:{queue:unknown[];wake?:(r:IteratorResult<unknown>)=>void;ended:boolean}={queue:[],ended:false};streams.add(s);signal.addEventListener("abort",()=>{s.ended=true;s.wake?.({done:true,value:undefined});streams.delete(s)},{once:true});return {[Symbol.asyncIterator](){return {async next(){if(s.queue.length)return {done:false,value:s.queue.shift()};if(s.ended)return {done:true,value:undefined};return new Promise<IteratorResult<unknown>>(resolve=>{s.wake=resolve})}}}}}}} as unknown as OwnedTaskHost
   const releaseScope=Promise.withResolvers<void>(),metadataReady=Promise.withResolvers<Parameters<typeof createNativeTaskService>[1]["metadataSource"]>()
   const metadataOwner=Effect.runPromise(Effect.scoped(Effect.gen(function*(){const source=yield* acquireEffectToolMetadataSource({hook:()=>Effect.void} as never);metadataReady.resolve(source);yield* Effect.promise(()=>releaseScope.promise)})))
   void metadataOwner.catch(error=>metadataReady.reject(error))
@@ -177,7 +184,7 @@ test("parallel C1 abort during shared initialization cannot poison live C2 or cr
   await Promise.race([f.catalogEntered,first.then(result=>{throw Error(`C1 failed before catalog entry: ${result}`)})])
   const second=f.invoke(async api=>{const start=await api.start({category:"qa",prompt:"C2"});if(start.kind!=="started")throw Error("start");const record=await api.wait(start.task_id);return {id:start.task_id,text:record.final_response}},c2)
   await f.secondInitialization
-  const reason=new Error("C1 interrupted"),inner=f.initializationWaits[0]!.then(()=>"unexpected facade",error=>error)
+  const reason=new Error("C1 interrupted"),inner=defined(f.initializationWaits[0]).then(()=>"unexpected facade",error=>error)
   c1.controller.abort(reason);expect(await first).toContain("C1 interrupted")
   const beforeRelease=await Promise.race([inner,Bun.sleep(100).then(()=>"inner initialization still pending")])
   expect(f.calls.filter(x=>x==="create")).toHaveLength(0);expect(f.catalogs()).toBe(1);expect(f.initializationWaits).toHaveLength(2);f.releaseCatalog()
@@ -190,7 +197,7 @@ test("parallel C1 abort during shared initialization cannot poison live C2 or cr
 })
 
 test("planned host grant uses each genuine operation source and Native SAME manager before child stage", async () => {
- const scope=Scope.makeUnsafe(),requests:any[]=[]
+ const scope=Scope.makeUnsafe(),requests:PermissionRequest[]=[]
  const permission=await Effect.runPromise(Effect.provideService(acquireEffectPermissionApi({assert:input=>Effect.sync(()=>{requests.push(input)})}),Scope.Scope,scope))
  try { await fixture(async f=>{
   let preparations=0
@@ -229,7 +236,7 @@ test("parent retirement rejects inner initialization wait before catalog release
   f.holdCatalog();const origin=f.raw()
   const outer=f.invoke(async()=>{throw Error("retired callback must not run")},origin).catch(error=>error)
   await f.catalogEntered
-  const inner=f.initializationWaits[0]!.then(()=>"unexpected facade",error=>error)
+  const inner=defined(f.initializationWaits[0]).then(()=>"unexpected facade",error=>error)
   const lease=f.leases[0] as Awaited<ReturnType<Service["parent"]>>
   const retiring=f.service.retire(lease)
   const beforeRelease=await Promise.race([inner,Bun.sleep(100).then(()=>"inner initialization still pending")])
@@ -254,7 +261,7 @@ test("caller abort leaves shared initialization rejection observed for the remai
   f.holdCatalog();const origin=f.raw(),reason=new Error("C1 leaves failed init"),failure=new Error("shared catalog unavailable")
   const first=f.invoke(async()=>{throw Error("C1 callback must not run")},origin).catch(error=>error)
   await f.catalogEntered
-  const inner=f.initializationWaits[0]!.then(()=>"unexpected facade",error=>error)
+  const inner=defined(f.initializationWaits[0]).then(()=>"unexpected facade",error=>error)
   const second=f.invoke(async()=>{throw Error("C2 callback must not run")}).catch(error=>error)
   await f.secondInitialization
   origin.controller.abort(reason)
@@ -296,19 +303,19 @@ test("actual Native initial receipt binds completion after its original unit Ker
   // Manually driven controlled host hook; actual hook/model behavior has a separate live gate.
   await f.afterTool(original.caller)
   expect(f.synthetics).toHaveLength(1)
-  expect(f.synthetics[0]!.input.sessionID).toBe(original.caller.sessionID)
-  expect(f.synthetics[0]!.input.text).toContain("result:initial completion")
+  expect(defined(f.synthetics[0]).input.sessionID).toBe(original.caller.sessionID)
+  expect(defined(f.synthetics[0]).input.text).toContain("result:initial completion")
   const current = await f.invoke(async api => api.get(start.task_id), original)
   expect(current.notification.notified_epoch).toBe(current.notification.run_epoch)
   const completions = new Database(join(f.dir, "parent", "owned-completions.sqlite"), { readonly: true })
   try {
    const saved = completions.query("SELECT body FROM intents").all() as { body: string }[]
    expect(saved).toHaveLength(1)
-   const intent = JSON.parse(saved[0]!.body)
+   const intent = JSON.parse(defined(saved[0]).body)
    expect(intent.phase).toBe("accepted")
    expect(intent.bookkeeping).toBe("complete")
    expect(intent.sources[0].taskId).toBe(start.task_id)
-   expect(intent.acceptance.id).toBe(f.synthetics[0]!.ack.id)
+   expect(intent.acceptance.id).toBe(defined(f.synthetics[0]).ack.id)
   } finally { completions.close() }
  })
 })
@@ -331,9 +338,9 @@ test("Native completion after the original parent idle returns uses fresh quiesc
   expect(observed).toBe(true)
   await Bun.sleep(0)
   expect(f.synthetics).toHaveLength(1)
-  expect(f.synthetics[0]!.input.sessionID).toBe(original.caller.sessionID)
-  expect(f.synthetics[0]!.input.delivery).toBe("steer")
-  expect(f.synthetics[0]!.input.text).toContain("late original model completion")
+  expect(defined(f.synthetics[0]).input.sessionID).toBe(original.caller.sessionID)
+  expect(defined(f.synthetics[0]).input.delivery).toBe("steer")
+  expect(defined(f.synthetics[0]).input.text).toContain("late original model completion")
   const task = JSON.parse(readFileSync(join(f.dir, "parent", "tasks", start.task_id + ".json"), "utf8"))
   expect(task.status).toBe("completed")
   expect(task.final_response).toBe("late original model completion")
@@ -373,7 +380,7 @@ test("closing a parent joins its original completion transport and preserves unc
    try {
     const saved = db.query("SELECT body FROM intents").all() as { body: string }[]
     expect(saved).toHaveLength(1)
-    expect(JSON.parse(saved[0]!.body).phase).toBe("uncertain")
+    expect(JSON.parse(defined(saved[0]).body).phase).toBe("uncertain")
    } finally { db.close() }
    const task = JSON.parse(readFileSync(join(f.dir, "parent", "tasks", start.task_id + ".json"), "utf8"))
    expect(task.notification.notified_epoch).toBeLessThan(task.notification.run_epoch)
@@ -401,7 +408,7 @@ test("accepted running steering preserves its original Native epoch completion s
   } finally { db.close() }
   await f.afterTool(original.caller)
   expect(f.synthetics).toHaveLength(1)
-  expect(f.synthetics[0]!.input.text).toContain("result:steer finishes original epoch")
+  expect(defined(f.synthetics[0]).input.text).toContain("result:steer finishes original epoch")
  })
 })
 
@@ -421,7 +428,7 @@ test("real terminal reattach restores notification custody without replaying its
   expect(f.calls.filter(call => call === "prompt")).toHaveLength(1)
   await f.afterTool(original.caller)
   expect(f.synthetics).toHaveLength(1)
-  expect(f.synthetics[0]!.input.text).toContain("result:terminal recovered completion")
+  expect(defined(f.synthetics[0]).input.text).toContain("result:terminal recovered completion")
   const current = await f.invoke(async api => api.get(start.task_id), original)
   expect(current.notification.notified_epoch).toBe(current.notification.run_epoch)
  })
@@ -456,7 +463,7 @@ test("Native parked send policy stays intact and real recovery enables its next 
   expect(f.calls.filter(call => call === "prompt")).toHaveLength(2)
   await f.afterTool(original.caller)
   expect(f.synthetics).toHaveLength(1)
-  expect(f.synthetics[0]!.input.text).toContain("result:automatic recovery next turn")
+  expect(defined(f.synthetics[0]).input.text).toContain("result:automatic recovery next turn")
   const notified = await f.invoke(async api => api.get(start.task_id), original)
   expect(notified.notification.notified_epoch).toBe(current.notification.run_epoch)
  })
@@ -639,9 +646,9 @@ test("retained facade and copied authority cannot initiate new actions after aut
  await fixture(async f=>{
   let retained:Facade|undefined
   await f.invoke(async api=>{retained=api;return {ok:true}})
-  expect(()=>retained!.start({category:"qa",prompt:"forbidden"})).toThrow("authorized")
-  expect(()=>retained!.get("unknown")).toThrow("authorized")
-  expect(()=>retained!.end("unknown")).toThrow("authorized");expect(f.calls.filter(x=>x==="create")).toHaveLength(0)
+  expect(()=>defined(retained).start({category:"qa",prompt:"forbidden"})).toThrow("authorized")
+  expect(()=>defined(retained).get("unknown")).toThrow("authorized")
+  expect(()=>defined(retained).end("unknown")).toThrow("authorized");expect(f.calls.filter(x=>x==="create")).toHaveLength(0)
  })
 })
 
@@ -652,12 +659,12 @@ test("a different root's current frame cannot authorize a retained Native manage
   await f.invoke(api => api.operation(async manager => { retained = manager; return { captured: true } }), original)
   const spec = { category: "qa", prompt: "same original manager", run_in_background: true,
    parent_session_id: original.caller.sessionID, root_session_id: original.caller.sessionID, depth: 1 }
-  const foreign = await f.invoke(api => api.operation(async () => retained!.start(spec).catch(error => ({ kind: "thrown", message: String(error) }))), other)
+  const foreign = await f.invoke(api => api.operation(async () => defined(retained).start(spec).catch(error => ({ kind: "thrown", message: String(error) }))), other)
   expect(foreign.kind).not.toBe("started")
   expect(f.calls.filter(call => call === "create")).toHaveLength(0)
   const own = await f.invoke(api => api.operation(async manager => {
    expect(manager === retained).toBe(true)
-   return retained!.start(spec)
+   return defined(retained).start(spec)
   }), original)
   expect(own.kind).toBe("started")
   const completed = await f.invoke(async api => (await api.wait(own.task_id)).status, original)
@@ -692,7 +699,7 @@ test("read-only Native wait is cancelled by callback binding disposal without ca
  await fixture(async f=>{
   let query:Promise<string>|undefined
   const started=await f.invoke(async api=>{const result=await api.start({category:"qa",prompt:"block active",run_in_background:true});if(result.kind!=="started")throw Error("start");query=api.wait(result.task_id).then(()=>"wrong completed",()=>"query cancelled");return result})
-  expect(await Promise.race([query!,Bun.sleep(80).then(()=>"waiter leaked")])).toBe("query cancelled")
+  expect(await Promise.race([defined(query),Bun.sleep(80).then(()=>"waiter leaked")])).toBe("query cancelled")
   const status=await f.invoke(async api=>api.get(started.task_id)?.status);expect(status).toBe("running");expect(f.blocked.size).toBe(1)
   await f.invoke(async api=>{await api.end(started.task_id);return {ended:true}})
  })
@@ -853,11 +860,11 @@ test("accepted child queue retains its original borrowed parent after the callba
   const queued=await f.invoke(api=>api.start({category:"qa",prompt:"queued-grandchild",run_in_background:true}),child)
   expect(queued.kind).toBe("started");expect(queued.status).toBe("pending");expect(f.calls.filter(x=>x==="create")).toHaveLength(1)
   let restore:(()=>Promise<void>)|undefined
-  await f.invoke(api=>api.operation(async manager=>{const parked=manager.concurrency?.park(parent.task_id,row.notification.run_epoch);if(!parked)throw Error("No actual parent lane");restore=()=>manager.concurrency!.unpark(parked);return null}),root)
+  await f.invoke(api=>api.operation(async manager=>{const parked=manager.concurrency?.park(parent.task_id,row.notification.run_epoch);if(!parked)throw Error("No actual parent lane");restore=()=>defined(manager.concurrency).unpark(parked);return null}),root)
   const complete=await f.invoke(api=>api.wait(queued.task_id),root)
   expect(complete.parent_session_id).toBe(child.caller.sessionID);expect(complete.root_session_id).toBe(root.caller.sessionID);expect(complete.depth).toBe(2)
   expect(complete.final_response).toBe("result:queued-grandchild")
-  await f.invoke(api=>api.operation(async()=>{await restore!();return null}),root)
+  await f.invoke(api=>api.operation(async()=>{await defined(restore)();return null}),root)
   await f.invoke(api=>api.end(parent.task_id),root)
   expect(f.calls.filter(x=>x==="remove")).toHaveLength(2)
  })
@@ -1019,9 +1026,9 @@ test("rebound lease grants no action by itself; only a new current frame can sta
   expect(completed.final_response).toBe("result:fresh-descendant");expect(completed.depth).toBe(2)
   const subsequent={caller:{...fresh.caller,id:"subsequent-child-action",messageID:"subsequent-child-message"} as ToolContext,controller}
   expect(await next.parent(subsequent.caller)).toBe(lease)
-  const refusal=await f.invoke(async()=>{try{await retained!.start({category:"qa",prompt:"forbidden-retained"});return "unexpected"}catch(error){return String(error)}},subsequent)
+  const refusal=await f.invoke(async()=>{try{await defined(retained).start({category:"qa",prompt:"forbidden-retained"});return "unexpected"}catch(error){return String(error)}},subsequent)
   expect(refusal).toContain("authorized")
-  await expect(Promise.resolve().then(()=>oldFacade!.start({category:"qa",prompt:"forbidden-old-owner"}))).rejects.toThrow()
+  await expect(Promise.resolve().then(()=>defined(oldFacade).start({category:"qa",prompt:"forbidden-old-owner"}))).rejects.toThrow()
   await expect(f.invoke(api=>api.wait(parent.task_id),root)).rejects.toThrow("uncertain")
   expect(f.calls.filter(x=>x==="create")).toHaveLength(3);expect(f.calls.filter(x=>x==="prompt")).toHaveLength(3)
   const oldParent=await f.invoke(api=>Promise.resolve(api.get(parent.task_id)),root)
@@ -1144,9 +1151,9 @@ test("operation issues a private fourth owner while preserving its original thre
 })
 
 /** Actual service/kernel/guard/permission implementations over explicitly controlled UNIT domains. */
-export async function withNativeTargetPermissionService(run:(value:{service:Service;registry:ReturnType<typeof createToolRegistry>;kernel:ReturnType<typeof createToolKernel>;f:Awaited<ReturnType<typeof host>>;requests:any[];targets:NativeTaskTargets;options:Parameters<typeof createNativeTaskService>[1];setFence(callback:()=>void):void;retire():void})=>Promise<void>,config:{denySubagent?:boolean;childGuardBinding?:Parameters<typeof createNativeTaskService>[1]["childGuardBinding"]}={}){
+export async function withNativeTargetPermissionService(run:(value:{service:Service;registry:ReturnType<typeof createToolRegistry>;kernel:ReturnType<typeof createToolKernel>;f:Awaited<ReturnType<typeof host>>;requests:PermissionRequest[];targets:NativeTaskTargets;options:Parameters<typeof createNativeTaskService>[1];setFence(callback:()=>void):void;retire():void})=>Promise<void>,config:{denySubagent?:boolean;childGuardBinding?:Parameters<typeof createNativeTaskService>[1]["childGuardBinding"]}={}){
  await fixture(async f=>{
-  const scope=Scope.makeUnsafe(),requests:any[]=[]
+  const scope=Scope.makeUnsafe(),requests:PermissionRequest[]=[]
   const permission=await Effect.runPromise(Effect.provideService(acquireEffectPermissionApi({assert:input=>Effect.suspend(()=>{requests.push(input);return config.denySubagent&&input.action==="subagent"?Effect.fail(new Error("Unit denied subagent")):Effect.void})}),Scope.Scope,scope))
   const guard=await Effect.runPromise(Effect.provideService(acquireOwnedChildToolGuard({tool:{transform:()=>Effect.succeed({dispose:Effect.void})},permission:{hook:()=>Effect.succeed({dispose:Effect.void})}}),Scope.Scope,scope))
   let current=true,fence:(()=>void)|undefined
@@ -1167,8 +1174,8 @@ export async function withNativeTargetPermissionService(run:(value:{service:Serv
 // Causal UNIT regression: no pretarget canary/read adapter; the real service owns authorization.
 test("canonical bridge registers real service targets without invented pretarget permission actions",async()=>{
  await withNativeTargetPermissionService(async({service,registry,kernel,f,requests})=>{
-  const publicTools:any[]=[]
-  const tool={async hook(){return{async dispose(){}}},async transform(change:any){change({list:()=>publicTools,get:(id:string)=>publicTools.find(t=>t.id===id),namespace(){},add(value:any){publicTools.push({...value,id:`public-${value.name}`})},update(id:string,edit:any){edit(publicTools.find(t=>t.id===id))},remove(){}});return{async dispose(){}}},async list(){return publicTools},async reload(){}}
+  const publicTools:UnitPublicTool[]=[]
+  const tool={async hook(){return{async dispose(){}}},async transform(change:(editor:ToolEditor)=>void){change({list:()=>publicTools,get:(id:string)=>publicTools.find(t=>t.id===id),namespace(){},add(value){publicTools.push({...value,id:`public-${value.name}`})},update(id,edit){edit(defined(publicTools.find(t=>t.id===id)))},remove(){}});return{async dispose(){}}},async list(){return publicTools},async reload(){}}
   const prepared={config:await f.options.config(),agents:{},loadSkills:()=>({prepend:"",resolved:[],missing:[]})} as unknown as PreparedNativeTaskRuntime
   const bridge=createNativeTaskBridge({tool,prepared,async rollbackAcquisition(){await service.close()},async acquire(targets){
    const targetPermissions=targets.tools.map(tool=>({tool,permission:service.targetPermission(tool)}))
@@ -1178,10 +1185,10 @@ test("canonical bridge registers real service targets without invented pretarget
   try{
    await bridge.ready;expect(publicTools.map(t=>t.name)).toEqual(["task","task_output","task_send","task_cancel"])
    const caller=f.raw("ses_public_owned").caller
-   const output=await publicTools.find(t=>t.name==="task_output").execute({task_id:"missing"},caller)
-   expect(output.metadata.native.details.kind).toBe("not_found");expect(requests).toHaveLength(0)
+   const output=await publicTool(publicTools,"task_output").execute({task_id:"missing"},caller)
+   expect(nativeDetails(output).kind).toBe("not_found");expect(requests).toHaveLength(0)
    // The genuine G2 request is observed and denied, so no guarded child is staged by this fake-session unit host.
-   await expect(publicTools.find(t=>t.name==="task").execute({category:"qa",prompt:"owned public",run_in_background:true},caller)).rejects.toThrow()
+   await expect(publicTool(publicTools,"task").execute({category:"qa",prompt:"owned public",run_in_background:true},caller)).rejects.toThrow()
    expect(requests).toHaveLength(1);expect(requests[0]).toMatchObject({action:"subagent",resources:["build"],sessionID:caller.sessionID})
   }finally{await bridge.close()}
  },{denySubagent:true})
@@ -1191,8 +1198,8 @@ test("canonical bridge registers real service targets without invented pretarget
 test("allowed public task start binds the configured G3 producer for the admitted spec before any child is staged",async()=>{
  const bound:{taskId:string;buildAgentID:string}[]=[],refused=Error("Unit G3 producer refused staging")
  await withNativeTargetPermissionService(async({service,registry,kernel,f,requests})=>{
-  const publicTools:any[]=[]
-  const tool={async hook(){return{async dispose(){}}},async transform(change:any){change({list:()=>publicTools,get:(id:string)=>publicTools.find(t=>t.id===id),namespace(){},add(value:any){publicTools.push({...value,id:`public-${value.name}`})},update(id:string,edit:any){edit(publicTools.find(t=>t.id===id))},remove(){}});return{async dispose(){}}},async list(){return publicTools},async reload(){}}
+  const publicTools:UnitPublicTool[]=[]
+  const tool={async hook(){return{async dispose(){}}},async transform(change:(editor:ToolEditor)=>void){change({list:()=>publicTools,get:(id:string)=>publicTools.find(t=>t.id===id),namespace(){},add(value){publicTools.push({...value,id:`public-${value.name}`})},update(id,edit){edit(defined(publicTools.find(t=>t.id===id)))},remove(){}});return{async dispose(){}}},async list(){return publicTools},async reload(){}}
   const prepared={config:await f.options.config(),agents:{},loadSkills:()=>({prepend:"",resolved:[],missing:[]})} as unknown as PreparedNativeTaskRuntime
   const bridge=createNativeTaskBridge({tool,prepared,async rollbackAcquisition(){await service.close()},async acquire(targets){
    const targetPermissions=targets.tools.map(tool=>({tool,permission:service.targetPermission(tool)}))
@@ -1203,7 +1210,7 @@ test("allowed public task start binds the configured G3 producer for the admitte
    await bridge.ready
    const caller=f.raw("ses_public_guarded").caller
    // when
-   const details=(await publicTools.find(t=>t.name==="task").execute({category:"qa",prompt:"guarded public",run_in_background:true},caller)).metadata.native.details
+   const details=nativeDetails(await publicTool(publicTools,"task").execute({category:"qa",prompt:"guarded public",run_in_background:true},caller))
    // then
    expect(details.status).toBe("error")
    expect(requests).toHaveLength(1);expect(requests[0]).toMatchObject({action:"subagent",resources:["build"],sessionID:caller.sessionID})
@@ -1222,7 +1229,7 @@ test("low-level actual service without G2 and G3 cannot issue target-phase permi
 
 test("actual service permission seals original target and owner; close and producer retirement revoke admissions",async()=>{
  await withNativeTargetPermissionService(async({service,f,retire,targets})=>{
-  const target=targets.tools[0]!
+  const target=defined(targets.tools[0])
   expect(()=>service.targetPermission(Object.freeze({...target,execute:async()=>({})}))).toThrow("Noncanonical")
   const permission=service.targetPermission(target),stop=new AbortController()
   const bound=bindNativeTaskTargetPermission(permission,target,{signal:stop.signal,assertCurrent(){}})
@@ -1236,7 +1243,7 @@ test("actual service permission seals original target and owner; close and produ
   retire();expect(()=>bound.assertCurrent()).toThrow("retired")
  })
  await withNativeTargetPermissionService(async({service,targets})=>{
-  const target=targets.tools[1]!
+  const target=defined(targets.tools[1])
   const bound=bindNativeTaskTargetPermission(service.targetPermission(target),target,{signal:new AbortController().signal,assertCurrent(){}})
   await service.close();expect(()=>bound.assertCurrent()).toThrow("closing");expect(()=>service.targetPermission(target)).toThrow("closing")
  })
@@ -1246,9 +1253,9 @@ test("real service issuance requires BOTH configured G3 ports even with genuine 
  await withNativeTargetPermissionService(async({f,options,targets})=>{
   for(const missing of ["childToolGuard","childGuardBinding"] as const){
    const incomplete=createNativeTaskService(f.ctx,{...options,[missing]:undefined})
-   try{expect(()=>incomplete.targetPermission(targets.tools[0]!)).toThrow("G2 authorizer and G3 binding")}finally{await incomplete.close()}
+   try{expect(()=>incomplete.targetPermission(defined(targets.tools[0]))).toThrow("G2 authorizer and G3 binding")}finally{await incomplete.close()}
   }
   const noGrant=createNativeTaskService(f.ctx,{...options,hostGrant:undefined})
-  try{expect(()=>noGrant.targetPermission(targets.tools[0]!)).toThrow("G2 authorizer and G3 binding")}finally{await noGrant.close()}
+  try{expect(()=>noGrant.targetPermission(defined(targets.tools[0]))).toThrow("G2 authorizer and G3 binding")}finally{await noGrant.close()}
  })
 })

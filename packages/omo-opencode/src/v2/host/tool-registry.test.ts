@@ -4,6 +4,11 @@ import { createToolRegistry } from "./tool-registry"
 import { issueToolValueCodec, type ToolValueCodec } from "./tool-value-codec"
 import { issueToolArgumentNormalizer } from "./tool-argument-normalizer"
 
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
+
 function fixture() {
   const tool = { id: "native", name: "native", description: "native", input: { type: "object", properties: { prompt: { type: "string" } } }, execute: async () => ({ content: "ok" }) }
   const input = issueToolValueCodec(tool, "input", { schema: tool.input, decodeUnknown: value => value })
@@ -18,9 +23,9 @@ test("association precedes cloning and snapshot never mutates shared schema", as
   expect(entry.tool.input).not.toBe(tool.input)
   expect(Object.isFrozen((entry.tool.input as { properties: object }).properties)).toBe(true)
   expect(Object.isFrozen(tool.input.properties)).toBe(false)
-  expect(await entry.inputDecoder!({ prompt: "ok" })).toEqual({ prompt: "ok" })
+  expect(await defined(entry.inputDecoder)({ prompt: "ok" })).toEqual({ prompt: "ok" })
   tool.input.properties.prompt.type = "number"
-  await expect(entry.inputDecoder!({ prompt: "ok" })).rejects.toThrow("Changed")
+  await expect(defined(entry.inputDecoder)({ prompt: "ok" })).rejects.toThrow("Changed")
 })
 test("replacement explicitly rebinds; same names, schemas and definitions inherit nothing", () => {
   const { tool, input, registry } = fixture()
@@ -57,7 +62,7 @@ test("invalid replacement does not abort current generation or revoke its codec"
  const {tool,registry}=fixture(),generation=registry.generation,signal=registry.retirementSignal(generation)
  expect(()=>registry.replace([tool,tool])).toThrow("Ambiguous")
  expect(signal.aborted).toBe(false);expect(registry.retirementSignal(generation)).toBe(signal)
- expect(await registry.get("native",generation).inputDecoder!({prompt:"valid"})).toEqual({prompt:"valid"})
+ expect(await defined(registry.get("native",generation).inputDecoder)({prompt:"valid"})).toEqual({prompt:"valid"})
 })
 
 test("actual SDK identifiers differ from names and ambiguous identifier replacement is atomic", () => {
@@ -78,40 +83,40 @@ test("explicit normalizers bind the original definition and retire only after va
   const input = issueToolArgumentNormalizer(tool, { schema: tool.input, normalizeUnknown: () => ({ prompt: "prepared" }) })
   const registry = createToolRegistry([tool], { native: () => [] }, [], [{ tool, input }])
   const entry = registry.getById(tool.id, registry.generation)
-  expect(await entry.normalizeInput!({ prompt: 123 })).toEqual({ prompt: "prepared" })
+  expect(await defined(entry.normalizeInput)({ prompt: 123 })).toEqual({ prompt: "prepared" })
   const old = registry.generation
   expect(() => registry.replace([tool, tool], [], [{ tool, input }])).toThrow("Ambiguous")
-  expect(await entry.normalizeInput!({})).toEqual({ prompt: "prepared" })
+  expect(await defined(entry.normalizeInput)({})).toEqual({ prompt: "prepared" })
   const copy = { ...tool }
   expect(() => registry.replace([copy], [], [{ tool: copy, input }])).toThrow("mismatched")
   expect(registry.generation).toBe(old)
   registry.replace([tool])
-  await expect(entry.normalizeInput!({})).rejects.toThrow("Retired")
+  await expect(defined(entry.normalizeInput)({})).rejects.toThrow("Retired")
   expect(registry.get("native", registry.generation).normalizeInput).toBeUndefined()
   registry.replace([tool], [], [{ tool, input }])
-  expect(await registry.get("native", registry.generation).normalizeInput!({})).toEqual({ prompt: "prepared" })
+  expect(await defined(registry.get("native", registry.generation).normalizeInput)({})).toEqual({ prompt: "prepared" })
 })
 
 test("actual Native owner association binds exact target and registry generation atomically",async()=>{
  await withNativeTargetPermissionService(async({service,registry,targets})=>{
-  const target=targets.tools[0]!
+  const target=defined(targets.tools[0])
   const permission=service.targetPermission(target),association={tool:target,permission}
   registry.replace([target],[],[],[association])
   const generation=registry.generation,entry=registry.get("task",generation)
-  entry.nativeTaskPermission!.assertOwner(service);expect(entry.adapter).toBeUndefined()
+  defined(entry.nativeTaskPermission).assertOwner(service);expect(entry.adapter).toBeUndefined()
   expect(()=>registry.replace([target],[],[],[association,association])).toThrow("Ambiguous")
-  expect(registry.generation).toBe(generation);entry.nativeTaskPermission!.assertCurrent()
+  expect(registry.generation).toBe(generation);defined(entry.nativeTaskPermission).assertCurrent()
   expect(()=>registry.replace([target],[],[],[{tool:target,permission:{} as typeof permission}])).toThrow("Unissued")
   expect(()=>registry.replace([Object.freeze({...target})],[],[],[association])).toThrow("Ambiguous")
   registry.replace([])
-  expect(()=>entry.nativeTaskPermission!.assertCurrent()).toThrow()
+  expect(()=>defined(entry.nativeTaskPermission).assertCurrent()).toThrow()
   expect(()=>registry.get("task",generation)).toThrow("Retired")
  })
 })
 
 test("Native target phase cannot override an ordinary explicit resource adapter",async()=>{
  await withNativeTargetPermissionService(async({service,targets})=>{
-  const target=targets.tools[1]!
+  const target=defined(targets.tools[1])
   const association={tool:target,permission:service.targetPermission(target)}
   expect(()=>createToolRegistry([target],{task_output:()=>[]},[],[],[association])).toThrow("Ambiguous")
   const ordinary=createToolRegistry([target],{})

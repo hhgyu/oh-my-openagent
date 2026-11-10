@@ -18,14 +18,14 @@ test("plain public SDK content preserves Native text/image order and metadata wi
   expect(result.metadata?.native).toEqual({ ...native, details: { nested: [null, false, 0, "", {}] } })
   expect(Object.getOwnPropertyDescriptors(native.details)).toEqual(before)
   expect(result.metadata?.native).not.toBe(native)
-  ;(result.metadata?.native as typeof native).content[0]!.text = "detached"
-  expect(native.content[0]!.text).toBe("first\n")
+  ;defined((result.metadata?.native as typeof native).content[0]).text = "detached"
+  expect(defined(native.content[0]).text).toBe("first\n")
 })
 
 for (const [index, details] of [null, false, 0, "", [], [false, 0], undefined].entries()) test(`retains falsy/array details ${index}`, () => {
   const result = adapt({ content: [], details })
-  if (details === undefined) expect(Object.hasOwn(result.metadata!.native, "details")).toBe(false)
-  else expect(result.metadata!.native.details).toEqual(details)
+  if (details === undefined) expect(Object.hasOwn(defined(result.metadata).native, "details")).toBe(false)
+  else expect(defined(result.metadata).native.details).toEqual(details)
 })
 
 test("Native errors throw the actual public SDK failure class with exact text and retained images/details", () => {
@@ -108,7 +108,8 @@ test("own optional undefined structured content is omitted and remains ordinary 
   const result = adapt(native)
   expect(result.content).toEqual(native.content)
   expect(Object.hasOwn(result, "output")).toBe(false)
-  expect(Object.hasOwn(result.metadata!.native, "structuredContent")).toBe(false)
+  expect(Object.hasOwn(defined(result.metadata).native, "structuredContent")).toBe(false)
   expect(Object.hasOwn(native, "structuredContent")).toBe(true)
 })
 
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

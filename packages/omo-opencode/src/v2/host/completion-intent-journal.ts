@@ -43,7 +43,8 @@ function jsonValue(value: unknown, ancestors = new Set<object>(), depth = 0, bud
     if (Array.isArray(value) && key === "length") return true
     if (typeof key !== "string" || key.length > 4096 || ["__proto__", "prototype", "constructor"].includes(key)) return false
     if (Array.isArray(value) && (!/^(0|[1-9]\d*)$/.test(key) || Number(key) >= value.length)) return false
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)!
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (!descriptor) throw new Error("Completion intent property vanished during validation")
     if (!first && !spend(1)) return false
     first = false
     if (!Array.isArray(value) && !spend(quotedBytes(key, maximumJSONBytes - budget.bytes) + 1)) return false

@@ -52,7 +52,7 @@ test("a fresh approval binds only inside its own recovery scope and only to an i
   try {
     const approval = await f.fresh.approve(record)
     expect(f.authorized).toHaveLength(1)
-    const rebuilt = { ...f.authorized[0]! }
+    const rebuilt = { ...defined(f.authorized[0]) }
     expect(() => f.fresh.verify(record, rebuilt)).toThrow("no fresh approval")
     await f.fresh.run(approval, async () => {
       expect(() => f.fresh.verify(record, { ...rebuilt, agentType: "oracle" })).toThrow("no fresh approval")
@@ -68,3 +68,4 @@ test("without a genuine current call or an authorization port no recovery approv
   const noPort = await approvals({ authorize: false })
   try { await expect(noPort.fresh.approve(parkedRecord())).rejects.toThrow("fresh current-call authorization") } finally { await noPort.close() }
 })
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

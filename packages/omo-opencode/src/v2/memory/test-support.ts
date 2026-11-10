@@ -106,7 +106,7 @@ export function createMemoryFixture(settings: Record<string, unknown> = {}): Mem
   }
 }
 
-export function memorySettings(overrides: Record<string, unknown> = {}): OmoMemorySettings {
+function memorySettings(overrides: Record<string, unknown> = {}): OmoMemorySettings {
   return OmoMemorySettingsSchema.parse(overrides)
 }
 

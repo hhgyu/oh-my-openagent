@@ -7,6 +7,11 @@ import { AssertInput } from "@opencode/plugin/permission"
 import { acquireOwnedChildToolGuard } from "./owned-child-tool-guard"
 import type { PreparedHostTaskGrant } from "../orchestration/native-task/host-grant"
 
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
+
 type Info = ReturnType<ToolEditor["list"]>[number]
 type Context = Parameters<Info["execute"]>[1]
 const selection: PreparedHostTaskGrant = { selected: [{ nativeName: "read", hostID: "read" }, { nativeName: "web_fetch", hostID: "web" }], deniedHostIDs: ["edit"], unavailableNativeNames: [], requirements: [], bindingSlots: [], allowsCodeModeTransport: true, modelCoverage: "native-selection-with-unchanged-persona-and-tool-policy" }
@@ -58,12 +63,12 @@ async function fixture(execute?: Info["execute"], disposePermission?: () => Effe
   const approve = (assertCurrent = () => {}) => owner.approve({}, { selection, buildAgentID: "unit-build", assertCurrent })
   const begin = () => newStage(approve())
   const bind = (stage: ReturnType<typeof begin>, assertCurrent = () => {}) => owner.bind(stage, { child: {}, agent: "unit-build", assertCurrent })
-  const run = (id: string, ctx = context()) => Effect.runPromiseExit(tools.get(id)!.execute({}, ctx))
+  const run = (id: string, ctx = context()) => Effect.runPromiseExit(defined(tools.get(id)).execute({}, ctx))
   const network = (update: Partial<PermissionEvaluation> = {}): PermissionEvaluation => {
     const ctx = context()
     return { sessionID: ctx.sessionID, agent: ctx.agent, action: "webfetch", resources: ["https://allowed.test/one"], metadata: { method: "GET" }, source: { type: "tool", id: ctx.id, messageID: ctx.messageID }, effect: "allow", ...update }
   }
-  return { owner, tools, originals, calls, context, approve, begin, newStage, bind, run, network, evaluateEffect: (value: PermissionEvaluation) => hook!(value), evaluate: (value: PermissionEvaluation) => Effect.runPromise(hook!(value)),
+  return { owner, tools, originals, calls, context, approve, begin, newStage, bind, run, network, evaluateEffect: (value: PermissionEvaluation) => defined(hook)(value), evaluate: (value: PermissionEvaluation) => Effect.runPromise(defined(hook)(value)),
     failDisposal() { failToolDispose = true }, disposals: () => ({ toolDisposals, permissionDisposals }) }
 }
 
@@ -167,7 +172,7 @@ test("failed original registration disposal is retained and retried; stopped own
 
 test("released owned IDs remain denied, including an original wrapped Effect captured before revocation", async () => {
   const f = await fixture(), stage = f.begin(); f.bind(stage)
-  const retained = f.tools.get("read")!.execute({}, f.context())
+  const retained = defined(f.tools.get("read")).execute({}, f.context())
   await Effect.runPromise(f.owner.join(stage)); f.owner.release(stage, () => {})
   expect(Exit.isFailure(await Effect.runPromiseExit(retained))).toBe(true)
   expect(Exit.isFailure(await f.run("read"))).toBe(true); expect(f.calls).toHaveLength(0)
@@ -230,7 +235,7 @@ test("parked retirement needs joined originals plus the backend-validated receip
   let revoked = 0
   const stage = f.owner.beginStage(f.approve(), "ses_unit_parked", () => {})
   f.owner.bind(stage, { child, agent: "unit-build", assertCurrent() {}, producers: { revoke() { revoked++ }, join: () => held.promise } })
-  const lazy = f.tools.get("read")!.execute({}, f.context("ses_unit_parked"))
+  const lazy = defined(f.tools.get("read")).execute({}, f.context("ses_unit_parked"))
   const validate = (value: object, issued: object) => { if (value !== receipt) throw Error("Unissued parking receipt"); validated.push(issued) }
   // when its Effect scope joins but the producer has not settled
   let joined = false
@@ -270,7 +275,7 @@ test("explicit renewal replaces only a joined parked tombstone; old-generation l
   const f = await fixture(), receipt = {}, sessionID = "ses_unit_renewed"
   const first = f.owner.beginStage(f.approve(), sessionID, () => {})
   f.owner.bind(first, { child: {}, agent: "unit-build", assertCurrent() {} })
-  const stale = f.tools.get("read")!.execute({}, f.context(sessionID))
+  const stale = defined(f.tools.get("read")).execute({}, f.context(sessionID))
   // then a live (unparked) stage can neither be renewed nor begun again
   expect(() => f.owner.renewStage(f.approve(), sessionID, () => {})).toThrow("joined parked")
   await Effect.runPromise(f.owner.join(first)); f.owner.retireParked(first, receipt, () => {})

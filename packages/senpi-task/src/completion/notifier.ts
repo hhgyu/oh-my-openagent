@@ -507,7 +507,9 @@ function createSourceCompletionNotifier(deps: CompletionNotifierDeps): Completio
       }
       if (sending.length === 0) return { count: 0, pending: false, failed: true }
       let threw = false, failure: unknown
-      try { deps.notifier.enqueueWithSource!(currentMessage, sending.map(owner => owner.source)) }
+      try {
+        if (deps.notifier.enqueueWithSource === undefined) throw new Error("source completion notifier requires enqueueWithSource")
+        deps.notifier.enqueueWithSource(currentMessage, sending.map(owner => owner.source)) }
       catch (error) { threw = true; failure = error }
       for (const owner of sending) owner.enqueuing = false
       if (threw && sending.every(owner => owner.disposition === undefined)) {

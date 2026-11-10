@@ -75,15 +75,17 @@ function selectHostTaskGrant(policy: GrantPolicy, input: Omit<HostGrantPreparati
     includeTaskTools: input.includeTaskTools, uiOnlyToolNames: input.uiOnlyToolNames,
   })
   if (visible.some(tool => !nativeNames.has(tool.name))) throw Error("Canonical filter returned a foreign tool")
-  const curated = policy.agentType !== undefined && CURATED_READONLY_AGENT_NAMES.has(policy.agentType)
-  const floor = curated ? (BUILTIN_AGENTS[policy.agentType!]?.tools ?? []).filter(rule => rule.allow).map(rule => rule.pattern) : undefined
+  const agentType = policy.agentType
+  const curated = agentType !== undefined && CURATED_READONLY_AGENT_NAMES.has(agentType)
+  const floor = curated ? (BUILTIN_AGENTS[agentType]?.tools ?? []).filter(rule => rule.allow).map(rule => rule.pattern) : undefined
   const allow = floor === undefined ? policy.toolAllowlist : floor.filter(name => policy.toolAllowlist === undefined || policy.toolAllowlist.includes(name))
   const denied = new Set(policy.toolDenylist), deniedHostIDs = new Set<string>(), requirements = new Set<HostGrantRequirement>()
   const bindingSlots: { requirement: HostGrantRequirement; nativeName: string }[] = []
   const counterpart = (name: string): string | undefined => {
     const explicit = custom.get(name)
     const expectedName = stock.get(name) ?? name
-    const matches = explicit ? [catalog.get(explicit)!] : [...catalog.values()].filter(tool => tool.name === expectedName && tool.options?.namespace === undefined)
+    const explicitTool = explicit ? catalog.get(explicit) : undefined
+    const matches = explicit ? (explicitTool ? [explicitTool] : []) : [...catalog.values()].filter(tool => tool.name === expectedName && tool.options?.namespace === undefined)
     if (matches.length > 1) throw Error("Ambiguous actual effective tool name")
     const tool = matches[0]
     if (!tool || tool.options?.namespace === undefined && ["subagent", "execute"].includes(tool.name)) return undefined
@@ -111,7 +113,11 @@ function selectHostTaskGrant(policy: GrantPolicy, input: Omit<HostGrantPreparati
     requirements.add("member-live-bindings")
     for (const name of policy.members) bindingSlots.push({ requirement: "member-live-bindings", nativeName: name })
   }
-  const codeMode = selected.some(pair => catalog.get(pair.hostID)!.options?.codemode !== false)
+  const codeMode = selected.some(pair => {
+    const tool = catalog.get(pair.hostID)
+    if (!tool) throw Error("Selected host tool is absent from the actual catalog")
+    return tool.options?.codemode !== false
+  })
   if (codeMode) requirements.add("codemode-network-guard")
   return Object.freeze({
     selected: Object.freeze(selected), deniedHostIDs: Object.freeze([...deniedHostIDs]),
@@ -166,8 +172,9 @@ export function createHostBuildAuthorizer(options: {
       const roster = await options.agents.list()
       current(); operationSignal.throwIfAborted()
       const builds = roster.data.filter(agent => agent.id === "build")
-      if (builds.length !== 1) throw Error("Actual build agent is unavailable or ambiguous")
-      const buildAgentID = builds[0]!.id
+      const [build] = builds
+      if (builds.length !== 1 || !build) throw Error("Actual build agent is unavailable or ambiguous")
+      const buildAgentID = build.id
       const signal = AbortSignal.any([callerSignal, operationSignal, token.admissionSignal])
       await options.permission.assert({ sessionID: source.sessionID, agent: source.agent, action: "subagent", resources: [buildAgentID],
         source: { type: "tool", messageID: source.messageID, id: source.id } }, { signal })

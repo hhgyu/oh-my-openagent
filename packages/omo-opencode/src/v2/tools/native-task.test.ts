@@ -23,14 +23,14 @@ const tick = async () => { for (let i = 0; i < 12; i++) await Promise.resolve() 
  * no SDK callback, host evaluator, child session or Native engine is claimed. */
 function unitFixture(initial: ListedTool[] = []) {
   const events: string[] = [], starts: unknown[] = [], updates: unknown[] = [], entries = [...initial]
-  let before: ((event: any) => void | Promise<void>) | undefined
+  let before: ((event: { tool: string; input: unknown }) => void | Promise<void>) | undefined
   let transform: ((editor: ToolEditor) => void) | undefined
   let parentGate: Promise<unknown> | undefined, acquisitionGate: Promise<unknown> | undefined
   let disposalFailures = 0, serviceFailures = 0, releaseFailures = 0
   let rollbackFailures = 0
-  let waitGate: ReturnType<typeof deferred<any>> | undefined, closeRejectsWait = false
+  let waitGate: ReturnType<typeof deferred<unknown>> | undefined, closeRejectsWait = false
   const waitEntered = deferred<void>()
-  let startedResult: any = { kind: "started", task_id: "unit-child", status: "running", name: "unit-child", run_epoch: 1 }
+  let startedResult: unknown = { kind: "started", task_id: "unit-child", status: "running", name: "unit-child", run_epoch: 1 }
   const editor: ToolEditor = {
     list: () => entries,
     get: id => entries.find(tool => tool.id === id), namespace() {},
@@ -80,13 +80,13 @@ function unitFixture(initial: ListedTool[] = []) {
       },
       async forCall(actual: ToolContext) {
         kernel.callAuthority.assertCall(kernel.callAuthority.capture(actual)); events.push("forCall")
-        return { async operation(run: any, reporting: { progress: ToolContext["progress"] }) {
+        return { async operation(run: (value: undefined, current: () => undefined, signal: AbortSignal, owner: NativeOperationOwner) => unknown, reporting: { progress: ToolContext["progress"] }) {
           events.push("operation")
           const owner = {
             task: {
               async start(spec: unknown) { starts.push(spec); return startedResult },
               get: () => undefined, subscribeChild: () => () => { events.push("unsubscribe") },
-              waitFor: () => { waitEntered.resolve(); return waitGate!.promise },
+              waitFor: () => { waitEntered.resolve(); return defined(waitGate).promise },
             },
             output: { list: () => [], get: () => undefined },
             reportProgress: (update: Record<string, unknown>) => { void reporting.progress(update) },
@@ -109,9 +109,9 @@ function unitFixture(initial: ListedTool[] = []) {
     failDisposal() { disposalFailures++ }, failService() { serviceFailures++ }, failRelease() { releaseFailures++ },
     failRollback() { rollbackFailures++ },
     setStart(value: unknown) { startedResult = value },
-    waitFor(work: ReturnType<typeof deferred<any>>, stopOnClose = false) { waitGate = work; closeRejectsWait = stopOnClose },
+    waitFor(work: ReturnType<typeof deferred<unknown>>, stopOnClose = false) { waitGate = work; closeRejectsWait = stopOnClose },
     async call(name: string, input: unknown) {
-      const selected = entries.find(entry => entry.name === name)!
+      const selected = defined(entries.find(entry => entry.name === name))
       const event = { tool: selected.id, input }
       await before?.(event)
       // Real Effect validation; controlled caller is explicitly unit, above.
@@ -139,11 +139,11 @@ test("unit public callback uses real kernel issuance, canonical Native start and
   const result = await f.call("task", { prompt: "work", subagent_type: "worker", run_in_background: true, load_skills: ["known"], task_summary: "s".repeat(110) })
   expect(f.starts).toHaveLength(1)
   expect(f.starts[0]).toMatchObject({ prompt: "KNOWN SKILL\nwork", parent_session_id: "unit-parent", run_in_background: true, task_summary: "s".repeat(77) + "..." })
-  expect(result.metadata!.native.details.task_id).toBe("unit-child")
+  expect(defined(result.metadata).native.details.task_id).toBe("unit-child")
   expect(f.events.indexOf("permission")).toBeLessThan(f.events.indexOf("forCall"))
   expect(f.events.indexOf("authorize")).toBeLessThan(f.events.indexOf("operation"))
   const output = await f.call("task_output", { task_id: "missing" })
-  expect(output.metadata!.native.details.kind).toBe("not_found")
+  expect(defined(output.metadata).native.details.kind).toBe("not_found")
   expect(f.starts).toHaveLength(1)
   await component.close()
   expect(f.events.indexOf("service:close")).toBeLessThan(f.events.indexOf("release"))
@@ -152,7 +152,7 @@ test("unit public callback uses real kernel issuance, canonical Native start and
 test("canonical normalization precedes strict public validation; malformed isolation never reaches manager", async () => {
   const f = unitFixture(), component = createNativeTaskBridge(f.options); await component.ready
   const result = await f.call("task", { prompt: 42 })
-  expect(result.metadata!.native.details.status).toBe("invalid_arguments")
+  expect(defined(result.metadata).native.details.status).toBe("invalid_arguments")
   await expect(f.call("task", { isolated: "true" })).rejects.toThrow()
   expect(f.starts).toHaveLength(0); await component.close()
 })
@@ -162,7 +162,7 @@ test("collision update uses actual ID and clears inherited output/options; close
   const f = unitFixture([initial]), component = createNativeTaskBridge(f.options); await component.ready
   expect(f.events).toContain("update:builtin-opaque-47")
   expect(f.entries.filter(entry => entry.name === "task")).toHaveLength(1)
-  expect(f.entries[0]!.output).toBeUndefined(); expect(f.entries[0]!.options).toBeUndefined()
+  expect(defined(f.entries[0]).output).toBeUndefined(); expect(defined(f.entries[0]).options).toBeUndefined()
   await component.close()
   expect(f.events).toContain("dispose:transform"); expect(f.events).toContain("dispose:hook")
   expect(f.events.some(event => event.startsWith("remove:"))).toBe(false)
@@ -199,8 +199,8 @@ test("close joins original acquisition and disposes a late owner without registr
 
 test("falsey registration cleanup failure retains custody and retry really disposes again", async () => {
   const f = unitFixture(), component = createNativeTaskBridge(f.options); await component.ready; f.failDisposal()
-  let thrown: any; try { await component.close() } catch (error) { thrown = error }
-  expect(thrown).toBeInstanceOf(AggregateError); expect(thrown.errors).toContain(false)
+  let thrown: unknown; try { await component.close() } catch (error) { thrown = error }
+  expect(thrown).toBeInstanceOf(AggregateError); if (!(thrown instanceof AggregateError)) throw Error("expected AggregateError"); expect(thrown.errors).toContain(false)
   expect(f.events).not.toContain("release"); await component.close()
   expect(f.events.filter(event => event === "dispose:transform")).toHaveLength(2)
   expect(f.events).toContain("release")
@@ -217,7 +217,7 @@ test("falsey service/release failure cannot mark closed and each retained owner 
 })
 
 test("foreground progress uses SDK metadata envelope; actual Tool.Error survives canonical failure and kernel", async () => {
-  const f = unitFixture(), waiting = deferred<any>(); f.waitFor(waiting)
+  const f = unitFixture(), waiting = deferred<unknown>(); f.waitFor(waiting)
   const component = createNativeTaskBridge(f.options); await component.ready
   const action = f.call("task", { prompt: "work", subagent_type: "worker", run_in_background: false })
   await f.waitEntered
@@ -231,7 +231,7 @@ test("foreground progress uses SDK metadata envelope; actual Tool.Error survives
 })
 
 test("close stops service before joining a foreground callback that requires service stop", async () => {
-  const f = unitFixture(), waiting = deferred<any>(); f.waitFor(waiting, true)
+  const f = unitFixture(), waiting = deferred<unknown>(); f.waitFor(waiting, true)
   const component = createNativeTaskBridge(f.options); await component.ready
   const action = f.call("task", { prompt: "work", subagent_type: "worker", run_in_background: false })
   await f.waitEntered; expect(f.events).toContain("operation")
@@ -277,3 +277,4 @@ test("new Native permission mode rejects a different actual service and missing 
   try{await expect(bridge.ready).rejects.toThrow(wrongOwner?"Foreign Native task permission owner":"association differs");expect(protocol.events).not.toContain("hook")}finally{await bridge.close()}
  })
 })
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

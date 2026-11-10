@@ -26,13 +26,18 @@ test("owned ready=false does not read unknown state, while liveness and outer le
     try { store.mutate(row.task_id, current => ({ ...current, status: "completed", final_response: "unit" })) } catch (error) { failure = error }
     expect(state).toBe(0); expect(failure).toBeUndefined()
     expect([live, mutations, edges, enqueues]).toEqual([1, 1, 1, 0])
-    expect(backing.load(row.task_id)!.notification.notified_epoch).toBe(-1)
+    expect(present(backing.load(row.task_id)).notification.notified_epoch).toBe(-1)
   } finally { backing.close(); rmSync(dir, { recursive: true, force: true }) }
 })
 
 import type { CompletionBridgeDeps } from "./observing-store"
 import type { CompletionRequest, ParentState } from "./types"
 import type { TaskRecord } from "../state/types"
+
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
 function withChain(run: (h: ReturnType<typeof chain>) => void): void {
   const h=chain();try{run(h)}finally{h.backing.close();rmSync(h.dir,{recursive:true,force:true})}
 }
@@ -57,17 +62,17 @@ function chain() {
 }
 const at="2026-11-09T00:00:00.000Z"
 test("ABSENT preserves original callback order, argument identities and notifier receiver",()=>withChain(h=>{
-  const row=h.record(),returned=h.store.mutate(row.task_id,current=>({...current,status:"completed",final_response:"unit"}))!
+  const row=h.record(),returned=present(h.store.mutate(row.task_id,current=>({...current,status:"completed",final_response:"unit"})))
   expect(h.order).toEqual(["state","mode","notify","live","mutation","edge"])
-  expect(h.notifies[0]!.record).toBe(returned);expect(h.live[0]).toBe(returned);expect(h.notifies[0]!.parentState).toBe(h.state)
+  expect(present(h.notifies[0]).record).toBe(returned);expect(h.live[0]).toBe(returned);expect(present(h.notifies[0]).parentState).toBe(h.state)
   expect(h.notifierThis).toBe(h.notifier)
 }))
 for(const path of ["transition","mutate"] as const) test(`ownsfalse ${path} skips both channel effects but outer ledger still runs`,()=>withChain(h=>{
   let ready=0,seen:TaskRecord|undefined,receiver:unknown
   h.make({ownsTerminal:function(row){receiver=this;seen=row;return false},notificationReady(){ready++;throw Error("must not evaluate readiness")}})
-  const row=h.record();const result=path==="mutate"?h.store.mutate(row.task_id,current=>({...current,status:"completed"}))!:h.store.transition(row.task_id,{type:"complete",timestamp:at,final_response:"unit"}).record
+  const row=h.record();const result=path==="mutate"?present(h.store.mutate(row.task_id,current=>({...current,status:"completed"}))):h.store.transition(row.task_id,{type:"complete",timestamp:at,final_response:"unit"}).record
   expect(seen).toBe(result);expect(receiver).toBe(h.deps);expect(ready).toBe(0)
-  expect(h.order).toEqual(["mutation","edge"]);expect(h.backing.load(row.task_id)!.notification.notified_epoch).toBe(-1)
+  expect(h.order).toEqual(["mutation","edge"]);expect(present(h.backing.load(row.task_id)).notification.notified_epoch).toBe(-1)
 }))
 for(const path of ["transition","mutate"] as const) test(`owned readyfalse ${path} preserves exact liveness/ledger and never samples state/mode`,()=>withChain(h=>{
   h.make({ownsTerminal:()=>true,notificationReady:()=>false,parentState(){throw Error("unknown state must not be sampled")},wasBackground(){throw Error("mode must not be sampled")}})
@@ -82,14 +87,14 @@ test("both true preserves notify then liveness with actual returned record",()=>
 test("guard receives actual post-write parent rather than stale input snapshot",()=>withChain(h=>{
   let seen:TaskRecord|undefined
   h.make({currentSessionId:()=>"other",ownsTerminal:row=>{seen=row;return row.parent_session_id==="parent"},notificationReady:()=>true})
-  const original=h.record();const result=h.store.mutate(original.task_id,row=>({...row,parent_session_id:"other",status:"lost"}))!
-  expect(original.parent_session_id).toBe("parent");expect(seen).toBe(result);expect(seen!.parent_session_id).toBe("other")
+  const original=h.record();const result=present(h.store.mutate(original.task_id,row=>({...row,parent_session_id:"other",status:"lost"})))
+  expect(original.parent_session_id).toBe("parent");expect(seen).toBe(result);expect(present(seen).parent_session_id).toBe("other")
   expect(h.order).toEqual(["mutation","edge"])
 }))
 for(const thrown of [undefined,0,null,Error("guard fault")]) test(`predicate exact throw ${String(thrown)} propagates AFTER committed write; outer exception boundary retained`,()=>withChain(h=>{
   h.make({ownsTerminal(){throw thrown}});const row=h.record();let caught=false,value:unknown
   try{h.store.mutate(row.task_id,current=>({...current,status:"completed"}))}catch(error){caught=true;value=error}
-  expect(caught).toBe(true);expect(value).toBe(thrown);expect(h.backing.load(row.task_id)!.status).toBe("completed")
+  expect(caught).toBe(true);expect(value).toBe(thrown);expect(present(h.backing.load(row.task_id)).status).toBe("completed")
   expect(h.order).toEqual([]);expect(h.live).toHaveLength(0);expect(h.mutations).toHaveLength(0)
 }))
 for(const invalid of [undefined,null,1,"true",{},Promise.resolve(true)]) test(`nonboolean predicate ${String(invalid)} is not truthiness and retains original invalid result`,()=>withChain(h=>{
@@ -97,7 +102,7 @@ for(const invalid of [undefined,null,1,"true",{},Promise.resolve(true)]) test(`n
   h.make({notificationReady:()=>invalid as unknown as boolean});const row=h.record();let value:unknown
   try{h.store.mutate(row.task_id,current=>({...current,status:"completed"}))}catch(error){value=error}
   expect(value).toBeInstanceOf(TypeError);expect((value as Error).cause).toBe(invalid)
-  expect(h.backing.load(row.task_id)!.status).toBe("completed");expect(h.order).toEqual([])
+  expect(present(h.backing.load(row.task_id)).status).toBe("completed");expect(h.order).toEqual([])
 }))
 test("readiness revocation of ownership prevents state/notification and later old-owner liveness",()=>withChain(h=>{
   let owned=true
@@ -176,11 +181,11 @@ const dir=mkdtempSync(join(tmpdir(),"C2G-cold-")),backing=createTaskRecordStore(
 for(const thrown of [undefined,0,null,Error("ready fault")]) test(`ready predicate exact throw ${String(thrown)} remains a postcommit fault, never unknown-state hold`,()=>withChain(h=>{
   h.make({ownsTerminal:()=>true,notificationReady(){throw thrown}});const row=h.record();let caught=false,error:unknown
   try{h.store.mutate(row.task_id,current=>({...current,status:"completed"}))}catch(value){caught=true;error=value}
-  expect(caught).toBe(true);expect(error).toBe(thrown);expect(h.backing.load(row.task_id)!.status).toBe("completed");expect(h.order).toEqual([])
+  expect(caught).toBe(true);expect(error).toBe(thrown);expect(present(h.backing.load(row.task_id)).status).toBe("completed");expect(h.order).toEqual([])
 }))
 test("owned held notification preserves original onTerminal throw and outer-ledger exception boundary",()=>withChain(h=>{
   h.make({ownsTerminal:()=>true,notificationReady:()=>false,parentState(){throw Error("must not sample")},onTerminal(){throw 0}})
   const row=h.record();let caught=false,value:unknown
   try{h.store.mutate(row.task_id,current=>({...current,status:"completed"}))}catch(error){caught=true;value=error}
-  expect(caught).toBe(true);expect(value).toBe(0);expect(h.order).toEqual([]);expect(h.backing.load(row.task_id)!.status).toBe("completed")
+  expect(caught).toBe(true);expect(value).toBe(0);expect(h.order).toEqual([]);expect(present(h.backing.load(row.task_id)).status).toBe("completed")
 }))

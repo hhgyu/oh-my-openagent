@@ -4,24 +4,40 @@ import { createOwnedChildObserver } from "./owned-child-observer"
 import type { OwnedChildObservationStore, ObservationRecord, ObservationSnapshot } from "./owned-child-observation-types"
 import type { ChildHandle } from "./session-backend"
 import type { OwnedChildObserverOptions } from "./owned-child-observer"
+import type { Context } from "@opencode/plugin/promise/plugin"
+import type { ToolDomain } from "@opencode/plugin/effect/tool"
+import type { Effect as EffectModule } from "effect"
+
+type HookCallback = (input: unknown) => unknown
+type FakeSession = {
+ hook: (name: string, callback: HookCallback) => Promise<{ dispose(): void }>
+ update: (input: { title?: string }, options: { signal: AbortSignal }) => Promise<unknown>
+}
+type ObserverHost = Pick<Context, "session" | "event">
+
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
 function fixture(emitBarrier = true) {
  const lifetime=new AbortController();let live=true,sequence=0,ended=false,hookDisposed=0,streamClosed=0
- const hooks=new Map<string,(input:any)=>unknown>();const queue:any[]=[];let wake:((value:IteratorResult<any>)=>void)|undefined
+ const hooks=new Map<string,HookCallback>();const queue:unknown[]=[];let wake:((value:IteratorResult<unknown>)=>void)|undefined
  const child={locator:{format:1,backendID:"test",location:"/project",hostVersion:"2.2.6",parentID:"parent",sessionID:"child",generation:1},lease:{sessionID:"child",generation:2,signal:lifetime.signal}} as ChildHandle
  const binding={key:"task",token:"binding",locator:child.locator};const records:ObservationRecord[]=[];const uncertainty:string[]=[]
  const guard=()=>{if(!live||lifetime.signal.aborted)throw Error("custody lost")}
  const store:OwnedChildObservationStore={bind(input){input.guard();return {binding,append(record){input.guard();records.push(structuredClone(record))},snapshot():ObservationSnapshot{input.guard();return {binding,records:structuredClone(records),uncertainty:[...uncertainty]}},invalidate(reason){uncertainty.push(reason)}}},close(){}}
  function end(){ended=true;if(wake){wake({done:true,value:undefined});wake=undefined}}
  function emit(type:string,data:Record<string,unknown>={}){const value={id:`evt_${sequence}`,type,created:sequence,durable:{aggregateID:"child",seq:sequence++,version:1},data:{sessionID:"child",...data}};if(wake){const yes=wake;wake=undefined;yes({done:false,value})}else queue.push(value)}
- const ctx:any={event:{subscribe({signal}:any){signal.addEventListener("abort",end,{once:true});return {[Symbol.asyncIterator](){return {async next(){if(queue.length)return {done:false,value:queue.shift()};if(ended)return {done:true,value:undefined};return new Promise<IteratorResult<any>>(yes=>wake=yes)},async return(){streamClosed++;end();return {done:true,value:undefined}}}}}}},session:{async hook(name:string,callback:any){hooks.set(name,callback);return {dispose(){hookDisposed++;hooks.delete(name)}}},async update({title}:any){if(emitBarrier)emit("session.title.updated",{title})}}}
- withJoinedSessionCancellation(ctx.session,"controlled-test")
+ const session:FakeSession={async hook(name,callback){hooks.set(name,callback);return {dispose(){hookDisposed++;hooks.delete(name)}}},async update({title}){if(emitBarrier)emit("session.title.updated",{title})}}
+ const ctx={event:{subscribe({signal}:{signal:AbortSignal}){signal.addEventListener("abort",end,{once:true});return {[Symbol.asyncIterator](){return {async next(){if(queue.length)return {done:false,value:queue.shift()};if(ended)return {done:true,value:undefined};return new Promise<IteratorResult<unknown>>(yes=>wake=yes)},async return(){streamClosed++;end();return {done:true,value:undefined}}}}}}},session} as unknown as ObserverHost
+ withJoinedSessionCancellation(session,"controlled-test")
  const options={key:"task",child,guard,store,title:"Actual task title",timeoutMs:1000}
  async function finish(text="final"){
   await hooks.get("model.request")?.({sessionID:"child",kind:"primary",model:{providerID:"actual",id:"observed"}})
   emit("session.execution.started");emit("session.inbox.delivered",{inboxID:"own"});emit("session.step.started",{assistantMessageID:"assistant",agent:"build",model:{providerID:"actual",id:"observed"}})
   emit("session.text.started",{assistantMessageID:"assistant",ordinal:0});emit("session.text.ended",{assistantMessageID:"assistant",ordinal:0,text});emit("session.step.ended",{assistantMessageID:"assistant",finish:"stop",tokens:{input:1,output:2},cost:0});emit("session.execution.succeeded")
  }
- return {ctx,options,emit,finish,records,uncertainty,hooks,lifetime,end,lose(){live=false},metrics:()=>({hookDisposed,streamClosed,ended})}
+ return {ctx,session,options,emit,finish,records,uncertainty,hooks,lifetime,end,lose(){live=false},metrics:()=>({hookDisposed,streamClosed,ended})}
 }
 
 test("actual observed owned title event establishes readiness; wait follows received terminal",async()=>{
@@ -54,8 +70,8 @@ test("stream closure cannot fabricate a result and a caller wait abort leaves ob
 })
 
 test("late registration after lifetime abort is disposed and never activates observer",async()=>{
- const f=fixture();let release!:()=>void;const hold=new Promise<void>(yes=>release=yes);const hook=f.ctx.session.hook
- f.ctx.session.hook=async(...args:any[])=>{const handle=await hook(...args);await hold;return handle}
+ const f=fixture();let release!:()=>void;const hold=new Promise<void>(yes=>release=yes);const hook=f.session.hook
+ f.session.hook=async(...args)=>{const handle=await hook(...args);await hold;return handle}
  const creation=createOwnedChildObserver(f.ctx,f.options);f.lifetime.abort();release()
  await expect(creation).rejects.toThrow();expect(f.metrics().hookDisposed).toBe(1);expect(f.records).toEqual([])
 })
@@ -63,7 +79,7 @@ test("late registration after lifetime abort is disposed and never activates obs
 
 test("readiness timeout also aborts a pending public title request",async()=>{
  const f=fixture(false);let aborted=false
- f.ctx.session.update=async(_input:any,{signal}:any)=>new Promise((_yes,no)=>{const stop=()=>{aborted=true;no(signal.reason)};if(signal.aborted)stop();else signal.addEventListener("abort",stop,{once:true})})
+ f.session.update=async(_input,{signal})=>new Promise((_yes,no)=>{const stop=()=>{aborted=true;no(signal.reason)};if(signal.aborted)stop();else signal.addEventListener("abort",stop,{once:true})})
  await expect(createOwnedChildObserver(f.ctx,{...f.options,timeoutMs:10})).rejects.toThrow("readiness-timeout")
  expect(aborted).toBe(true);expect(f.metrics().hookDisposed).toBe(1);expect(f.metrics().ended).toBe(true)
 })
@@ -71,8 +87,8 @@ test("readiness timeout also aborts a pending public title request",async()=>{
 
 test("bare Promise session cannot claim title-request cancellation through a truthy config flag",async()=>{
  const f=fixture();let updateCalled=false
- const bare={hook:f.ctx.session.hook,async update(){updateCalled=true},joinedCancellation:true}
- await expect(createOwnedChildObserver({...f.ctx,session:bare},f.options)).rejects.toThrow("joined session cancellation")
+ const bare={hook:f.session.hook,async update(){updateCalled=true},joinedCancellation:true}
+ await expect(createOwnedChildObserver({...f.ctx,session:bare as unknown as ObserverHost["session"]},f.options)).rejects.toThrow("joined session cancellation")
  expect(updateCalled).toBe(false);expect(f.records).toEqual([]);expect(f.hooks.size).toBe(0)
 })
 
@@ -103,9 +119,9 @@ test("default observer cannot be switched to turn policy after creation",async()
 })
 
 async function sourceFixture(options = {}) {
- const { Effect, Scope, Exit }=await import("effect"),scope=Scope.makeUnsafe();let hook:any,disposed=0
+ const { Effect, Scope, Exit }=await import("effect"),scope=Scope.makeUnsafe();let hook:((input:unknown)=>EffectModule.Effect<void>)|undefined,disposed=0
  const { acquireEffectToolMetadataSource }=await import("./effect-tool-metadata-source")
- const tool:any={hook(_name:string,callback:any){return Effect.gen(function*(){hook=callback;yield*Effect.addFinalizer(()=>Effect.sync(()=>{hook=undefined;disposed++}));return {dispose:Effect.void}})}}
+ const tool={hook(_name:string,callback:(input:unknown)=>EffectModule.Effect<void>){return Effect.gen(function*(){hook=callback;yield*Effect.addFinalizer(()=>Effect.sync(()=>{hook=undefined;disposed++}));return {dispose:Effect.void}})}} as unknown as ToolDomain
  const source=await Effect.runPromise(Effect.provideService(acquireEffectToolMetadataSource(tool,options),Scope.Scope,scope))
  return {source,emit:async(extra={})=>{if(hook)await Effect.runPromise(hook({sessionID:"child",messageID:"assistant",id:"actual_call",tool:"final_routed_target",status:"completed",input:"secret",result:"secret",...extra}))},close:()=>Effect.runPromise(Scope.close(scope,Exit.succeed(undefined))),disposed:()=>disposed}
 }
@@ -201,7 +217,7 @@ test("safe tool joins deduplicate exact same event ID but refuse conflicting reu
  for(const conflict of [false,true]){
  const f=await joinSequence(["called","success"])
  try{
-  const terminal=f.f.records.find(row=>row.kind==="host"&&row.event.type==="session.tool.success")! as Extract<ObservationRecord,{kind:"host"}>
+  const terminal=defined(f.f.records.find(row=>row.kind==="host"&&row.event.type==="session.tool.success")) as Extract<ObservationRecord,{kind:"host"}>
   f.f.records.push(conflict?{...structuredClone(terminal),event:{...structuredClone(terminal.event),type:"session.tool.failed",data:{...terminal.event.data,errorType:"tool.error"}}}:structuredClone(terminal))
   const view=f.observer.observation().toolMetadata
   if(conflict){expect(view.coverage).toBe("uncertain");expect(view.joined).toEqual([]);expect(view.reasons).toContain("conflicting-tool-event-id")}
@@ -221,7 +237,7 @@ test("safe tool joins withhold rows for missing or foreign host tool identity",a
  for(const bad of [{assistantMessageID:undefined},{sessionID:"foreign"}]){
  const f=await joinSequence(["called","success"])
  try{
-  const original=f.f.records.find(row=>row.kind==="host"&&row.event.type==="session.tool.called")! as Extract<ObservationRecord,{kind:"host"}>
+  const original=defined(f.f.records.find(row=>row.kind==="host"&&row.event.type==="session.tool.called")) as Extract<ObservationRecord,{kind:"host"}>
   const {assistantMessageID,...data}=original.event.data
   f.f.records.push({kind:"host",id:"extra_tool_identity",event:{...structuredClone(original.event),id:"extra_tool_identity",...(bad.sessionID?{sessionID:bad.sessionID,durable:undefined}:{}),data:bad.sessionID?original.event.data:data}})
   const view=f.observer.observation().toolMetadata;expect(view.coverage).toBe("uncertain");expect(view.joined).toEqual([]);expect(view.reasons).toContain(bad.sessionID?"foreign-tool-event-identity":"missing-tool-event-identity")

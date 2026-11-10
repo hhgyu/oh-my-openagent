@@ -102,6 +102,10 @@ export interface ParentNotificationAuthorityOptions {
 }
 export class NotificationAuthorityError extends Error { override readonly name = "NotificationAuthorityError" }
 function fail(message: string): never { throw new NotificationAuthorityError(message) }
+function ownedRef(row: TaskRecord): NonNullable<TaskRecord["owned_session"]> {
+  if (!row.owned_session) fail("Notification owned source identity differs")
+  return row.owned_session
+}
 function relationship(row: TaskRecord): string {
   const owned = row.owned_session && { ...row.owned_session, journalRevision: undefined }
   return JSON.stringify([row.task_id, row.created_at, row.parent_session_id, row.root_session_id, row.depth,
@@ -148,7 +152,7 @@ export function createParentNotificationAuthorityIssuer(options: ParentNotificat
     task.chain = chain(task.token, task.chain, task.rootBasis)
     const ports = evidence(), actual = ports.accepted?.get(task.id), row = ports.store.load(task.id)
     if (!actual || actual.identity !== task.identity) fail("Original accepted notification custody unavailable")
-    if (task.recovered && (ports.recovered?.get(task.control!) !== task.recovered || task.recovered.identity !== task.identity
+    if (task.recovered && ((task.control ? ports.recovered?.get(task.control) : undefined) !== task.recovered || task.recovered.identity !== task.identity
       || task.recovered.control !== task.control || task.recovered.result !== task.recoveryResult || !task.recovered.result.ok
       || recoveryFingerprint(task.recovered) !== task.recoveryFingerprint)) fail("Original recovered notification association changed")
     if (!actual.birth || actual.birth.createdAt !== task.birth || actual.birth.parentSessionId !== task.parent
@@ -181,9 +185,10 @@ export function createParentNotificationAuthorityIssuer(options: ParentNotificat
   /** No turn descriptor is written for the first input. Its actual private begin return
    * and backend's accepted ledger are required instead; absence alone proves nothing. */
   function uncheckpointedProof(task: Task, row: TaskRecord, actual: ChildRecord): () => void {
-    const control = task.control!, ports = evidence()
+    const control = task.control, ports = evidence()
     const accepted = ports.accepted?.get(task.id)
     if (!accepted || accepted.identity !== task.identity) fail("Initial input accepted identity differs")
+    if (!control) fail("Uncheckpointed Native run has no registered admission proof")
     const initial = ports.initialInputs?.get(control)
     if (initial) {
       const begin = initial.begin, inputID = initial.inputID, stageIdentity = initial.stageIdentity, outcome = begin.outcome
@@ -239,8 +244,8 @@ export function createParentNotificationAuthorityIssuer(options: ParentNotificat
       const closed = evidence().closed?.get(row.task_id)
       if (closed) {
         if (closed !== run.closed || closed.control !== run.control || !run.closedRow || closed.row.phase !== "closed"
-          || closed.referenceRevision !== run.closedReferenceRevision || row.owned_session!.journalRevision !== run.closedReferenceRevision
-          || run.closedRow.revision < row.owned_session!.journalRevision || (run.closedRow.turn ? run.closedRow.turn.nativeEpoch !== run.epoch : !run.admissionProof)
+          || closed.referenceRevision !== run.closedReferenceRevision || ownedRef(row).journalRevision !== run.closedReferenceRevision
+          || run.closedRow.revision < ownedRef(row).journalRevision || (run.closedRow.turn ? run.closedRow.turn.nativeEpoch !== run.epoch : !run.admissionProof)
           || JSON.stringify(closed.row) !== JSON.stringify(run.closedRow)) fail("Closed notification source receipt/reference differs")
         evidence().journal.assertCurrent(run.closedRow)
       } else {
@@ -248,7 +253,7 @@ export function createParentNotificationAuthorityIssuer(options: ParentNotificat
         run.control.handle.assertOwned()
         run.control.backend.observationGuard(run.control.child)()
       }
-      const revision = row.owned_session!.journalRevision
+      const revision = ownedRef(row).journalRevision
       if (revision < run.revision) fail("Notification source journal rolled back")
       run.revision = revision
     }
@@ -270,7 +275,7 @@ export function createParentNotificationAuthorityIssuer(options: ParentNotificat
       const control = evidence().controls?.get(row.task_id)
       if (!control || !control.handle.assertOwned) fail("Notification receiving ancestor control unavailable")
       checkControl(row, control); control.handle.assertOwned(); control.backend.observationGuard(control.child)()
-      identities.push(receiverRelationship(row)); controls.push(control); revisions.push(row.owned_session!.journalRevision)
+      identities.push(receiverRelationship(row)); controls.push(control); revisions.push(ownedRef(row).journalRevision)
     }
     if (captured && (JSON.stringify(identities) !== JSON.stringify(captured.identities) || controls.some((control,index)=>control !== captured.controls[index])
       || controls.length !== captured.controls.length || revisions.some((revision,index)=>revision < captured.revisions[index]))) fail("Notification receiver chain changed")
@@ -367,30 +372,31 @@ export function createParentNotificationAuthorityIssuer(options: ParentNotificat
             closedReferenceRevision = closed.referenceRevision
             closedRow = closedRowSnapshot(closed.row) // Copy BEFORE the first await, not after it.
             if (closed.control !== control || !Number.isSafeInteger(closed.referenceRevision)
-              || closed.referenceRevision !== row.owned_session!.journalRevision) fail("Closed source control/reference differs")
+              || closed.referenceRevision !== ownedRef(row).journalRevision) fail("Closed source control/reference differs")
             await control.backend.confirmClosed(control.child)
             const fresh = custody(captured)
             if (relationship(fresh) !== identity || evidence().closed?.get(row.task_id) !== closed
-              || fresh.owned_session!.journalRevision !== closedReferenceRevision || closed.referenceRevision !== closedReferenceRevision
+              || ownedRef(fresh).journalRevision !== closedReferenceRevision || closed.referenceRevision !== closedReferenceRevision
               || JSON.stringify(closed.row) !== JSON.stringify(closedRow)) fail("Closed source changed during confirmation")
           } else { if (!control.handle.assertOwned) fail("Source custody guard unavailable"); control.handle.assertOwned(); control.backend.observationGuard(control.child)() }
-          const actual = await evidence().journal.read(row.owned_session!.journalKey)
+          const actual = await evidence().journal.read(ownedRef(row).journalKey)
           const fresh = custody(captured)
-          if (relationship(fresh) !== identity || !actual || actual.owner !== evidence().journal.owner || actual.key !== row.owned_session!.journalKey
+          if (relationship(fresh) !== identity || !actual || actual.owner !== evidence().journal.owner || actual.key !== ownedRef(row).journalKey
             || actual.locator.sessionID !== row.child_session_id || actual.locator.parentID !== row.parent_session_id
             || actual.locator.backendID !== control.child.locator.backendID || actual.locator.location !== control.child.locator.location
             || actual.locator.hostVersion !== hostVersion || actual.locator.generation !== control.child.locator.generation
-            || actual.revision < fresh.owned_session!.journalRevision) fail("Native notification turn/journal proof differs")
+            || actual.revision < ownedRef(fresh).journalRevision) fail("Native notification turn/journal proof differs")
           evidence().journal.assertCurrent(actual)
           if (actual.turn) { if (actual.turn.nativeEpoch !== epoch) fail("Native notification turn epoch differs") }
           else admissionProof = uncheckpointedProof(captured, fresh, actual)
           if (closed && (actual.phase !== "closed" || evidence().closed?.get(row.task_id) !== closed
-            || fresh.owned_session!.journalRevision !== closedReferenceRevision || closed.referenceRevision !== closedReferenceRevision
+            || ownedRef(fresh).journalRevision !== closedReferenceRevision || closed.referenceRevision !== closedReferenceRevision
             || JSON.stringify(actual) !== JSON.stringify(closedRow) || JSON.stringify(closed.row) !== JSON.stringify(closedRow))) fail("Closed source receipt/reference changed during journal read")
         }
         const binding = Object.freeze({ [runBrand]: true as const })
-        runs.set(binding, { task: captured, epoch, identity, revision: row.owned_session?.journalRevision ?? 0, control, closed, closedRow, closedReferenceRevision, admissionProof })
-        sourceCurrent(runs.get(binding)!)
+        const run: Run = { task: captured, epoch, identity, revision: row.owned_session?.journalRevision ?? 0, control, closed, closedRow, closedReferenceRevision, admissionProof }
+        runs.set(binding, run)
+        sourceCurrent(run)
         return binding
       })
       pending.add(work); void work.finally(()=>pending.delete(work)).catch(()=>{})

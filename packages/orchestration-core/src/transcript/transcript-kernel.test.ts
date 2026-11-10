@@ -10,6 +10,11 @@ import { readEventLogTranscript, readEventLogTranscriptResult } from "./event-lo
 import { MAX_TRANSCRIPT_SOURCE_BYTES, readBoundedFileText } from "./read-bounded"
 import { renderTranscript, TRANSCRIPT_MAX_CHARS } from "./render"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 const dirs: string[] = []
 function directory() { const dir = mkdtempSync(join(tmpdir(), "omo-core-transcript-")); dirs.push(dir); return dir }
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
@@ -72,7 +77,7 @@ test("bounded source and character/tail defaults preserve original head-tail beh
   writeFileSync(path, "abcdefghijk")
   expect(readBoundedFileText(path, 7)).toEqual({ text: "abc\nijk", truncated: true })
   writeFileSync(path, "a".repeat(MAX_TRANSCRIPT_SOURCE_BYTES) + "MIDDLE" + "z".repeat(MAX_TRANSCRIPT_SOURCE_BYTES))
-  const bounded = readBoundedFileText(path)!
+  const bounded = present(readBoundedFileText(path))
   expect(Buffer.byteLength(bounded.text)).toBe(MAX_TRANSCRIPT_SOURCE_BYTES)
   expect(bounded.truncated).toBe(true); expect(bounded.text).not.toContain("MIDDLE")
   const rendered = renderTranscript([{ kind: "assistant", text: "x".repeat(TRANSCRIPT_MAX_CHARS * 2) }], { mode: "full", tailLines: 60 })
@@ -90,7 +95,7 @@ test("implemented public exports are same functions and complete closure has no 
   const files = ["../contracts/child-event.ts", "../contracts/transcript.ts", "events.ts", "event-log.ts", "read-bounded.ts", "render.ts"]
   for (const file of files) {
     const source = readFileSync(new URL(file, import.meta.url), "utf8")
-    const imports = [...source.matchAll(/^(?:import|export)\s+(?:type\s+)?(?:\{[^}]*\}|\*(?:\s+as\s+\w+)?|[\w$]+)\s+from\s*["']([^"']+)["']/gm)].map(match => match[1]!)
+    const imports = [...source.matchAll(/^(?:import|export)\s+(?:type\s+)?(?:\{[^}]*\}|\*(?:\s+as\s+\w+)?|[\w$]+)\s+from\s*["']([^"']+)["']/gm)].map(match => present(match[1]))
     expect(imports.every(specifier => specifier.startsWith(".") || specifier.startsWith("node:"))).toBe(true)
     expect(source).not.toMatch(/\b(?:import\s*\(|require\s*\()/)
     expect(source).not.toMatch(/@code-yeongyu\/senpi|@opencode\/|@opencode-ai\/|senpi-task|omo-senpi|senpi-barrel/)

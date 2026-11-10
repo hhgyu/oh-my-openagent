@@ -6,6 +6,11 @@ import type * as PromisePlugin from "@opencode/plugin/promise/plugin"
 import { acquireEffectSessionBackendApi, createEffectSessionBackendApi, type EffectSessionBackendApi } from "./effect-session-backend-api"
 import { hasJoinedSessionCancellation } from "./session-cancellation"
 
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
+
 const testScope=Scope.makeUnsafe()
 const runtime=Context.make(Scope.Scope,testScope)
 afterAll(()=>Effect.runPromise(Scope.close(testScope,Exit.succeed(undefined))))
@@ -15,7 +20,7 @@ export function composePromiseSession(context:PromisePlugin.Context,bridge:Effec
  return {...context,session:{...context.session,...bridge}}
 }
 function output(name:keyof typeof endpoints,wire:unknown):unknown {
- const success=[...endpoints[name].success][0]!
+ const success=defined([...endpoints[name].success][0])
  const ast=Schema.toType(success).ast
  const field=SchemaAST.isObjects(success.ast)?success.ast.propertySignatures.find(p=>p.name==="data"):undefined
  const codec=SchemaAST.isObjects(ast)&&ast.propertySignatures.length===1&&ast.propertySignatures[0]?.name==="data"&&field?Schema.make<Schema.Codec<unknown,unknown>>(field.type):Schema.make<Schema.Codec<unknown,unknown>>(success.ast)
@@ -33,7 +38,7 @@ test("full bridge is nominally cancellable and codecs preserve create/list/get m
  const created=await f.api.create({id:"ses_child",parentID:"ses_parent",title:null,metadata:wireSession.metadata,location:{directory:process.cwd()}})
  expect(created as unknown).toEqual(wireSession);expect(await f.api.get({sessionID:"ses_child"}) as unknown).toEqual(wireSession)
  expect(await f.api.list({directory:process.cwd(),parentID:"ses_parent",limit:5}) as unknown).toEqual({data:[wireSession],cursor:{}})
- expect((f.calls[0]!.input as {metadata:unknown}).metadata).toEqual(wireSession.metadata)
+ expect((defined(f.calls[0]).input as {metadata:unknown}).metadata).toEqual(wireSession.metadata)
 })
 test("attachments, prompt metadata, synthetic and instruction JSON round trip without dropping fields",async()=>{
  const f=fake();const files=[{uri:"data:text/plain;base64,SGk=",name:"fixture.txt",source:{type:"inline" as const}}]
@@ -42,9 +47,9 @@ test("attachments, prompt metadata, synthetic and instruction JSON round trip wi
  await f.api.instructions.entry.put({sessionID:"ses_child",key:"key",value:{nested:[1,"private"]}})
  expect(await f.api.instructions.entry.list({sessionID:"ses_child"})).toEqual([{key:"key",value:{nested:[1,"private"]}}])
  await f.api.instructions.entry.remove({sessionID:"ses_child",key:"key"});await f.api.update({sessionID:"ses_child",title:"Updated",metadata:{private:"retained"}})
- expect(f.calls.find(call=>call.method==="prompt")!.input).toMatchObject({files,metadata:{private:{flag:true}}})
- expect(f.calls.find(call=>call.method==="msg_synthetic")!.input).toMatchObject({metadata:{private:[1,2]},resume:false})
- expect(f.calls.find(call=>call.method==="instructions.put")!.input).toMatchObject({value:{nested:[1,"private"]}})
+ expect(defined(f.calls.find(call=>call.method==="prompt")).input).toMatchObject({files,metadata:{private:{flag:true}}})
+ expect(defined(f.calls.find(call=>call.method==="msg_synthetic")).input).toMatchObject({metadata:{private:[1,2]},resume:false})
+ expect(defined(f.calls.find(call=>call.method==="instructions.put")).input).toMatchObject({value:{nested:[1,"private"]}})
 })
 test("preaborted signal never enters host and abort joins async finalizers before preserving reason",async()=>{
  const order:string[]=[];const reason={stop:true};const controller=new AbortController()
@@ -64,13 +69,13 @@ test("every remaining method is exercised and nonempty context dates encode back
  expect(await f.api.interrupt({sessionID:"ses_child",resume:false})).toEqual({interrupted:true})
  expect(await f.api.wait({sessionID:"ses_child"})).toBeUndefined();expect(await f.api.remove({sessionID:"ses_child"})).toBeUndefined()
  expect(f.calls.filter(call=>["interrupt","wait","remove"].includes(call.method)).map(call=>call.method)).toEqual(["interrupt","wait","remove"])
- expect(f.calls.find(call=>call.method==="interrupt")!.input).toEqual({sessionID:"ses_child",resume:false})
+ expect(defined(f.calls.find(call=>call.method==="interrupt")).input).toEqual({sessionID:"ses_child",resume:false})
  const decoded=output("session.create",wireSession) as {time:{created:unknown}}
  expect(DateTime.isDateTime(decoded.time.created)).toBe(true)
 })
 test("query-as-type supports numeric/bool filters and codec errors redact invalid private input/output",async()=>{
  const f=fake();await f.api.list({limit:3,archived:true,parentID:"ses_parent"})
- expect(f.calls[0]!.input).toMatchObject({limit:3,archived:true,parentID:"ses_parent"})
+ expect(defined(f.calls[0]).input).toMatchObject({limit:3,archived:true,parentID:"ses_parent"})
  const secret="synthetic-sensitive-rejected-value"
  try{await f.api.create({id:"ses_child",metadata:{invalid:BigInt(3),secret}} as never);throw Error("unexpected")}
  catch(error){expect(String(error)).toBe("SessionCodecError: Invalid session API value");expect(JSON.stringify(error)).not.toContain(secret)}
@@ -118,7 +123,7 @@ test("setup failure closes the owner and joins a request that had no caller sign
  }))
  await expect(Effect.runPromise(program)).rejects.toBe(failure);order.push("setup-rejected")
  expect(await waiting).toBeInstanceOf(Error);expect(order).toEqual(["request-finalizer","request-rejected","setup-rejected"])
- await expect(api!.remove({sessionID:"ses_child"})).rejects.toThrow("closed")
+ await expect(defined(api).remove({sessionID:"ses_child"})).rejects.toThrow("closed")
 })
 test("owner pretracks before genuine host effect reenters its scope close",async()=>{
  const scope=Scope.makeUnsafe(),order:string[]=[];let entered!:()=>void;const ready=new Promise<void>(resolve=>{entered=resolve});let closing:Promise<void>|undefined

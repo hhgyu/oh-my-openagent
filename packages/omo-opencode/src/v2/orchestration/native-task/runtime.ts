@@ -358,7 +358,8 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
   }
   const retiringParents = new Map<string, Promise<void>>()
   async function retireChildren(sessionID: string, intent: "end" | "detach" | "dispose") {
-    if (retiringParents.has(sessionID)) return retiringParents.get(sessionID)!
+    const retiring = retiringParents.get(sessionID)
+    if (retiring) return retiring
     const binding = bindings.stop(sessionID)
     if (binding) notificationOwners.get(binding)?.owner.stop()
     const work = (async () => {
@@ -400,7 +401,8 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     ...(options.authorizeRecovery && { authorize: options.authorizeRecovery }), capture: () => options.captureStartAuthority() })
   /** Guarded child bindings from ONE original producer: planned admission or fresh recovery. */
   function guardFor(spec: ManagedStartSpec, approval: ChildGuardApproval, prepared: Planned, assertLifetime: () => void, assertStageAdmission?: () => void) {
-    const producer = options.childGuardBinding!(spec, prepared), footprint = JSON.stringify(producer.coverage)
+    if (!options.childGuardBinding) throw Error("Child tool guard requires original planned authorization and live binding producer")
+    const producer = options.childGuardBinding(spec, prepared), footprint = JSON.stringify(producer.coverage)
     const assertProducer = () => { assertLifetime(); producer.assertCurrent(); if (JSON.stringify(producer.coverage) !== footprint) throw Error("Original child binding targets changed") }
     assertProducer()
     return { approval, selection: prepared.selection, coverage: producer.coverage, buildAgentID: prepared.buildAgentID, assertLifetime: assertProducer,
@@ -516,7 +518,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     const admitted = await lifecycle.admitResident(record.parent_session_id)
     if (admitted.kind === "rejected") throw admitted.error
     approval?.authority.assertAdmission()
-    const respawned = await notificationRecoveryRequests.run(origin, () => approval ? freshRecoveries!.run(approval, () => manager.respawn(record)) : manager.respawn(record))
+    const respawned = await notificationRecoveryRequests.run(origin, () => approval && freshRecoveries ? freshRecoveries.run(approval, () => manager.respawn(record)) : manager.respawn(record))
     if (!respawned.ok) throw new Error(respawned.reason)
     const control = controls.get(record.task_id)
     if (!control || control.handle !== respawned.handle) throw Error("Actual Native recovery runtime returned another control")
@@ -526,7 +528,8 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       return { ...fresh, host_pid: process.pid, residency_state: "resident" }
     })
     const restored = store.load(record.task_id); if (restored) remember(restored)
-    const fresh = store.load(record.task_id)!
+    const fresh = store.load(record.task_id)
+    if (!fresh) throw Error("Recovered task record is absent after residency restore")
     const attached = await manager.reattach(fresh, control.handle)
     if (!attached.ok) throw new Error(attached.reason)
   }
@@ -595,8 +598,9 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       stage = { identity: Object.freeze({}), origin, managed: spec, epoch: record.notification.run_epoch,
         open: true, verified: false, beginInvoked: false }
     }
-    const staged = await (stage ? notificationStages.run(stage, async () => {
-      try { return await selected.startStaged?.(spec) } finally { stage!.open = false }
+    const activeStage = stage
+    const staged = await (activeStage ? notificationStages.run(activeStage, async () => {
+      try { return await selected.startStaged?.(spec) } finally { activeStage.open = false }
     }) : selected.startStaged?.(spec))
     if (!staged) throw new Error("Owned runner must stage before first input")
     if (stage && (!stage.control || stage.control.handle !== staged.child)) throw Error("Staged return differs from actual installed notification control")
@@ -604,7 +608,8 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       spec.admission?.assertOpen(); active(); staged.child.assertOwned?.()
       if (ticket.commit().kind !== "launch") {
         // Throw through the original branded held-admission path; no child sequence/ACK invented.
-        return spec.admission!.assertOpen() as never
+        if (!spec.admission) throw Error("Managed start has no original Native admission")
+        return spec.admission.assertOpen() as never
       }
       if (stage) {
         if (stage.origin.installed?.identity !== stage.identity || stage.origin.installed.control !== stage.control) throw Error("Original installed stage changed before first input")
@@ -656,7 +661,11 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       const policyBasis = nativePolicyBasis(spec, plan)
       // Register ORIGINAL queued hook work before its producer can begin. This
       // nests under the original service/task operation, not its report waiter.
-      const original = Promise.resolve().then(() => options.authorizePlannedStart!(spec, plan)).then(prepared => {
+      const original = Promise.resolve().then(() => {
+        const authorize = options.authorizePlannedStart
+        if (!authorize) throw Error("Original planned host authorization is no longer configured")
+        return authorize.call(options, spec, plan)
+      }).then(prepared => {
         active(); admission.assertOpen()
         if (bindings.fromAuthority(authority) !== parent || spec.admission !== admission || admission.hostAuthority !== authority ||
           kernelTools !== spec.kernelTools || members !== spec.memberScopedTools || policyBasis !== nativePolicyBasis(spec, plan) || footprint !== grantFootprint({
@@ -722,8 +731,9 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
                 origin.task = entry.issuer.bindAcceptedWithoutChild(origin.provisional, result)
                 notificationTasks.set(record.task_id, { binding: origin.binding, task: origin.task })
               } else if (result.kind === "start_failed" && origin.installed?.control && !origin.installed.beginInvoked) {
-                const stage = origin.installed
-                notificationFailedStarts.set(stage.control!, Object.freeze({ identity: origin.identity, control: stage.control!,
+                const stage = origin.installed, control = stage.control
+                if (!control) throw Error("Failed notification start has no owned control")
+                notificationFailedStarts.set(control, Object.freeze({ identity: origin.identity, control,
                   stageIdentity: stage.identity, nativeEpoch: stage.epoch, result, beginInvoked: false }))
               }
               entry.owner.requestReconcile()
@@ -925,7 +935,8 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         const current = scoped(id)
         const operation = () => manager.sendToTask({ ...input, idOrName: id, callerSessionId: callerID, allScope: false })
         try {
-          const result = controls.get(id) ? await controls.get(id)!.withInputSignal(signal, operation) : await operation()
+          const control = controls.get(id)
+          const result = control ? await control.withInputSignal(signal, operation) : await operation()
           if (result.kind === "uncertain") manager.markObservationUncertain(id, new ChildObservationUncertain("input-admission-uncertain"))
           return result
         } catch (error) {

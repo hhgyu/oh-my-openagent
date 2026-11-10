@@ -11,6 +11,11 @@ import { AdmissionBarrier } from "../pause/admission-barrier"
 import type { ManagedRunner } from "./types"
 import { join } from "node:path"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 afterEach(cleanupProjects)
 function configuration(){
  const cwd=tempProject(),store=createTaskRecordStore({project_dir:cwd}),runner=new FakeRunner()
@@ -32,7 +37,7 @@ test("required recovery factory runs once at the original post-seeding construct
  const service={async respawn(){throw Error("not invoked")},async settleTeardowns(){events.push("drain")}}
  const manager=createTaskManagerImplementation({...f.options,store},{preparePlanning:async()=>{},createRecoveryRuntime(options:Parameters<typeof createTaskManager>[0]){events.push("recovery");expect(options.store).toBe(store);expect(options.runners).toBe(f.options.runners);return service}})
  expect(events).toEqual(["seed","recovery"])
- await manager.settleLaunchesForShutdown!(1000)
+ await present(manager.settleLaunchesForShutdown).call(manager, 1000)
  expect(events).toEqual(["seed","recovery","drain","drain"])
 })
 function record(f:ReturnType<typeof configuration>,mode:"in-process"|"process"="in-process"):TaskRecord {
@@ -74,10 +79,10 @@ test("minimal worker capability forwards existing yield tool and paused restore 
 })
 test("manager keeps run admission and real durable launch stamp outside the recovery service",async()=>{
  const f=configuration(),saved=record(f),barrier=new AdmissionBarrier(),child=makeHandle(saved.task_id),observed:TaskRecord[]=[];let calls=0
- const runner:ManagedRunner={start:async()=>{observed.push(f.store.load(saved.task_id)!);return child.handle}}
+ const runner:ManagedRunner={start:async()=>{observed.push(present(f.store.load(saved.task_id)));return child.handle}}
  const manager=createTaskManagerImplementation({...f.options,admissionBarrier:barrier,runners:{"in-process":runner,process:runner},now:()=>Date.parse("2026-11-08T00:00:00.000Z")},{preparePlanning:async()=>{},createRecoveryRuntime(options){const native=createNativeTaskRecoveryRuntime(options);const service:TaskRecoveryRuntime={respawn:function(request,workerCaps,epoch){calls++;expect(this).toBe(service);expect(workerCaps).toBe(manager.workpools);expect(epoch()).toBe(saved.notification.run_epoch);return native.respawn(request,workerCaps,epoch)},settleTeardowns:()=>native.settleTeardowns()};return service}})
- barrier.close(saved.root_session_id!,1);expect(await manager.respawn(saved)).toMatchObject({ok:false,code:"run_paused"});expect(calls).toBe(0)
- const credential=barrier.resume(saved.root_session_id!,1,"resume")
+ barrier.close(present(saved.root_session_id),1);expect(await manager.respawn(saved)).toMatchObject({ok:false,code:"run_paused"});expect(calls).toBe(0)
+ const credential=barrier.resume(present(saved.root_session_id),1,"resume")
  const result=await manager.respawn(saved,undefined,credential)
  expect(result.ok).toBe(true);expect(calls).toBe(1);expect(observed[0]).toMatchObject({started_at:"2026-11-08T00:00:00.000Z",status:saved.status,notification:saved.notification})
  if(result.ok)await result.handle.dispose()
@@ -85,13 +90,13 @@ test("manager keeps run admission and real durable launch stamp outside the reco
 test("Stop while trusted recovery launch is pending reaches original beforeLaunch and prevents RPC start",async()=>{
  const f=configuration(),saved=record(f,"process"),barrier=new AdmissionBarrier(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();let starts=0
  const manager=createTaskManager({...f.options,admissionBarrier:barrier,rpcRespawnRunner:{start:async()=>{starts++;return rpcHandle(saved.task_id)}},trustedRespawnLaunch:async()=>{entered.resolve();await release.promise;return undefined}})
- const starting=manager.respawn(saved);await entered.promise;barrier.close(saved.root_session_id!,2);release.resolve()
- expect(await starting).toMatchObject({ok:false,code:"run_paused"});expect(starts).toBe(0);expect(f.store.load(saved.task_id)?.started_at).toBeUndefined();expect(barrier.inFlight(saved.root_session_id!)).toEqual([])
+ const starting=manager.respawn(saved);await entered.promise;barrier.close(present(saved.root_session_id),2);release.resolve()
+ expect(await starting).toMatchObject({ok:false,code:"run_paused"});expect(starts).toBe(0);expect(f.store.load(saved.task_id)?.started_at).toBeUndefined();expect(barrier.inFlight(present(saved.root_session_id))).toEqual([])
 })
 test("paused recovery bypasses stopped run only for no-turn restore and preserves status/epoch",async()=>{
  const f=configuration(),saved={...record(f),status:"paused" as const},barrier=new AdmissionBarrier(),child=makeHandle(saved.task_id);f.store.mutate(saved.task_id,()=>saved);let resumes=0
  const runner:ManagedRunner={start:async()=>{throw Error("must resume paused")},resume:async()=>{resumes++;return child.handle}}
- const manager=createTaskManager({...f.options,admissionBarrier:barrier,runners:{"in-process":runner,process:runner}});barrier.close(saved.root_session_id!,1)
+ const manager=createTaskManager({...f.options,admissionBarrier:barrier,runners:{"in-process":runner,process:runner}});barrier.close(present(saved.root_session_id),1)
  const result=await manager.respawn(saved,join(f.options.cwd,"paused.jsonl"),undefined,{paused:true})
  expect(result.ok).toBe(true);expect(resumes).toBe(1);expect(child.followUpCalls).toEqual([]);expect(child.steerCalls).toEqual([]);expect(f.store.load(saved.task_id)).toMatchObject({status:"paused",notification:saved.notification})
  if(result.ok)await result.handle.dispose()
@@ -102,7 +107,7 @@ for(const failure of [false,true])test(`both recovery teardown passes join late 
  const runner:ManagedRunner={start:async spec=>{child=makeHandle(spec.taskId);entered.resolve(spec.taskId);await release.promise;events.push("late-launch");return child.handle}}
  const service:TaskRecoveryRuntime={respawn:async()=>{throw Error("not invoked")},settleTeardowns:async function(){expect(this).toBe(service);events.push(`drain-${++drains}`);if(drains===1)firstDrain.resolve();if(failure)throw Error("controlled recovery teardown failure")}}
  const manager=createTaskManagerImplementation({...f.options,runners:{"in-process":runner,process:runner}},{preparePlanning:async()=>{},createRecoveryRuntime:()=>service})
- const starting=manager.start(baseSpec({execution_mode:"process"}));const taskId=await entered.promise;const shutdown=manager.settleLaunchesForShutdown!(1000)
+ const starting=manager.start(baseSpec({execution_mode:"process"}));const taskId=await entered.promise;const shutdown=present(manager.settleLaunchesForShutdown).call(manager, 1000)
  try{await firstDrain.promise;expect(drains).toBe(1);release.resolve();await shutdown;await starting;expect(drains).toBe(2);expect(events.indexOf("drain-2")).toBeGreaterThan(events.indexOf("late-launch"))}
  finally{release.resolve();await shutdown;await starting;manager.forget(taskId,{path:"park"});child?.settle({status:"cancelled"});manager.workpools.dispose()}
 })

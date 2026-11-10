@@ -56,7 +56,10 @@ export function createOwnedAncestry(options: {
       // including its revision. A raw file-only increment is not progress evidence.
       options.assertControl(row)
     }
-    for (const [index, row] of rows.entries()) captured[index].minimumRevision = row.owned_session!.journalRevision
+    for (const [index, row] of rows.entries()) {
+      if (!row.owned_session) throw Error("Owned ancestry host binding differs")
+      captured[index].minimumRevision = row.owned_session.journalRevision
+    }
   }
   return {
     path,
@@ -68,10 +71,14 @@ export function createOwnedAncestry(options: {
         notification: Object.freeze({ ...row.notification }),
         owned_session: row.owned_session && Object.freeze({ ...row.owned_session }),
       }))
-      const captured = rows.map(row => ({ identity: admissionFence(row), minimumRevision: row.owned_session!.journalRevision }))
+      const captured = rows.map(row => {
+        if (!row.owned_session) throw Error("Owned ancestry row has no owned session")
+        return { identity: admissionFence(row), minimumRevision: row.owned_session.journalRevision }
+      })
       const assertCurrent = () => assertPath(sessionID, captured)
       assertCurrent()
-      for (const [index, id] of [...rows.map(row => row.child_session_id!), options.root.sessionID].entries()) {
+      for (const [index, id] of [...rows.map(row => row.child_session_id), options.root.sessionID].entries()) {
+        if (id === undefined) throw Error("Actual host ancestry differs from owned tree")
         const actual = await options.get(id, signal)
         signal?.throwIfAborted(); assertCurrent()
         const expectedParent = rows[index]?.parent_session_id

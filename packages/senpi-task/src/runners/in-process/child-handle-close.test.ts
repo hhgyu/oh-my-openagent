@@ -9,6 +9,11 @@ import {
   type ChildSession,
 } from "./child-handle"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 // Controlled structural session ports; actual installed SDK coverage is separate.
 function fixture(options: {
   join?: () => Promise<void>
@@ -30,12 +35,12 @@ function fixture(options: {
   if (options.join) session.whenToolChildClosed = function () {
     expect(this).toBe(session)
     events.push("join")
-    return options.join!()
+    return present(options.join).call(options)
   }
   if (options.emit) {
     const runner = {
       hasHandlers(type: string) { expect(this).toBe(runner); return type === "session_shutdown" },
-      async emit() { expect(this).toBe(runner); events.push("shutdown"); return options.emit!() },
+      async emit() { expect(this).toBe(runner); events.push("shutdown"); return present(options.emit).call(options) },
     }
     Object.assign(session, { extensionRunner: runner })
   }

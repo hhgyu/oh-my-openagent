@@ -7,6 +7,11 @@ import { createTaskOutputTool, type TaskOutputInput } from "./output"
 import { forgetTaskOutputSessionReads, runTaskOutput } from "../task/operations"
 import type { OutputManager } from "./types"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 function context(sessionId: string) {
   return { sessionManager: { getSessionId: () => sessionId } } as never
 }
@@ -28,7 +33,7 @@ describe("task_output polling guard", () => {
     const factory = createTaskOutputTool(deps)
     for (const useFactory of [false, true]) {
       const read = (index: number) => {
-        const record = records[index]!
+        const record = present(records[index])
         return useFactory
           ? factory.execute("call", { task_id: record.task_id }, undefined, undefined, context(record.parent_session_id))
           : runTaskOutput(deps, { task_id: record.task_id }, record.parent_session_id, reads)

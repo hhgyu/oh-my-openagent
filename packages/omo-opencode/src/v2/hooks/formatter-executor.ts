@@ -43,6 +43,15 @@ function identity(file: string): string {
   const value = statSync(file)
   return `${value.dev}:${value.ino}:${value.size}:${value.mtimeMs}:${value.ctimeMs}`
 }
+/** A stopped POSIX child runs detached as its own process group leader. Its `close` only proves the
+ * leader exited, so wait (bounded) until no group member remains before reporting the stop. */
+async function processGroupExit(pid: number | undefined): Promise<void> {
+  if (process.platform === "win32" || pid === undefined) return
+  for (let attempt = 0; attempt < 200; attempt++) {
+    try { process.kill(-pid, 0) } catch { return }
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 10))
+  }
+}
 function nodeIdentity(file: string): string { const value = statSync(file); return `${value.dev}:${value.ino}` }
 function executableIdentity(file: string): string | undefined { try { return identity(file) } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error } }
 /** Neutral Bun discovery reads nearest package metadata and probes ancestor bin/marker
@@ -132,7 +141,7 @@ export function createFormatterExecutor(options: FormatterExecutorOptions) {
       processHandle.once("error", error => { failed = error })
       processHandle.once("close", code => {
         cleanup()
-        if (stopped !== undefined) reject(stopped)
+        if (stopped !== undefined) { const reason = stopped; void processGroupExit(processHandle.pid).then(() => reject(reason)) }
         else if (failed) { if ((failed as NodeJS.ErrnoException).code === "ENOENT") resolvePromise("missing"); else reject(mode === "inspect" ? failed : new FormatterExecutionError("spawn", "Formatter could not start; original mutation remains committed")) }
         else resolvePromise(code ?? 1)
       })
@@ -148,7 +157,8 @@ export function createFormatterExecutor(options: FormatterExecutorOptions) {
       const cwd = scope(request.cwd)
       const file = scope(request.filePath, cwd)
       if (!statSync(file).isFile() || !isAbsolute(request.binary) || !Number.isFinite(request.timeoutMs) || request.timeoutMs <= 0) throw new FormatterExecutionError("invalid_path", "Invalid formatter file, binary or timeout")
-      const command = Object.freeze([request.binary, ...request.formatter.args, file])
+      const binary = request.binary
+      const command = Object.freeze([binary, ...request.formatter.args, file])
       const timeoutMs = request.timeoutMs
       const pending = queues.get(file) ?? Promise.resolve()
       const work = (async () => {
@@ -156,11 +166,11 @@ export function createFormatterExecutor(options: FormatterExecutorOptions) {
         check(caller.signal)
         const originalIdentity = identity(file)
         const directoryIdentity = nodeIdentity(cwd)
-        const binaryIdentity = executableIdentity(command[0]!)
+        const binaryIdentity = executableIdentity(binary)
         const unchanged = (before?: Buffer) => {
           check(caller.signal)
           if (scope(file) !== file || nodeIdentity(cwd) !== directoryIdentity || identity(file) !== originalIdentity ||
-            executableIdentity(command[0]!) !== binaryIdentity || (before && !readFileSync(file).equals(before))) {
+            executableIdentity(binary) !== binaryIdentity || (before && !readFileSync(file).equals(before))) {
             throw new FormatterExecutionError("changed", "Formatter input or executable changed during authorization")
           }
         }

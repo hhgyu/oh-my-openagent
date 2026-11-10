@@ -6,6 +6,11 @@ import { dirname, join } from "node:path"
 import type { ToolContext } from "@opencode/plugin/promise/tool"
 import { createFormatterExecutor, FormatterExecutionError } from "./formatter-executor"
 
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
+
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 function fixture() {
@@ -78,7 +83,7 @@ describe("formatter executor", () => {
     expect(binary).not.toBeNull()
     const executor = createFormatterExecutor({ directory: f.root, authorize: () => {}, permission: { assert: async () => {} } })
     try {
-      const request = { ...f.request, binary: binary!, formatter: { tool: "gofmt" as const, command: "gofmt", args: ["-w"] } }
+      const request = { ...f.request, binary: defined(binary), formatter: { tool: "gofmt" as const, command: "gofmt", args: ["-w"] } }
       expect((await executor.runCli(request, f.caller)).status).toBe("formatted")
       expect(readFileSync(f.file, "utf8")).toBe("package main\n\nfunc main() { println(1) }\n")
       expect(await executor.runCli(request, f.caller)).toEqual({ status: "unchanged", added: 0, removed: 0 })
@@ -201,7 +206,7 @@ describe("formatter executor", () => {
     const executor = createFormatterExecutor({ directory: f.root, authorize: () => {}, resolveBun: () => null, permission: { assert: async request => { grants.push(request) } } })
     try {
       await executor.resolveBunFormat(f.root, f.caller)
-      const ancestor = grants.find(grant => grant.resources.includes(join(dirname(f.root), "package.json")))!
+      const ancestor = defined(grants.find(grant => grant.resources.includes(join(dirname(f.root), "package.json"))))
       expect(ancestor).toBeDefined(); expect(ancestor.action).toBe("read")
       let current = f.root
       for (;;) {
@@ -215,7 +220,7 @@ describe("formatter executor", () => {
     } finally { await executor.dispose() }
   })
   test("git ignore inspection uses actual repo rules and exact caller permission source", async () => {
-    const f = fixture(); const git = Bun.which("git")!
+    const f = fixture(); const git = defined(Bun.which("git"))
     expect(git).toBeTruthy()
     const init = spawnSync(git, ["init", "--quiet", f.root], { windowsHide: true, stdio: "ignore" })
     expect(init.status).toBe(0)

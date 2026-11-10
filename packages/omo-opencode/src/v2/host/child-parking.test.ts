@@ -4,6 +4,11 @@ import { createSessionBackend, type ChildJournal, type ChildRecord, type Session
 import { withJoinedSessionCancellation } from "./session-cancellation"
 import { PARKED_DENY_RULE, PARKING_MARKER_KEY, type SessionRule } from "./child-parking"
 
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
+
 const sessionID = (value: string) => value as SessionLease["sessionID"]
 type Info = SessionReference & { permissions?: SessionRule[]; metadata?: Record<string, unknown> }
 const userRule: SessionRule = { action: "read", resource: "*", effect: "allow" }
@@ -20,16 +25,16 @@ function fixture(options: { join?: () => Promise<void> } = {}) {
   }
   const journal: ChildJournal = {
     async claim(key, owner, initial) { const old = records.get(key); const value = old ? { ...old, owner, revision: old.revision + 1 } : initial; if (!value) throw Error("missing"); records.set(key, value); return structuredClone(value) },
-    async read(key) { return records.has(key) ? structuredClone(records.get(key)!) : undefined },
+    async read(key) { return records.has(key) ? structuredClone(defined(records.get(key))) : undefined },
     writeSync, async write(previous, next) { writeSync(previous, next) },
     assertCurrent(expected) { if (JSON.stringify(records.get(expected.key)) !== JSON.stringify(expected)) throw Error("stale synchronous fence"); return undefined },
   }
   const api: SessionBackendApi = {
-    async create(input) { events.push("create"); const value = { id: sessionID(input.id!), parentID: parent.sessionID, location: { directory: "/project" }, agent: "build" }; sessions.set(value.id, value); return value },
+    async create(input) { events.push("create"); const value = { id: sessionID(defined(input.id)), parentID: parent.sessionID, location: { directory: "/project" }, agent: "build" }; sessions.set(value.id, value); return value },
     async get({ sessionID }) { const value = sessions.get(sessionID); if (!value) throw Error("not found"); return structuredClone(value) },
     async list() { return { data: [...sessions.values()], cursor: {} } },
-    async prompt(input) { events.push("prompt"); return { id: input.id!, sessionID: sessionID(input.sessionID) } },
-    async synthetic(input) { return { id: input.id!, sessionID: sessionID(input.sessionID) } },
+    async prompt(input) { events.push("prompt"); return { id: defined(input.id), sessionID: sessionID(input.sessionID) } },
+    async synthetic(input) { return { id: defined(input.id), sessionID: sessionID(input.sessionID) } },
     async interrupt() { events.push("interrupt"); hooks.interrupt?.(); return { interrupted: false } },
     async wait() { events.push("wait"); hooks.wait?.() },
     async remove({ sessionID }) { events.push("remove"); sessions.delete(sessionID) }, async context() { return [] },
@@ -37,7 +42,7 @@ function fixture(options: { join?: () => Promise<void> } = {}) {
     async update(input) {
       events.push("update")
       if (hooks.update?.(input) === "drop") return
-      const session = sessions.get(input.sessionID)!
+      const session = defined(sessions.get(input.sessionID))
       if (input.permissions) session.permissions = structuredClone([...input.permissions])
       if (input.metadata) session.metadata = structuredClone({ ...input.metadata })
     },
@@ -48,7 +53,7 @@ function fixture(options: { join?: () => Promise<void> } = {}) {
   const host = { app: { name: "opencode", version: "2.2.6", channel: "stable" }, location: { directory: "/project" }, session: api }
   const backend = createSessionBackend(host, backendOptions)
   async function staged() { const child = await backend.stage({ key: "child-task", sessionID: sessionID("child"), agent: "build" }); events.length = 0; return child }
-  return { backend, host, backendOptions, events, records, sessions, hooks, staged, child: () => sessions.get("child")!, row: () => records.get("child-task")! }
+  return { backend, host, backendOptions, events, records, sessions, hooks, staged, child: () => defined(sessions.get("child")), row: () => defined(records.get("child-task")) }
 }
 
 test("verified park appends deny-last, keeps user rules and metadata, and mints only a backend receipt", async () => {
@@ -61,12 +66,12 @@ test("verified park appends deny-last, keeps user rules and metadata, and mints 
   expect(f.events).toEqual(["join", "interrupt", "wait", "update"])
   expect(f.child().permissions).toEqual([userRule, PARKED_DENY_RULE])
   expect(f.child().metadata?.["user.note"]).toBe("keep")
-  const parking = f.row().parking!
+  const parking = defined(f.row().parking)
   expect(parking).toMatchObject({ state: "parked", readback: "verified", original: { present: true, rules: [userRule] } })
   expect(f.child().metadata?.[PARKING_MARKER_KEY]).toMatchObject({ parking: parking.id, fingerprint: parking.fingerprint })
   // parked is not closed
   expect(f.row().phase).toBe("staged")
-  const receipt = f.backend.parkedReceipt(child)!
+  const receipt = defined(f.backend.parkedReceipt(child))
   expect(() => f.backend.assertParked(receipt, child)).not.toThrow()
   expect(() => f.backend.assertParked({}, child)).toThrow("Unissued")
   expect(() => f.backend.assertParked(receipt, {})).toThrow("foreign")
@@ -119,7 +124,7 @@ test("failed producer join keeps custody without any host mutation; a healthy re
 
 test("lost update acknowledgement retries idempotently: intent row plus parked host state verifies without rewriting", async () => {
   const f = fixture(), child = await f.staged(); let lose = true
-  const update = f.host.session.update!
+  const update = defined(f.host.session.update)
   f.host.session.update = async (input, options) => { await update(input, options); if (lose) { lose = false; throw Error("update acknowledgement lost") } }
   await expect(f.backend.detach(child)).rejects.toThrow("acknowledgement lost")
   expect(f.row().parking?.state).toBe("intent"); expect(f.backend.parkedReceipt(child)).toBeUndefined()
@@ -179,7 +184,7 @@ test("merge-patch host metadata keeps an omitted marker, so restore nulls only t
 
 test("a lost restore acknowledgement retries from restoring without a second write", async () => {
   const f = fixture(), { reload, child } = await parkedThenReloaded(f); let lose = true
-  const update = f.host.session.update!
+  const update = defined(f.host.session.update)
   f.host.session.update = async (input, options) => { await update(input, options); if (lose) { lose = false; throw Error("restore acknowledgement lost") } }
   await expect(reload.restoreParked(child, "build")).rejects.toThrow("acknowledgement lost")
   expect(f.row().parking?.state).toBe("restoring")

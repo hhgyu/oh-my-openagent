@@ -2461,6 +2461,7 @@
         "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.test-d.ts",
         "src/logger.ts",
+        "src/curated-readonly-presentation.ts",
       ],
       "ignoreDependencies": [
         // pre-existing at origin dev 4686e425b5: a declared dependency nothing imports
@@ -2500,6 +2501,21 @@
         // pre-existing at origin dev 4686e425b5: duplicate export(s) OmoComputerSettingsLayerSchema, OmoComputerSettingsSchema
         "src/schema/computer.ts": ["duplicates"],
       },
+    },
+    "packages/orchestration-core": {
+      "includeEntryExports": true,
+      // knip's default entry patterns (an explicit "entry" replaces them), files run by path from package.json scripts or CI
+      // workflows, and the test, config and helper files plugins report with exports unchecked: listing them export-checks
+      // them too (script/knip-entry-exports.test.ts probes every knip entry and fails on one that is missing).
+      "entry": [
+        "{index,cli,main}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
+        "src/{index,cli,main}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
+        "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
+        "**/*.test-d.ts",
+        // package.json exports "./contracts/*" and "./transcript/*"
+        "src/contracts/*.ts",
+        "src/transcript/*.ts",
+      ],
     },
     "packages/prompts-core": {
       "includeEntryExports": true,
@@ -3546,6 +3562,9 @@
         "src/features/team-mode/team-tasklist/test-support.ts",
         "src/hooks/runtime-fallback/test-timeout-clock.test-support.ts",
         "src/tools/skill/zauc-mocks-skill-tools/test-support.ts",
+        "src/v2/agents/test-support.ts",
+        "src/v2/memory/test-support.ts",
+        "src/v2/memory/kibitzer/test-support.ts",
         "test/fixtures/config-migration/opencode-side-effect-import.ts",
         // Test fixtures run as their own process by path (`bun run <dir>/fixtures/<name>.ts`), so nothing imports them.
         "src/hooks/prometheus-md-only/fixtures/*.ts",

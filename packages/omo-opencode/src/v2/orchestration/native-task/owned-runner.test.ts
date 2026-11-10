@@ -35,7 +35,7 @@ async function guardFixture(run: (value: {
   const owner = await Effect.runPromise(Effect.provideService(acquireOwnedChildToolGuard({ tool, permission }), Scope.Scope, scope))
   const lazy = (sessionID: string, agent: string, id = "opaque-read") => {
     const context = { sessionID: sessionID as ToolContext["sessionID"], agent: agent as ToolContext["agent"], messageID: "unit-runner-message" as ToolContext["messageID"], id: "unit-runner-call" as ToolContext["id"], progress: () => Effect.void }
-    return tools.get(id)!.execute({}, context)
+    return defined(tools.get(id)).execute({}, context)
   }
   try { await run({ owner, tools, targetCalls: () => targets, lazy, leaf: (sessionID, agent, id = "opaque-read") => Effect.runPromiseExit(lazy(sessionID, agent, id)) }) } finally { await Effect.runPromise(Scope.close(scope, Exit.succeed(undefined))) }
 }
@@ -54,18 +54,18 @@ test("G3 guarded birth binds actual opaque host IDs/build agent before input and
       if (started.kind !== "started") throw Error(JSON.stringify(started))
       try {
         await runtime.wait(started.task_id)
-        const record = runtime.get(started.task_id)!
+        const record = defined(runtime.get(started.task_id))
         expect(state.createdAgents).toEqual(["verified-unit-build"]); expect(approvals).toBe(1); expect(binds).toBe(1)
         expect(admissionChecks).toBeGreaterThan(0)
         const exposed = state.contexts[0] as { tools: Record<string, unknown> }
         expect(Object.keys(exposed.tools).sort()).toEqual(["execute", "opaque-read"])
         caller.abort(Error("Original unit call/frame ended after ACK")); const before = admissionChecks
-        expect(Exit.isSuccess(await g.leaf(record.child_session_id!, "verified-unit-build"))).toBe(true)
+        expect(Exit.isSuccess(await g.leaf(defined(record.child_session_id), "verified-unit-build"))).toBe(true)
         expect(admissionChecks).toBe(before)
-        expect(Exit.isFailure(await g.leaf(record.child_session_id!, "verified-unit-build", "opaque-edit"))).toBe(true)
+        expect(Exit.isFailure(await g.leaf(defined(record.child_session_id), "verified-unit-build", "opaque-edit"))).toBe(true)
         expect(g.targetCalls()).toBe(1)
       } finally { await runtime.end(started.task_id) }
-      expect(Exit.isFailure(await g.leaf(runtime.get(started.task_id)!.child_session_id!, "verified-unit-build"))).toBe(true)
+      expect(Exit.isFailure(await g.leaf(defined(defined(runtime.get(started.task_id)).child_session_id), "verified-unit-build"))).toBe(true)
     }, { childToolGuard: g.owner, authorizePlannedStart: async (spec, plan) => { approvals++; return approved(spec, plan) },
       captureStartAuthority: () => ({ admissionSignal: caller.signal, lifetimeSignal: lifetime.signal, assertAdmission() { admissionChecks++; caller.signal.throwIfAborted() }, assertLifetime() { lifetime.signal.throwIfAborted() } }),
       childGuardBinding: (_spec, prepared) => ({ coverage, assertCurrent() {}, bind(child, assertBackendCurrent) {
@@ -100,12 +100,12 @@ test("G3 actual remove failure keeps deny claim until explicit END cleanup retri
   await guardFixture(async g => {
     await withOwnedRuntimeUnit(async (runtime, state) => {
       const started = await runtime.start({ category: "qa", prompt: "guarded cleanup" }); if (started.kind !== "started") throw Error(JSON.stringify(started))
-      await runtime.wait(started.task_id); const record = runtime.get(started.task_id)!
+      await runtime.wait(started.task_id); const record = defined(runtime.get(started.task_id))
       state.failRemoveOnce()
       await expect(runtime.end(started.task_id)).rejects.toThrow()
-      expect(Exit.isFailure(await g.leaf(record.child_session_id!, "verified-unit-build"))).toBe(true)
+      expect(Exit.isFailure(await g.leaf(defined(record.child_session_id), "verified-unit-build"))).toBe(true)
       await runtime.end(started.task_id)
-      expect(Exit.isFailure(await g.leaf(record.child_session_id!, "verified-unit-build"))).toBe(true)
+      expect(Exit.isFailure(await g.leaf(defined(record.child_session_id), "verified-unit-build"))).toBe(true)
       expect(g.targetCalls()).toBe(0)
     }, { childToolGuard: g.owner, authorizePlannedStart: async (spec, plan) => approved(spec, plan),
       childGuardBinding: (_spec, prepared) => ({ coverage, assertCurrent() {}, bind(child, assertCurrent) { return { child, agent: prepared.buildAgentID, coverage, assertCurrent } } }),
@@ -118,7 +118,7 @@ test("G3 approved zero-tool child starts model-only while every original leaf re
     await withOwnedRuntimeUnit(async (runtime, state) => {
       const started = await runtime.start({ category: "qa", prompt: "model-only child" }); if (started.kind !== "started") throw Error(JSON.stringify(started))
       try {
-        await runtime.wait(started.task_id); const child = runtime.get(started.task_id)!.child_session_id!
+        await runtime.wait(started.task_id); const child = defined(defined(runtime.get(started.task_id)).child_session_id)
         expect((state.contexts[0] as { tools: object }).tools).toEqual({})
         expect(Exit.isFailure(await g.leaf(child, "verified-unit-build"))).toBe(true)
         expect(Exit.isFailure(await g.leaf(child, "verified-unit-build", "opaque-edit"))).toBe(true)
@@ -150,7 +150,7 @@ const guardedOptions = (g: { owner: OwnedChildToolGuard }, producers?: () => { r
 })
 async function completedGuarded(runtime: Parameters<Parameters<typeof withOwnedRuntimeUnit>[0]>[0], prompt: string) {
   const started = await runtime.start({ category: "qa", prompt }); if (started.kind !== "started") throw Error(JSON.stringify(started))
-  await runtime.wait(started.task_id); return { id: started.task_id, child: runtime.get(started.task_id)!.child_session_id! }
+  await runtime.wait(started.task_id); return { id: started.task_id, child: defined(defined(runtime.get(started.task_id)).child_session_id) }
 }
 
 test("G3 close with a retained completed guarded child parks it host-denied and completes without removal", async () => {
@@ -351,3 +351,4 @@ test("G3R without a fresh current-call authorization the parked child stays deni
     }, guardedOptions(before))
   }) })
 })
+function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

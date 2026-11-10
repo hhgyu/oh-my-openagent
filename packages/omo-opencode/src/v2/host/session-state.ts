@@ -23,10 +23,11 @@ export function createSessionScopes() {
   const owned = new WeakSet<SessionLease>()
   let generation = 0
   function assert(lease: SessionLease, sessionID = lease.sessionID) {
-    if (!owned.has(lease) || lease.sessionID !== sessionID || current.get(sessionID)?.lease !== lease || lease.signal.aborted) {
+    const scope = current.get(sessionID)
+    if (!owned.has(lease) || lease.sessionID !== sessionID || !scope || scope.lease !== lease || lease.signal.aborted) {
       throw new Error("Unknown, foreign or retired session scope")
     }
-    return current.get(sessionID)!
+    return scope
   }
   return {
     open(sessionID: SessionLease["sessionID"], policy: SessionToolPolicy): SessionLease {

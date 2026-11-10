@@ -1,5 +1,10 @@
 import { expect, it } from "bun:test"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 it("loads and executes the private Core selector in a fresh process without harness or IO imports", async () => {
   const forbidden = /(?:@code-yeongyu\/senpi|@earendil-works\/pi|(?:^|[\/\\])(?:omo-senpi|senpi-task|omo-opencode|omo-codex)(?:[\/\\]|$)|^(?:node:)?(?:fs|child_process|net|http|https)(?:\/|$))/
   const denied: string[] = []
@@ -11,7 +16,7 @@ it("loads and executes the private Core selector in a fresh process without harn
   })
   expect(denied).toEqual([])
   expect(built.success).toBe(true)
-  for (const path of Object.keys(built.metafile!.inputs)) expect(path).not.toMatch(forbidden)
+  for (const path of Object.keys(present(built.metafile).inputs)) expect(path).not.toMatch(forbidden)
   const script = `
     const Module = await import("node:module");
     const blockedPattern = new RegExp(${JSON.stringify(forbidden.source)});

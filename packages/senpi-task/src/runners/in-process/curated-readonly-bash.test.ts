@@ -9,6 +9,11 @@ import {
   planCuratedReadonlyCommand,
 } from "./curated-readonly-bash"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 async function executeFakeGitHub(endpoint: "bytes" | "error" | "lines" | "small"): Promise<string> {
   const tool = createCuratedReadonlyBashTool("/fixture", async () => {
     if (endpoint === "lines") return Array.from({ length: 2_501 }, (_, index) => `row ${index}`).join("\n")
@@ -100,7 +105,7 @@ test("both presentation routes preserve arbitrary error and original cancellatio
       expect(cwd).toBe("/original-cwd")
       expect(seconds).toBe(7)
       expect(signal).toBe(controller.signal)
-      throw signal!.reason
+      throw present(signal).reason
     }, formatter)
     await expect(tool.execute("id", { program: "curl", args: ["https://example.com"], timeout_seconds: 7 }, controller.signal)).rejects.toBe(reason)
     expect(calls).toBe(1)

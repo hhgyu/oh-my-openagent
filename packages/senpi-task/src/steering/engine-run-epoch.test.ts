@@ -9,6 +9,11 @@ import type { TaskRecord } from "../state"
 import { fenceRun, nextRunEpoch } from "../state"
 import { createTaskRecordStore } from "../store"
 
+function present<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected value to be present")
+  return value
+}
+
 afterEach(cleanupSteering)
 
 test("prepared known no-dispatch restores terminal fields, burns issued epoch across reload and preserves fresh queue/effects",async()=>{
@@ -17,14 +22,14 @@ test("prepared known no-dispatch restores terminal fields, burns issued epoch ac
  const fake=makeFakeHandle(r.task_id,"in-process"),calls:string[]=[],sent:string[]=[]
  Object.assign(fake.handle,{prepareFollowUp:async()=>({
   stamp:(next:TaskRecord)=>{calls.push("stamp");return next},
-  dispatch:async(text:string)=>{calls.push("dispatch");sent.push(text);h.store.mutate(r.task_id,f=>({...f,effect_seq:9,last_effect_id:"fresh-effect",pending_steering:[...f.pending_steering!,{id:"fresh",message:"fresh queued",deliver_as:"steer"}]}));return {kind:"not-dispatched" as const,reason:"proven before host call"}},
+  dispatch:async(text:string)=>{calls.push("dispatch");sent.push(text);h.store.mutate(r.task_id,f=>({...f,effect_seq:9,last_effect_id:"fresh-effect",pending_steering:[...present(f.pending_steering),{id:"fresh",message:"fresh queued",deliver_as:"steer"}]}));return {kind:"not-dispatched" as const,reason:"proven before host call"}},
   restoreOwnedReference:(prior:TaskRecord)=>prior.owned_session,
   retainFailure:()=>{calls.push("retained")},release:async()=>{calls.push("release")},
  })})
  h.setLive(r.task_id,fake.handle)
  const answer=await h.engine.sendToTask({idOrName:r.task_id,message:"new turn"})
  expect(answer.kind).toBe("not_continuable");expect(fake.followUpCalls).toEqual([])
- const restored=createTaskRecordStore({project_dir:"/unused",task:{state_dir:h.store.stateDir}}).load(r.task_id)!
+ const restored=present(createTaskRecordStore({project_dir:"/unused",task:{state_dir:h.store.stateDir}}).load(r.task_id))
  expect(restored.status).toBe("completed");expect(restored.final_response).toBe("first pass")
  expect(restored.notification.run_epoch).toBe(0);expect(restored.burnt_epoch).toBe(1);expect(nextRunEpoch(restored)).toBe(2)
  expect(fenceRun(restored,1)).toBe("unknown");expect(restored.effect_seq).toBe(9);expect(restored.last_effect_id).toBe("fresh-effect")
@@ -35,7 +40,7 @@ test("prepared known no-dispatch restores terminal fields, burns issued epoch ac
  const next=await h.engine.sendToTask({idOrName:r.task_id,message:"retry explicitly"})
  expect(next.kind).toBe("revived");expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(2)
  expect(h.store.load(r.task_id)?.prior_runs_cost_usd).toBe(5)
- expect(fenceRun(h.store.load(r.task_id)!,1)).toBe("superseded")
+ expect(fenceRun(present(h.store.load(r.task_id)),1)).toBe("superseded")
  const before=fake.followUpCalls.length
  expect((await h.engine.sendToTask({idOrName:r.task_id,message:"stale",expectedRunEpoch:1})).kind).toBe("stale")
  expect(fake.followUpCalls).toHaveLength(before)
@@ -81,9 +86,9 @@ test("rollback restores the prior owned run with its refreshed actual ticket rev
  h.store.mutate(r.task_id,f=>({...f,runner_kind:"owned-session",child_session_id:reference.sessionID,residency_claim:reference.residencyClaim,owned_session:reference}))
  const fake=makeFakeHandle(r.task_id,"in-process")
  fake.handle.prepareFollowUp=async()=>({stamp:next=>({...next,owned_session:{...reference,runEpoch:next.notification.run_epoch,journalRevision:2}}),
-  dispatch:async()=>({kind:"not-dispatched",reason:"private no-call fixture witness"}),restoreOwnedReference:prior=>({...prior.owned_session!,journalRevision:3}),retainFailure:()=>{},release:async()=>{}})
+  dispatch:async()=>({kind:"not-dispatched",reason:"private no-call fixture witness"}),restoreOwnedReference:prior=>({...present(prior.owned_session),journalRevision:3}),retainFailure:()=>{},release:async()=>{}})
  h.setLive(r.task_id,fake.handle);expect((await h.engine.sendToTask({idOrName:r.task_id,message:"new"})).kind).toBe("not_continuable")
- const restored=createTaskRecordStore({project_dir:"/unused",task:{state_dir:h.store.stateDir}}).load(r.task_id)!
+ const restored=present(createTaskRecordStore({project_dir:"/unused",task:{state_dir:h.store.stateDir}}).load(r.task_id))
  expect(restored.notification.run_epoch).toBe(0);expect(restored.owned_session?.runEpoch).toBe(0);expect(restored.owned_session?.journalRevision).toBe(3);expect(restored.burnt_epoch).toBe(1)
 })
 

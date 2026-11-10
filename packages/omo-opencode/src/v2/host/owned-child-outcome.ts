@@ -30,7 +30,10 @@ type Frame = {
 const terminals = new Set(["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"])
 const finishes = new Set(["stop", "length", "tool-calls"])
 
+function isDefinedNumber(value: number | undefined): value is number { return value !== undefined }
+
 /** Own observations, not host wait/info.outcome or a fabricated execution identifier. */
+
 export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completion?: ChildCompletionPolicy): OwnedChildOutcome {
   const base = { delivered: [] as string[], consumption: "unconfirmed" as const }
   const uncertain = (reason: string): OwnedChildOutcome => ({ ...base, status: "uncertain", reason })
@@ -122,7 +125,7 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completi
     if (event.type === "session.retry.scheduled") {
       const step = currentStep(event)
       const attempt = event.data.attempt
-      if (!step || frame!.steps.at(-1) !== step || step.ended || step.failed === "aborted"
+      if (!step || !frame || frame.steps.at(-1) !== step || step.ended || step.failed === "aborted"
         || step.pendingRetry !== undefined || attempt === undefined || attempt !== step.retryAttempt + 1 || !event.data.errorType) {
         fail("unmatched-retry")
       } else step.pendingRetry = attempt
@@ -150,8 +153,8 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completi
         if (!event.data.errorType) fail("missing-step-error")
         step.failed = event.data.errorType ?? "unknown"
       } else if (event.type === "session.tool.called") {
-        if (!event.data.callID || frame!.calls.has(event.data.callID)) fail("invalid-tool-call")
-        else { frame!.calls.add(event.data.callID); step.calls.set(event.data.callID, "called") }
+        if (!event.data.callID || !frame || frame.calls.has(event.data.callID)) fail("invalid-tool-call")
+        else { frame.calls.add(event.data.callID); step.calls.set(event.data.callID, "called") }
       } else if (event.type === "session.tool.success" || event.type === "session.tool.failed" || event.type === "session.tool.progress") {
         const callID = event.data.callID
         if (!callID || step.calls.get(callID) !== "called") fail("unmatched-tool-event")
@@ -186,7 +189,7 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completi
     ...base,
     ...(frame ? { startEventID: frame.start, delivered: [...frame.delivered] } : {}),
     ...(frame?.terminal ? { terminalEventID: frame.terminal.id } : {}),
-    ...(last ? { assistantMessageID: last.id, model: { ...last.model }, observedSteps: frame!.steps.length } : {}),
+    ...(frame && last ? { assistantMessageID: last.id, model: { ...last.model }, observedSteps: frame.steps.length } : {}),
     ...(frame && frame.calls.size > 0 ? { observedToolCalls: frame.calls.size } : {}),
   }
   const terminal = frame?.terminal
@@ -194,15 +197,15 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completi
     // Local intent suppresses stale success; it is not an acknowledgement from the host.
     return { ...facts, status: "pending", reason: "stop-pending" }
   }
-  if (!terminal) return { ...facts, status: "pending" }
-  if (!frame!.delivered.length) return { ...facts, status: "control-only" }
+  if (!terminal || !frame) return { ...facts, status: "pending" }
+  if (!frame.delivered.length) return { ...facts, status: "control-only" }
   if (terminal.type === "session.execution.interrupted") return { ...facts, status: "interrupted", reason: "host-interrupted" }
   if (terminal.type === "session.execution.failed") return { ...facts, status: "error", reason: terminal.data.errorType }
   if (!last) return uncertain("missing-assistant-step")
   if ([...expected].some(id => !delivered.has(id))) return { ...facts, status: "pending", reason: "input-not-delivered" }
-  const failed = frame!.steps.find(step => step.failed)
+  const failed = frame.steps.find(step => step.failed)
   if (failed) return { ...facts, status: failed.failed === "aborted" ? "interrupted" : "error", reason: failed.failed }
-  const ownedSteps = frame!.steps.filter(step => step.afterOwnDelivery)
+  const ownedSteps = frame.steps.filter(step => step.afterOwnDelivery)
   if (completion !== undefined && ownedSteps.length === 0) return uncertain("missing-owned-assistant-step")
   if (last.ended?.data.finish === "tool-calls") return uncertain("unfinished-assistant-turn")
   const stepText = (step: Step) => [...step.parts].sort(([a], [b]) => a - b).map(([, part]) => part).join("")
@@ -213,16 +216,21 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completi
     : stepText(last)
   if (text.length > 1_048_576) return uncertain("output-too-large")
   if (text.length === 0 && completion !== "turn") return { ...facts, status: "error", reason: "empty-assistant-output" }
-  const ended = frame!.steps.map(step => step.ended!.data)
+  const ended = frame.steps.map(step => {
+    if (!step.ended) throw new Error("Completed owned child step is missing its end event")
+    return step.ended.data
+  })
   const tokenKeys = ["input", "output", "reasoning", "cacheRead", "cacheWrite"] as const
   const tokens: NonNullable<OwnedChildOutcome["tokens"]> = {}
   for (const key of tokenKeys) {
-    if (ended.every(data => data.tokens?.[key] !== undefined)) {
-      const total = ended.reduce((sum, data) => sum + data.tokens![key]!, 0)
+    const counts = ended.map(data => data.tokens?.[key])
+    if (counts.every(isDefinedNumber)) {
+      const total = counts.reduce((sum, count) => sum + count, 0)
       if (Number.isSafeInteger(total)) tokens[key] = total
     }
   }
-  const cost = ended.every(data => data.cost !== undefined) ? ended.reduce((sum, data) => sum + data.cost!, 0) : undefined
+  const costs = ended.map(data => data.cost)
+  const cost = costs.every(isDefinedNumber) ? costs.reduce((sum, value) => sum + value, 0) : undefined
   return {
     ...facts, status: "completed", text,
     ...(Object.keys(tokens).length ? { tokens } : {}),

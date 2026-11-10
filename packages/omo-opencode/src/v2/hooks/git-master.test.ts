@@ -5,6 +5,18 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { registerGitMasterReadHook } from "./git-master"
 
+type ContentPart = { readonly type: string; readonly text?: string; readonly extra?: string; readonly data?: string }
+type ReadContent = string | readonly ContentPart[]
+type ReadEvent = { tool: string; status: string; input: object; result: { content: ReadContent } }
+function parts(content: ReadContent): readonly ContentPart[] {
+  if (typeof content === "string") throw new Error("Expected structured read content")
+  return content
+}
+function textContent(content: ReadContent): string {
+  if (typeof content !== "string") throw new Error("Expected string read content")
+  return content
+}
+
 const dirs: string[] = []
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
 function fixture(settings: object = {}, options: Record<string, unknown> = {}) {
@@ -12,13 +24,13 @@ function fixture(settings: object = {}, options: Record<string, unknown> = {}) {
   mkdirSync(join(directory, ".omo"))
   const config = (value: object) => writeFileSync(join(directory, ".omo", "omo.jsonc"), JSON.stringify({ git_master: value }))
   config(settings)
-  let callback: (event: any) => void = () => { throw new Error("Hook not registered") }
+  let callback: (event: ReadEvent) => void = () => { throw new Error("Hook not registered") }
   let registrations = 0, disposals = 0
   const host = { location: { directory }, options, tool: { hook: async (name: string, hook: typeof callback) => {
     expect(name).toBe("execute.after"); registrations++; callback = hook
     return { dispose: async () => { disposals++ } }
   } } } as unknown as Pick<Plugin.Context, "location" | "options" | "tool">
-  const read = (content: any = "git status", overrides: object = {}) => {
+  const read = (content: ReadContent = "git status", overrides: object = {}) => {
     const event = { tool: "read", status: "completed", input: { path: "C:\\skills\\git-master\\SKILL.md" }, result: { content, title: "KEEP", metadata: { marker: "KEEP" }, custom: 42 }, ...overrides }
     callback(event); return event
   }
@@ -43,15 +55,15 @@ test("first text only, frontmatter and nontext retained, dedup across all texts"
   const event = f.read([image, first, last])
   expect(event.result.content).toHaveLength(3)
   expect(event.result.content[0]).toBe(image); expect(event.result.content[2]).toBe(last)
-  expect(event.result.content[1].extra).toBe("KEEP")
-  expect(event.result.content[1].text).toStartWith("---\nname: git-master\n---\n")
-  expect(event.result.content[1].text).toContain("PREFIX=1 git status")
+  expect(parts(event.result.content)[1]?.extra).toBe("KEEP")
+  expect(parts(event.result.content)[1]?.text).toStartWith("---\nname: git-master\n---\n")
+  expect(parts(event.result.content)[1]?.text).toContain("PREFIX=1 git status")
 })
 test("default attribution appends one block, all-off preserves result identity and guards skip", async () => {
   const f = fixture(); await registerGitMasterReadHook(f.host)
   const event = f.read([{ type: "text", text: "git status" }])
   expect(event.result.content).toHaveLength(2)
-  expect(event.result.content[1].text).toContain("Co-authored-by:")
+  expect(parts(event.result.content)[1]?.text).toContain("Co-authored-by:")
   for (const overrides of [{ tool: "bash" }, { status: "error" }, { input: { path: "/other/SKILL.md" } }, { input: { file_path: 4, path: "/git-master/SKILL.md" } }]) {
     expect(f.read("UNCHANGED", overrides).result.content).toBe("UNCHANGED")
   }
@@ -94,7 +106,7 @@ test("attribution-only result remains identical and directive appears once on re
   const first = f.read("```bash\ngit status\n```").result
   const second = f.read("", { result: first }).result
   expect(second).toBe(first)
-  expect((second.content.match(/<commit_attribution>/g) ?? []).length).toBe(1)
+  expect((textContent(second.content).match(/<commit_attribution>/g) ?? []).length).toBe(1)
   await close()
 })
 

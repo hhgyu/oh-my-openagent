@@ -108,7 +108,8 @@ export async function createOwnedTaskHandle(input: {
     const view = observer.observation()
     // Reprojecting is deterministic; own-log frame IDs reconcile lost append acknowledgements.
     for (const event of projection.events(view)) {
-      const identity = projection.identity(event)!
+      const identity = projection.identity(event)
+      if (identity === undefined) throw new ChildObservationUncertain("missing-projection-identity")
       // Event-level display persistence is idempotent even when identical prose occurs twice.
       for (const write of transcript) write(event)
       if (!seen.has(identity)) {
@@ -296,7 +297,12 @@ export async function createOwnedTaskHandle(input: {
     await retire(false)
   }
   async function assertEndAuthority(): Promise<TaskRecord> {
-    if (!cleanupOnly) { assertOwned(); return store.load(spec.taskId)! }
+    if (!cleanupOnly) {
+      assertOwned()
+      const record = store.load(spec.taskId)
+      if (!record) throw Error("Owned task record is absent at end authority")
+      return record
+    }
     const before = store.load(spec.taskId), ref = before?.owned_session
     const actual = await journal.read(journalKey)
     if (!before || !ref || !actual || actual.owner !== journal.owner || ref.journalOwner !== journal.owner

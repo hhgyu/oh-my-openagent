@@ -4,20 +4,25 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
 import type * as Plugin from "@opencode/plugin/promise/plugin"
-import type { Info, ToolContext } from "@opencode/plugin/promise/tool"
+import type { Info, ToolContext, ToolEditor } from "@opencode/plugin/promise/tool"
 import { createMutationRuntime } from "./runtime"
+
+function defined<T>(value: T): NonNullable<T> {
+  if (value === undefined || value === null) throw new Error("Expected value to be defined")
+  return value
+}
 const roots: string[]=[]
 afterEach(()=>{for(const root of roots.splice(0))rmSync(root,{recursive:true,force:true})})
 function fixture(foreign=false,denyRead=false) {
  const directory=mkdtempSync(join(tmpdir(),"omo-mutation-runtime-"));roots.push(directory)
- const original:Info={name:"write",description:"unit write",input:z.object({path:z.string(),content:z.string()}),execute:async(input:any)=>{writeFileSync(join(directory,input.path),input.content);return {content:"WRITTEN"}}}
- const base=[{...original,id:"write"}];let tools=base.map(x=>({...x}));const transforms:Array<{callback:(editor:any)=>void}>=[];const grants:any[]=[]
- function rebuild(){tools=base.map(x=>({...x}));const editor={list:()=>tools,get:(id:string)=>tools.find(t=>t.id===id),add:(tool:any)=>tools.push({...tool,id:tool.name}),update:(id:string,update:(t:any)=>void)=>{const tool=tools.find(t=>t.id===id);if(tool)update(tool)},remove:(id:string)=>{tools=tools.filter(t=>t.id!==id)},namespace:()=>{}};for(const t of transforms)t.callback(editor)}
+ const original:Info={name:"write",description:"unit write",input:z.object({path:z.string(),content:z.string()}),execute:async(input:{path:string;content:string})=>{writeFileSync(join(directory,input.path),input.content);return {content:"WRITTEN"}}}
+ const base=[{...original,id:"write"}];let tools=base.map(x=>({...x}));const transforms:Array<{callback:(editor:ToolEditor)=>void}>=[];const grants:Array<{action:string}>=[]
+ function rebuild(){tools=base.map(x=>({...x}));const editor={list:()=>tools,get:(id:string)=>tools.find(t=>t.id===id),add:(tool:Info)=>tools.push({...tool,id:tool.name}),update:(id:string,update:(t:Info)=>void)=>{const tool=tools.find(t=>t.id===id);if(tool)update(tool)},remove:(id:string)=>{tools=tools.filter(t=>t.id!==id)},namespace:()=>{}};for(const t of transforms)t.callback(editor)}
  const host={
   location:{directory},
-  session:{get:async({sessionID}:any)=>({id:sessionID,location:{directory:foreign?dirnameForForeign(directory):directory}})},
-  permission:{assert:async(value:any)=>{grants.push(value);if(denyRead&&value.action==="read")throw Error("READ_MUST_NOT_RUN")}},
-  tool:{transform:async(callback:any)=>{
+  session:{get:async({sessionID}:{sessionID:string})=>({id:sessionID,location:{directory:foreign?dirnameForForeign(directory):directory}})},
+  permission:{assert:async(value:{action:string})=>{grants.push(value);if(denyRead&&value.action==="read")throw Error("READ_MUST_NOT_RUN")}},
+  tool:{transform:async(callback:(editor:ToolEditor)=>void)=>{
    const item={callback};transforms.push(item);rebuild()
    return {dispose:async()=>{const i=transforms.indexOf(item);if(i>=0)transforms.splice(i,1);rebuild()}}
   }},
@@ -30,7 +35,7 @@ test("complete composition exposes exactly six LSP tools and restores base regis
  const f=fixture(),runtime=createMutationRuntime({formatOnMutation:{mode:"off",maxFileBytes:1048576,timeoutMs:3000},diagnosticsEnabled:false})
  const close=await runtime.register(f.host);expect(runtime.snapshot().active).toBe(true)
  expect(f.tools().filter(t=>t.name.startsWith("lsp_")).map(t=>t.name)).toHaveLength(6)
- const callback=f.tools().find(t=>t.name==="write")!.execute
+ const callback=defined(f.tools().find(t=>t.name==="write")).execute
  const output=await callback({path:"a.txt",content:"ACTUAL_BYTES"},f.caller)
  expect(readFileSync(join(f.directory,"a.txt"),"utf8")).toBe("ACTUAL_BYTES");expect(output.metadata?.omoMutation).toMatchObject({committed:true,status:"processed"})
  expect(runtime.snapshot().reports[0]).toMatchObject({sessionID:f.caller.sessionID,callID:f.caller.id,committed:true})
@@ -40,7 +45,7 @@ test("complete composition exposes exactly six LSP tools and restores base regis
 })
 test("another host location cannot enter an original mutation callback",async()=>{
  const f=fixture(true),runtime=createMutationRuntime({formatOnMutation:{mode:"off",maxFileBytes:1048576,timeoutMs:3000},diagnosticsEnabled:false});const close=await runtime.register(f.host)
- try{await expect(f.tools().find(t=>t.name==="write")!.execute({path:"a.txt",content:"DENIED"},f.caller)).rejects.toThrow("another host location")}
+ try{await expect(defined(f.tools().find(t=>t.name==="write")).execute({path:"a.txt",content:"DENIED"},f.caller)).rejects.toThrow("another host location")}
  finally{await close()}
 })
 test("disabled composition has no tool transform or hidden process owner",async()=>{
@@ -49,7 +54,7 @@ test("disabled composition has no tool transform or hidden process owner",async(
 
 test("off formatter and diagnostics do not introduce a read into an allowed blind write",async()=>{
  const f=fixture(false,true),runtime=createMutationRuntime({formatOnMutation:{mode:"off",maxFileBytes:1048576,timeoutMs:3000},diagnosticsEnabled:false});const close=await runtime.register(f.host)
- try{await f.tools().find(t=>t.name==="write")!.execute({path:"blind.txt",content:"PRESERVED"},f.caller);expect(readFileSync(join(f.directory,"blind.txt"),"utf8")).toBe("PRESERVED");expect(f.grants).toHaveLength(0)}finally{await close()}
+ try{await defined(f.tools().find(t=>t.name==="write")).execute({path:"blind.txt",content:"PRESERVED"},f.caller);expect(readFileSync(join(f.directory,"blind.txt"),"utf8")).toBe("PRESERVED");expect(f.grants).toHaveLength(0)}finally{await close()}
 })
 
 test("dispose joins first, second and third pending registration and retires every late handle",async()=>{
