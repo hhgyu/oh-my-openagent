@@ -21,6 +21,8 @@ const DESCRIPTION = [
   "Cancel is terminal and NOT resumable. On a child that already finished it is a no-op that reports its unchanged status, except when that child still holds a resident session or queued messages: those are released, reported as kind released.",
   "Use this to end work you no longer need.",
 ].join(" ")
+/** The SAME tool description, for host adapters that publish this operation under their own tool API. */
+export const TASK_CANCEL_TOOL_DESCRIPTION = DESCRIPTION
 
 export type TaskCancelDeps = {
   readonly manager: CancelManager

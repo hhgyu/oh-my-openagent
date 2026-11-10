@@ -9,6 +9,10 @@
       "types": "./index.d.ts",
       "import": "./src/index.ts"
     },
+    "./ultrawork-keyword": {
+      "types": "./src/ultrawork-keyword/index.ts",
+      "import": "./src/ultrawork-keyword/index.ts"
+    },
     "./prompts/ultrawork/codex.md": "./prompts/ultrawork/codex.md"
   },
   "types": "./index.d.ts",

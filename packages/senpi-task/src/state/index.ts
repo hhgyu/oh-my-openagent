@@ -76,3 +76,5 @@ export type {
   TaskStartFailureRecordFields,
   TaskStartFailureTransition,
 } from "./start-failure"
+
+export type { OwnedSessionIdentity } from "./types"

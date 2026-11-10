@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
 
-import type { ToolDefinition } from "@code-yeongyu/senpi"
+import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
+import { capCuratedReadonlyResult, type CuratedReadonlyFormatter } from "@oh-my-opencode/utils/curated-readonly-presentation"
 import { Type, type Static } from "typebox"
 
 import { loadSenpiBarrel, senpiBarrel } from "../../lazy/senpi-barrel"
@@ -21,6 +22,11 @@ export const CuratedReadonlyBashParams = Type.Object({
 })
 
 export type CuratedReadonlyBashInput = Static<typeof CuratedReadonlyBashParams>
+
+/** The original structured broker uses only its captured executor and an optional signal. */
+export type CuratedReadonlyBashTool = Omit<ToolDefinition, "execute"> & {
+  readonly execute: (toolCallId: string, input: CuratedReadonlyBashInput, signal?: AbortSignal) => Promise<AgentToolResult<undefined>>
+}
 
 export type CuratedReadonlyRequest = {
   readonly program: "curl" | "gh"
@@ -73,11 +79,13 @@ export function planCuratedReadonlyCommand(request: CuratedReadonlyRequest): Cur
 export function createCuratedReadonlyBashTool(
   cwd: string,
   executor: CuratedReadonlyExecutor = executeCommand,
-): ToolDefinition {
+  formatter?: CuratedReadonlyFormatter,
+): CuratedReadonlyBashTool {
   // Returned as a plain literal: senpi's defineTool is an identity helper for type inference
   // (pinned by the senpi API tripwire), so wrapping here would only statically bind this module
   // to the engine barrel. The barrel values below (truncateHead/formatSize/limits) are read
-  // lazily inside execute, which warms the boundary first.
+  // lazily inside execute, which warms the boundary first. An explicit real presentation port
+  // lets another host use this SAME command policy/executor without loading a Native SDK.
   return {
     name: "bash",
     label: "Read-only research",
@@ -85,62 +93,25 @@ export function createCuratedReadonlyBashTool(
     promptSnippet: "Structured read-only remote research through gh or curl; arbitrary shell commands are unavailable.",
     parameters: CuratedReadonlyBashParams,
     execute: async (_toolCallId, input: CuratedReadonlyBashInput, signal) => {
-      await loadSenpiBarrel()
+      if (formatter === undefined) await loadSenpiBarrel()
       const command = planCuratedReadonlyCommand(input)
       try {
         const text = await executor(command, cwd, input.timeout_seconds ?? 30, signal)
-        return { content: [{ type: "text", text: capResultText(text) }], details: undefined }
+        return { content: [{ type: "text", text: capResultText(text, formatter) }], details: undefined }
       } catch (error) {
         if (!(error instanceof CuratedReadonlyCommandError)) throw error
-        throw new CuratedReadonlyCommandError(capResultText(error.message), { cause: error })
+        throw new CuratedReadonlyCommandError(capResultText(error.message, formatter), { cause: error })
       }
     },
   }
 }
 
-function capResultText(text: string): string {
-  const { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncateHead } = senpiBarrel()
-  const boundary = truncateHead(text, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES })
-  if (!boundary.truncated) return text
-
-  // Curated retrievals need the response head, including for one-line JSON that truncateHead cannot partially retain.
-  let notice = buildTruncationNotice(boundary.truncatedBy, "", boundary.totalLines, boundary.totalBytes)
-  let content = ""
-  for (let pass = 0; pass < 4; pass += 1) {
-    const contentBytes = DEFAULT_MAX_BYTES - Buffer.byteLength(`\n${notice}`)
-    const truncation = truncateHead(text, { maxBytes: contentBytes, maxLines: DEFAULT_MAX_LINES - 1 })
-    content = truncation.firstLineExceedsLimit ? truncateUtf8Prefix(text, contentBytes) : truncation.content
-    const nextNotice = buildTruncationNotice(boundary.truncatedBy, content, boundary.totalLines, boundary.totalBytes)
-    if (Buffer.byteLength(nextNotice) === Buffer.byteLength(notice)) {
-      notice = nextNotice
-      break
-    }
-    notice = nextNotice
-  }
-  return `${content}\n${notice}`
-}
-
-function buildTruncationNotice(
-  truncatedBy: "bytes" | "lines" | null,
-  content: string,
-  totalLines: number,
-  totalBytes: number,
-): string {
-  const shown = truncatedBy === "lines"
-    ? `${countLines(content)} of ${totalLines} lines`
-    : `${senpiBarrel().formatSize(Buffer.byteLength(content))} of ${senpiBarrel().formatSize(totalBytes)}`
-  return `[truncated: ${shown}. Narrow the request before retrying.]`
-}
-
-function countLines(text: string): number {
-  return text.length === 0 ? 0 : text.split("\n").length
-}
-
-function truncateUtf8Prefix(text: string, maxBytes: number): string {
-  const bytes = Buffer.from(text)
-  let end = Math.min(maxBytes, bytes.length)
-  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1
-  return bytes.subarray(0, end).toString("utf8")
+function capResultText(text: string, formatter?: CuratedReadonlyFormatter): string {
+  if (formatter !== undefined) return capCuratedReadonlyResult(text, formatter)
+  const { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncateHead, formatSize } = senpiBarrel()
+  return capCuratedReadonlyResult(text, {
+    maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES, truncateHead, formatSize,
+  })
 }
 
 function isReadonlyCurl(args: readonly string[]): boolean {

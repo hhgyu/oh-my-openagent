@@ -6,7 +6,7 @@ on:
       - 'packages/isolation-core/**'
       - '.github/workflows/isolation-linux-fs.yml'
   push:
-    branches: [dev, master]
+    branches: [dev, master, v2/dev]
     paths:
       - 'packages/isolation-core/**'
       - '.github/workflows/isolation-linux-fs.yml'

@@ -1,8 +1,9 @@
 import { log } from "@oh-my-opencode/utils"
 
-import type { ManagedChildHandle } from "../manager/child-handle"
+import type { ManagedChildHandle, PreparedFollowUp } from "../manager/child-handle"
 import { getLifecycleDetachedRevival } from "../lifecycle/port"
 import type { TaskRecord } from "../state"
+import { nextRunEpoch } from "../state"
 import { buildRevived, deliveryUncertain, evictionRefusal, lazyRevivalFailure, messageSha256, uncertainDeliveryDenial } from "./engine-policy"
 import { bestEffortRollback } from "./revival-rollback"
 import { reviveRunningOnSend } from "./revive-running"
@@ -88,25 +89,64 @@ async function deliverRevivedTerminal(
   if (!reservation.ok) {
     return { kind: "capacity_deferred", task_id: record.task_id, reason: "Task capacity is full; retry explicitly." }
   }
+  const preparedReservation = reservation
   let revived: TaskRecord | undefined
   let deliveryAcknowledged = false
   let poolDeliveryStarted = false
+  let ticket: PreparedFollowUp | undefined
+  let prior: TaskRecord | undefined
+  let stamped: TaskRecord | undefined
+  let dispatchEntered = false
+  let retained = false
+  function requireTicket(): PreparedFollowUp {
+    if (ticket === undefined) throw new Error("revival follow-up ticket was not prepared")
+    return ticket
+  }
+  function retain(reason: string): SendOutcome {
+    retained = true
+    requireTicket().retainFailure(reason)
+    preparedReservation.commit()
+    return lazyRevivalFailure(record, reason)
+  }
+  function notDispatched(reason: string): SendOutcome {
+    // The store can fail after its synchronous mutation callback; a returned candidate
+    // is not proof of persistence. The restore helper re-reads and fences the actual record.
+    revived ??= stamped
+    if (!revived || !prior) { preparedReservation.release(); return lazyRevivalFailure(record, reason) }
+    try {
+      const restored = restorePreparedRevival(port, prior, revived, handle, requireTicket(), nowIso)
+      if (!restored) { preparedReservation.release(); return lazyRevivalFailure(record, "ownership changed before proven unstarted delivery could be restored") }
+      preparedReservation.release()
+      return lazyRevivalFailure(record, reason)
+    } catch (error) {
+      return retain(`known unadmitted turn; rollback unconfirmed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   try {
     const fresh = port.store.load(record.task_id)
     if (fresh === null || fresh.status !== record.status || fresh.killed === true || fresh.host_pid !== record.host_pid || fresh.notification.run_epoch !== record.notification.run_epoch) {
       reservation.release()
       return lazyRevivalFailure(record, "task ownership or status changed before delivery")
     }
+    prior = fresh
+    if (handle.prepareFollowUp) {
+      try { ticket = await handle.prepareFollowUp(fresh, nextRunEpoch(fresh)) }
+      catch (error) { reservation.release(); return lazyRevivalFailure(record, error instanceof Error ? error.message : String(error)) }
+    }
     // Both warm and cold continuation fence the same record. A newly observed uncertainty
     // marker wins before an epoch is admitted; continuation never uses spawn-time stamping.
     let applied = false
     let uncertain: SendOutcome | undefined
     const updated = port.store.mutate(record.task_id, (current) => {
-      if (current.status !== fresh.status || current.host_pid !== fresh.host_pid || current.residency_state !== "resident" || current.killed === true || current.notification.run_epoch !== fresh.notification.run_epoch) return current
+      if (current.status !== fresh.status || current.host_pid !== fresh.host_pid || current.residency_state !== "resident" || current.killed === true || current.notification.run_epoch !== fresh.notification.run_epoch
+        || ticket && (port.liveHandle(record.task_id) !== handle || current.parent_session_id !== fresh.parent_session_id || current.residency_claim !== fresh.residency_claim || current.cancel_requested !== undefined)) return current
       uncertain = uncertainDeliveryDenial(current, message)
       if (uncertain !== undefined) return current
       applied = true
-      return buildDeliveryRecord(current, nowIso(), message)
+      const next = buildDeliveryRecord(current, nowIso(), message)
+      if (!ticket) return next
+      stamped = ticket.stamp(next)
+      return stamped
     })
     if (uncertain !== undefined || !applied || updated === null) {
       reservation.release()
@@ -116,7 +156,13 @@ async function deliverRevivedTerminal(
     port.store.appendEvent(record.task_id, { type: "revived", payload: { run_epoch: revived.notification.run_epoch } })
     const pending = revived.pending_steering ?? []
     poolDeliveryStarted = pending.some(entry => entry.workpool !== undefined)
-    await handle.followUp([...pending.map((entry) => entry.message), message].join("\n\n"))
+    const text = [...pending.map((entry) => entry.message), message].join("\n\n")
+    if (ticket) {
+      dispatchEntered = true
+      const result = await ticket.dispatch(text)
+      if (result.kind === "not-dispatched") return notDispatched(result.reason)
+      if (result.kind !== "accepted") return retain("prepared dispatch returned an unprovable admission disposition")
+    } else await handle.followUp(text)
     deliveryAcknowledged = true
     const acknowledged = port.store.load(record.task_id)
     if (acknowledged?.status !== "running" || acknowledged.host_pid !== revived.host_pid || acknowledged.notification.run_epoch !== revived.notification.run_epoch || port.liveHandle(record.task_id) !== handle) {
@@ -130,12 +176,18 @@ async function deliverRevivedTerminal(
         return { ...rest, pending_steering: (current.pending_steering ?? []).filter((entry) => !deliveredIds.has(entry.id)) }
       })
     }
+    retained = ticket !== undefined
     reservation.commit()
     return { kind: "revived", task_id: record.task_id, run_epoch: revived.notification.run_epoch }
   } catch (error) {
+    if (ticket && !dispatchEntered) return notDispatched(error instanceof Error ? error.message : String(error))
     if (error instanceof InputUncertainError) {
+      retained = ticket !== undefined
       reservation.commit()
       return { kind: "uncertain", task_id: record.task_id, effect_id: error.effectId, reason: error.message }
+    }
+    if (ticket) {
+      return retain(`prepared dispatch failed without a proven no-dispatch result: ${error instanceof Error ? error.message : String(error)}`)
     }
     if (error instanceof InputConflictError) {
       reservation.release()
@@ -199,7 +251,39 @@ async function deliverRevivedTerminal(
     if (rollbackOnFailure && priorRecord !== undefined) await bestEffortRollback(port, priorRecord)
     reservation.release()
     return lazyRevivalFailure(record, error instanceof Error ? error.message : String(error))
-  }
+  } finally { if (ticket && !retained) await ticket.release() }
+}
+
+/** Native owns this exact-epoch restore; an issued undone epoch is burnt in the SAME write. */
+function restorePreparedRevival(port: SteeringPort, prior: TaskRecord, admitted: TaskRecord, handle: ManagedChildHandle, ticket: PreparedFollowUp, nowIso: () => string): boolean {
+  let restored = false
+  port.store.mutate(prior.task_id, fresh => {
+    const epoch = admitted.notification.run_epoch
+    if (fresh.status !== "running" || fresh.residency_state !== "resident" || fresh.killed === true || fresh.cancel_requested !== undefined
+      || fresh.host_pid !== admitted.host_pid || fresh.parent_session_id !== admitted.parent_session_id || fresh.residency_claim !== admitted.residency_claim
+      || fresh.notification.run_epoch !== epoch || fresh.run_start_epoch !== epoch || port.liveHandle(prior.task_id) !== handle) return fresh
+    const expected = admitted.owned_session, current = fresh.owned_session
+    if (expected || current) {
+      if (!expected || !current || current.journalRevision < expected.journalRevision) return fresh
+      const identity = ["format", "backendID", "location", "hostVersion", "parentID", "sessionID", "generation", "journalKey", "journalOwner", "runEpoch", "residencyClaim"] as const
+      if (identity.some(key => current[key] !== expected[key])) return fresh
+    }
+    handle.assertOwned?.()
+    const owned = ticket.restoreOwnedReference(prior)
+    const next = { ...fresh }
+    const fields = ["final_response", "error_message", "failure_kind", "failure_reason", "interrupt_cause", "run_stats", "prior_runs_cost_usd", "terminal_at", "provisional_exit", "stop_reason", "deadline", "awaiting_input", "run_start_epoch", "revive_delivery_uncertain"] as const
+    for (const key of fields) {
+      if (Object.hasOwn(prior, key)) Object.assign(next, { [key]: prior[key] })
+      else Reflect.deleteProperty(next, key)
+    }
+    if (owned === undefined) Reflect.deleteProperty(next, "owned_session")
+    else next.owned_session = owned
+    restored = true
+    return { ...next, status: prior.status, residency_state: prior.residency_state,
+      notification: { ...fresh.notification, run_epoch: prior.notification.run_epoch },
+      burnt_epoch: Math.max(fresh.burnt_epoch ?? 0, prior.burnt_epoch ?? 0, epoch), updated_at: nowIso() }
+  })
+  return restored
 }
 
 function buildDeliveryRecord(record: TaskRecord, timestamp: string, message: string): TaskRecord {

@@ -5,13 +5,13 @@ name: Engine trust mutations
 # senpi, the desktop or the macOS/Windows adapters run in their owners' pipelines.
 on:
   pull_request:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - "packages/omo-native/**"
       - "script/omo-native-trust-mutations.ts"
       - ".github/workflows/trust-mutations.yml"
   push:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - "packages/omo-native/**"
       - "script/omo-native-trust-mutations.ts"

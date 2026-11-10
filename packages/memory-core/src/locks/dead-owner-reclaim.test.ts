@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { randomUUID } from "node:crypto"
-import { mkdtemp, readdir, rm, unlink, utimes, writeFile } from "node:fs/promises"
+import { existsSync } from "node:fs"
+import { mkdtemp, readFile, readdir, rm, unlink, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -19,8 +20,13 @@ import {
   setLockCandidateFsForTests,
 } from "./index"
 import type { LockRecord } from "./lock-record"
+import { acquireWithoutDirectorySweep } from "./acquire-core"
+import { readOwner } from "./lock-owner"
+import { provenDeadTakeoverFor } from "./proven-dead-takeovers"
+import { recoverStaleOwner } from "./stale-owner"
 
 const temporaryDirectories: string[] = []
+const restoreFilesystem: Array<() => void> = []
 
 async function createLocksDirectory(): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), "dead-owner-reclaim-"))
@@ -29,6 +35,7 @@ async function createLocksDirectory(): Promise<string> {
 }
 
 afterEach(async () => {
+  for (const restore of restoreFilesystem.splice(0).reverse()) restore()
   for (const directory of temporaryDirectories.splice(0)) await rm(directory, { recursive: true, force: true })
 })
 
@@ -59,6 +66,256 @@ function countPublishAttempts(): { readonly names: () => readonly string[]; read
 }
 
 describe("dead-owner lock reclaim", () => {
+  async function disappearingPrimary() {
+    const lockPath = path.join(await createLocksDirectory(), "primary.lock")
+    const deadOwner = await deadOwnerRecord("memory-write")
+    const contender = await createLockRecord("memory-write")
+    await writeRecord(lockPath, deadOwner)
+    const snapshot = await readOwner(lockPath)
+    if (snapshot === null) throw new Error("missing primary fixture")
+    return { lockPath, deadOwner, contender, snapshot }
+  }
+
+  function vanishAtFinalUnlink(lockPath: string, replacement?: LockRecord): () => number {
+    const originalUnlink = resilientFs.unlink
+    let calls = 0
+    const intercepted = spyOn(resilientFs, "unlink").mockImplementation(async (candidate) => {
+      if (String(candidate) === lockPath && calls++ === 0) {
+        await unlink(lockPath)
+        if (replacement !== undefined) {
+          // The original unlink observed absence; a successor published before its caller resumed.
+          try {
+            await unlink(lockPath)
+          } catch (error) {
+            if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error
+            await writeRecord(lockPath, replacement)
+            throw error
+          }
+          throw new Error("expected missing primary")
+        }
+        return unlink(lockPath)
+      }
+      return originalUnlink(candidate)
+    })
+    restoreFilesystem.push(() => intercepted.mockRestore())
+    return () => calls
+  }
+
+  test("#given the primary vanishes after the final recovery fence #when unlink sees ENOENT #then retry is allowed without takeover proof", async () => {
+    const { lockPath, contender, snapshot } = await disappearingPrimary()
+    const calls = vanishAtFinalUnlink(lockPath)
+
+    let failure: unknown
+    try {
+      await recoverStaleOwner(lockPath, snapshot, contender, Date.now(), 5_000)
+    } catch (error) { failure = error }
+
+    expect(calls()).toBe(1)
+    expect(existsSync(lockPath)).toBe(false)
+    expect(existsSync(`${lockPath}.recovery`)).toBe(false)
+    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
+    expect(failure).toBeUndefined()
+  })
+
+  test("#given the primary vanishes at unlink #when a zero-wait contender acquires #then it republishes exclusively without unearned takeover proof", async () => {
+    const { lockPath, contender } = await disappearingPrimary()
+    const calls = vanishAtFinalUnlink(lockPath)
+
+    let failure: unknown
+    try {
+      await acquireWithoutDirectorySweep(lockPath, contender, { waitTimeoutMs: 0 })
+    } catch (error) { failure = error }
+
+    expect(calls()).toBe(1)
+    expect(existsSync(`${lockPath}.recovery`)).toBe(false)
+    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
+    expect(failure).toBeUndefined()
+    expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(contender)
+  })
+
+  test("#given a live successor publishes after primary unlink sees ENOENT #when a zero-wait contender retries #then live custody stays intact and contention is typed", async () => {
+    const { lockPath, contender } = await disappearingPrimary()
+    const successor = await createLockRecord("memory-write")
+    const calls = vanishAtFinalUnlink(lockPath, successor)
+
+    let failure: unknown
+    try {
+      await acquireWithoutDirectorySweep(lockPath, contender, { waitTimeoutMs: 0 })
+    } catch (error) { failure = error }
+
+    expect(calls()).toBe(1)
+    expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(successor)
+    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
+    expect(existsSync(`${lockPath}.recovery`)).toBe(false)
+    expect(failure).toBeInstanceOf(LockContentionError)
+  })
+
+  test("#given final primary unlink fails with EACCES #when recovery runs #then the error propagates and neither custody nor proof is fabricated", async () => {
+    const { lockPath, deadOwner, contender, snapshot } = await disappearingPrimary()
+    const expected = Object.assign(new Error("injected EACCES"), { code: "EACCES" })
+    const originalUnlink = resilientFs.unlink
+    const intercepted = spyOn(resilientFs, "unlink").mockImplementation(async (candidate) => {
+      if (String(candidate) === lockPath) throw expected
+      return originalUnlink(candidate)
+    })
+    restoreFilesystem.push(() => intercepted.mockRestore())
+
+    let failure: unknown
+    try {
+      await recoverStaleOwner(lockPath, snapshot, contender, Date.now(), 5_000)
+    } catch (error) { failure = error }
+
+    expect(failure).toBe(expected)
+    expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(deadOwner)
+    expect(existsSync(`${lockPath}.recovery`)).toBe(false)
+    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
+  })
+
+  test("#given a public acquisition whose primary vanishes at unlink #when its directory sweep acquires #then no takeover proof is inherited", async () => {
+    const { lockPath, contender } = await disappearingPrimary()
+    const calls = vanishAtFinalUnlink(lockPath)
+
+    await acquireLock(lockPath, contender, { waitTimeoutMs: 0 })
+
+    expect(calls()).toBeGreaterThanOrEqual(1)
+    expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(contender)
+    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
+    await releaseLock(lockPath, contender)
+  })
+
+  test("#given a primary disappears before the recovery current read #when public acquisition sweeps #then the existing absent-primary retry grants no proof", async () => {
+    const { lockPath, contender } = await disappearingPrimary()
+    const originalRead = resilientFs.readFile
+    let reads = 0
+    const intercepted = spyOn(resilientFs, "readFile").mockImplementation((async (candidate: string, ...rest: unknown[]) => {
+      // Sweep's initial owner read, acquisition snapshot, then recovery's current-owner read.
+      if (String(candidate) === lockPath && ++reads === 3) await unlink(lockPath)
+      return (originalRead as (...args: unknown[]) => unknown)(candidate, ...rest)
+    }) as typeof resilientFs.readFile)
+    restoreFilesystem.push(() => intercepted.mockRestore())
+
+    await acquireLock(lockPath, contender, { waitTimeoutMs: 0 })
+
+    expect(reads).toBeGreaterThanOrEqual(3)
+    expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(contender)
+    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
+    await releaseLock(lockPath, contender)
+  })
+
+  test("#given the initially scanned dead owner is replaced by another dead owner #when the sweep removes the actual owner #then public proof names that actual owner", async () => {
+    const { lockPath, contender } = await disappearingPrimary()
+    const actualOwner = await deadOwnerRecord("memory-write")
+    const originalRead = resilientFs.readFile
+    let reads = 0
+    const intercepted = spyOn(resilientFs, "readFile").mockImplementation((async (candidate: string, ...rest: unknown[]) => {
+      if (String(candidate) === lockPath && ++reads === 2) await writeRecord(lockPath, actualOwner)
+      return (originalRead as (...args: unknown[]) => unknown)(candidate, ...rest)
+    }) as typeof resilientFs.readFile)
+    restoreFilesystem.push(() => intercepted.mockRestore())
+
+    await acquireLock(lockPath, contender, { waitTimeoutMs: 0 })
+
+    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toEqual(actualOwner)
+    await releaseLock(lockPath, contender)
+  })
+
+  test("#given a dead primary actually removed by the sweep #when public acquisition succeeds #then only its nonce inherits the actual owner proof and release clears it", async () => {
+    const { lockPath, contender, deadOwner } = await disappearingPrimary()
+
+    await acquireLock(lockPath, contender, { waitTimeoutMs: 0 })
+
+    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toEqual(deadOwner)
+    expect(provenDeadTakeoverFor(lockPath, randomUUID())).toBeUndefined()
+    expect(await releaseLock(lockPath, contender)).toBe(true)
+    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
+  })
+
+  test("#given a live successor publishes after the missing unlink #when public acquisition sweeps and retries #then live custody and no-proof refusal survive", async () => {
+    const { lockPath, contender } = await disappearingPrimary()
+    const successor = await createLockRecord("memory-write")
+    vanishAtFinalUnlink(lockPath, successor)
+
+    let failure: unknown
+    try { await acquireLock(lockPath, contender, { waitTimeoutMs: 0 }) } catch (error) { failure = error }
+
+    expect(failure).toBeInstanceOf(LockContentionError)
+    expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(successor)
+    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
+  })
+
+  test.each([false, true])("#given an intervening publisher remains=%s #when public acquisition loses its publish after a real takeover #then no proof crosses that publisher", async (remains) => {
+    const { lockPath, contender } = await disappearingPrimary()
+    const successor = await createLockRecord("memory-write")
+    const realLink = resilientFs.link
+    let publications = 0
+    const restore = setLockCandidateFsForTests({ link: async (from, to) => {
+      if (String(to) === lockPath && publications++ === 1) {
+        await writeRecord(lockPath, successor)
+        try { await realLink(from, to) } catch (error) {
+          if (!remains) await unlink(lockPath)
+          throw error
+        }
+        throw new Error("expected lost exclusive publish")
+      }
+      await realLink(from, to)
+    } })
+    restoreFilesystem.push(restore)
+
+    let failure: unknown
+    try { await acquireLock(lockPath, contender, { waitTimeoutMs: 0 }) } catch (error) { failure = error }
+
+    expect(publications).toBeGreaterThanOrEqual(2)
+    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
+    if (remains) {
+      expect(failure).toBeInstanceOf(LockContentionError)
+      expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(successor)
+    } else {
+      expect(failure).toBeUndefined()
+      expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(contender)
+      await releaseLock(lockPath, contender)
+    }
+  })
+
+  test("#given a sweeper's own release loses the primary #when release returns false #then no reclaim count or callback is fabricated", async () => {
+    const { lockPath } = await disappearingPrimary()
+    const originalUnlink = resilientFs.unlink
+    const callbacks: LockRecord[] = []
+    let calls = 0
+    const intercepted = spyOn(resilientFs, "unlink").mockImplementation(async (candidate) => {
+      if (String(candidate) === lockPath && ++calls === 2) {
+        await unlink(lockPath)
+        return unlink(lockPath)
+      }
+      return originalUnlink(candidate)
+    })
+    restoreFilesystem.push(() => intercepted.mockRestore())
+
+    const reclaimed = await sweepDeadOwnerLocks(path.dirname(lockPath), { onReclaimed: (_path, owner) => callbacks.push(owner) })
+
+    expect(calls).toBe(2)
+    expect(existsSync(lockPath)).toBe(false)
+    expect(reclaimed).toBe(0)
+    expect(callbacks).toEqual([])
+  })
+
+  test("#given recovery nonce custody changes after publication #when the final fence reads it #then primary and replacement recovery custody stay intact", async () => {
+    const { lockPath, contender, deadOwner, snapshot } = await disappearingPrimary()
+    const replacement = await createLockRecord("memory-write:recovery")
+    const recoveryPath = `${lockPath}.recovery`
+    const originalRead = resilientFs.readFile
+    let reads = 0
+    const intercepted = spyOn(resilientFs, "readFile").mockImplementation((async (candidate: string, ...rest: unknown[]) => {
+      if (String(candidate) === recoveryPath && ++reads === 2) await writeRecord(recoveryPath, replacement)
+      return (originalRead as (...args: unknown[]) => unknown)(candidate, ...rest)
+    }) as typeof resilientFs.readFile)
+    restoreFilesystem.push(() => intercepted.mockRestore())
+
+    expect(await recoverStaleOwner(lockPath, snapshot, contender, Date.now(), 5_000)).toBe(false)
+    expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(deadOwner)
+    expect(JSON.parse(await readFile(recoveryPath, "utf8"))).toEqual(replacement)
+    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
+  })
+
   test("#given a dead primary owner and a live recovery holder #when six contenders wait #then none publishes a candidate", async () => {
     // #given
     const lockPath = memoryWriterLockPath(await createLocksDirectory())

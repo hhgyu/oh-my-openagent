@@ -16,6 +16,7 @@ export function isFallbackHandoff(record: TaskRecord | null | undefined): record
   return record != null
     && record.fallback_handoff_epoch !== undefined
     && record.fallback_handoff_epoch === record.notification.run_epoch
+    && record.owned_session === undefined
     && record.pid === undefined
     && !isHostSessionRecord(record)
 }
@@ -36,15 +37,16 @@ export type FallbackRung = {
  * launch that never happens never leaves the record naming a model nothing ran on.
  */
 export function handOffToNextRung(record: TaskRecord, rung: FallbackRung): TaskRecord {
-  const { pid: closingPid, runner_kind: _closedRunner, host_session: closingSession, provisional_exit: _exit, ...rest } = record
+  const { owned_session: closingOwned, pid: closingPid, runner_kind: _closedRunner, host_session: closingSession, provisional_exit: _exit, ...rest } = record
   const runEpoch = nextRunEpoch(record)
   const closing = {
+    ...(closingOwned === undefined ? {} : { owned_session: closingOwned }),
     ...(closingPid === undefined ? {} : { pid: closingPid }),
     ...(closingSession === undefined ? {} : { host_session: closingSession }),
   }
   return {
     ...rest,
-    ...(closingPid === undefined && closingSession === undefined ? {} : { fallback_closing_child: closing }),
+    ...(closingPid === undefined && closingSession === undefined && closingOwned === undefined ? {} : { fallback_closing_child: closing }),
     model: rung.model.display,
     resolved_model: rung.model,
     fallback_models: rung.remaining,
@@ -68,6 +70,7 @@ export function endFallbackHandoff(record: TaskRecord): TaskRecord {
 export function forgetClosedChild(record: TaskRecord, closed: TaskRecord["fallback_closing_child"]): TaskRecord {
   const current = record.fallback_closing_child
   if (current === undefined || closed === undefined) return record
+  if (JSON.stringify(current.owned_session) !== JSON.stringify(closed.owned_session)) return record
   if (current.pid !== closed.pid || current.host_session?.session_path !== closed.host_session?.session_path ||
     current.host_session?.socket !== closed.host_session?.socket ||
     current.host_session?.instance_id !== closed.host_session?.instance_id ||

@@ -40,6 +40,7 @@ export function savedRunOwner(record: TaskRecord): RunPauseOwner | undefined {
  * transcript is lost: its prompt is never replayed.
  */
 export async function restorePausedChild(ports: PausedRestorePorts, record: TaskRecord): Promise<ManagedChildHandle> {
+  if (record.owned_session !== undefined) throw Object.assign(new Error("Owned session active run hold is unavailable; no child sequence acknowledgement exists"), { code: "owned_session_pause_unavailable" })
   const taskId = record.task_id
   const owner = record.host_pid
   if (owner !== undefined && owner !== ports.hostPid && ports.isProcessAlive(owner)) throw new PausedChildOwnedElsewhereError(taskId, owner)

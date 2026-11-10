@@ -175,3 +175,87 @@ export function sendAndCloseStdin(stdin: {
 	write(chunk: string): unknown;
 	end(): unknown;
 }, input: string): Promise<void>;
+export interface CommentCheckerLogger {
+	info(message: string, details?: unknown): void;
+	warn(message: string, details?: unknown): void;
+}
+export const COMMENT_CHECKER_FEEDBACK_HEADER: string;
+export function commentCheckerFailureNotice(binaryPath: string, failure: CheckFailure): string;
+export const COMMENT_CHECKER_CACHE_DIR_NAME: string;
+export interface InstalledCommentCheckerBinaryOptions {
+	readonly env?: Record<string, string | undefined>;
+	readonly existsSync?: (path: string) => boolean;
+	readonly importMetaUrl: string;
+	readonly requireModule?: (moduleName: string) => unknown;
+	readonly pathLookup?: (binaryName: string) => string | null | undefined;
+	readonly platform?: NodeJS.Platform;
+	readonly cacheDir?: string;
+}
+export function resolveInstalledCommentCheckerBinary(options: InstalledCommentCheckerBinaryOptions): string | null;
+export function defaultCommentCheckerCacheDir(
+	platform?: NodeJS.Platform,
+	env?: Record<string, string | undefined>,
+	cacheDirName?: string,
+): string;
+export interface CommentCheckerArchiveOps {
+	ensureCacheDir(cacheDir: string): void;
+	downloadArchive(url: string, archivePath: string): Promise<void>;
+	extractTarGz(archivePath: string, destDir: string): Promise<void>;
+	extractZipArchive(archivePath: string, destDir: string): Promise<void>;
+	ensureExecutable(binaryPath: string): void;
+	cleanupArchive(archivePath: string): void;
+}
+export interface DownloadCommentCheckerBinaryOptions {
+	readonly logger: CommentCheckerLogger;
+	readonly logLabel: string;
+	readonly archive: CommentCheckerArchiveOps;
+	readonly platform?: NodeJS.Platform;
+	readonly arch?: string;
+	readonly cacheDir?: string;
+	readonly resolveAssetUrl?: (asset: CommentCheckerReleaseAsset) => string;
+}
+export function downloadCommentCheckerBinary(options: DownloadCommentCheckerBinaryOptions): Promise<string | null>;
+export function runCommentCheckerWithNodeSpawn(input: RunCommentCheckerInput): Promise<CheckResult>;
+export type ToolResultTextBlock = { type: "text"; text: string };
+export type ToolResultContentBlock = ToolResultTextBlock | Record<string, unknown>;
+export interface ToolResultEventLike {
+	type: "tool_result";
+	toolCallId: string;
+	toolName: string;
+	input: Record<string, unknown>;
+	content: ToolResultContentBlock[];
+	details?: unknown;
+	isError: boolean;
+}
+export interface ToolResultContextLike {
+	cwd: string;
+	sessionManager?: {
+		getSessionId?: () => string;
+		getSessionFile?: () => string | undefined;
+	};
+}
+export function parseToolResultEvent(value: unknown): ToolResultEventLike | undefined;
+export function parseToolResultContext(value: unknown): ToolResultContextLike;
+export interface CommentCheckerSessionOptions<L extends CommentCheckerLogger> {
+	readonly logger: L;
+	readonly logLabel: string;
+	readonly hookEventName: string;
+	readonly resolveBinary: () => string | null;
+	readonly downloadBinary: (logger: L) => Promise<string | null>;
+	readonly runCommentChecker: (input: RunCommentCheckerInput) => Promise<CheckResult>;
+}
+export interface CommentCheckerToolResultHooks {
+	onCheckStart?(): void;
+	onCheckFailure?(binaryPath: string, failure: CheckFailure): void;
+}
+export interface CommentCheckerSession {
+	startTurn(): void;
+	checkToolResult(
+		event: ToolResultEventLike,
+		context: ToolResultContextLike,
+		hooks?: CommentCheckerToolResultHooks,
+	): Promise<string[]>;
+}
+export function createCommentCheckerSession<L extends CommentCheckerLogger>(
+	options: CommentCheckerSessionOptions<L>,
+): CommentCheckerSession;

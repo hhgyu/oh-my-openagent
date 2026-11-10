@@ -99,7 +99,7 @@ export const BACKGROUND_MODES = ["foreground", "background", "promoted"] as cons
 
 export type BackgroundMode = (typeof BACKGROUND_MODES)[number]
 
-export const RUNNER_KINDS = ["child-process", "host-session"] as const
+export const RUNNER_KINDS = ["child-process", "host-session", "owned-session"] as const
 
 export type RunnerKind = (typeof RUNNER_KINDS)[number]
 
@@ -192,3 +192,11 @@ export type {
   TaskTransitionAudit,
   TaskTransitionResult,
 } from "./transition-types"
+
+/** Inert owned external-session reference; never a live custody capability or Native socket. */
+export type OwnedSessionIdentity = {
+  readonly format: 1; readonly backendID: string; readonly location: string; readonly hostVersion: string
+  readonly parentID: string; readonly sessionID: string; readonly generation: number
+  readonly journalKey: string; readonly journalOwner: string; readonly journalRevision: number
+  readonly runEpoch: number; readonly residencyClaim: string
+}

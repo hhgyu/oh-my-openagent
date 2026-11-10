@@ -19,6 +19,7 @@ Owns static mode and planning-role markdown prompt content (`prompts/` tree), bu
 
 - **Constants:** `ULTRAWORK_{DEFAULT,GPT,GEMINI,GLM,PLANNER}_PROMPT`, `CODEX_ULTRAWORK_PROMPT`, `HYPERPLAN_MODE_PROMPT`, `TEAM_MODE_PROMPT`; `VariantTable`s `ultraworkPromptVariants`, `codexUltraworkPromptVariants`, `atlasPromptVariants`, `prometheusPromptVariants`.
 - **Functions:** `resolveVariant(input)` (uses `model-core` matchers), `loadPrompt`/`loadPromptSync` (bundled sync or filesystem async).
+- **Ultrawork keyword detection (`./ultrawork-keyword` subpath, also re-exported from the root):** `isUltraworkInput`, `classifyUltraworkInput`, and the region maskers `stripQuotedRegions`/`stripQuotedSpans`/`maskNegatedInvocations` + `NOT_*` boundary fragments. Shared by OmO Native (`omo-senpi` ultrawork/skill-pointers re-export it) and the OpenCode 2 ultrawork/todo-fanout hooks; the subpath carries no `.md` imports, so non-bundling consumers can typecheck it.
 - **Types/errors:** `ModelVariant` (9 literals), `PromptSource`, `LoadedPrompt`, `VariantTable`; `PromptFileNotFoundError`, `PromptPathTraversalError`.
 
 ## DEPENDENCIES & CONSUMERS

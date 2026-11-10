@@ -49,6 +49,18 @@ const RAW_PROMPT_ALLOWLIST = new Map<string, string>([
     "binds SDK Session.promptAsync into a narrow facade consumed only by gate-routed unstable-agent-babysitter dispatch; performs no direct dispatch itself",
   ],
   [
+    path.join(SOURCE_ROOT, "v2", "host", "session-backend.ts"),
+    "OpenCode 2 owned CHILD backend: prompts only child.locator.sessionID it created itself, after a durable per-input admission receipt (pending/accepted/uncertain) is checkpointed in the child journal; never addresses a parent or main session",
+  ],
+  [
+    path.join(SOURCE_ROOT, "v2", "host", "effect-session-backend-api.ts"),
+    "adapts the joined Effect session.prompt transport into the narrow surface consumed only by the owned child backend; performs no dispatch itself",
+  ],
+  [
+    path.join(SOURCE_ROOT, "v2", "orchestration", "native-task", "owned-runner.ts"),
+    "wraps the transport handed to the owned child backend with the original first-input authority fence; the backend only targets the owned child session",
+  ],
+  [
     path.join(WORKSPACE_ROOT, "packages", "senpi-task", "src", "runners", "in-process", "child-handle.ts"),
     "drives a senpi CHILD AgentSession.prompt for spawned subagent turns; senpi-task cannot reach OpenCode session APIs (opencode-coupling audit) so the main-session injection invariant does not apply",
   ],

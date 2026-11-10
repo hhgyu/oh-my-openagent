@@ -1,4 +1,4 @@
-import type { EffectiveModelChange, EffectiveModelChangeKind, EffectiveModelSource, TaskRecord, TaskStatus } from "../state"
+import type { EffectiveModelChange, EffectiveModelChangeKind, EffectiveModelSource, RunnerKind, TaskRecord, TaskStatus } from "../state"
 import { EFFECTIVE_MODEL_CHANGE_KINDS } from "../state"
 
 function liveChangeKind(source: EffectiveModelSource): EffectiveModelChangeKind | undefined {
@@ -23,8 +23,21 @@ export function storedStatus(status: TaskStatus): { readonly status: Exclude<Tas
   return status === "paused" ? { status: "running", paused: true } : { status }
 }
 
+// An owned adapter session is a host-managed session on disk. Its additive, strictly
+// parsed owned_session reference preserves the adapter identity; it is not a Native
+// RPC host_session descriptor and never supplies a fabricated socket or process ID.
+export function storedRunnerKind(kind: RunnerKind): Exclude<RunnerKind, "owned-session"> {
+  return kind === "owned-session" ? "host-session" : kind
+}
+
 export function toStorableTaskRecord(record: TaskRecord): TaskRecord & StoredPausedMarker {
-  const stored = storableEffectiveModel(record)
+  let stored = storableEffectiveModel(record)
+  if (stored.runner_kind === "owned-session") {
+    if (stored.owned_session === undefined || stored.pid !== undefined || stored.host_session !== undefined) {
+      throw new Error("Owned runner storage requires an unmixed owned session identity")
+    }
+    stored = { ...stored, runner_kind: storedRunnerKind(stored.runner_kind) }
+  }
   return stored.status === "paused" ? { ...stored, ...storedStatus(stored.status) } : stored
 }
 

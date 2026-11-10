@@ -1,3 +1,4 @@
+import { managedRunnerFor } from "./runner-routing"
 import { createTaskRecord, type TaskRecord } from "../state"
 import { WorkpoolError, type WorkpoolSpec } from "../workpool/types"
 import { buildManagedSpec, buildRecordInput, buildSpawnSpecV1 } from "./manager-helpers"
@@ -40,5 +41,5 @@ export function prepareWorkpoolLaunch(input: {
   const managedSpec = { ...built, ...(spec.admission === undefined ? {} : { admission: spec.admission }) }
   const record = { ...claimed, spawn_spec: buildSpawnSpecV1(managedSpec) }
   if (prior === null) options.store.save(record)
-  return { record, managedSpec, runner: options.runners[executionMode], model: record.model }
+  return { record, managedSpec, runner: managedRunnerFor(options, executionMode), model: record.model }
 }

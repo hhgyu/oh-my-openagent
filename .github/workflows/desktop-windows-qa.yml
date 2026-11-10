@@ -18,7 +18,7 @@ on:
       - "script/qa/desktop/windows.ts"
       - "script/qa/desktop/windows/**"
   push:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - ".github/workflows/desktop-windows-qa.yml"
       - "Cargo.toml"

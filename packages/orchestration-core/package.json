@@ -1,0 +1,27 @@
+{
+  "name": "@oh-my-opencode/orchestration-core",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Harness-neutral task runner outcome and failure contracts shared by OmO adapters.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./transcript/*": {
+      "types": "./src/transcript/*.ts",
+      "import": "./src/transcript/*.ts"
+    },
+    "./contracts/*": {
+      "types": "./src/contracts/*.ts",
+      "import": "./src/contracts/*.ts"
+    }
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "test": "bun test src/"
+  },
+  "sideEffects": false
+}

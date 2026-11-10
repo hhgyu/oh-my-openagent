@@ -1,6 +1,6 @@
 import type { AgentToolResult, AgentToolUpdateCallback } from "@code-yeongyu/senpi"
 
-import type { StartResult, TaskManager } from "../../manager"
+import type { StartResult } from "../../manager"
 import type { TaskRecord } from "../../state"
 import { failedStartDetail, itemError, startedDetail, type StartedResult } from "./batch-item-details"
 import { trackBatchProgress } from "./batch-progress"
@@ -8,7 +8,7 @@ import type { ForegroundWaitOptions, ForegroundWaitResult } from "./foreground-w
 import { waitForForegroundTask } from "./foreground-wait"
 import { appendMissingSkills } from "./skill-result"
 import { backgroundConversionText } from "./start-presentation"
-import type { ResolvedSpawnItem, TaskSkillSummary, TaskToolContext, TaskToolDetails, TaskToolItemDetail } from "./types"
+import type { ResolvedSpawnItem, TaskOperationManager, TaskSkillSummary, TaskToolContext, TaskToolDetails, TaskToolItemDetail } from "./types"
 
 type BatchStart =
   | { readonly kind: "started"; readonly item: ResolvedSpawnItem; readonly result: StartedResult; readonly skills?: TaskSkillSummary }
@@ -23,7 +23,16 @@ type BatchItemOutput = {
 }
 
 export type ExecuteBatchInput = ForegroundWaitOptions & {
-  readonly manager: TaskManager
+  readonly manager: Pick<TaskOperationManager,
+    | "get"
+    | "waitFor"
+    | "subscribeChild"
+    | "whenLaunched"
+    | "promoteToBackground"
+    | "cancelTask"
+    | "findTaskByChildSession"
+    | "concurrency"
+  >
   readonly items: readonly ResolvedSpawnItem[]
   readonly signal: AbortSignal | undefined
   readonly ctx: TaskToolContext

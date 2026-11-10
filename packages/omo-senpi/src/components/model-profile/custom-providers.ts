@@ -1,13 +1,12 @@
+import type { DeclaredModelProvider } from "@oh-my-opencode/delegate-core/model-profile/types"
+export type { DeclaredModelProvider } from "@oh-my-opencode/delegate-core/model-profile/types"
 import { readModelsJson } from "./models-json"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-export type DeclaredModelProvider = {
-  readonly provider: string
-  readonly modelIds: readonly string[]
-}
+
 
 function declaredModelIds(entry: unknown): readonly string[] {
   if (!isRecord(entry) || !Array.isArray(entry["models"])) return []

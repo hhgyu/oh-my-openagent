@@ -5,6 +5,9 @@ export type BuildNode = {
 	deps: string[]
 }
 
+const V2_EXTERNALS = ["@opencode/plugin", "@opencode/plugin/*", "effect", "effect/*"]
+const V2_BUILD_ARGS = ["--splitting", "--chunk-naming", "opencode-[hash].js", ...V2_EXTERNALS.flatMap((name) => ["--external", name])]
+
 const OPENTUI_EXTERNALS = ["@opentui/core", "@opentui/keymap", "@opentui/solid"]
 
 export const BUILD_NODES: BuildNode[] = [
@@ -16,10 +19,12 @@ export const BUILD_NODES: BuildNode[] = [
 	{ id: "lsp-daemon", command: "bun", args: ["run", "build:lsp-daemon"], deps: [] },
 	{ id: "codex-plugin", command: "bun", args: ["run", "build:codex-plugin"], deps: ["git-bash-mcp", "lsp-tools-mcp", "lsp-daemon"] },
 	{ id: "senpi-plugin", command: "bun", args: ["run", "build:senpi-plugin:stage"], deps: ["ast-grep-mcp", "lsp-daemon", "codex-plugin"] },
-	{ id: "index", command: "bun", args: ["build", "packages/omo-opencode/src/index.ts", "--outdir", "dist", "--target", "bun", "--format", "esm", "--external", "zod"], deps: [] },
+	{ id: "index", command: "bun", args: ["build", "packages/omo-opencode/src/index.ts", "--outdir", "dist", "--target", "bun", "--format", "esm", "--external", "zod", ...V2_BUILD_ARGS], deps: [] },
+	{ id: "v2-index", command: "bun", args: ["build", "packages/omo-opencode/src/v2/index.ts", "--outdir", "dist/v2", "--target", "bun", "--format", "esm", "--external", "zod", ...V2_BUILD_ARGS], deps: [] },
 	{ id: "tui", command: "bun", args: ["build", "packages/omo-opencode/src/tui.ts", "--outdir", "dist", "--target", "bun", "--format", "esm", ...OPENTUI_EXTERNALS.flatMap((name) => ["--external", name])], deps: [] },
 	{ id: "shared-skills-assets", command: "bun", args: ["run", "build:shared-skills-assets"], deps: ["index"] },
-	{ id: "node-require-shim", command: "bun", args: ["run", "build:node-require-shim"], deps: ["index"] },
+	{ id: "node-require-shim", command: "bun", args: ["run", "build:node-require-shim"], deps: ["index", "v2-index"] },
+	{ id: "v2-personas", command: "bun", args: ["script/stage-v2-personas.ts"], deps: ["index", "v2-index"] },
 	{ id: "declarations", command: "tsc", args: ["--emitDeclarationOnly"], deps: [] },
 	{ id: "cli", command: "bun", args: ["build", "packages/omo-opencode/src/cli/index.ts", "--outdir", "dist/cli", "--target", "bun", "--format", "esm"], deps: [] },
 	{ id: "cli-node", command: "bun", args: ["run", "build:cli-node"], deps: [] },

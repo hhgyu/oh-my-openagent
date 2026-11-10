@@ -16,10 +16,20 @@
     "./binary-downloader": {
       "types": "./src/shared/binary-downloader.ts",
       "import": "./src/shared/binary-downloader.ts"
+    },
+    "./v2": {
+      "types": "./src/v2/index.ts",
+      "import": "./src/v2/index.ts"
     }
   },
   "scripts": {
     "typecheck": "tsgo --noEmit -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0"
+  },
+  "devDependencies": {
+    "effect": "4.1.0"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",
@@ -33,10 +43,12 @@
     "@oh-my-opencode/delegate-core": "workspace:*",
     "@oh-my-opencode/hashline-core": "workspace:*",
     "@oh-my-opencode/mcp-client-core": "workspace:*",
+    "@oh-my-opencode/memory-core": "workspace:*",
     "@oh-my-opencode/model-core": "workspace:*",
     "@oh-my-opencode/omo-codex": "workspace:*",
     "@oh-my-opencode/omo-config-core": "workspace:*",
     "@oh-my-opencode/openclaw-core": "workspace:*",
+    "@oh-my-opencode/orchestration-core": "workspace:*",
     "@oh-my-opencode/prompts-core": "workspace:*",
     "@oh-my-opencode/rules-engine": "workspace:*",
     "@oh-my-opencode/shared-skills": "workspace:*",
@@ -47,10 +59,13 @@
     "@oh-my-opencode/utils": "workspace:*",
     "@opencode-ai/plugin": "1.18.31",
     "@opencode-ai/sdk": "1.18.31",
-    "@opencode/plugin": "2.0.32",
+    "@opencode/plugin": "2.2.6",
+    "@opencode/protocol": "2.2.6",
     "commander": "^15.0.0",
     "jsonc-parser": "^3.3.1",
     "picocolors": "^1.1.1",
-    "zod": "^4.6.5"
+    "typebox": "1.3.34",
+    "zod": "^4.6.5",
+    "@oh-my-opencode/senpi-task": "workspace:*"
   }
 }

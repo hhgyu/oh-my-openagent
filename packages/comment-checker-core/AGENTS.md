@@ -16,6 +16,12 @@ Two responsibilities: (1) parse LLM apply-patch edits into structured `CheckerEd
 | `resolveCommentCheckerBinary(input)` | `runner.ts` | locate binary via `createRequire(@code-yeongyu/comment-checker)` |
 | `runCommentChecker(input, options)` | `runner.ts` | pipe `HookInput` JSON to stdin, read stdout/stderr, return `CheckResult` |
 | `COMMENT_CHECKER_VERSION_MARKER`, `isCachedCommentCheckerCurrent(cacheDir)`, `recordCachedCommentCheckerRelease(cacheDir)` | `cached-release.ts` | version marker beside the binary in the shared cache slot; a missing or different marker means the cached checker is stale and must be re-downloaded (#8850) |
+| `createCommentCheckerSession(options)` | `session.ts` | per-session checker state shared by OmO Native and the OpenCode 2 host: one-shot binary resolve/download, inert-on-failure (#8850), per-turn file dedupe, feedback text blocks; the host passes its post-tool `hookEventName` and log label |
+| `parseToolResultEvent` / `parseToolResultContext` | `tool-result-input.ts` | structural parse of a completed tool call (`path`/`content`/`old_string`/`new_string`/`edits`, `apply_patch` metadata) into `HookInput`s |
+| `resolveInstalledCommentCheckerBinary(options)`, `defaultCommentCheckerCacheDir()` | `installed-binary.ts` | `OMO_COMMENT_CHECKER_BIN` → package API (resolved from the caller's `importMetaUrl`) → PATH → shared cache slot at the pinned release |
+| `downloadCommentCheckerBinary(options)` | `binary-download.ts` | pinned-release download into the shared cache; archive I/O is injected (`CommentCheckerArchiveOps`) |
+| `runCommentCheckerWithNodeSpawn(input)` | `node-spawn.ts` | `runCommentChecker` over `child_process.spawn` for Node/Bun hosts |
+| `COMMENT_CHECKER_FEEDBACK_HEADER`, `commentCheckerFailureNotice()` | `feedback.ts` | feedback header and the user-facing "could not run" notice |
 | types (17) | `types.ts` | `CheckerEdit`, `HookInput`, `CheckResult`, `SpawnFn`/`SpawnProcess`/`SpawnSignal`, `ApplyPatchFileMetadata`, … |
 
 ## DEPENDENCIES & CONSUMERS

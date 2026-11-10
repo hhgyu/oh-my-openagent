@@ -1,6 +1,5 @@
-export const COMMENT_CHECKER_FEEDBACK_HEADER = "comment-checker found issues in"
-export const COMMENT_CHECKER_ENV_KEY = "OMO_COMMENT_CHECKER_BIN"
-export const COMMENT_CHECKER_PACKAGE_NAME = "@code-yeongyu/comment-checker"
-// Must equal the OpenCode edition's CACHE_DIR_NAME (omo-opencode shared/plugin-identity.ts) so one
-// downloaded binary serves both editions; comment-checker.downloader.test.ts pins the equality.
-export const COMMENT_CHECKER_CACHE_DIR_NAME = "oh-my-opencode"
+export { COMMENT_CHECKER_CACHE_DIR_NAME, COMMENT_CHECKER_FEEDBACK_HEADER } from "@oh-my-opencode/comment-checker-core"
+
+export const COMMENT_CHECKER_LOG_LABEL = "omo-senpi comment-checker"
+/** Senpi `tool_result` is the host's post-tool event; the checker payload names it the Claude Code way. */
+export const SENPI_COMMENT_CHECKER_HOOK_EVENT = "PostToolUse"

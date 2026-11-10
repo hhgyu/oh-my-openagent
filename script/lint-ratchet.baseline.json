@@ -314,9 +314,6 @@
   "packages/omo-opencode/src/tools/skill/zauc-mocks-skill-tools/short-name-resolution.test.ts": {
     "typescript/no-non-null-assertion": 1
   },
-  "packages/omo-senpi/src/components/formatter/formatter.ts": {
-    "typescript/no-non-null-assertion": 1
-  },
   "packages/omo-senpi/src/components/init-deep-advisor/component.test.ts": {
     "typescript/no-non-null-assertion": 3
   },

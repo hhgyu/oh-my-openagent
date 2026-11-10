@@ -171,6 +171,8 @@ function runSenpi(senpiBin, sandbox, prompt, script, extraEnv = {}) {
 				OMO_SENPI_QA: "1",
 			},
 			encoding: "utf8",
+			// Without it every senpi launch opens a visible console window on win32 when the driver has none.
+			windowsHide: true,
 			timeout: 60_000,
 		},
 	);

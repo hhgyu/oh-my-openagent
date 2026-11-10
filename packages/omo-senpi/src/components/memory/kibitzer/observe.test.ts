@@ -35,7 +35,9 @@ const FAKE_GITHUB_TOKEN = `ghp_${"FAKE".repeat(6)}0000`
 const FAKE_SK_TOKEN = "sk-test-not-a-real-key-000000"
 
 const roots: string[] = []
+const idleObservers: Array<ReturnType<typeof createKibitzerObservability>> = []
 afterEach(async () => {
+  for (const observe of idleObservers.splice(0)) await withinMs(observe.whenIdle(), "observability cleanup")
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 
@@ -79,6 +81,7 @@ async function fixture(): Promise<Fixture> {
     now: () => clock.now,
     logger: { info: () => {}, warn: (message, details) => { warnings.push({ message, details }) }, error: () => {} },
   })
+  idleObservers.push(observe)
   return {
     root,
     context,

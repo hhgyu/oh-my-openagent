@@ -1,0 +1,159 @@
+import { RecallCorpusCache } from "@oh-my-opencode/memory-core"
+import type { OmoMemorySettings } from "@oh-my-opencode/omo-config-core"
+import type * as Plugin from "@opencode/plugin/promise/plugin"
+import type { Registration } from "@opencode/plugin/promise/registration"
+import { createMemoryBinder, describeError } from "./binding"
+import { consoleMemoryLogger, loadMemorySettings, memoryComponentEnabled, type MemoryEnv, type MemoryLogger } from "./config"
+import { createMemoryProjection } from "./projection"
+import { createRecallCollector, fileRecallStores, type RecallStores } from "./recall"
+import { createRecallDelivery } from "./recall-delivery"
+import { createSessionMetadataStore } from "./session-metadata"
+import { loadKibitzerPersona } from "@oh-my-opencode/memory-core"
+import { createKibitzerComponent, kibitzerCategoryModel, kibitzerHostCapable, registerKibitzerAgent, type KibitzerComponent, type KibitzerSeams } from "./kibitzer"
+import { loadRuntimeConfig } from "../config/runtime"
+import { createMemoryTools, MEMORY_APPLY_PATCH_TOOL_NAME, MEMORY_TOOL_NAME } from "./tools"
+
+export { MEMORY_BINDING_KEY } from "./binding"
+export { MEMORY_PART_MARKER, PROJECTION_PIN_KEY } from "./projection"
+export { RECALL_PART_MARKER } from "./recall-delivery"
+
+export type MemoryHost = Pick<Plugin.Context, "session" | "tool" | "options" | "location"> & Partial<Pick<Plugin.Context, "app" | "agent">>
+
+export interface MemoryComponentOptions {
+  /** Environment for `OMO_MEMORY_HOME` and identity resolution; defaults to `process.env`. */
+  readonly env?: MemoryEnv
+  /** Home directory the `~/.omo` reservation is checked against; defaults to `os.homedir()`. */
+  readonly home?: string
+  readonly now?: () => number
+  readonly loadSettings?: (cwd: string) => OmoMemorySettings
+  readonly logger?: MemoryLogger
+  readonly lockWaitTimeoutMs?: number
+  readonly lockRetryDelayMs?: number
+  readonly recallStores?: RecallStores
+  /**
+   * Kibitzer test seam. Production runs the judge only on a host that can own its child (verified
+   * OpenCode 2.2.6 with the joined Effect session transport); a supplied `createPort` stands in for it.
+   */
+  readonly kibitzer?: KibitzerSeams
+}
+
+/**
+ * OpenCode 2 memory component (plan phases P1 + P2). Senpi -> OpenCode mapping:
+ * - session_start binding entry -> lazy bind on first use from `session.get`, recorded in session metadata;
+ * - before_agent_start systemPrompt block -> one tagged system part per model request (`session.hook("context")`);
+ * - registerTool memory -> `tool.transform` adding `memory` and `memory_apply_patch`;
+ * - recall drain message -> one tagged recall system part, fed by `prompt` and `execute.before` collection;
+ * - resident Kibitzer judge (P3) -> one owned child per bound root session (see `./kibitzer`): candidates
+ *   are judged there and only its accepted nudges reach the recall part.
+ * Nothing calls `session.prompt`; subagent children never bind; Kibitzer input goes through the owned
+ * session backend's gated admission paths.
+ */
+export async function registerMemoryComponent(context: MemoryHost, options: MemoryComponentOptions = {}): Promise<() => Promise<void>> {
+  const loadSettings = options.loadSettings ?? loadMemorySettings
+  if (!memoryComponentEnabled(loadSettings(context.location.directory), context.options)) return async () => {}
+  const logger = options.logger ?? consoleMemoryLogger
+  const now = options.now ?? Date.now
+  const metadata = createSessionMetadataStore(context.session)
+  const binder = createMemoryBinder({
+    session: context.session, metadata, env: options.env ?? process.env, now, loadSettings, logger,
+    ...(options.home === undefined ? {} : { home: options.home }),
+  })
+  const stores = options.recallStores ?? fileRecallStores
+  const projection = createMemoryProjection({ binder, metadata, now, logger })
+  const corpusCache = new RecallCorpusCache({ shared: true })
+  const seams = options.kibitzer
+  // The persona is read BEFORE any agent transform: a throw inside a host transform makes OpenCode
+  // disable the whole plugin. A missing persona disables only the judge (no recall nudges).
+  const persona = (() => {
+    if (seams?.createPort !== undefined || !kibitzerHostCapable(context)) return undefined
+    try { return loadKibitzerPersona() } catch (error) {
+      logger.warn("kibitzer disabled: persona asset unavailable", { error: describeError(error) })
+      return null
+    }
+  })()
+  const kibitzer: KibitzerComponent | undefined = seams?.createPort !== undefined || (kibitzerHostCapable(context) && persona !== null)
+    ? createKibitzerComponent({ host: context, binder, stores, corpusCache, logger, now, ...seams })
+    : undefined
+  const collector = createRecallCollector({ binder, stores, corpusCache, logger, ...(kibitzer === undefined ? {} : { judge: kibitzer }) })
+  const delivery = createRecallDelivery({ binder, stores, collector, logger })
+  // Senpi persists this counter as a session entry; here it is process-local and restarts at 0 on reload.
+  const userTurns = new Map<string, number>()
+  const tools = createMemoryTools({
+    binder, userTurns: sessionID => userTurns.get(sessionID) ?? 0,
+    ...(options.lockWaitTimeoutMs === undefined ? {} : { lockWaitTimeoutMs: options.lockWaitTimeoutMs }),
+    ...(options.lockRetryDelayMs === undefined ? {} : { lockRetryDelayMs: options.lockRetryDelayMs }),
+  })
+
+  let closed = false
+  const registrations: Registration[] = []
+  let disposal: Promise<void> | undefined
+  const cleanup = (): Promise<void> => {
+    disposal ??= (async () => {
+      closed = true
+      const results = await Promise.allSettled(registrations.map(registration => registration.dispose()))
+      await collector.idle()
+      if (kibitzer !== undefined) results.push(...await Promise.allSettled([kibitzer.close()]))
+      await metadata.settled()
+      binder.clear()
+      projection.clear()
+      collector.clear()
+      userTurns.clear()
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      if (failures.length > 0) throw new AggregateError(failures.map(failure => failure.reason), "Memory component cleanup failed")
+    })()
+    return disposal
+  }
+  try {
+    registrations.push(await context.session.hook("prompt", input => {
+      if (closed) return
+      if (kibitzer?.isKibitzerSession(input.sessionID) === true) return
+      userTurns.set(input.sessionID, (userTurns.get(input.sessionID) ?? 0) + 1)
+      kibitzer?.onPrompt(input.sessionID, input.prompt.text)
+      collector.observePrompt(input.sessionID, input.prompt.text)
+    }))
+    registrations.push(await context.tool.hook("execute.before", event => {
+      if (closed) return
+      kibitzer?.onToolBefore(event)
+      if (kibitzer?.isKibitzerSession(event.sessionID) === true || event.tool === MEMORY_TOOL_NAME || event.tool === MEMORY_APPLY_PATCH_TOOL_NAME) return
+      collector.observeToolInput(event.sessionID, event.input)
+    }))
+    if (kibitzer !== undefined) {
+      const judge = kibitzer
+      registrations.push(await context.tool.hook("execute.after", event => {
+        if (closed) return
+        judge.onToolAfter(event.status === "completed"
+          ? { sessionID: event.sessionID, tool: event.tool, id: event.id, status: event.status, result: event.result }
+          : { sessionID: event.sessionID, tool: event.tool, id: event.id, status: event.status, error: event.error })
+      }))
+      if (context.agent !== undefined) {
+        const directory = context.location.directory
+        registrations.push(await registerKibitzerAgent(context.agent, {
+          model: () => kibitzerCategoryModel(loadRuntimeConfig({ cwd: directory }).config, loadSettings(directory).recall.category),
+          warn: message => logger.warn(message),
+          ...(typeof persona === "string" ? { persona: () => persona } : {}),
+        }))
+      }
+    }
+    registrations.push(await context.session.hook("context", async value => {
+      if (closed || kibitzer?.onContext(value) === true) return
+      try {
+        await projection.onContext(value)
+        await delivery.onContext(value)
+      } catch (error) {
+        logger.warn("memory context injection skipped", { sessionID: value.sessionID, error: describeError(error) })
+      }
+    }))
+    registrations.push(await context.session.hook("compaction", value => { projection.markCompacted(value.sessionID) }))
+    const [memoryTool, applyPatchTool] = tools
+    const judgeTools = kibitzer?.tools(memoryTool)
+    registrations.push(await context.tool.transform(editor => {
+      if (judgeTools === undefined) editor.add(memoryTool)
+      else for (const tool of judgeTools) editor.add(tool)
+      editor.add(applyPatchTool)
+    }))
+  } catch (error) {
+    try { await cleanup() } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Memory registration and rollback failed") }
+    throw error
+  }
+  return cleanup
+}

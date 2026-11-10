@@ -34,7 +34,7 @@ export type ResidentHandle = {
   reconcileInputs?(): Promise<void>
   readonly task_id: string
   // "host-session" is a SESSION of the shared daemon: it has no pid, so nothing may signal it.
-  readonly kind: "in-process" | "rpc" | "host-session"
+  readonly kind: "in-process" | "rpc" | "host-session" | "owned-session"
   readonly pid: number | undefined
   // Interrupt an in-flight turn. Safe to call on an already-idle child.
   abort(): Promise<void>
@@ -202,7 +202,14 @@ export type IdleReclaimerScheduler = {
   clearInterval(timer: IdleReclaimerTimer): void
 }
 
+export type OwnedSessionLifecyclePort = {
+  destroy(record: TaskRecord, cause: DestroyCause): Promise<void>
+  suspend(record: TaskRecord, reason: string): Promise<void>
+  reconcile(record: TaskRecord): Promise<import("./types").ReconcileOutcome>
+}
+
 export type LifecycleDeps = {
+  readonly ownedSessions?: OwnedSessionLifecyclePort
   // Adapter's existing mutation channel: parks from manager, daemon loss and reconcile all flow here.
   readonly onStoreMutation?: (listener: () => void) => () => void
   readonly revivePolicy?: RevivePolicyPort

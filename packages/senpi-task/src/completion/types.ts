@@ -66,6 +66,19 @@ export type ParentNotifierMessage = {
 // session shutdown) is reported out-of-band through recordDeliveryFailure.
 export type ParentNotifier = {
   enqueue(message: ParentNotifierMessage): void
+  /** Opt-in queued custody, not ACK. Only accepted() commits canonical notification bookkeeping. */
+  enqueueWithSource?(message: ParentNotifierMessage, sources: readonly CompletionDeliverySource[]): void
+}
+
+/** Instance-issued bookkeeping provenance, never host delivery authority or a serializable ACK. */
+export type CompletionDeliverySource = {
+  readonly taskId: string
+  readonly runEpoch: number
+  readonly parentSessionId: string
+  /** Host calls after durable transport acceptance; repeat retries unfinished bookkeeping only. */
+  readonly accepted: () => void
+  /** Definitively undelivered only. Repeat retries the original failure bookkeeping, never transport. */
+  readonly notDelivered: (error: unknown) => void
 }
 
 export type CompletionNotifierStore = {
@@ -101,6 +114,7 @@ export type SkipReason = "sync-task" | "non-notifying-terminal" | "not-terminal"
 export type DeliveredDecision = "wake" | "deliver_streaming"
 
 export type NotifyResult =
+  | { readonly kind: "pending"; readonly decision: DeliveredDecision }
   | { readonly kind: "skipped"; readonly reason: SkipReason }
   | { readonly kind: "delivered"; readonly decision: DeliveredDecision }
   | { readonly kind: "buffered"; readonly reason: TransitionReason }
@@ -125,6 +139,7 @@ export type RecordDeliveryFailureInput = {
 export type ReconcileFailedNotificationsInput = ReconcileUnnotifiedNotificationsInput
 
 export type FlushResult =
+  | { readonly kind: "pending"; readonly count: number }
   | { readonly kind: "flushed"; readonly count: number }
   | { readonly kind: "dropped"; readonly count: number }
   | { readonly kind: "failed"; readonly count: number }
@@ -139,6 +154,8 @@ export type CompletionNotifier = {
    * epoch and `notification_failed_epoch` is stamped: without that rollback
    * `reconcileUnnotifiedNotifications` skips the record forever and the parent never learns its
    * background task finished.
+   * Available only for the legacy ABSENT source port. An enqueueWithSource notifier rejects
+   * this task-ID-only API: its host must settle the exact issued source receipt instead.
    */
   recordDeliveryFailure(input: RecordDeliveryFailureInput): void
   flushBuffered(input: FlushInput): FlushResult

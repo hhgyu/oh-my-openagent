@@ -63,9 +63,11 @@ describe("/proc fd holder scan fails closed", () => {
   })
 
   test("#given a listed process holding the lock and one holding nothing relevant #then exactly the holder is reported", async () => {
-    const { proc, lock } = await sandbox()
-    await processEntry(proc, SELF, { "0": "/dev/null" })
-    await processEntry(proc, OTHER, { "0": "/dev/null", "7": lock })
+    const { proc, repo, lock } = await sandbox()
+    const unrelated = join(repo, "unrelated")
+    await writeFile(unrelated, "", "utf8")
+    await processEntry(proc, SELF, { "0": unrelated })
+    await processEntry(proc, OTHER, { "0": unrelated, "7": lock })
     expect(await scanProcFdHolders(lock, view(proc))).toEqual({ kind: "holders", pids: [OTHER] })
   })
 })

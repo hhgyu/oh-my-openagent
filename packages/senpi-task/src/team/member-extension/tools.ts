@@ -40,6 +40,11 @@ export type MemberTaskSendDeps = {
   readonly newMessageId?: () => string
 }
 
+/** The original member closure uses no ExtensionContext or UI capability. */
+export type MemberTaskSendTool = Omit<ToolDefinition<typeof MemberTaskSendParams, MemberTaskSendDetails>, "execute"> & {
+  readonly execute: (toolCallId: string, params: MemberTaskSendInput) => Promise<AgentToolResult<MemberTaskSendDetails>>
+}
+
 export class UnknownMemberRecipientError extends Error {
   readonly recipient: string
 
@@ -86,7 +91,7 @@ export async function runMemberTaskSend(
 
 export function createMemberTaskSendTool(
   deps: MemberTaskSendDeps,
-): ToolDefinition<typeof MemberTaskSendParams, MemberTaskSendDetails> {
+): MemberTaskSendTool {
   // Returned as a plain literal: senpi's defineTool is an identity helper for type inference
   // (pinned by the senpi API tripwire), so wrapping here would only statically bind this module
   // to the engine barrel.

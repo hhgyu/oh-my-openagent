@@ -7,6 +7,7 @@ import { releaseLock } from "./lock-owner"
 import { isLockOwnerProvenDead } from "./stale-owner"
 import { createLockRecord, parseLockRecord, type LockRecord } from "./lock-record"
 import { getPidLiveness } from "./process-identity"
+import { provenDeadTakeoverFor } from "./proven-dead-takeovers"
 
 const LOCK_FILE_SUFFIX = ".lock"
 
@@ -48,8 +49,10 @@ async function reclaimIfDeadOwner(lockPath: string, options: DeadOwnerSweepOptio
     if (error instanceof LockContentionError) return false
     throw error
   }
-  await releaseLock(lockPath, sweeper)
-  options.onReclaimed?.(lockPath, previousOwner)
+  const takeoverOwner = provenDeadTakeoverFor(lockPath, sweeper.nonce)
+  const released = await releaseLock(lockPath, sweeper)
+  if (takeoverOwner === undefined || !released) return false
+  options.onReclaimed?.(lockPath, takeoverOwner)
   return true
 }
 

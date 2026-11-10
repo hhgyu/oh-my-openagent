@@ -28,12 +28,14 @@ function toPosix(entry: string): string {
 }
 
 function productionSources(): readonly string[] {
-  return readdirSync(import.meta.dir, { recursive: true, encoding: "utf8" })
+  const adapterSources = readdirSync(import.meta.dir, { recursive: true, encoding: "utf8" })
     .map(toPosix)
     .filter((entry: string) => entry.endsWith(".ts"))
     .filter((entry: string) => !entry.endsWith(".test.ts") && !entry.endsWith(".test-support.ts"))
     .filter((entry: string) => !entry.split("/").includes("__fixtures__"))
     .sort()
+  // Refactors must keep the same production spawn sites inside this safety gate.
+  return [...adapterSources, "../../lsp-core/src/mutation/formatter.ts"]
 }
 
 function importedEntryPoints(source: string): readonly string[] {
@@ -119,7 +121,7 @@ describe("omo-senpi win32 console suppression", () => {
           "components/memory/worker/memory-run-supervisor.ts",
           "components/memory/worker/supervisor-process-identity.ts",
           "components/thread/addressing.ts",
-          "components/formatter/formatter.ts",
+          "../../lsp-core/src/mutation/formatter.ts",
         ]) {
           expect(audited).toContain(required)
         }

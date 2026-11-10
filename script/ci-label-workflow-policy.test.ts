@@ -29,7 +29,7 @@ describe("#given required CI and an optional full-matrix label run", () => {
     // then
     expect(Object.keys(triggers)).toEqual(["pull_request"])
     expect(pullRequest["types"]).toEqual(["labeled"])
-    expect(pullRequest["branches"]).toEqual(["dev", "master"])
+    expect(pullRequest["branches"]).toEqual(["dev", "master", "v2/dev"])
   })
 
   test("#then the called workflow cannot share normal CI's workflow identity", () => {

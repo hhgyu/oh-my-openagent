@@ -114,6 +114,7 @@ describe("reflection worktree integration", () => {
       "commit", "--allow-empty", "-m", "exact", "-m", "Omo-Run: legacy",
     ])).code).toBe(0)
     const integrationSha = (await git(parentDir, ["rev-parse", "HEAD"])).stdout.trim()
+    await writeFile(join(parentDir, `${worktree.baseSha}..HEAD`), "untracked revision/path collision\n")
     await expect(probeLegacyAutoRunReceipt(worktree, "legacy")).resolves.toEqual({
       status: "integrated",
       evidence: "receipt",

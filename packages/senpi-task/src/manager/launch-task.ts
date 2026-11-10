@@ -1,9 +1,10 @@
 import type { ChildCreationPort, GuardedChild, ResumedChildTurn, RunPauseOwner } from "../pause/ports"
-import type { EffectiveModelRecord, ResolvedModelRecord, TaskRecord } from "../state"
+import type { EffectiveModelRecord, ResolvedModelRecord, TaskRecord, TaskTransitionAudit } from "../state"
+import { transitionTaskRecord } from "../state"
 import type { TaskRecordStore } from "../store"
 import type { ManagedChildHandle } from "./child-handle"
 import type { describeStartFailure } from "./start-failure"
-import { isAdmissionHeld, type HeldStart } from "./start-admission"
+import { isAdmissionHeld, isHostStartAdmissionRefused, type HeldStart } from "./start-admission"
 import type { ManagedRunner, ManagedStartSpec, StartResult } from "./types"
 
 export type LaunchContext = {
@@ -33,6 +34,8 @@ export type LaunchPorts = {
   isShuttingDown(): boolean
   release(context: LaunchContext): void
   settleWaiters(taskId: string): void
+  /** Optional host-only local refusal if actual terminal bookkeeping could not persist. */
+  hostRefusalUnsettled?(context: LaunchContext, error: unknown): void
   dropPending(taskId: string): void
   advance(context: LaunchContext, error: unknown): LaunchAdvance | undefined
   failure(record: TaskRecord, error: unknown): ReturnType<typeof describeStartFailure>
@@ -51,6 +54,7 @@ export async function launchTask(initial: LaunchContext, ports: LaunchPorts): Pr
     initial.managedSpec.admission?.assertOpen()
     return await launchAdmitted(initial, ports)
   } catch (error) {
+    if (isHostStartAdmissionRefused(error)) return failRefusedHostAdmission(initial, ports, error)
     if (!isAdmissionHeld(error)) throw error
     const held = initial.managedSpec.admission?.hold() ?? error.result
     ports.release(initial)
@@ -60,6 +64,45 @@ export async function launchTask(initial: LaunchContext, ports: LaunchPorts): Pr
   }
 }
 
+/** A known pre-runner refusal uses Native's existing transition/failure writers. Audit
+ * append cannot run inside the record mutation or block the later terminal settlement. */
+function failRefusedHostAdmission(initial: LaunchContext, ports: LaunchPorts, error: unknown): LaunchOutcome {
+  let started = false
+  let audit: TaskTransitionAudit | undefined
+  try {
+    ports.store.mutate(initial.record.task_id, fresh => {
+      if (fresh.status !== "pending" || fresh.host_pid !== initial.record.host_pid
+        || fresh.notification.run_epoch !== initial.record.notification.run_epoch
+        || fresh.parent_session_id !== initial.record.parent_session_id || fresh.residency_claim !== initial.record.residency_claim) return fresh
+      const result = transitionTaskRecord(fresh, { type: "start", timestamp: new Date(ports.now()).toISOString() })
+      started = result.applied
+      audit = result.audit
+      return result.record
+    })
+  } catch (failure) {
+    ports.release(initial)
+    try { ports.settleWaiters(initial.record.task_id) }
+    finally { ports.hostRefusalUnsettled?.(initial, failure) }
+    throw failure
+  }
+  if (!started) {
+    ports.release(initial); ports.settleWaiters(initial.record.task_id)
+    return { ok: false, error: "host admission retired after task ownership changed" }
+  }
+  const errors: unknown[] = []
+  try { if (audit) ports.store.appendEvent(initial.record.task_id, { type: audit.type, payload: audit }) }
+  catch (failure) { errors.push(failure) }
+  let outcome: LaunchOutcome | undefined
+  try { outcome = fail(ports, initial, error) }
+  catch (failure) { errors.push(failure) }
+  if (errors.length) {
+    const failure = errors.length === 1 ? errors[0] : new AggregateError(errors, "Host refusal bookkeeping incomplete")
+    ports.hostRefusalUnsettled?.(initial, failure)
+    throw failure
+  }
+  if (outcome === undefined) throw new Error("Host refusal bookkeeping produced no launch outcome")
+  return outcome
+}
 async function launchAdmitted(initial: LaunchContext, ports: LaunchPorts): Promise<LaunchOutcome> {
   if (ports.isShuttingDown()) {
     ports.release(initial)
@@ -119,6 +162,12 @@ async function launchAdmitted(initial: LaunchContext, ports: LaunchPorts): Promi
       }
       turn = activation
     } catch (error) {
+      if (isAdmissionHeld(error)) {
+        await ports.discard(context, handle)
+        ports.forget(record.task_id)
+        ports.release(context)
+        return { ok: true, held: error.result }
+      }
       const failure = fail(ports, context, error)
       await ports.discard(context, handle)
       ports.forget(record.task_id)
@@ -136,11 +185,12 @@ async function launchAdmitted(initial: LaunchContext, ports: LaunchPorts): Promi
 
 function fail(ports: LaunchPorts, context: LaunchContext, error: unknown): LaunchOutcome {
   ports.release(context)
-  const failure = ports.failure(context.record, error)
-  ports.settleWaiters(context.record.task_id)
-  return {
-    ok: false, error: failure.errorMessage,
-    ...(failure.failureKind === undefined ? {} : { failure_kind: failure.failureKind }),
-    ...(failure.failureReason === undefined ? {} : { failure_reason: failure.failureReason }),
-  }
+  try {
+    const failure = ports.failure(context.record, error)
+    return {
+      ok: false, error: failure.errorMessage,
+      ...(failure.failureKind === undefined ? {} : { failure_kind: failure.failureKind }),
+      ...(failure.failureReason === undefined ? {} : { failure_reason: failure.failureReason }),
+    }
+  } finally { ports.settleWaiters(context.record.task_id) }
 }

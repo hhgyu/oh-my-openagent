@@ -9,7 +9,8 @@ import type { TaskRecord } from "../../state"
 import { hostLivenessText } from "../../state/host-liveness"
 import { isolationLine } from "../../isolation/details"
 import { defaultResolveCallerSessionId, toolResult } from "../control"
-import { renderTaskOutputCall, renderTaskOutputResult, taskOutputModelText } from "./renderers"
+import { renderTaskOutputCall, renderTaskOutputResult } from "./renderers"
+import { taskOutputModelText } from "./model-text"
 import { renderTranscript } from "./render"
 import { buildTaskSnapshot } from "./snapshot"
 import { defaultTranscriptReader } from "./transcript"
@@ -203,6 +204,13 @@ function digestField(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex")
 }
 
+export function forgetTaskOutputSessionReads(statusReads: Map<string, string>, sessionId: string): void {
+  for (const key of statusReads.keys()) {
+    const parsed: unknown = JSON.parse(key)
+    if (Array.isArray(parsed) && parsed[0] === sessionId) statusReads.delete(key)
+  }
+}
+
 export function createTaskOutputTool(deps: TaskOutputDeps): TaskOutputTool {
   const resolveCaller = deps.resolveCallerSessionId ?? defaultResolveCallerSessionId
   const statusReads = new Map<string, string>()
@@ -215,11 +223,6 @@ export function createTaskOutputTool(deps: TaskOutputDeps): TaskOutputTool {
       runTaskOutput(deps, params, resolveCaller(ctx), statusReads),
     renderCall: (args, theme) => renderTaskOutputCall(args, theme),
     renderResult: (result, options, theme) => renderTaskOutputResult(result, options, theme),
-    forgetSession: (sessionId: string) => {
-      for (const key of statusReads.keys()) {
-        const parsed: unknown = JSON.parse(key)
-        if (Array.isArray(parsed) && parsed[0] === sessionId) statusReads.delete(key)
-      }
-    },
+    forgetSession: (sessionId: string) => forgetTaskOutputSessionReads(statusReads, sessionId),
   }
 }

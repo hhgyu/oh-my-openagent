@@ -5,7 +5,7 @@ name: Engine trust helper
 # decoder and selectEngineTrust. Synthetic certificates only; no trust store is modified.
 on:
   pull_request:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - "crates/omo-engine-trust-helper/**"
       - "packages/omo-native/engine-trust-policy.ts"
@@ -17,7 +17,7 @@ on:
       - "rust-toolchain.toml"
       - ".github/workflows/engine-trust-helper.yml"
   push:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - "crates/omo-engine-trust-helper/**"
       - "packages/omo-native/engine-trust-policy.ts"

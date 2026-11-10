@@ -30,3 +30,12 @@ export {
   HYPERPLAN_MODE_PROMPT,
   TEAM_MODE_PROMPT,
 } from "./mode-prompts"
+export type {
+  ArmingSnapshot,
+  UltraworkClassification,
+  UltraworkClassificationInput,
+  UltraworkInputSource,
+  UltraworkInvocationStage,
+  UltraworkRoute,
+  UltraworkSuppressionReason,
+} from "./ultrawork-keyword"

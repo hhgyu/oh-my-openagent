@@ -114,7 +114,14 @@ export async function recoverStaleOwner(
     // a third contender's publish; in that case the critical section is no longer ours.
     const fence = await readOwner(recoveryPath)
     if (fence === null || fence.record?.nonce !== recoveryRecord.nonce) return false
-    await unlink(lockPath)
+    try {
+      await unlink(lockPath)
+    } catch (error) {
+      // Its owner may release after our final read. Retry exclusive acquisition, but do not
+      // attribute a dead-owner takeover to a primary this contender did not remove.
+      if (errorCode(error) === "ENOENT") return true
+      throw error
+    }
     // Record the reclaimed previous owner so consumers that gate on dead-owner evidence (the
     // stranded-git-lock sweep) can prove reclamation after the lock file itself is republished;
     // the proof is bound to the contender's acquisition nonce (omo #10199 r5 MEDIUM 3).

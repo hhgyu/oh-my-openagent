@@ -6,6 +6,8 @@ import { dirname, join } from "node:path"
 import { GitMemoryRepo, createNodeGitExec } from "../git"
 import { disableFixtureAutoMaintenance } from "../git/test-repo-config.test-support"
 import { validateCompletion } from "./completion-validation"
+import { commitCount } from "./completion-repair"
+import { findSecretLikeFailures } from "./completion-secret-scan"
 import { createReflectionWorktree, type ReflectionWorktree } from "./worktree"
 import { removeTree } from "../../../../test-support/remove-tree"
 
@@ -69,6 +71,25 @@ async function expectScrubbed(result: Awaited<ReturnType<typeof validateCompleti
 }
 
 describe("reflection completion secret screening", () => {
+  it("#given an untracked file named exactly base..tip #when scanning and counting commits #then both read the revision range", async () => {
+    const { worktree } = await fixture()
+    await writeAt(worktree.dir, "reference/clean.md", "---\ndescription: Clean\n---\n\nclean body\n")
+    const tip = await rawCommit(worktree.dir, ["reference/clean.md"], "clean history")
+    await writeFile(join(worktree.dir, `${worktree.baseSha}..${tip}`), "untracked revision/path collision\n")
+
+    // Both real Git operations must settle before the existing fixture teardown removes the repository.
+    const results = await Promise.allSettled([
+      findSecretLikeFailures((argv, stdin) => worktree.exec.run(argv, {
+        cwd: worktree.dir, timeoutMs: 30_000, ...(stdin === undefined ? {} : { stdin }),
+      }), worktree.baseSha, tip),
+      commitCount(worktree.exec, worktree.dir, worktree.baseSha, tip),
+    ])
+    expect(results).toEqual([
+      { status: "fulfilled", value: [] },
+      { status: "fulfilled", value: 1 },
+    ])
+  })
+
   it("#given a submodule whose path is secret-like #when validated #then it fails without echoing the path", async () => {
     // given: a gitlink recorded straight into the index, the way a maintenance child could add one
     const { worktree } = await fixture()

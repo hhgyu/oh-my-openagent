@@ -12,7 +12,7 @@ import { childIdentityOf, hasChildIdentity, isTerminalRecord, nowIso, recordSpaw
  * process child was spawned for this attempt alone and is ended.
  */
 async function letGoOfRejected(handle: ManagedChildHandle): Promise<void> {
-  if (handle.kind === "host-session") await releaseSupersededHandle(handle)
+  if ((handle.kind === "host-session" || handle.kind === "owned-session")) await releaseSupersededHandle(handle)
   else await discardManagedHandle(handle)
 }
 
@@ -37,6 +37,7 @@ export async function reattachManagedTask(input: {
   // answered) and idle: the new run is stamped "resumed, waiting for input" (senpi#3266).
   readonly awaitingInput?: { readonly reason: AwaitingInputReason }
 }): Promise<ReattachResult> {
+  input.handle.assertOwned?.()
   let fresh = input.store.load(input.record.task_id)
   if (fresh?.host_pid !== input.hostPid || fresh.residency_state !== "resident" || fresh.killed === true) {
     await letGoOfRejected(input.handle)
@@ -94,7 +95,7 @@ export async function reattachManagedTask(input: {
     const timestamp = nowIso(input.now)
     const sessionId = input.handle.sessionId
     // A revived daemon child is identified by its session, exactly as a fresh spawn stamps it.
-    const withRunner = recordSpawnedRunner(rest, input.handle.kind, input.handle.hostSession) ?? rest
+    const withRunner = recordSpawnedRunner(rest, input.handle.kind, input.handle.hostSession, input.handle.ownedSession === undefined ? undefined : { ...input.handle.ownedSession, runEpoch: epoch }) ?? rest
     const reattached: TaskRecord = {
       ...withRunner,
       status: "running",
@@ -106,6 +107,7 @@ export async function reattachManagedTask(input: {
       ...(input.awaitingInput === undefined ? {} : { awaiting_input: { reason: input.awaitingInput.reason, since: timestamp } }),
     }
     input.store.replace(reattached)
+    if (input.handle.bindReattachedRun) await input.handle.bindReattachedRun(fresh, reattached)
     input.armOutcome(reattached, input.handle, epoch)
     return { ok: true }
   } catch (error) {

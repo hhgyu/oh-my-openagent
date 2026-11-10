@@ -35,6 +35,7 @@ export function buildTaskSnapshot(record: TaskRecord, stateDir: string, now: num
   const awaitingInput = awaitingInputDetails(record)
   return {
     task_id: record.task_id,
+    ...(record.observation_uncertain === undefined ? {} : { observation_uncertain: record.observation_uncertain }),
     status: record.status,
     ...(record.host_liveness === undefined ? {} : { host_liveness: record.host_liveness }),
     residency_state: record.residency_state,

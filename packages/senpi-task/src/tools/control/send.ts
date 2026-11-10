@@ -31,6 +31,8 @@ const DESCRIPTION = [
   "Team messages always steer into the recipient's running turn.",
   "One-shot agents (plan-reviewer) always refuse task_send in every state; spawn a new plan-reviewer instead.",
 ].join(" ")
+/** The SAME tool description, for host adapters that publish this operation under their own tool API. */
+export const TASK_SEND_TOOL_DESCRIPTION = DESCRIPTION
 
 const MEMBER_SCOPED_DESCRIPTION = [
   "Send a durable message to another team member or the team lead.",
@@ -54,6 +56,9 @@ export type TaskSendDeps = {
 export type TaskSendRunOptions = {
   readonly signal?: AbortSignal
   readonly deliverLateOutcome?: LateSendOutcome
+  // Host lifetime ownership, not delivery/ACK evidence. Retain synchronously without throwing.
+  // Opting in also joins a Promise returned by a late callback; absence keeps the Native default.
+  readonly retainWork?: (work: Promise<unknown>, phase: "sending" | "late") => void
 }
 
 // A steer to a live child is acknowledged well inside this window; a revive that has to wait on a busy
@@ -72,21 +77,28 @@ export async function runTaskSend(
     return toolResult(`Not sent to ${params.to}: the turn was aborted before the message went out.`, { kind: "aborted", to: params.to })
   }
   const deliver = options.deliverLateOutcome
+  const retainWork = options.retainWork
   const sending = sendNow(manager, params, callerSessionId, teamRouting)
+  retainWork?.(sending, "sending")
   const reported = await settledWithin(sending, deliver === undefined ? Number.POSITIVE_INFINITY : SEND_REPORT_WINDOW_MS, options.signal)
   if (reported.settled) return reported.value
   const cause = reported.cause === "aborted" ? "aborted" : "host_slow"
-  sending.then(
+  const late = sending.then(
     (result) => {
-      if (deliver !== undefined) deliver(result, { cause, callerSessionId })
+      if (deliver !== undefined) {
+        const completion = deliver(result, { cause, callerSessionId })
+        if (retainWork !== undefined) return completion
+      }
       else log("senpi-task task_send outcome after the caller stopped waiting", { to: params.to, details: result.details })
     },
     (error: unknown) => {
       const reason = error instanceof Error ? error.message : String(error)
       log("senpi-task task_send failed after the caller stopped waiting", { to: params.to, reason })
-      deliver?.(toolErrorResult(`task_send to ${params.to} failed: ${reason}`, { kind: "send_failed", to: params.to, reason }), { cause, callerSessionId })
+      const completion = deliver?.(toolErrorResult(`task_send to ${params.to} failed: ${reason}`, { kind: "send_failed", to: params.to, reason }), { cause, callerSessionId })
+      if (retainWork !== undefined) return completion
     },
   )
+  retainWork?.(late, "late")
   const lead = cause === "aborted" ? "The turn was aborted while the message was being delivered" : "The task host is slow to answer"
   const follow = deliver === undefined ? "check task_output for the result" : "the outcome arrives as a notification"
   return toolResult(`${lead}; delivery to ${params.to} continues in the background and ${follow}. Do not resend it.`, {

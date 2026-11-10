@@ -1,0 +1,133 @@
+import { execFileSync } from "node:child_process"
+import { afterEach, describe, expect, test } from "bun:test"
+import { existsSync, readFileSync } from "node:fs"
+import { join } from "node:path"
+import { Error as ToolError } from "@opencode/plugin/promise/tool"
+import { MEMORY_BINDING_KEY, MEMORY_PART_MARKER, PROJECTION_PIN_KEY, registerMemoryComponent } from "./index"
+import { createMemoryFixture, partsWith } from "./test-support"
+
+const fixtures: ReturnType<typeof createMemoryFixture>[] = []
+function fixture(settings: Record<string, unknown> = {}) {
+  const created = createMemoryFixture(settings)
+  fixtures.push(created)
+  return created
+}
+afterEach(() => { for (const created of fixtures.splice(0)) created.cleanup() })
+
+const create = (file: string, description: string, body: string) =>
+  ({ command: "create", reason: `add ${file}`, file_path: file, description, file_text: body })
+
+describe("registerMemoryComponent", () => {
+  test("#given memory.enabled false or the omo-memory-enabled option false #then nothing is registered", async () => {
+    // given
+    const disabledByConfig = fixture({ enabled: false })
+    const disabledByOption = fixture()
+    // when
+    const first = await registerMemoryComponent(disabledByConfig.host, disabledByConfig.options())
+    const second = await registerMemoryComponent({ ...disabledByOption.host, options: { "omo-memory-enabled": false } }, disabledByOption.options())
+    // then
+    expect([disabledByConfig.hooks.size, disabledByConfig.tools.size, disabledByOption.hooks.size, disabledByOption.tools.size]).toEqual([0, 0, 0, 0])
+    await first(); await second()
+  })
+
+  test("#given a root session without memory storage #when a model request is built #then nothing is projected and no storage is created", async () => {
+    // given
+    const f = fixture()
+    f.addSession("root")
+    const cleanup = await registerMemoryComponent(f.host, f.options())
+    // when
+    await f.prompt("root", "remember my coffee order")
+    const system = await f.context("root")
+    // then
+    expect(system).toEqual([])
+    expect(existsSync(f.env.OMO_MEMORY_HOME ?? "")).toBe(false)
+    await cleanup()
+  })
+
+  test("#given a subagent child session #when it calls the memory tool #then the call is refused and no storage is created", async () => {
+    // given
+    const f = fixture()
+    f.addSession("child", { parentID: "root" })
+    const cleanup = await registerMemoryComponent(f.host, f.options())
+    // when
+    const refused = f.runTool("memory", "child", create("system/notes.md", "Working notes for this project", "zebra"))
+    // then
+    await expect(refused).rejects.toBeInstanceOf(ToolError)
+    expect(existsSync(f.env.OMO_MEMORY_HOME ?? "")).toBe(false)
+    expect(await f.context("child")).toEqual([])
+    await cleanup()
+  })
+
+  test("#given two user prompts in a root session #when it writes memory #then the commit carries that session and turn", async () => {
+    // given
+    const f = fixture()
+    f.addSession("root")
+    const cleanup = await registerMemoryComponent(f.host, f.options())
+    await f.prompt("root", "first request")
+    await f.prompt("root", "second request")
+    // when
+    await f.runTool("memory", "root", create("system/notes.md", "Working notes for this project", "turn trailer"))
+    // then
+    const metadata = f.sessions.get("root")?.metadata ?? {}
+    const repo = join(f.env.OMO_MEMORY_HOME ?? "", "agents", String((metadata[MEMORY_BINDING_KEY] as { identity: string }).identity), "repo")
+    const message = execFileSync("git", ["-C", repo, "log", "-1", "--format=%B"], { encoding: "utf8" })
+    expect(message).toContain("Omo-Session: root")
+    expect(message).toContain("Omo-Turn: 2")
+    await cleanup()
+  })
+
+  test("#given a root session #when it writes memory #then the seeded repo is created and one pinned block is projected per request", async () => {
+    // given
+    const f = fixture()
+    f.addSession("root", { metadata: { "user.key": "kept" } })
+    const cleanup = await registerMemoryComponent(f.host, f.options())
+    // when
+    const result = await f.runTool("memory", "root", create("system/notes.md", "Working notes for this project", "token zebra-4711"))
+    const first = await f.context("root")
+    const again = await f.context("root", first)
+    // then
+    expect(typeof result.metadata?.commit).toBe("string")
+    const metadata = f.sessions.get("root")?.metadata ?? {}
+    const repo = join(f.env.OMO_MEMORY_HOME ?? "", "agents", String((metadata[MEMORY_BINDING_KEY] as { identity: string }).identity), "repo")
+    expect(existsSync(join(repo, "system", "persona.md"))).toBe(true)
+    expect(readFileSync(join(repo, "system", "notes.md"), "utf8")).toContain("zebra-4711")
+    expect(partsWith(again, MEMORY_PART_MARKER)).toHaveLength(1)
+    expect(partsWith(first, MEMORY_PART_MARKER)[0]?.text).toContain("zebra-4711")
+    expect(metadata["user.key"]).toBe("kept")
+    expect(metadata[PROJECTION_PIN_KEY]).toMatchObject({ version: 1, sessionId: "root" })
+    await cleanup()
+  })
+
+  test("#given a pinned projection #when memory changes #then the block keeps the pin until a compaction repins it", async () => {
+    // given
+    const f = fixture()
+    f.addSession("root")
+    const cleanup = await registerMemoryComponent(f.host, f.options())
+    await f.runTool("memory", "root", create("system/notes.md", "Working notes for this project", "token alpha-1"))
+    const pinned = partsWith(await f.context("root"), MEMORY_PART_MARKER)[0]?.text
+    // when
+    await f.runTool("memory_apply_patch", "root", {
+      reason: "add beta",
+      input: "*** Begin Patch\n*** Add File: system/later.md\n+---\n+description: Notes added after the pin\n+---\n+token beta-2\n*** End Patch",
+    })
+    const stillPinned = partsWith(await f.context("root"), MEMORY_PART_MARKER)[0]?.text
+    await f.compaction("root")
+    const repinned = partsWith(await f.context("root"), MEMORY_PART_MARKER)[0]?.text
+    // then
+    expect(stillPinned).toBe(pinned)
+    expect(pinned).not.toContain("beta-2")
+    expect(repinned).toContain("beta-2")
+    await cleanup()
+  })
+
+  test("#given cleanup ran #then every hook and the tool transform are disposed", async () => {
+    // given
+    const f = fixture()
+    const cleanup = await registerMemoryComponent(f.host, f.options())
+    // when
+    await cleanup()
+    await cleanup()
+    // then
+    expect([f.hooks.size, f.tools.size, f.disposals()]).toEqual([0, 0, 5])
+  })
+})

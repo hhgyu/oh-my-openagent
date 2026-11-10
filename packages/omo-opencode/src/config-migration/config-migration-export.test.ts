@@ -176,6 +176,10 @@ describe("config-migration public subpath", () => {
         import: "./src/cli/service-auth/index.ts",
         types: "./src/cli/service-auth/index.ts",
       },
+      "./v2": {
+        import: "./src/v2/index.ts",
+        types: "./src/v2/index.ts",
+      },
     })
   })
 

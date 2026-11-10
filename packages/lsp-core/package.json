@@ -32,6 +32,10 @@
     "./lsp/*": {
       "types": "./src/lsp/*.ts",
       "import": "./src/lsp/*.ts"
+    },
+    "./mutation/*": {
+      "types": "./src/mutation/*.ts",
+      "import": "./src/mutation/*.ts"
     }
   },
   "types": "./src/index.ts",
@@ -40,6 +44,8 @@
     "test": "bun test src/*.test.ts src/**/*.test.ts"
   },
   "dependencies": {
-    "@oh-my-opencode/mcp-stdio-core": "workspace:*"
+    "@oh-my-opencode/mcp-stdio-core": "workspace:*",
+    "@oh-my-opencode/comment-checker-core": "workspace:*",
+    "@oh-my-opencode/utils": "workspace:*"
   }
 }

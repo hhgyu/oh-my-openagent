@@ -1,4 +1,5 @@
-import { existsSync } from "@oh-my-opencode/memory-core/fs"
+import { existsSync, mkdir } from "@oh-my-opencode/memory-core/fs"
+import { join } from "node:path"
 
 import {
   GitMemoryRepo,
@@ -10,6 +11,7 @@ import {
 } from "@oh-my-opencode/memory-core"
 
 import type { MemoryIdentityContext } from "./context"
+import { readRunJson, writeRunJsonAtomic } from "./worker/run-artifacts"
 
 /** Logger surface the scheduler needs. */
 export interface MemoryMaintenanceLogger {
@@ -42,12 +44,31 @@ export interface MemoryMaintenance {
   settled(): Promise<void>
 }
 
-const STAMP_KEY = "omo.maintenanceAt"
+const LEGACY_STAMP_KEY = "omo.maintenanceAt"
+const STAMP_FILENAME = "maintenance.json"
 const DEFAULT_DELAY_MS = 30_000
 const DEFAULT_INTERVAL_MS = 12 * 60 * 60 * 1000
 // git's own gc.auto default is 6,700; packing earlier keeps history walks fast on slower disks.
 const DEFAULT_MIN_LOOSE_OBJECTS = 2_000
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000
+
+async function readRuntimeAttemptedAt(path: string): Promise<number> {
+  let value: unknown
+  try {
+    value = await readRunJson<unknown>(path)
+  } catch (error) {
+    if (error instanceof SyntaxError
+      || (error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+      return Number.NaN
+    }
+    throw error
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return Number.NaN
+  const stamp = value as { version?: unknown; attemptedAt?: unknown }
+  return stamp.version === 1 && typeof stamp.attemptedAt === "number" && Number.isFinite(stamp.attemptedAt)
+    ? stamp.attemptedAt
+    : Number.NaN
+}
 
 /**
  * Keeps the memory repo packed off the hot path (#9667). Commits set `gc.auto=0` so no commit waits on
@@ -56,8 +77,8 @@ const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000
  * - One runner per identity across every session and process: the pass holds the identity's
  *   `memory-maintenance` lock and a session that finds it held skips (it never waits). This lock, not
  *   git, is what keeps two passes apart.
- * - At most once per interval: the stamp lives in the repo's own config and is read and written while
- *   holding that lock, so many sessions starting together still produce one pass.
+ * - At most once per interval: the attempt stamp lives in identity runtime storage under that lock.
+ *   Legacy Git stamps are read only: writing Git config would invalidate active reflection snapshots.
  * - Safe with concurrent commits: `GitMemoryRepo.maintain()` only packs and then deletes loose copies of
  *   objects a pack already holds (`prune-packed`); it never prunes unreachable objects, so an object a
  *   writer has just created is never removed.
@@ -104,9 +125,13 @@ export function createMemoryMaintenance(options: MemoryMaintenanceOptions = {}):
       await withLock(memoryMaintenanceLockPath(context.identityPaths.locks), record, async () => {
         signal.throwIfAborted()
         const repo = createRepo(context)
-        const last = Number(await repo.configGet(STAMP_KEY) ?? Number.NaN)
+        const stampPath = join(context.identityPaths.runtime, STAMP_FILENAME)
+        const runtimeAt = await readRuntimeAttemptedAt(stampPath)
+        const legacyAt = Number(await repo.configGet(LEGACY_STAMP_KEY) ?? Number.NaN)
+        const last = Math.max(...[runtimeAt, legacyAt].filter(Number.isFinite))
         if (Number.isFinite(last) && now() - last < intervalMs) return
-        await repo.configSet(STAMP_KEY, String(now()))
+        await mkdir(context.identityPaths.runtime, { recursive: true, mode: 0o700 })
+        await writeRunJsonAtomic(stampPath, { version: 1, attemptedAt: now() })
         const result = await repo.maintain({ minLooseObjects, timeoutMs, signal })
         if (result.status === "packed") {
           options.logger?.info("omo-senpi memory repo packed", {

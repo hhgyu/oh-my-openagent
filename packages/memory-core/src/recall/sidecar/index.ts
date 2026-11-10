@@ -1,0 +1,12 @@
+// Recall sidecar barrel exports only.
+export * from "./wake-policy"
+export * from "./wake-slot"
+export * from "./sidecar-prompt-blocks"
+export * from "./sidecar-prompt-reseed"
+export * from "./sidecar-prompt"
+export * from "./events-text"
+export * from "./sensitive-output"
+export * from "./sensitive-output-lexer"
+export * from "./sensitive-output-shapes"
+export * from "./observe-paths"
+export * from "./observe-prune"

@@ -2,13 +2,13 @@ name: get.omo.dev CI
 
 on:
   push:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - "packages/get-worker/**"
       - "script/installer/**"
       - ".github/workflows/get-worker-ci.yml"
   pull_request:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - "packages/get-worker/**"
       - "script/installer/**"

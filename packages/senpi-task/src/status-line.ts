@@ -1,4 +1,5 @@
-import { excerptRendererText, optionalRendererText } from "./renderer-text"
+import { optionalRendererText } from "./renderer-text"
+import { excerptModelText as excerptRendererText } from "./model-text"
 import type { EffectiveModelRecord, ResolvedModelRecord, TaskRunStats } from "./state"
 
 // One status row must survive next to a spinner, elapsed clock and the terminal edge, so the human

@@ -41,3 +41,18 @@ export type {
   SpawnProcess,
   SpawnSignal,
 } from "./types"
+export type { CommentCheckerLogger } from "./logger"
+export { COMMENT_CHECKER_FEEDBACK_HEADER, commentCheckerFailureNotice } from "./feedback"
+export {
+  COMMENT_CHECKER_CACHE_DIR_NAME,
+  defaultCommentCheckerCacheDir,
+  resolveInstalledCommentCheckerBinary,
+} from "./installed-binary"
+export type { InstalledCommentCheckerBinaryOptions } from "./installed-binary"
+export { downloadCommentCheckerBinary } from "./binary-download"
+export type { CommentCheckerArchiveOps, DownloadCommentCheckerBinaryOptions } from "./binary-download"
+export { runCommentCheckerWithNodeSpawn } from "./node-spawn"
+export { parseToolResultContext, parseToolResultEvent } from "./tool-result-input"
+export type { ToolResultContentBlock, ToolResultContextLike, ToolResultEventLike, ToolResultTextBlock } from "./tool-result-input"
+export { createCommentCheckerSession } from "./session"
+export type { CommentCheckerSession, CommentCheckerSessionOptions, CommentCheckerToolResultHooks } from "./session"
