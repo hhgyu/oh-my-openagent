@@ -14,6 +14,13 @@ export { createMemberTaskSendTool } from "../../team/member-extension/tools"
 export type { MemberTaskSendDeps, MemberTaskSendTool, MemberTaskSendInput, MemberTaskSendDetails } from "../../team/member-extension/tools"
 export { createWorkpoolWorkerTool } from "../workpool"
 export type { WorkpoolToolResult, WorkpoolWorkerDeps, WorkpoolWorkerTool } from "../workpool"
+// The ORIGINAL curated read-only broker policy, factory and executor; hosts supply their own formatter.
+export {
+  createCuratedReadonlyBashTool, CuratedReadonlyBashParams, CuratedReadonlyCommandError, executeCuratedReadonlyCommand,
+} from "../../runners/in-process/curated-readonly-bash"
+export type {
+  CuratedReadonlyBashInput, CuratedReadonlyBashTool, CuratedReadonlyChildObserver, CuratedReadonlyCommand, CuratedReadonlyExecutor, CuratedReadonlyRequest,
+} from "../../runners/in-process/curated-readonly-bash"
 export { buildTaskExecute } from "./execute"
 export { TaskToolParams } from "./params"
 export type { TaskToolParamsStatic } from "./params"

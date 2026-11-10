@@ -17,7 +17,10 @@ import { createToolKernel } from "../../host/tool-kernel"
 import { createToolRegistry, type ListedTool } from "../../host/tool-registry"
 import { createNativeTaskBridge } from "../../tools/native-task"
 import { prepareNativeTaskRuntime } from "../../tools/native-task-preparation"
+import { createNativeChildGuardBinding } from "./child-guard-binding"
+import { acquireReadonlyBroker, type ReadonlyBrokerOwner } from "./live-readonly-producer"
 import { createNativeTaskService } from "./service"
+import { READONLY_BROKER_TOOL_NAME } from "../../tools/curated-readonly"
 
 type MetadataSource = Parameters<typeof createNativeTaskService>[1]["metadataSource"]
 type JoinedSession = Effect.Success<ReturnType<typeof acquireEffectSessionBackendApi>>
@@ -29,14 +32,18 @@ export interface NativeTaskEffectOwners {
   readonly metadataSource: MetadataSource
   readonly permission: JoinedPermissionApi
   readonly guard: OwnedChildToolGuard
+  /** Dedicated curated read-only broker registration, executable only by its bound owned child. */
+  readonly readonly: ReadonlyBrokerOwner
 }
 
 export function acquireNativeTaskEffectOwners(context: EffectPlugin.Context, session: JoinedSession): Effect.Effect<NativeTaskEffectOwners, never, Scope.Scope> {
   return Effect.gen(function* () {
     const metadataSource = yield* acquireEffectToolMetadataSource(context.tool)
     const permission = yield* acquireEffectPermissionApi(context.permission)
+    // Registered BEFORE the guard: transforms run in registration order, so the guard wraps it too.
+    const readonly = yield* acquireReadonlyBroker({ tool: context.tool }, permission)
     const guard = yield* acquireOwnedChildToolGuard({ tool: context.tool, permission: context.permission })
-    return { session, metadataSource, permission, guard }
+    return { session, metadataSource, permission, guard, readonly }
   })
 }
 
@@ -74,9 +81,15 @@ export function nativeTaskStateDir(projectDirectory: string, parentSessionID: st
 }
 
 /** Unnamespaced actual catalog entries a Native child may be granted. Namespaced CodeMode tools,
- * raw subagent/execute and this component's own public targets are never child grants. */
+ * raw subagent/execute, this component's own public targets and the dedicated read-only broker
+ * (bound only through its `curated-readonly-broker` slot) are never catalog grants. */
 export function childCatalog(actual: readonly ListedTool[]): ListedTool[] {
-  return actual.filter(tool => tool.options?.namespace === undefined && !["subagent", "execute", ...PUBLIC_TOOLS].includes(tool.name))
+  return actual.filter(tool => tool.options?.namespace === undefined && !["subagent", "execute", READONLY_BROKER_TOOL_NAME, ...PUBLIC_TOOLS].includes(tool.name))
+}
+
+/** Parents and non-curated children never see the broker; a bound curated child keeps it. */
+export function hideUnboundReadonlyBroker(context: { readonly sessionID: string; readonly tools: Record<string, unknown> }, owner: Pick<ReadonlyBrokerOwner, "hostID" | "isBound">): void {
+  if (!owner.isBound(context.sessionID)) delete context.tools[owner.hostID]
 }
 
 export async function registerNativeTaskComponent(control: PromisePlugin.Context, owners: NativeTaskEffectOwners): Promise<() => Promise<void>> {
@@ -104,6 +117,10 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     const preparedGeneration = generation
     const initial = childCatalog(await control.tool.list())
     current()
+    // The dedicated broker is exposed to a model request only in a session with a live bound producer.
+    const brokerVisibility = await control.session.hook("context", context => hideUnboundReadonlyBroker(context, owners.readonly))
+    closers.push(() => brokerVisibility.dispose())
+    current()
     const routable = [...PUBLIC_TOOLS, ...initial.map(tool => tool.id)]
     const registry = createToolRegistry([], {})
     const kernel = createToolKernel({ registry, scopes, pipeline: createPolicyPipeline(), permission: owners.permission })
@@ -122,14 +139,9 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
         return { nativeTools: childStructuralToolNames(CUSTOM_CANDIDATES).map(name => ({ name })), catalog }
       } },
       childToolGuard: owners.guard,
-      // No live kernel/member/broker/network producer is installed, so no requirement is claimed as bound.
-      // A selection needing one is refused by the runner as incomplete bindings, never silently widened.
-      childGuardBinding(_spec, approved) {
-        const coverage = { boundRequirements: [] }
-        return { coverage, assertCurrent: assertGeneration, bind(child, assertBackendCurrent) {
-          return { child, agent: approved.buildAgentID, coverage, assertCurrent() { assertGeneration(); assertBackendCurrent() } }
-        } }
-      },
+      // Only the read-only broker producer is installed. Kernel/member/network requirements stay
+      // unbound, so a selection needing one is refused by the runner, never silently widened.
+      childGuardBinding: createNativeChildGuardBinding({ assertGeneration, readonly: owners.readonly }),
     })
     closers.push(() => service.close())
     const bridge = createNativeTaskBridge({ tool: control.tool, prepared, async rollbackAcquisition() { await service.close() }, async acquire(targets) {
