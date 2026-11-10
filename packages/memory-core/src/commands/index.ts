@@ -10,9 +10,6 @@ export { runRecompileCommand } from "./recompile"
 export { REMEMBER_INSTRUCTION, runRememberCommand } from "./remember"
 export { runSearchCommand } from "./search"
 export {
-  requireIdentity,
-  respond,
-  sessionIdOf,
   type MemoryCommandContext,
   type MemoryCommandDeps,
   type MemoryCommandHandler,
