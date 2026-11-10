@@ -15,7 +15,7 @@ on:
       - "script/qa/desktop/linux.ts"
       - "script/qa/desktop/linux/**"
   push:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - ".github/workflows/desktop-linux-qa.yml"
       - "Cargo.toml"

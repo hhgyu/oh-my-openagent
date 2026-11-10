@@ -1084,7 +1084,6 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) CLAUDE_CODE_PROVIDER, claudeCodeRuntimeDir, claudeCodeProgressLine
       "packages/omo-senpi/src/components/claude-code/index.ts": ["CLAUDE_CODE_PROVIDER", "claudeCodeRuntimeDir", "claudeCodeProgressLine"],
       // pre-existing at origin dev 4686e425b5: unused export(s) commentCheckerFailureNotice
-      "packages/omo-senpi/src/components/comment-checker/failure-notice.ts": ["commentCheckerFailureNotice"],
       // pre-existing at origin dev 4686e425b5: unused export(s) downloadSenpiCommentCheckerBinary, defaultCommentCheckerCacheDir
       "packages/omo-senpi/src/components/comment-checker/index.ts": ["downloadSenpiCommentCheckerBinary", "defaultCommentCheckerCacheDir"],
       // pre-existing at origin dev 4686e425b5: unused export(s) COMPUTER_USE_COMPONENT_NAME
@@ -1114,7 +1113,6 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) FEEDBACK_REDACTOR_VERSION, FEEDBACK_IDEMPOTENCY_KEY
       "packages/omo-senpi/src/components/feedback/submit.ts": ["FEEDBACK_REDACTOR_VERSION", "FEEDBACK_IDEMPOTENCY_KEY"],
       // pre-existing at origin dev 4686e425b5: unused export(s) DEFAULT_COMMIT_FOOTER
-      "packages/omo-senpi/src/components/git-master/directive.ts": ["DEFAULT_COMMIT_FOOTER"],
       // pre-existing at origin dev 4686e425b5: unused export(s) AdvisorFakeExtensionAPI
       "packages/omo-senpi/src/components/init-deep-advisor/component.test-support.ts": ["AdvisorFakeExtensionAPI"],
       // pre-existing at origin dev 4686e425b5: unused export(s) SEVERITY_MAP, EXT_TO_LANG, getLanguageId
@@ -1138,7 +1136,6 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) identityFor
       "packages/omo-senpi/src/components/memory/commands/types.ts": ["identityFor"],
       // pre-existing at origin dev 4686e425b5: unused export(s) getMemoryRepo
-      "packages/omo-senpi/src/components/memory/context.ts": ["getMemoryRepo"],
       // pre-existing at origin dev 4686e425b5: unused export(s) DEFAULT_SERVICE_API
       "packages/omo-senpi/src/components/memory/device-session/account-source.ts": ["DEFAULT_SERVICE_API"],
       // pre-existing at origin dev 4686e425b5: unused export(s) FakeScheduler
@@ -1286,7 +1283,6 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) buildWidgetRows
       "packages/omo-senpi/src/components/task/status-ui.ts": ["buildWidgetRows"],
       // pre-existing at origin dev 4686e425b5: unused export(s) isTerminalStatus
-      "packages/omo-senpi/src/components/task/store-status-edge.ts": ["isTerminalStatus"],
       // pre-existing at origin dev 4686e425b5: unused export(s) CATEGORY_CONFIG_SOURCES, CATEGORY_CONFIG_PROPERTY_NAMES
       "packages/omo-senpi/src/components/telemetry/category-config-schema.ts": ["CATEGORY_CONFIG_SOURCES", "CATEGORY_CONFIG_PROPERTY_NAMES"],
       // pre-existing at origin dev 4686e425b5: unused export(s) isEmitterSite
@@ -1542,7 +1538,6 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) TaskConcurrency, decideDepthPolicy, NameRegistry, AUTO_HOST_CAPABILITIES, adaptInProcessHandle, adaptRpcHandle, TASK_AWAITING_INPUT_EVENT, TRANSCRIPT_ASSISTANT_EVENT, TRANSCRIPT_TOOL_EVENT, logTranscriptEvent and 1 more
       "packages/senpi-task/src/manager/index.ts": ["TaskConcurrency", "decideDepthPolicy", "NameRegistry", "AUTO_HOST_CAPABILITIES", "adaptInProcessHandle", "adaptRpcHandle", "TASK_AWAITING_INPUT_EVENT", "TRANSCRIPT_ASSISTANT_EVENT", "TRANSCRIPT_TOOL_EVENT", "logTranscriptEvent", "subscribeTranscriptLog"],
       // pre-existing at origin dev 4686e425b5: unused export(s) START_REPORT_WINDOW_MS
-      "packages/senpi-task/src/manager/manager.ts": ["START_REPORT_WINDOW_MS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) readObservedModel, observeChildEffectiveModel
       "packages/senpi-task/src/manager/observed-model.ts": ["readObservedModel", "observeChildEffectiveModel"],
       // pre-existing at origin dev 4686e425b5: unused export(s) PausedChildLostError, PausedChildOwnedElsewhereError
@@ -1560,9 +1555,7 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) childVisibleToolNames, isTaskOrTeamFamilyTool, DEFAULT_MAX_CHILD_DEPTH
       "packages/senpi-task/src/runners/in-process.ts": ["childVisibleToolNames", "isTaskOrTeamFamilyTool", "DEFAULT_MAX_CHILD_DEPTH"],
       // pre-existing at origin dev 4686e425b5: unused export(s) CuratedReadonlyBashParams
-      "packages/senpi-task/src/runners/in-process/curated-readonly-bash.ts": ["CuratedReadonlyBashParams"],
       // pre-existing at origin dev 4686e425b5: unused export(s) CHILD_HOST_TOOLS
-      "packages/senpi-task/src/runners/in-process/host-tools.ts": ["CHILD_HOST_TOOLS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) CHILD_DIRECT_EXPOSURE_TOOL_NAMES, childVisibleToolNames
       "packages/senpi-task/src/runners/in-process/shared-tool-filter.ts": ["CHILD_DIRECT_EXPOSURE_TOOL_NAMES", "childVisibleToolNames"],
       // pre-existing at origin dev 4686e425b5: unused export(s) DEFAULT_MAX_CHILD_DEPTH, childVisibleToolNames, isTaskOrTeamFamilyTool, SENPI_SESSION_BUILTIN_NAMES, buildSubagentPrompt, createChildResourceLoader, isHostSessionHandle, resolveTaskHostSocket, TASK_DAEMON_REQUIRED_CAPABILITIES, TASK_HOST_SOCKET_ENV_NAMES and 19 more
@@ -1612,7 +1605,6 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) AWAITING_INPUT_REASONS, createTaskId, TRANSPORT_LOST_REASON, MODEL_START_FAILURE_REASONS, HOST_START_FAILURE_REASONS
       "packages/senpi-task/src/state/index.ts": ["AWAITING_INPUT_REASONS", "createTaskId", "TRANSPORT_LOST_REASON", "MODEL_START_FAILURE_REASONS", "HOST_START_FAILURE_REASONS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) MODEL_START_FAILURE_REASONS
-      "packages/senpi-task/src/state/start-failure.ts": ["MODEL_START_FAILURE_REASONS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) formatLiveSpend, formatCostUsd, formatCacheHitPercent, toolCountSuffix
       "packages/senpi-task/src/status-line.ts": ["formatLiveSpend", "formatCostUsd", "formatCacheHitPercent", "toolCountSuffix"],
       // pre-existing at origin dev 4686e425b5: unused export(s) CANCEL_PENDING_REASON

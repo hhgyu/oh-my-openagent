@@ -232,7 +232,7 @@ describe("CI fast-path workflow wiring", () => {
   test("keeps schema generation on master and skips duplicate draft generation", () => {
     const triggers = parseWorkflow(ciWorkflowPath)["on"]
     if (!isRecord(triggers) || !isRecord(triggers["push"])) throw new Error("CI must define push triggers")
-    expect(triggers["push"]["branches"]).toEqual(["master", "dev"])
+    expect(triggers["push"]["branches"]).toEqual(["master", "dev", "v2/dev"])
 
     const jobs = workflowJobs(ciWorkflowPath)
     const schema = jobs["auto-commit-schema"]
