@@ -17,6 +17,21 @@ test("insert is exclusive across actual SQLite connections and never overwrites 
  await expect(b.claim("child",b.owner,record(b.owner))).rejects.toThrow("already exists")
  expect((await b.read("child"))?.owner).toBe(a.owner)
 })
+
+test("own turn descriptor survives actual SQLite close/reopen without losing reserved receipts",async()=>{
+ const file=path(),a=await open(file)
+ const initial={...record(a.owner),turn:{nativeEpoch:2,observationKey:"owned-turn:2",firstInputID:"msg_owned_turn"},receipts:{msg_reserved:"pending" as const}}
+ await a.claim("child",a.owner,initial);a.close();const b=await open(file),row=await b.read("child")
+ expect((row as typeof initial).turn).toEqual(initial.turn);expect(row?.receipts).toEqual(initial.receipts)
+})
+
+test("invalid own turn descriptors refuse before actual journal insertion",async()=>{
+ const a=await open()
+ for(const turn of [{nativeEpoch:-1,observationKey:"bad"},{nativeEpoch:1,observationKey:""},{nativeEpoch:1,observationKey:"key",unexpected:true},{nativeEpoch:1,observationKey:"key",firstInputID:""}]){
+  await expect(a.claim("child",a.owner,{...record(a.owner),turn})).rejects.toThrow("Invalid")
+  expect(await a.read("child")).toBeUndefined()
+ }
+})
 test("same-owner reload advances a durable fence and stale writes fail", async () => {
  const a=await open();const first=await a.claim("child",a.owner,record(a.owner));const next=await a.claim("child",a.owner)
  expect(next.revision).toBe(1)
@@ -113,4 +128,23 @@ test("synchronous checkpoint commits exact SQLite CAS before immediate current-r
  expect(()=>journal.writeSync(first,next)).toThrow("Stale");expect(await journal.read("child")).toEqual(next)
  const accepted={...next,revision:next.revision+1,phase:"accepted" as const};await journal.write(next,accepted);expect(()=>journal.assertCurrent(accepted)).not.toThrow()
  journal.close();expect(()=>journal.writeSync(accepted,{...accepted,revision:accepted.revision+1})).toThrow("closed")
+})
+
+// Storage contract: the durable parking descriptor (parked is NOT closed) round-trips exactly and
+// malformed parking state can never be persisted as a receipt.
+test("parking descriptor survives actual SQLite reopen with exact ordered rules while phase stays truthful", async () => {
+ const file=path(),a=await open(file),initial=await a.claim("child",a.owner,{...record(a.owner),phase:"accepted"})
+ const parking={format:1 as const,state:"parked" as const,id:"park-1",owner:a.owner,original:{present:true,rules:[{action:"read",resource:"*",effect:"allow" as const},{action:"edit",resource:"/x",effect:"ask" as const}]},
+  fingerprint:"a".repeat(64),marker:"omo.native-task.parking" as const,agent:"build",nativeEpoch:3,intentRevision:1,readback:"verified" as const}
+ a.writeSync(initial,{...initial,revision:1,parking});a.close()
+ const row=await (await open(file)).read("child")
+ expect(row?.parking).toEqual(parking);expect(row?.phase).toBe("accepted")
+})
+
+test("malformed parking descriptors refuse before actual journal insertion", async () => {
+ const a=await open(),base={format:1 as const,state:"intent" as const,id:"park-1",owner:a.owner,original:{present:false,rules:[]},fingerprint:"b".repeat(64),marker:"omo.native-task.parking" as const,intentRevision:1}
+ for(const parking of [{...base,state:"parked" as const},{...base,state:"conflict" as const},{...base,readback:"verified" as const},{...base,fingerprint:"short"},{...base,marker:"foreign.marker"},{...base,original:{present:true,rules:[{action:"*",resource:"*",effect:"maybe"}]}},{...base,token:"capability"}]){
+  await expect(a.claim("child",a.owner,{...record(a.owner),parking} as never)).rejects.toThrow("Invalid")
+  expect(await a.read("child")).toBeUndefined()
+ }
 })

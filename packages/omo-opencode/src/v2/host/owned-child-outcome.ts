@@ -1,3 +1,4 @@
+import type { ChildCompletionPolicy } from "@oh-my-opencode/orchestration-core/contracts/child-outcome"
 import {
   observationRecordSchema,
   type ObservationSnapshot,
@@ -8,6 +9,7 @@ import {
 
 type Step = {
   id: string
+  afterOwnDelivery: boolean
   model: ObservedModel
   parts: Map<number, string>
   textStarts: Set<number>
@@ -29,9 +31,10 @@ const terminals = new Set(["session.execution.succeeded", "session.execution.fai
 const finishes = new Set(["stop", "length", "tool-calls"])
 
 /** Own observations, not host wait/info.outcome or a fabricated execution identifier. */
-export function projectOwnedChildOutcome(snapshot: ObservationSnapshot): OwnedChildOutcome {
+export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completion?: ChildCompletionPolicy): OwnedChildOutcome {
   const base = { delivered: [] as string[], consumption: "unconfirmed" as const }
   const uncertain = (reason: string): OwnedChildOutcome => ({ ...base, status: "uncertain", reason })
+  if (completion !== undefined && completion !== "final-text" && completion !== "turn") return uncertain("invalid-completion-policy")
   const locator = snapshot?.binding?.locator
   if (!locator || locator.format !== 1 || !snapshot.binding.key || !snapshot.binding.token
     || !locator.sessionID || !Array.isArray(snapshot.records) || !Array.isArray(snapshot.uncertainty)) {
@@ -111,7 +114,7 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot): OwnedCh
         || frame.steps.some(step => step.pendingRetry !== undefined || !step.ended && !step.failed)) {
         fail("invalid-step-start")
       } else {
-        const step: Step = { id: assistantMessageID, model, parts: new Map(), textStarts: new Set(), calls: new Map(), retryAttempt: 1 }
+        const step: Step = { id: assistantMessageID, afterOwnDelivery: frame.delivered.length > 0, model, parts: new Map(), textStarts: new Set(), calls: new Map(), retryAttempt: 1 }
         steps.set(step.id, step); frame.steps.push(step)
       }
       continue
@@ -199,11 +202,17 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot): OwnedCh
   if ([...expected].some(id => !delivered.has(id))) return { ...facts, status: "pending", reason: "input-not-delivered" }
   const failed = frame!.steps.find(step => step.failed)
   if (failed) return { ...facts, status: failed.failed === "aborted" ? "interrupted" : "error", reason: failed.failed }
+  const ownedSteps = frame!.steps.filter(step => step.afterOwnDelivery)
+  if (completion !== undefined && ownedSteps.length === 0) return uncertain("missing-owned-assistant-step")
   if (last.ended?.data.finish === "tool-calls") return uncertain("unfinished-assistant-turn")
-  const parts = [...last.parts].sort(([a], [b]) => a - b)
-  const text = parts.map(([, part]) => part).join("")
+  const stepText = (step: Step) => [...step.parts].sort(([a], [b]) => a - b).map(([, part]) => part).join("")
+  // Native keeps the last nonempty assistant message WITHIN the current turn.
+  // Both explicit Native policies retain it; omitted policy preserves legacy P0 behavior.
+  const text = completion !== undefined
+    ? [...ownedSteps].reverse().map(stepText).find(value => value.length > 0) ?? ""
+    : stepText(last)
   if (text.length > 1_048_576) return uncertain("output-too-large")
-  if (text.length === 0) return { ...facts, status: "error", reason: "empty-assistant-output" }
+  if (text.length === 0 && completion !== "turn") return { ...facts, status: "error", reason: "empty-assistant-output" }
   const ended = frame!.steps.map(step => step.ended!.data)
   const tokenKeys = ["input", "output", "reasoning", "cacheRead", "cacheWrite"] as const
   const tokens: NonNullable<OwnedChildOutcome["tokens"]> = {}

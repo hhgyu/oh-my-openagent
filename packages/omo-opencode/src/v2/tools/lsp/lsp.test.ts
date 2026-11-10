@@ -7,21 +7,24 @@ import type { ToolContext, Info } from "@opencode/plugin/promise/tool"
 import { createLspComponent } from "./index"
 import { createLspRuntime, RequestOnlyLspClient, normalizeWorkspaceEditUris } from "./runtime"
 import { lspSchemas, LSP_TOOL_NAMES } from "./schemas"
-import type { WorkspaceEdit, ResolvedServer } from "@oh-my-opencode/lsp-core"
+import { LspServerLookupError } from "@oh-my-opencode/lsp-core"
+import type { WorkspaceEdit, ResolvedServer, TextEdit, FormattingOptions } from "@oh-my-opencode/lsp-core"
 
 const server: ResolvedServer = { id: "fixture", command: ["fixture"], extensions: [".ts"], priority: 0 }
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "v2-lsp-unit-"))
   const a=join(root,"a.ts"), b=join(root,"b.ts")
   writeFileSync(a,"const original = 1\n");writeFileSync(b,"original\n")
-  let starts=0, stops=0, requests=0
+  let starts=0, stops=0, requests=0, formats=0, syncs=0
+  let formatWork: (file: string, signal?: AbortSignal) => Promise<TextEdit[] | null> = async () => [{range:{start:{line:0,character:0},end:{line:0,character:18}},newText:"const original = 2;"}]
   const events: unknown[]=[];const permissions: { action: string; resources: readonly string[] }[]=[]
   let reject: unknown;let authorizationReject: unknown
   let edit: WorkspaceEdit = { changes: { [pathToFileURL(a).href]: [{ range:{start:{line:0,character:6},end:{line:0,character:14}},newText:"renamed"}], [pathToFileURL(b).href]: [{range:{start:{line:0,character:0},end:{line:0,character:8}},newText:"renamed"}] } }
   class Client extends RequestOnlyLspClient {
     override async start(){starts++} override async initialize(){} override isAlive(){return true} override async stop(){stops++}
-    override async openFile(){} override getOpenDocumentVersion(){return undefined}
+    override async openFile(){syncs++} override getOpenDocumentVersion(){return undefined}
     override async requestRename(){requests++;return edit}
+    override async formatDocument(file:string,_options:FormattingOptions,signal?:AbortSignal){formats++;return formatWork(file,signal)}
     override async definition(){requests++;return {uri:pathToFileURL(b).href,range:{start:{line:0,character:0},end:{line:0,character:8}}}}
     override async references(){return []}
     override async documentSymbols(){return []}
@@ -32,7 +35,7 @@ function fixture() {
   const caller={sessionID:"real-caller",agent:"readonly-or-writer",messageID:"message",id:"call",signal:controller.signal,progress:async()=>{}} as unknown as ToolContext
   const options={directory:root,homeDirectory:root,permission:{assert:async(input:any)=>{permissions.push(input);if(reject)throw reject}},authorize:async()=>{if(authorizationReject)throw authorizationReject},onMutation:async(event:unknown)=>{events.push(event)},resolveServer:()=>server,clientFactory:(r:string,s:ResolvedServer)=>new Client(r,s)}
   const runtime=createLspRuntime(options)
-  return {root,a,b,runtime,caller,options,controller,events,permissions,setEdit:(e:WorkspaceEdit)=>{edit=e},deny:(e:unknown)=>{reject=e},denyCaller:(e:unknown)=>{authorizationReject=e},counts:()=>({starts,stops,requests}),cleanup:async()=>{await runtime.dispose();rmSync(root,{recursive:true,force:true})}}
+  return {root,a,b,runtime,caller,options,controller,events,permissions,setEdit:(e:WorkspaceEdit)=>{edit=e},setFormat:(fn:typeof formatWork)=>{formatWork=fn},deny:(e:unknown)=>{reject=e},denyCaller:(e:unknown)=>{authorizationReject=e},counts:()=>({starts,stops,requests,formats,syncs}),cleanup:async()=>{await runtime.dispose();rmSync(root,{recursive:true,force:true})}}
 }
 describe("Native six-tool LSP OpenCode adapter",()=>{
  test("exact six portable schemas preserve Native indexing/defaults and reject forged fields",()=>{
@@ -132,4 +135,77 @@ describe("Native six-tool LSP OpenCode adapter",()=>{
   const denied=Error("destination descendant denied");f.options.permission.assert=async(input:any)=>{if(input.action==="edit"&&input.resources.includes(protectedFile))throw denied}
   try{await expect(f.runtime.execute("lsp_rename",{filePath:"a.ts",line:1,character:6,newName:"x"},f.caller)).rejects.toBe(denied);expect(readFileSync(protectedFile,"utf8")).toBe("protected\n");expect(readFileSync(join(source,"child.ts"),"utf8")).toBe("source\n");expect(f.events).toHaveLength(0)}finally{await f.cleanup()}
  })
+})
+
+describe("owned internal LSP format backend",()=>{
+ test("format uses owned client, real edit permission and mutation caller then resynchronizes",async()=>{
+  const f=fixture();try{const output=await f.runtime.format("a.ts",f.caller);expect(output.details).toMatchObject({status:"formatted",linesAdded:1,linesRemoved:1});expect(readFileSync(f.a,"utf8")).toBe("const original = 2;\n");expect(f.permissions.some(p=>p.action==="read")).toBe(true);expect(f.permissions.filter(p=>p.action==="edit").flatMap(p=>p.resources)).toEqual([f.a]);expect((f.events[0] as any).tool).toBe("format");expect((f.events[0] as any).context).toBe(f.caller);expect(f.counts().syncs).toBe(1)}finally{await f.cleanup()}
+ })
+ test("missing server or capability returns unavailable, while an unchanged edit is honest",async()=>{
+  const f=fixture();try{
+   f.setFormat(async()=>null);expect((await f.runtime.format("a.ts",f.caller)).details).toMatchObject({status:"unavailable",reason:"capability_not_advertised",linesAdded:0,linesRemoved:0})
+   f.setFormat(async()=>[]);expect((await f.runtime.format("a.ts",f.caller)).details.status).toBe("unchanged")
+   f.options.resolveServer=()=>{throw new LspServerLookupError("No server configured")};expect((await f.runtime.format("a.ts",f.caller)).details).toMatchObject({status:"unavailable",reason:"missing_dependency"});expect(f.events).toHaveLength(0)
+  }finally{await f.cleanup()}
+ })
+ test("only explicit method-not-found becomes unavailable; general errors preserve identity",async()=>{
+  const f=fixture();const failure={code:-32603,message:"server failure"};try{f.setFormat(async()=>{throw {code:-32601,message:"method not found"}});expect((await f.runtime.format("a.ts",f.caller)).details.status).toBe("unavailable");f.setFormat(async()=>{throw failure});await expect(f.runtime.format("a.ts",f.caller)).rejects.toBe(failure)}finally{await f.cleanup()}
+ })
+ test("readonly and read denial never call server; edit rejection never writes",async()=>{
+  const f=fixture();const rejection={reason:"user rejection"};try{
+   f.denyCaller(rejection);await expect(f.runtime.format("a.ts",f.caller)).rejects.toBe(rejection);f.denyCaller(undefined);f.deny(rejection);await expect(f.runtime.format("a.ts",f.caller)).rejects.toBe(rejection);expect(f.counts().formats).toBe(0)
+   f.deny(undefined);f.options.permission.assert=async(input:any)=>{if(input.action==="edit")throw rejection};await expect(f.runtime.format("a.ts",f.caller)).rejects.toBe(rejection);expect(readFileSync(f.a,"utf8")).toBe("const original = 1\n");expect(f.events).toHaveLength(0)
+  }finally{await f.cleanup()}
+ })
+ test("snapshot predates server request so concurrent edits cannot be overwritten",async()=>{
+  const f=fixture();try{f.setFormat(async file=>{writeFileSync(file,"concurrent external edit\n");return[{range:{start:{line:0,character:0},end:{line:0,character:5}},newText:"BAD"}]});await expect(f.runtime.format("a.ts",f.caller)).rejects.toThrow("changed");expect(readFileSync(f.a,"utf8")).toBe("concurrent external edit\n");expect(f.events).toHaveLength(0)}finally{await f.cleanup()}
+ })
+ test("changes during edit approval and symlink escape fail before formatting write",async()=>{
+  const f=fixture();const external=mkdtempSync(join(tmpdir(),"v2-format-outside-"));const file=join(external,"a.ts");writeFileSync(file,"outside\n")
+  try{f.options.permission.assert=async(input:any)=>{if(input.action==="edit")writeFileSync(f.a,"changed during approval\n")};await expect(f.runtime.format("a.ts",f.caller)).rejects.toThrow("changed");expect(readFileSync(f.a,"utf8")).toBe("changed during approval\n");symlinkSync(external,join(f.root,"link"),process.platform==="win32"?"junction":"dir");const before=f.counts().formats;await expect(f.runtime.format("link/a.ts",f.caller)).rejects.toThrow("workspace");expect(f.counts().formats).toBe(before);expect(readFileSync(file,"utf8")).toBe("outside\n")}finally{await f.cleanup();rmSync(external,{recursive:true,force:true})}
+ })
+ test("abort and final disposal reject pending format and never recreate the client",async()=>{
+  const f=fixture();let began:()=>void=()=>{};const started=new Promise<void>(r=>{began=r});f.setFormat(async(_file,signal)=>{began();await new Promise<void>((_resolve,reject)=>{signal!.addEventListener("abort",()=>reject(signal!.reason),{once:true})});return[]})
+  try{const call=f.runtime.format("a.ts",f.caller);await started;await f.runtime.dispose();await expect(call).rejects.toThrow("disposed");await expect(f.runtime.format("a.ts",f.caller)).rejects.toThrow("disposed");expect(f.counts().starts).toBe(1);expect(f.counts().stops).toBe(1);expect(f.events).toHaveLength(0)}finally{await f.cleanup()}
+ })
+ test("onMutation recursion fails explicitly instead of queuing behind itself",async()=>{
+  const f=fixture();f.options.onMutation=async()=>{await f.runtime.format("a.ts",f.caller)}
+  try{await expect(f.runtime.format("a.ts",f.caller)).rejects.toThrow("after the original");expect(readFileSync(f.a,"utf8")).toBe("const original = 2;\n")}finally{await f.cleanup()}
+ })
+ test("component shares its one registered runtime, fences duplicate registration and closes format",async()=>{
+  const f=fixture();const tools:Info[]=[];let disposed=0;const host={location:{directory:f.root},permission:f.options.permission,tool:{transform:async(fn:any)=>{fn({add:(tool:Info)=>tools.push(tool)});return{dispose:async()=>{disposed++}}}}} as any
+  try{const component=createLspComponent(f.options);await expect(component.format("a.ts",f.caller)).rejects.toThrow("registered");const close=await component.register(host);await expect(component.register(host)).rejects.toThrow("registered");await component.format("a.ts",f.caller);expect(tools.map(t=>t.name)).toEqual([...LSP_TOOL_NAMES]);await tools.find(t=>t.name==="lsp_goto_definition")!.execute({filePath:"a.ts",line:1,character:6},f.caller);expect(f.counts().starts).toBe(1);await close();await close();expect(disposed).toBe(1);await expect(component.format("a.ts",f.caller)).rejects.toThrow("disposed")
+   const disabled=createLspComponent({...f.options,enabled:false});const off=await disabled.register(host);expect((await disabled.format("a.ts",f.caller)).details).toMatchObject({status:"unavailable",reason:"disabled"});await off();await expect(disabled.format("a.ts",f.caller)).rejects.toThrow("disposed")
+  }finally{await f.cleanup()}
+ })
+})
+
+
+test("format never reclassifies a permission or observer error as a missing capability",async()=>{
+ const f=fixture();const rejection={code:-32601,message:"approval rejected"}
+ try{
+  f.options.permission.assert=async(input:any)=>{if(input.action==="edit")throw rejection}
+  await expect(f.runtime.format("a.ts",f.caller)).rejects.toBe(rejection);expect(readFileSync(f.a,"utf8")).toBe("const original = 1\n")
+  f.options.permission.assert=async()=>{}
+  f.options.onMutation=async()=>{throw rejection}
+  await expect(f.runtime.format("a.ts",f.caller)).rejects.toBe(rejection);expect(readFileSync(f.a,"utf8")).toBe("const original = 2;\n");expect(f.counts().syncs).toBe(1)
+ }finally{await f.cleanup()}
+})
+
+test("parallel runtime disposal calls share the same completion promise",async()=>{
+ const f=fixture();try{await f.runtime.format("a.ts",f.caller);const first=f.runtime.dispose();const second=f.runtime.dispose();expect(first).toBe(second);await Promise.all([first,second]);expect(f.counts().stops).toBe(1)}finally{await f.cleanup()}
+})
+
+
+test("component diagnostics uses genuine caller and its owned six-tool runtime without catalog lookup",async()=>{
+ const f=fixture();const tools:Info[]=[];const callers:unknown[]=[]
+ const host={location:{directory:f.root},permission:f.options.permission,tool:{transform:async(fn:any)=>{fn({add:(tool:Info)=>tools.push(tool)});return{dispose:async()=>{}}}}} as any
+ const component=createLspComponent({...f.options,authorize:async(caller,operation)=>{callers.push(caller);expect(operation.tool).toBe("lsp_diagnostics")}})
+ try{
+  await expect(component.diagnostics("a.ts",f.caller)).rejects.toThrow("registered")
+  const close=await component.register(host);const output=await component.diagnostics("a.ts",f.caller)
+  expect(callers).toEqual([f.caller]);expect(callers[0]).toBe(f.caller);expect(output.metadata?.severity).toBe("error");expect(tools.map(tool=>tool.name)).toEqual([...LSP_TOOL_NAMES]);expect(f.permissions.every((request:any)=>request.sessionID===f.caller.sessionID&&request.source.id===f.caller.id)).toBe(true)
+  await close();await expect(component.diagnostics("a.ts",f.caller)).rejects.toThrow("disposed")
+  const disabled=createLspComponent({...f.options,enabled:false});const off=await disabled.register(host);expect((await disabled.diagnostics("a.ts",f.caller)).metadata).toMatchObject({status:"unavailable",errorKind:"missing_dependency",reason:"disabled"});await off();await expect(disabled.diagnostics("a.ts",f.caller)).rejects.toThrow("disposed")
+ }finally{await f.cleanup()}
 })

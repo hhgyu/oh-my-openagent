@@ -10,7 +10,7 @@ export const opencodeV2Server = {
   setup: async (context: Plugin.Context) => {
     const { setupV2Host } = await import("../v2")
     const cleanup = await setupV2Host(context)
-    log("[opencode-v2] native agents registered", { notice: OPENCODE_V2_NOTICE_MESSAGE })
+    log("[opencode-v2] native agent and runtime setup complete", { notice: OPENCODE_V2_NOTICE_MESSAGE })
     return cleanup
   },
   effect: (context: EffectPlugin.Context) => {

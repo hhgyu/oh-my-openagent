@@ -3,7 +3,7 @@ import { NATIVE_EDITION_GUIDE_URL, NATIVE_EDITION_INSTALL_COMMAND } from "../cli
 export const OPENCODE_V2_NOTICE_TITLE = "Oh My OpenAgent on OpenCode 2"
 
 export const OPENCODE_V2_NOTICE_MESSAGE = [
-  "OpenCode 2 support is partial: native OmO agents are active. OmO tools, lifecycle hooks and orchestration are not ported yet; agents use the available host tools.",
+  "OpenCode 2 support is partial: native OmO agents, Native LSP tools, mutation formatting and post-edit diagnostics are available. Remaining Native tools, hooks and orchestration are still being ported.",
   `For the full omo, use OmO Native: run ${NATIVE_EDITION_INSTALL_COMMAND}, then omo.`,
   `Guide: ${NATIVE_EDITION_GUIDE_URL}`,
 ].join("\n")

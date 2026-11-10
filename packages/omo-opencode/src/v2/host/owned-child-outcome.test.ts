@@ -58,6 +58,91 @@ test("actual same-execution synthetic continuation returns the final step, never
 test("actual empty success is an explicit task output error", () => {
   expect(projectOwnedChildOutcome(fixture("empty"))).toMatchObject({ status: "error", reason: "empty-assistant-output" })
 })
+
+test("explicit Native turn policy accepts a positively observed empty assistant turn", () => {
+  expect(projectOwnedChildOutcome(fixture("empty"), "turn")).toMatchObject({ status: "completed", text: "", observedSteps: 1, consumption: "unconfirmed" })
+  expect(projectOwnedChildOutcome(fixture("empty"), "final-text").status).toBe("error")
+  expect(projectOwnedChildOutcome(fixture(), "unknown" as never)).toMatchObject({ status: "uncertain", reason: "invalid-completion-policy" })
+})
+
+test("Native turn retains last nonempty current-turn text across an empty final step without changing default", () => {
+  const snapshot = fixture("tool")
+  for (const row of events(snapshot)) if (row.event.type === "session.text.ended") row.event.data.text = ""
+  const firstEnd = events(snapshot).find(row => row.event.type === "session.step.ended")!
+  const start = events(snapshot).find(row => row.event.type === "session.step.started")!
+  const index = snapshot.records.indexOf(firstEnd)
+  const records = [...snapshot.records]
+  records.splice(index, 0,
+    host("session.text.started", 900, { assistantMessageID: start.event.data.assistantMessageID, ordinal: 42 }, start.event.sessionID),
+    host("session.text.ended", 901, { assistantMessageID: start.event.data.assistantMessageID, ordinal: 42, text: "current tool-stage verdict" }, start.event.sessionID))
+  const complete = revise({ ...snapshot, records }, () => true)
+  expect(projectOwnedChildOutcome(complete).status).toBe("error")
+  expect(projectOwnedChildOutcome(complete, "final-text")).toMatchObject({ status: "completed", text: "current tool-stage verdict" })
+  expect(projectOwnedChildOutcome(complete, "turn")).toMatchObject({ status: "completed", text: "current tool-stage verdict", observedToolCalls: 1, observedSteps: 2 })
+})
+
+test("turn policy preserves failure Stop delivery cursor retry and tool coverage gates", () => {
+  for (const name of ["error", "interrupt"] as const) expect(projectOwnedChildOutcome(fixture(name), "turn").status).not.toBe("completed")
+  const empty = fixture("empty")
+  expect(projectOwnedChildOutcome({ ...empty, records: [...empty.records, { kind: "stop", id: "stop:policy" }] }, "turn").status).toBe("pending")
+  expect(projectOwnedChildOutcome({ ...empty, records: empty.records.filter(row => row.kind !== "input") }, "turn").status).toBe("control-only")
+  expect(projectOwnedChildOutcome(revise(empty, row => row.kind !== "host" || !row.event.type.startsWith("session.step.") && !row.event.type.startsWith("session.text.")), "turn").status).toBe("uncertain")
+  const gap = fixture("empty"); events(gap).at(-1)!.event.durable!.seq += 1
+  expect(projectOwnedChildOutcome(gap, "turn").status).toBe("uncertain")
+  const retry = retryFixture()
+  expect(projectOwnedChildOutcome(revise(retry, row => row.kind !== "host" || row.event.type !== "session.retry.scheduled"), "turn").status).toBe("uncertain")
+  const tool = fixture("tool")
+  expect(projectOwnedChildOutcome(revise(tool, row => row.kind !== "host" || !["session.tool.success", "session.tool.failed"].includes(row.event.type)), "turn").status).toBe("uncertain")
+})
+
+test("explicit Native policies never borrow nonempty text from an earlier execution frame", () => {
+  const prior = fixture(), next = fixture("empty")
+  // Same owned session, but fresh assistant/input/event identities and a new actual frame.
+  for (const row of next.records) {
+    row.id = `next:${row.id}`
+    if (row.kind === "input") row.inboxID = `next:${row.inboxID}`
+    if (row.kind === "host") {
+      row.event.id = row.id; row.event.sessionID = prior.binding.locator.sessionID
+      row.event.durable!.aggregateID = prior.binding.locator.sessionID
+      if (row.event.data.inboxID) row.event.data.inboxID = `next:${row.event.data.inboxID}`
+      if (row.event.data.assistantMessageID) row.event.data.assistantMessageID = `next:${row.event.data.assistantMessageID}`
+    }
+  }
+  const snapshot = revise({ ...prior, records: [...prior.records, ...next.records] }, () => true)
+  expect(projectOwnedChildOutcome(snapshot, "turn")).toMatchObject({ status: "completed", text: "" })
+  expect(projectOwnedChildOutcome(snapshot, "final-text")).toMatchObject({ status: "error", reason: "empty-assistant-output" })
+})
+
+test("both Native policies keep unknown version missing delivery and unfinished assistant gates", () => {
+  for (const policy of ["turn", "final-text"] as const) {
+    const version = fixture("empty"); events(version).at(-1)!.event.durable!.version = 99
+    expect(projectOwnedChildOutcome(version, policy).status).toBe("uncertain")
+    const delivery = fixture("empty")
+    expect(projectOwnedChildOutcome(revise(delivery, row => row.kind !== "host" || row.event.type !== "session.inbox.delivered"), policy).status).toBe("control-only")
+    const unfinished = fixture("empty")
+    events(unfinished).find(row => row.event.type === "session.step.ended")!.event.data.finish = "tool-calls"
+    expect(projectOwnedChildOutcome(unfinished, policy)).toMatchObject({ status: "uncertain", reason: "unfinished-assistant-turn" })
+    const pending = fixture("empty")
+    expect(projectOwnedChildOutcome({ ...pending, records: [...pending.records, { kind: "input", id: "next:undelivered", inboxID: "undelivered" }] }, policy).status).toBe("pending")
+  }
+})
+
+test("Native policy cannot borrow pre-delivery control steps in the same execution", () => {
+  const snapshot = fixture("empty"), sessionID = snapshot.binding.locator.sessionID
+  const at = snapshot.records.findIndex(row => row.kind === "host" && row.event.type === "session.inbox.delivered")
+  const records = [...snapshot.records]
+  records.splice(at, 0,
+    host("session.step.started", 800, { assistantMessageID: "control-before-input", model: { providerID: "qa-local", id: "control" } }, sessionID),
+    host("session.text.started", 801, { assistantMessageID: "control-before-input", ordinal: 0 }, sessionID),
+    host("session.text.ended", 802, { assistantMessageID: "control-before-input", ordinal: 0, text: "CONTROL_TEXT_MUST_NOT_BORROW" }, sessionID),
+    host("session.step.ended", 803, { assistantMessageID: "control-before-input", finish: "stop" }, sessionID))
+  const complete = revise({ ...snapshot, records }, () => true)
+  expect(projectOwnedChildOutcome(complete, "turn")).toMatchObject({ status: "completed", text: "" })
+  expect(projectOwnedChildOutcome(complete, "final-text")).toMatchObject({ status: "error", reason: "empty-assistant-output" })
+  const noOwnedStep = revise(complete, row => row.kind !== "host" || !row.event.data.assistantMessageID || row.event.data.assistantMessageID === "control-before-input")
+  for (const policy of ["turn", "final-text"] as const) expect(projectOwnedChildOutcome(noOwnedStep, policy))
+    .toMatchObject({ status: "uncertain", reason: "missing-owned-assistant-step" })
+})
 test("actual provider failure and interrupted text cannot project completed", () => {
   expect(projectOwnedChildOutcome(fixture("error"))).toMatchObject({ status: "error", reason: "provider.invalid-request" })
   expect(projectOwnedChildOutcome(fixture("interrupt"))).toMatchObject({ status: "interrupted", reason: "host-interrupted" })

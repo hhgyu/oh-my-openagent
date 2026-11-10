@@ -96,6 +96,10 @@ async function findFirstPartyEffectImports(): Promise<string[]> {
     .filter((path) => path.length > 0)
 }
 
+// The OpenCode 2 plugin API is Effect-based; only its host adapter (and the build test of its Effect root)
+// may import the host-provided effect.
+const EFFECT_HOST_ADAPTER_PREFIXES = ["packages/omo-opencode/src/v2/", "packages/omo-opencode/src/opencode-v2/", "script/build-v2-effect-root.test.ts"] as const
+
 describe("dependency security", () => {
   it("#given picomatch is bundled into the published dist #when dependencies are locked #then it uses the patched ReDoS-safe release", () => {
     const packageJson = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf-8")) as {
@@ -113,9 +117,11 @@ describe("dependency security", () => {
     expect(bunLock.workspaces?.[""]?.devDependencies?.picomatch).toBe(`^${MINIMUM_SAFE_PICOMATCH_VERSION}`)
   })
 
-  it("#given effect is only needed by OpenCode internals #when root dependencies are locked #then the root package does not depend on effect directly", () => {
+  it("#given effect is supplied by the OpenCode host #when root dependencies are locked #then the root package never ships it as a runtime dependency", () => {
     const packageJson = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf-8")) as {
       dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+      peerDependencies?: Record<string, string>
     }
     const bunLock = parse(readFileSync(join(REPO_ROOT, "bun.lock"), "utf-8")) as BunLock
     const opencodePluginDependencies = bunLock.packages?.["@opencode-ai/plugin"]?.[2]
@@ -125,16 +131,21 @@ describe("dependency security", () => {
     expect(opencodePluginDependencies).toMatchObject({
       dependencies: expect.objectContaining({ effect: expect.any(String) }),
     })
-    expect(bunLock.packages?.effect?.[0]).toBe("effect@4.0.0-beta.83")
+    // The OpenCode 2 Effect host adapter compiles against the host's effect: a peer, pinned only for
+    // development, and kept external in the V2 build so the published bundle never carries it.
+    expect(packageJson.peerDependencies?.effect).toBeDefined()
+    expect(bunLock.packages?.effect?.[0]).toBe(`effect@${packageJson.devDependencies?.effect}`)
+    const buildNodes = readFileSync(join(REPO_ROOT, "script", "build-nodes.ts"), "utf-8")
+    expect(buildNodes).toMatch(/const V2_EXTERNALS = \[[^\]]*"effect"[^\]]*\]/)
   })
 
   // The scan spawns `git grep -E` over every first-party source and already bounds that spawn at
   // 60s so a stalled grep fails deterministically. The case therefore has to outlive its own
   // guard: on the 5s default the test died before the spawn budget could ever apply, which is the
   // Windows failure. The assertion is unchanged - only the ceiling now exceeds what it wraps.
-  it("#given first-party TypeScript sources #when dependency imports are scanned #then no source imports effect directly", async () => {
+  it("#given first-party TypeScript sources #when dependency imports are scanned #then only the OpenCode 2 Effect host adapter imports effect", async () => {
     const effectImports = await findFirstPartyEffectImports()
 
-    expect(effectImports).toEqual([])
+    expect(effectImports.filter((path) => !EFFECT_HOST_ADAPTER_PREFIXES.some((prefix) => path.startsWith(prefix)))).toEqual([])
   }, 90_000)
 })

@@ -5,7 +5,16 @@ import { Effect, type Scope } from "effect"
 import type { Rpc } from "@opencode/plugin"
 import { z } from "zod"
 import { registerAgents } from "./agents"
+import { createMutationRuntime } from "./hooks/runtime"
+import { registerGitMasterReadHook } from "./hooks/git-master"
+import { registerCommentChecker } from "./hooks/comment-checker"
+import { registerQuestionGates } from "./hooks/question-gates"
+import { registerTodoFanoutReminder } from "./hooks/todo-fanout-reminder"
+import { registerUltrawork } from "./hooks/ultrawork"
+import { loadRuntimeConfig } from "./config/runtime"
 import { acquireEffectSessionBackendApi } from "./host/effect-session-backend-api"
+// Type-only: the component modules load SQLite-backed journals, so they are imported only when enabled.
+import type { NativeTaskEffectOwners } from "./orchestration/native-task/component"
 
 export const PLUGIN_ID = "oh-my-openagent"
 export const BOOTSTRAP_STAGE = "bootstrap"
@@ -55,10 +64,40 @@ export async function registerBootstrap(rpc: BootstrapRpc): Promise<Cleanup> {
   }
 }
 
-export async function setupV2Host(context: Plugin.Context): Promise<Cleanup> {
+export interface V2HostOwners {
+  /** Present only on the Effect host: the Native task component needs Effect-scoped owners. */
+  readonly nativeTask?: NativeTaskEffectOwners
+}
+
+export function nativeTaskEnabled(options: Plugin.Context["options"] | undefined): boolean {
+  return options?.["omo-native-task-enabled"] !== false
+}
+
+export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners = {}): Promise<Cleanup> {
   const cleanups: Cleanup[] = []
   try {
     cleanups.push(await registerAgents(context.agent, { cwd: context.location.directory }))
+    cleanups.push(await registerGitMasterReadHook(context))
+    cleanups.push(await registerUltrawork(context))
+    cleanups.push(await registerTodoFanoutReminder(context))
+    cleanups.push(await registerQuestionGates(context))
+    cleanups.push(await registerCommentChecker(context))
+    if (context.options?.["omo-memory-enabled"] !== false) {
+      const { registerMemoryComponent } = await import("./memory")
+      cleanups.push(await registerMemoryComponent(context))
+    }
+    if (context.options?.["omo-senpi-lsp-tools-enabled"] !== false) {
+      const snapshot = loadRuntimeConfig({ cwd: context.location.directory })
+      const runtime = createMutationRuntime({
+        ...(snapshot.config.formatOnMutation ? { formatOnMutation: snapshot.config.formatOnMutation } : {}),
+        diagnosticsEnabled: context.options?.["omo-senpi-lsp-post-edit-diagnostics-enabled"] !== false,
+      })
+      cleanups.push(await runtime.register(context))
+    }
+    if (owners.nativeTask) {
+      const { registerNativeTaskComponent } = await import("./orchestration/native-task/component")
+      cleanups.push(await registerNativeTaskComponent(context, owners.nativeTask))
+    }
     cleanups.push(await registerBootstrap(context.rpc))
   } catch (error) {
     for (const cleanup of cleanups.reverse()) {
@@ -84,12 +123,16 @@ export function setupV2EffectHost(context: EffectPlugin.Context): Effect.Effect<
     // Acquire first: component cleanup can still use this API before its owner finalizer joins requests.
     const bridge = yield* acquireEffectSessionBackendApi(context.session)
     console.info("[oh-my-openagent/v2] Effect session transport ready", context.app.version)
+    // Acquired BEFORE the Promise component so scope finalization (LIFO) closes them after it.
+    const nativeTask = nativeTaskEnabled(context.options)
+      ? yield* Effect.flatMap(Effect.promise(() => import("./orchestration/native-task/component")), component => component.acquireNativeTaskEffectOwners(context, bridge))
+      : undefined
     yield* fromPromise({
       id: PLUGIN_ID,
       setup: (promiseContext) => setupV2Host({
         ...promiseContext,
         session: { ...promiseContext.session, ...bridge },
-      }),
+      }, nativeTask ? { nativeTask } : {}),
     }).effect(context)
   })
 }
@@ -100,3 +143,4 @@ export const omoV2Plugin = {
 }
 
 export default omoV2Plugin
+

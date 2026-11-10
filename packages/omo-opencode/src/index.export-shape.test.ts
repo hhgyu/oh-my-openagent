@@ -23,12 +23,21 @@ describe("oh-my-openagent plugin export shape", () => {
     const registered: string[] = []
     const disposed: string[] = []
     const context = {
+      options: { "omo-senpi-lsp-tools-enabled": false, "omo-senpi-ultrawork-disabled": true, "omo-senpi-todo-fanout-reminder-disabled": true, "omo-senpi-question-gates-disabled": true, "omo-senpi-comment-checker-disabled": true, "omo-memory-enabled": false },
       location: { directory: process.cwd() as Plugin.Context["location"]["directory"] },
       agent: {
         transform: async (callback) => {
           expect(typeof callback).toBe("function")
           registered.push("agents")
           return { dispose: async () => { disposed.push("agents") } }
+        },
+      },
+      tool: {
+        hook: async (name, callback) => {
+          expect(name).toBe("execute.after")
+          expect(typeof callback).toBe("function")
+          registered.push("tool-after")
+          return { dispose: async () => { disposed.push("tool-after") } }
         },
       },
       rpc: {
@@ -41,8 +50,10 @@ describe("oh-my-openagent plugin export shape", () => {
         },
       },
     } satisfies {
+      options: Plugin.Context["options"]
       location: Plugin.Context["location"]
       agent: Pick<Plugin.Context["agent"], "transform">
+      tool: Pick<Plugin.Context["tool"], "hook">
       rpc: Pick<Plugin.Context["rpc"], "register">
     }
 
@@ -50,9 +61,9 @@ describe("oh-my-openagent plugin export shape", () => {
     expect(typeof pluginModule.server).toBe("function")
     expect(typeof pluginModule.setup).toBe("function")
     const cleanup = await pluginModule.setup(context as Plugin.Context)
-    expect(registered).toEqual(["agents", "rpc"])
+    expect(registered).toEqual(["agents", "tool-after", "rpc"])
     expect(typeof cleanup).toBe("function")
     await cleanup?.()
-    expect(disposed).toEqual(["rpc", "agents"])
+    expect(disposed).toEqual(["rpc", "tool-after", "agents"])
   })
 })

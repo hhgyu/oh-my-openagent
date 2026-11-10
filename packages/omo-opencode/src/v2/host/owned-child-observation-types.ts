@@ -18,6 +18,14 @@ export const safeChildEventSchema = z.object({
 }).strict().refine(event => event.data.text === undefined || event.type === "session.text.ended", "Text is only retained for final text parts")
 export type ObservedModel = z.infer<typeof observedModelSchema>
 export type SafeChildEvent = z.infer<typeof safeChildEventSchema>
+const metadataIdentity = z.string().min(1).max(4096).regex(/^[^\s\x00-\x1f\x7f]+$/)
+/** Parent hook facts, not host events: no timestamp, durable cursor or event ID. */
+export const safeToolMetadataSchema = z.object({
+  sessionID: metadataIdentity, messageID: metadataIdentity, callID: metadataIdentity,
+  tool: z.string().min(1).max(512).regex(/^[A-Za-z0-9_.:-]+$/), status: z.enum(["completed", "error"]),
+}).strict()
+export type SafeToolMetadata = z.infer<typeof safeToolMetadataSchema>
+export const toolMetadataRecordID = (value: SafeToolMetadata): string => `tool-metadata:${JSON.stringify([value.sessionID,value.messageID,value.callID])}`
 export const observationRecordSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("host"), id: text, event: safeChildEventSchema }).strict().refine(value => value.id === value.event.id, "Host event identity mismatch"),
   z.object({ kind: z.literal("input"), id: text, inboxID: text }).strict(),
@@ -25,6 +33,8 @@ export const observationRecordSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("primary"), id: text, model: observedModelSchema }).strict(),
   z.object({ kind: z.literal("auxiliary"), id: text, requestKind: z.enum(["title", "generate", "compaction"]) }).strict(),
   z.object({ kind: z.literal("uncertain"), id: text, reason: z.string().min(1).max(128) }).strict(),
+  z.object({ kind: z.literal("tool-metadata"), id: z.string().min(1).max(74_000), metadata: safeToolMetadataSchema }).strict().refine(value => value.id === toolMetadataRecordID(value.metadata), "Tool metadata identity mismatch"),
+  z.object({ kind: z.literal("tool-metadata-gap"), id: text, reason: z.string().min(1).max(128) }).strict(),
 ])
 export type ObservationRecord = z.infer<typeof observationRecordSchema>
 export interface ObservationBinding { readonly key: string; readonly token: string; readonly locator: ChildLocator }
@@ -59,6 +69,18 @@ export interface OwnedChildOutcome {
   readonly observedToolCalls?: number
   readonly tokens?: z.infer<typeof tokensSchema>
   readonly cost?: number
+}
+
+/** Safe parent-owned read view. It deliberately exposes no custody capability. */
+export interface OwnedChildObservationView {
+  readonly records: readonly ObservationRecord[]
+  readonly uncertainty: readonly string[]
+  readonly toolMetadata: {
+    readonly scope: "model-loop-outer-calls"
+    readonly coverage: "unavailable" | "partial" | "uncertain"
+    readonly reasons: readonly string[]
+    readonly joined: readonly SafeToolMetadata[]
+  }
 }
 
 /** Project only safe fields, never stringify raw provider errors, inputs or outputs. */

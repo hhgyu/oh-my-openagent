@@ -1,4 +1,4 @@
-import { Database, constants } from "bun:sqlite"
+import { Database, constants } from "../../shared/bun-sqlite-shim"
 import { randomUUID } from "node:crypto"
 import { isAbsolute } from "node:path"
 import { z } from "zod"
@@ -100,6 +100,7 @@ export function openOwnedChildObservationStore(options: OwnedChildObservationSto
     function validateRecord(raw: unknown, locator: ObservationBinding["locator"]): ObservationRecord {
       const record = parsed(observationRecordSchema, raw, "Invalid observation record")
       if (record.kind === "host" && (record.event.sessionID !== locator.sessionID || (record.event.durable && record.event.durable.aggregateID !== locator.sessionID))) fail("Foreign observation session or aggregate")
+      if (record.kind === "tool-metadata" && record.metadata.sessionID !== locator.sessionID) fail("Foreign tool metadata session")
       return record
     }
     function readRecords(binding: ObservationBinding): ObservationRecord[] {

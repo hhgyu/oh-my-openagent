@@ -113,3 +113,18 @@ test("global orphan detection rejects unrelated binding keys instead of hiding c
  expect((db.query("SELECT count(*) AS count FROM observation_records WHERE key='unassociated'").get() as {count:number}).count).toBe(1)
  } finally { db.close() }
 })
+
+test("parent hook metadata persistence remains bounded to actual bound child session",()=>{
+ const metadata={sessionID:"foreign",messageID:"assistant",callID:"actual",tool:"final_target",status:"completed" as const}
+ const child=bind(open());expect(()=>child.append({kind:"tool-metadata",id:`tool-metadata:${JSON.stringify([metadata.sessionID,metadata.messageID,metadata.callID])}`,metadata})).toThrow("Foreign")
+ expect(child.snapshot().records).toEqual([]);expect(child.snapshot().uncertainty).toContain("invalid-record")
+})
+
+test("safe parent metadata survives existing SQLite JSON rows without schema or version migration",()=>{
+ const file=path(),store=open(file),child=bind(store)
+ const metadata={sessionID:"child",messageID:"assistant",callID:"actual",tool:"final_target",status:"error" as const}
+ const record:ObservationRecord={kind:"tool-metadata",id:`tool-metadata:${JSON.stringify([metadata.sessionID,metadata.messageID,metadata.callID])}`,metadata}
+ child.append(record);child.append(record);expect(child.snapshot().records).toEqual([record]);store.close()
+ const db=new Database(file,{readonly:true});expect((db.query("PRAGMA user_version").get() as {user_version:number}).user_version).toBe(1);db.close()
+ const next=bind(open(file));expect(next.snapshot().records).toEqual([record]);expect(next.snapshot().uncertainty).toContain("rebound")
+})

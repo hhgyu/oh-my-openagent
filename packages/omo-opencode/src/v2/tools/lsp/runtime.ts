@@ -1,5 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks"
 import { homedir } from "node:os"
-import { existsSync, realpathSync, statSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import type { ToolContext, Result } from "@opencode/plugin/promise/tool"
@@ -15,11 +16,13 @@ import {
 import { runWithRequestContext, canonicalizeExistingOrNearestAncestor, isPathInside, type LspRequestContext } from "@oh-my-opencode/lsp-core/request-context"
 import { findBunProjectRoot, resolveBunProjectCommand, runBunCommand } from "@oh-my-opencode/lsp-core/lsp/bun-project-checks"
 import { parseBunCheckOutput, parseBunLintJson } from "@oh-my-opencode/lsp-core/lsp/bun-command-output"
+import { DEFAULT_FORMATTING_OPTIONS } from "@oh-my-opencode/lsp-core/lsp/format-document"
+import { normalizeTextEdits } from "@oh-my-opencode/lsp-core/lsp/workspace-edit-text"
 import { lspSchemas, type LspToolName } from "./schemas"
 
 export class LspToolFailure extends Error {
   override readonly name = "LspToolFailure"
-  constructor(readonly code: "missing_dependency" | "invalid_path" | "workspace_edit_rejected" | "diagnostics_unavailable" | "disposed", message: string) { super(message) }
+  constructor(readonly code: "missing_dependency" | "invalid_path" | "workspace_edit_rejected" | "diagnostics_unavailable" | "disposed" | "reentrant_operation", message: string) { super(message) }
 }
 
 /** Reuses the neutral transport and document tracker. No call acquires core's auto-write
@@ -33,8 +36,20 @@ export class RequestOnlyLspClient extends LspClient {
   }
 }
 
+export interface LspFormatResult {
+  readonly details: {
+    readonly status: "formatted" | "unchanged" | "unavailable"
+    readonly reason?: string
+    readonly message?: string
+    readonly linesAdded: number
+    readonly linesRemoved: number
+    readonly changedFiles?: readonly string[]
+    readonly delta?: WorkspaceMutationDelta
+  }
+}
+
 export interface LspMutation {
-  readonly tool: "lsp_rename"
+  readonly tool: "lsp_rename" | "format"
   readonly context: ToolContext
   readonly changedFiles: readonly string[]
   readonly delta: WorkspaceMutationDelta
@@ -45,7 +60,7 @@ export interface LspRuntimeOptions {
   readonly homeDirectory?: string
   readonly permission: Pick<PermissionDomain, "assert">
   /** The session/tool policy owner must reject read-only callers here; never infer identity. */
-  readonly authorize: (context: ToolContext, operation: { readonly tool: LspToolName; readonly mutates: boolean; readonly path: string }) => void | Promise<void>
+  readonly authorize: (context: ToolContext, operation: { readonly tool: LspToolName | "format"; readonly mutates: boolean; readonly path: string }) => void | Promise<void>
   /** Required sink for actual mutation facts, including partial commits. No formatter implied. */
   readonly onMutation: (event: LspMutation) => void | Promise<void>
   readonly clientFactory?: (root: string, server: ResolvedServer) => RequestOnlyLspClient
@@ -103,8 +118,10 @@ export function createLspRuntime(options: LspRuntimeOptions) {
   }
   let manager: LspManager | undefined
   let disposed = false
+  let disposal: Promise<void> | undefined
   const lifetime = new AbortController()
   const active = new Set<Promise<unknown>>()
+  const operationScope = new AsyncLocalStorage<{ active: boolean }>()
   // Rename and reads share one queue: document synchronization cannot race another request.
   let tail: Promise<unknown> = Promise.resolve()
   const getManager = () => manager ??= new LspManager({ clientFactory: options.clientFactory ?? ((root, server) => new RequestOnlyLspClient(root, server)) })
@@ -143,6 +160,82 @@ export function createLspRuntime(options: LspRuntimeOptions) {
       finally { owned.releaseClient(root, server.id) }
     }
     return withLspClient(path, (client, root, file) => fn(client as RequestOnlyLspClient, root, file), operation, { manager: owned, signal })
+  }
+  function queued<T>(caller: ToolContext, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    if (disposed) return Promise.reject(new LspToolFailure("disposed", "LSP component disposed"))
+    if (operationScope.getStore()?.active) return Promise.reject(new LspToolFailure("reentrant_operation", "Call LSP operations after the original execution settles, never inside its onMutation callback"))
+    const signal = AbortSignal.any([caller.signal, lifetime.signal])
+    const work = tail.catch(() => {}).then(() => runWithRequestContext(context, () => {
+      const scope = { active: true }
+      return operationScope.run(scope, async () => {
+        try { signal.throwIfAborted(); return await operation(signal) }
+        finally { scope.active = false }
+      })
+    }))
+    tail = work
+    active.add(work); void work.then(() => active.delete(work), () => active.delete(work))
+    return awaitSignal(work, signal)
+  }
+  async function runFormat(filePath: string, caller: ToolContext, signal: AbortSignal): Promise<LspFormatResult> {
+    const inputPath = lspSchemas.lsp_diagnostics.parse({ filePath }).filePath
+    const path = canonical(inputPath)
+    if (!isPathInside(directory, path)) throw new LspToolFailure("invalid_path", "Formatting must stay inside the owning workspace")
+    await awaitSignal(Promise.resolve(options.authorize(caller, { tool: "format", mutates: true, path })), signal)
+    await grantRead(caller, [path, findWorkspaceRoot(path)], signal)
+    if (canonical(inputPath) !== path || !statSync(path).isFile()) throw new LspToolFailure("invalid_path", "Formatting requires a stable source file in the owning workspace")
+    const stamp = () => { const stat = statSync(path); return [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(":") }
+    const beforeStamp = stamp()
+    const before = readFileSync(path, "utf8")
+    const unchangedSnapshot = () => {
+      signal.throwIfAborted()
+      if (canonical(inputPath) !== path || stamp() !== beforeStamp || readFileSync(path, "utf8") !== before) throw new LspToolFailure("workspace_edit_rejected", "File changed during LSP formatting; retry without overwriting the external edit")
+    }
+    unchangedSnapshot()
+    let acquired = false
+    try {
+      return await withClient(path, signal, "format", async client => {
+        acquired = true
+        unchangedSnapshot()
+        let edits: Awaited<ReturnType<LspClient["formatDocument"]>>
+        try { edits = await client.formatDocument(path, DEFAULT_FORMATTING_OPTIONS, signal) }
+        catch (error) {
+          unchangedSnapshot()
+          if (error && typeof error === "object" && "code" in error && error.code === -32601) return { details: { status: "unavailable", reason: "capability_not_advertised", linesAdded: 0, linesRemoved: 0 } }
+          throw error
+        }
+        unchangedSnapshot()
+        if (edits === null) return { details: { status: "unavailable", reason: "capability_not_advertised", linesAdded: 0, linesRemoved: 0 } }
+        const normalized = normalizeTextEdits(before, edits, 0)
+        if (normalized.text === before) return { details: { status: "unchanged", linesAdded: 0, linesRemoved: 0 } }
+        const edit = normalizeWorkspaceEditUris({ changes: { [pathToFileURL(path).href]: [...normalized.edits] } }, directory)
+        const planned = planWorkspaceEdit(edit, directory)
+        if (!planned.success) throw new LspToolFailure("workspace_edit_rejected", planned.result.errors.join("\n"))
+        await permission(caller, "edit", [path], signal)
+        unchangedSnapshot()
+        const committed = commitWorkspaceEditPlan(planned.plan, { signal })
+        if (committed.delta.changedPaths.length) {
+          // A format is an internal operation fact with the ORIGINAL caller, not a new tool trace.
+          let observerFailed = false; let observerError: unknown
+          try { await options.onMutation({ tool: "format", context: caller, changedFiles: committed.delta.changedPaths, delta: committed.delta, success: committed.result.success }) }
+          catch (error) { observerFailed = true; observerError = error }
+          let syncFailed = false; let syncError: unknown
+          try { await client.openFile(path) }
+          catch (error) { syncFailed = true; syncError = error }
+          if (observerFailed) throw observerError
+          if (syncFailed) throw syncError
+        }
+        if (!committed.result.success) throw new LspToolFailure("workspace_edit_rejected", committed.result.errors.join("\n"))
+        signal.throwIfAborted()
+        return { details: { status: "formatted", linesAdded: normalized.edits.reduce((count, edit) => count + edit.newText.split("\n").length, 0), linesRemoved: normalized.edits.reduce((count, edit) => count + edit.range.end.line - edit.range.start.line + 1, 0), changedFiles: committed.delta.changedPaths, delta: committed.delta } }
+      })
+    } catch (error) {
+      if (signal.aborted) throw signal.reason
+      if (!acquired && error instanceof LspServerLookupError) {
+        unchangedSnapshot()
+        return { details: { status: "unavailable", reason: "missing_dependency", message: error.message, linesAdded: 0, linesRemoved: 0 } }
+      }
+      throw error
+    }
   }
   async function bunDiagnostics(path: string, extension: string, severity: "error" | "warning" | "information" | "hint" | "all", caller: ToolContext, signal: AbortSignal): Promise<Result | undefined> {
     if (![".ts", ".tsx", ".mts", ".cts"].includes(extension) || !findBunProjectRoot(path, home)) return undefined
@@ -284,26 +377,25 @@ export function createLspRuntime(options: LspRuntimeOptions) {
   }
   return {
     execute(name: LspToolName, input: unknown, caller: ToolContext): Promise<Result> {
-      if (disposed) return Promise.reject(new LspToolFailure("disposed", "LSP component disposed"))
-      const signal = AbortSignal.any([caller.signal, lifetime.signal])
-      const work = tail.catch(() => {}).then(() => runWithRequestContext(context, async () => {
+      return queued(caller, async signal => {
         try { return await run(name, input, caller, signal) }
         catch (error) {
           if (signal.aborted) throw signal.reason
           if (error instanceof LspServerLookupError) throw new LspToolFailure("missing_dependency", error.message)
           throw error
         }
-      }))
-      tail = work
-      active.add(work);void work.then(() => active.delete(work), () => active.delete(work))
-      return awaitSignal(work, signal)
+      })
+    },
+    /** Invoke only after the original tool execution has settled; onMutation is not a dispatch seam. */
+    format(filePath: string, caller: ToolContext): Promise<LspFormatResult> {
+      return queued(caller, signal => runFormat(filePath, caller, signal))
     },
     snapshot() { return manager?.getSnapshot() ?? [] },
-    async dispose() {
-      if (disposed) return
+    dispose(): Promise<void> {
+      if (disposal) return disposal
       disposed = true; lifetime.abort(new LspToolFailure("disposed", "LSP component disposed"))
-      await Promise.allSettled([...active])
-      await manager?.stopAll()
+      disposal = (async () => { await Promise.allSettled([...active]); await manager?.stopAll() })()
+      return disposal
     },
   }
 }

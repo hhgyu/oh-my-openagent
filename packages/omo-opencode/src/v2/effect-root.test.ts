@@ -53,7 +53,8 @@ function fixture(options: { version?: string; failRpc?: boolean; mutation?: bool
   })
   const host = {
     app: { version: options.version ?? "2.2.6" }, location: { directory },
-    options: { "omo-senpi-lsp-tools-enabled": options.mutation === true, "omo-senpi-lsp-post-edit-diagnostics-enabled": false },
+    // This fixture does not model the tool/permission domains the Native task component acquires.
+    options: { "omo-senpi-lsp-tools-enabled": options.mutation === true, "omo-senpi-lsp-post-edit-diagnostics-enabled": false, "omo-native-task-enabled": false, "omo-senpi-ultrawork-disabled": true, "omo-senpi-todo-fanout-reminder-disabled": true, "omo-senpi-question-gates-disabled": true, "omo-senpi-comment-checker-disabled": true, "omo-memory-enabled": false },
     agent: { get: unused, list: unused, reload: unused, transform: () => registration("agents") },
     session: new Proxy(unused, { get: (_target, key) => key === "get" ? get : unused }),
     tool: new Proxy(unused, { get: (_target, key) => key === "transform"
@@ -78,15 +79,15 @@ test("official scoped Effect composition installs once and cleans RPC then agent
   const f = fixture()
   await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
     yield* setupV2EffectHost(f.host)
-    expect(f.order).toEqual(["register:agents", "register:rpc"])
+    expect(f.order).toEqual(["register:agents", "register:tool-hook", "register:rpc"])
   })))
-  expect(f.order).toEqual(["register:agents", "register:rpc", "dispose:rpc", "dispose:agents"])
+  expect(f.order).toEqual(["register:agents", "register:tool-hook", "register:rpc", "dispose:rpc", "dispose:tool-hook", "dispose:agents"])
 })
 
 test("failed public RPC setup cleans prior agent registration on the same real scope", async () => {
   const f = fixture({ failRpc: true })
   await expect(Effect.runPromise(Effect.scoped(setupV2EffectHost(f.host)))).rejects.toThrow("Fixture RPC failed")
-  expect(f.order).toEqual(["register:agents", "dispose:agents"])
+  expect(f.order).toEqual(["register:agents", "register:tool-hook", "dispose:tool-hook", "dispose:agents"])
 })
 
 test("unverified host versions are refused before any domain registration", async () => {
@@ -96,3 +97,21 @@ test("unverified host versions are refused before any domain registration", asyn
     expect(f.order).toEqual([])
   }
 })
+
+test("existing mutation consumer receives the joined native session producer and scope close joins its finalizer", async () => {
+  const f = fixture({ mutation: true, pendingGet: true })
+  let request: Promise<unknown> | undefined
+  await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+    yield* rootPlugin.effect(f.host)
+    const caller = { sessionID: "ses_effect_root", messageID: "msg_fixture", id: "call_fixture", agent: "build",
+      signal: new AbortController().signal, progress: () => Effect.void }
+    request = Effect.runPromise(f.tools.get("write")!.execute({ path: "fixture.txt", content: "unused" }, caller)).catch(error => error)
+    yield* Effect.promise(() => f.entered)
+    expect(f.getCalls()).toBe(1)
+  })))
+  await request
+  expect(f.order).toContain("get:finalizer-joined")
+  expect(f.order.filter(item => item === "dispose:rpc")).toHaveLength(1)
+  expect(f.order.filter(item => item === "dispose:agents")).toHaveLength(1)
+})
+

@@ -1,10 +1,11 @@
-import { Database, constants } from "bun:sqlite"
+import { Database, constants } from "../../shared/bun-sqlite-shim"
 import { randomUUID } from "node:crypto"
 import { lstatSync, mkdirSync, realpathSync } from "node:fs"
 import { dirname, isAbsolute, parse, resolve } from "node:path"
 import { z } from "zod"
 import { getPidLiveness, getProcessStartIdentity, startIdentitiesConflict } from "@oh-my-opencode/memory-core/process-identity"
 import { SessionBackendError, type ChildJournal, type ChildRecord } from "./session-backend"
+import { PARKING_MARKER_KEY } from "./child-parking"
 
 const applicationID = 0x4f4d4f32
 const integer = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
@@ -15,6 +16,14 @@ const recordSchema = z.object({
   phase: z.enum(["creating", "staged", "admitting", "accepted", "uncertain", "closing", "closed"]),
   admission: z.enum(["none", "pending", "accepted", "uncertain"]), inboxID: text.optional(),
   receipts: z.record(text, z.enum(["pending", "accepted", "uncertain"])).refine(value => Object.keys(value).length <= 4096),
+  turn: z.object({ nativeEpoch: integer, observationKey: z.string().min(1).max(512), firstInputID: text.optional() }).strict().optional(),
+  // Parking is NOT closing: phase stays truthful; conflict/intent never become a receipt.
+  parking: z.object({
+    format: z.literal(1), state: z.enum(["intent", "parked", "conflict", "restoring", "restored"]), id: text, owner: text,
+    original: z.object({ present: z.boolean(), rules: z.array(z.object({ action: z.string().max(4096), resource: z.string().max(4096), effect: z.enum(["allow", "deny", "ask"]) }).strict()).max(4096) }).strict(),
+    fingerprint: z.string().regex(/^[0-9a-f]{64}$/), marker: z.literal(PARKING_MARKER_KEY), agent: text.optional(), nativeEpoch: integer.optional(), intentRevision: integer,
+    readback: z.literal("verified").optional(), conflict: z.string().min(1).max(1024).optional(),
+  }).strict().refine(value => (value.state === "parked" || value.state === "restored") === (value.readback === "verified") && (value.state === "conflict") === (value.conflict !== undefined)).optional(),
 }).strict()
 const ownerSchema = z.object({ token: text, pid: integer.refine(pid => pid > 0), start: text.nullable(), released: z.union([z.literal(0), z.literal(1)]) }).strict()
 type Owner = z.infer<typeof ownerSchema>

@@ -34,3 +34,10 @@ test("persisted tool input and reasoning bodies cannot masquerade as final text"
   expect(observationRecordSchema.safeParse({kind:"host",id:event.id,event:{...event,type}}).success).toBe(false)
  }
 })
+
+test("parent tool metadata is distinct from host events and refuses unsafe persisted identities",()=>{
+ const metadata={sessionID:"child",messageID:"assistant",callID:"call",tool:"final_target",status:"completed"}
+ const id=`tool-metadata:${JSON.stringify([metadata.sessionID,metadata.messageID,metadata.callID])}`
+ expect(observationRecordSchema.safeParse({kind:"tool-metadata",id,metadata}).success).toBe(true)
+ for(const bad of [{id:"invented-host-event"},{metadata:{...metadata,result:"secret"}},{metadata:{...metadata,messageID:"bad\nidentity"}},{metadata:{...metadata,status:"pending"}}])expect(observationRecordSchema.safeParse({kind:"tool-metadata",id,metadata,...bad}).success).toBe(false)
+})
