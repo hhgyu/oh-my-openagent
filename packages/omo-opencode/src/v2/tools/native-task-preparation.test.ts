@@ -1,8 +1,23 @@
 import { Skill } from "@opencode/plugin"
-import { Schema } from "effect"
-import { expect, test } from "bun:test"
+import { Error as ToolError } from "@opencode/plugin/promise/tool"
+import { Effect, Schema, Scope } from "effect"
+import { describe, expect, test } from "bun:test"
 import { join, resolve } from "node:path"
-import { prepareNativeTaskRuntime, type NativeTaskPreparationOptions } from "./native-task-preparation"
+import { acquireEffectPermissionApi } from "../host/effect-permission-api"
+import { prepareNativeTaskRuntime, requestedTaskSkillNames, type NativeSkillCaller, type NativeTaskPreparationOptions, type PreparedNativeTaskRuntime } from "./native-task-preparation"
+
+type SkillAssert = { readonly sessionID: string; readonly agent?: string; readonly action: string; readonly resources: readonly string[]; readonly source?: unknown }
+const caller: NativeSkillCaller = { sessionID: "ses_prep_parent", agent: "prep-agent", messageID: "prep-message", id: "prep-call" }
+/** The GENUINE joined owner over a UNIT SDK permission domain (acquisition is synchronous). */
+function joinedPermission(requests: SkillAssert[], decide: (request: SkillAssert) => Effect.Effect<void, unknown> = () => Effect.void) {
+  return Effect.runSync(Effect.provideService(acquireEffectPermissionApi({ assert: request => {
+    requests.push(request); return decide(request) as Effect.Effect<void, ToolError>
+  } }), Scope.Scope, Scope.makeUnsafe()))
+}
+/** Authorize then load through the per-call loader, as the bridge does. */
+async function load(prepared: PreparedNativeTaskRuntime, names: readonly string[], cwd: string) {
+  return (await prepared.authorizeSkills(caller, names, new AbortController().signal))(names, cwd)
+}
 
 type ModelResult = Awaited<ReturnType<NativeTaskPreparationOptions["models"]["model"]["list"]>>
 type ProviderResult = Awaited<ReturnType<NativeTaskPreparationOptions["models"]["provider"]["list"]>>
@@ -42,16 +57,20 @@ function fixture() {
   const controller = new AbortController()
   let current = true
   const stale = Error("component generation retired")
+  const permissionRequests: SkillAssert[] = []
+  let decide: (request: SkillAssert) => Effect.Effect<void, unknown> = () => Effect.void
+  const permission = joinedPermission(permissionRequests, request => decide(request))
   const options: NativeTaskPreparationOptions = {
     cwd, models: { model: modelPort, provider: providerPort }, skills: skillPort, canonical, signal: controller.signal,
-    assertCurrent() { if (!current) throw stale },
+    assertCurrent() { if (!current) throw stale }, permission,
     configOptions: { env: { HOME: home }, platform: "linux", fileSystem: {
       existsSync: path => Object.hasOwn(files, path),
       readFileSync: path => { reads.push(path); if (!Object.hasOwn(files, path)) throw Error("Virtual config only"); return JSON.stringify(files[path]) },
     } },
   }
   return { options, home, cwd, files, reads, models, providers, skills, modelPort, providerPort, skillPort, canonical, nativeAgents,
-    receiverRows, argumentRows, resolverInputs, formatterInputs, controller, stale, retire() { current = false } }
+    receiverRows, argumentRows, resolverInputs, formatterInputs, controller, stale, retire() { current = false },
+    permissionRequests, setDecision(value: typeof decide) { decide = value } }
 }
 
 test("prepares canonical config/agents, real catalog metadata and named SDK content before synchronous loading", async () => {
@@ -64,7 +83,7 @@ test("prepares canonical config/agents, real catalog metadata and named SDK cont
   expect(f.receiverRows).toEqual([f.modelPort, f.providerPort, f.skillPort])
   expect(f.argumentRows).toEqual([[], [], [{ location: { directory: f.cwd } }]])
   expect(prepared.models[0].availability).toMatchObject({ providerListed: true, enabled: true, authentication: "unknown" })
-  const loaded = prepared.loadSkills(["beta", "missing", "alpha", "beta", "disabled", "missing"], f.cwd)
+  const loaded = (await load(prepared, ["beta", "missing", "alpha", "beta", "disabled", "missing"], f.cwd))
   expect(loaded.resolved).toEqual(["beta", "alpha", "beta"])
   expect(loaded.missing).toEqual(["missing", "missing"])
   expect(loaded.rejected).toEqual([{ name: "disabled", reason: "Skill is disabled by configuration" }])
@@ -74,7 +93,8 @@ test("prepares canonical config/agents, real catalog metadata and named SDK cont
   f.skills.data[0].content = "CHANGED AFTER SNAPSHOT"
   f.nativeAgents.selectedByNative.prompt = "CHANGED AFTER SNAPSHOT"
   f.models.data[0].enabled = false
-  expect(prepared.loadSkills(["alpha"], f.cwd).skills?.[0].content).toBe("ALPHA CONTENT")
+  // Skill content is call-time host data; the agent and model snapshots stay registration-time.
+  expect((await load(prepared, ["alpha"], f.cwd)).skills?.[0].content).toBe("CHANGED AFTER SNAPSHOT")
   expect(prepared.agents.selectedByNative.prompt).toBe("Native port result")
   expect(prepared.models[0].availability.enabled).toBe(true)
   expect(Object.isFrozen(prepared.config)).toBe(true)
@@ -83,10 +103,10 @@ test("prepares canonical config/agents, real catalog metadata and named SDK cont
 
 test("missing and disabled names remain nonfatal Native SkillResolution data; empty list still forwards formatter", async () => {
   const f = fixture(), prepared = await prepareNativeTaskRuntime(f.options)
-  expect(prepared.loadSkills(["absent", "disabled"], f.cwd)).toMatchObject({ resolved: [], missing: ["absent"], rejected: [{ name: "disabled", reason: "Skill is disabled by configuration" }] })
-  expect(prepared.loadSkills([], f.cwd)).toMatchObject({ resolved: [], missing: [], skills: [], rejected: [] })
+  expect((await load(prepared, ["absent", "disabled"], f.cwd))).toMatchObject({ resolved: [], missing: ["absent"], rejected: [{ name: "disabled", reason: "Skill is disabled by configuration" }] })
+  expect((await load(prepared, [], f.cwd))).toMatchObject({ resolved: [], missing: [], skills: [], rejected: [] })
   expect(f.formatterInputs).toHaveLength(2)
-  expect(() => prepared.loadSkills(["alpha"], join(f.cwd, "other"))).toThrow("location")
+  await expect(load(prepared, ["alpha"], join(f.cwd, "other"))).rejects.toThrow("location")
 })
 
 test("foreign response location, ambiguous names and malformed actual paths refuse the whole snapshot", async () => {
@@ -153,10 +173,10 @@ test("stale generation waits for original requests and refuses prepared loader a
   expect(f.resolverInputs).toHaveLength(0)
   const fresh = fixture(), prepared = await prepareNativeTaskRuntime(fresh.options)
   fresh.retire()
-  expect(() => prepared.loadSkills(["alpha"], fresh.cwd)).toThrow(fresh.stale)
+  await expect(prepared.authorizeSkills(caller, ["alpha"], new AbortController().signal)).rejects.toBe(fresh.stale)
   const canceled = fixture(), another = await prepareNativeTaskRuntime(canceled.options)
   canceled.controller.abort(Error("closed lifetime"))
-  expect(() => another.loadSkills(["alpha"], canceled.cwd)).toThrow("closed lifetime")
+  await expect(another.authorizeSkills(caller, ["alpha"], new AbortController().signal)).rejects.toThrow("closed lifetime")
 })
 
 test("synchronous host throws still join other original work and do not replace its identity", async () => {
@@ -178,7 +198,7 @@ test("canonical helper errors propagate and generation change during formatting 
   const formatting = fixture(), prepared = await prepareNativeTaskRuntime({ ...formatting.options, canonical: {
     ...formatting.canonical, buildSkillPrepend() { formatting.retire(); return "not publishable" },
   } })
-  expect(() => prepared.loadSkills(["alpha"], formatting.cwd)).toThrow(formatting.stale)
+  await expect(load(prepared, ["alpha"], formatting.cwd)).rejects.toBe(formatting.stale)
 })
 
 test("each host response is copied on settlement without mutating SDK data or Native shared definitions", async () => {
@@ -203,7 +223,7 @@ test("pre-canceled owner starts no config/catalog work, and formatter errors kee
   const prepared = await prepareNativeTaskRuntime({ ...healthy.options, canonical: {
     ...healthy.canonical, buildSkillPrepend() { throw failure },
   } })
-  expect(() => prepared.loadSkills(["alpha"], healthy.cwd)).toThrow(failure)
+  await expect(load(prepared, ["alpha"], healthy.cwd)).rejects.toBe(failure)
 })
 
 for (const port of ["model", "provider", "skill"] as const) {
@@ -299,19 +319,19 @@ test("real SDK builtin skill URI catalog preserves all content and opaque locati
  ]
  f.skills.data.push(...builtin)
  const prepared=await prepareNativeTaskRuntime(f.options)
- const loaded=prepared.loadSkills(["OpenCode","alpha","Report"],f.cwd)
+ const loaded=(await load(prepared, ["OpenCode","alpha","Report"], f.cwd))
  expect(loaded.resolved).toEqual(["OpenCode","alpha","Report"])
  expect(loaded.skills).toEqual([builtin[0],f.skills.data[0],builtin[1]].map(skill=>({name:skill.name,content:skill.content,location:skill.path})))
  expect(f.formatterInputs).toEqual([{selected:loaded.skills,prompt:"",receiver:f.canonical}])
  expect(loaded.prepend).toBe("CANONICAL_PORT:OpenCode,alpha,Report:")
- expect(prepared.loadSkills(["beta"],f.cwd).skills?.[0].content).toBe("BETA CONTENT")
+ expect((await load(prepared, ["beta"], f.cwd)).skills?.[0].content).toBe("BETA CONTENT")
  expect(f.reads).toEqual([join(f.home,".omo","omo.jsonc")])
 })
 
 test.each(["skill://opaque", "skill://opaque/docs/reference.md", "skill://opaque/SKILL.md///", "skill://opaque/Raw%2Fsegment?query#fragment.md"])("SDK-compatible locator remains opaque and unchanged: %s",async path=>{
  const f=fixture(),skill=Schema.decodeUnknownSync(Skill.Info)({id:"opaque",name:"opaque",path,content:"OPAQUE SDK CONTENT"})
  f.skills.data.push(skill)
- const prepared=await prepareNativeTaskRuntime(f.options),loaded=prepared.loadSkills(["opaque","alpha"],f.cwd)
+ const prepared=await prepareNativeTaskRuntime(f.options),loaded=(await load(prepared, ["opaque","alpha"], f.cwd))
  expect(loaded.skills?.[0]).toEqual({name:"opaque",content:"OPAQUE SDK CONTENT",location:path})
  expect(loaded.skills?.[1].location).toBe(f.skills.data[0].path)
  expect(f.formatterInputs).toEqual([{selected:loaded.skills,prompt:"",receiver:f.canonical}])
@@ -326,4 +346,147 @@ test.each([
  const f=fixture();f.skills.data[0].path=path
  await expect(prepareNativeTaskRuntime(f.options)).rejects.toThrow("Invalid host skill entry")
  expect(f.resolverInputs).toHaveLength(0);expect(f.formatterInputs).toHaveLength(0)
+})
+
+describe("#given a prepared snapshot and the genuine joined permission owner", () => {
+  const signal = () => new AbortController().signal
+  test("#when skills are authorized #then each distinct SDK id is asserted once, in request order, with the genuine caller fields", async () => {
+    // given
+    const f = fixture(), prepared = await prepareNativeTaskRuntime(f.options)
+    // when
+    const loader = await prepared.authorizeSkills(caller, ["beta", "missing", "disabled", "alpha", "beta"], signal())
+    // then
+    expect(f.permissionRequests).toEqual([
+      { sessionID: "ses_prep_parent", agent: "prep-agent", action: "skill", resources: ["beta-id"], source: { type: "tool", messageID: "prep-message", id: "prep-call" } },
+      { sessionID: "ses_prep_parent", agent: "prep-agent", action: "skill", resources: ["alpha-id"], source: { type: "tool", messageID: "prep-message", id: "prep-call" } },
+    ])
+    expect(loader(["beta", "alpha", "missing", "disabled"], f.cwd)).toMatchObject({ resolved: ["beta", "alpha"], missing: ["missing"], rejected: [{ name: "disabled" }] })
+  })
+
+  test("#when the per-call loader is asked for an available skill this call did not authorize #then it refuses", async () => {
+    // given
+    const f = fixture(), prepared = await prepareNativeTaskRuntime(f.options)
+    // when
+    const loader = await prepared.authorizeSkills(caller, ["alpha"], signal())
+    // then
+    expect(() => loader(["alpha", "beta"], f.cwd)).toThrow("Skill was not authorized for this call: beta")
+    expect(f.formatterInputs).toHaveLength(0)
+  })
+
+  test("#when an earlier call authorized a skill #then a later call asserts it again instead of reusing the decision", async () => {
+    // given
+    const f = fixture(), prepared = await prepareNativeTaskRuntime(f.options)
+    await prepared.authorizeSkills(caller, ["alpha"], signal())
+    const denial = new ToolError({ message: "skill denied on second call" })
+    f.setDecision(() => Effect.fail(denial))
+    // when
+    const second = prepared.authorizeSkills({ ...caller, id: "prep-call-2" }, ["alpha"], signal())
+    // then
+    await expect(second).rejects.toBe(denial)
+    expect(f.permissionRequests.map(request => request.source)).toEqual([
+      { type: "tool", messageID: "prep-message", id: "prep-call" }, { type: "tool", messageID: "prep-message", id: "prep-call-2" },
+    ])
+  })
+
+  test("#when the live catalog drops the name while its assert is pending #then the post-assert recheck fails closed", async () => {
+    // given
+    const f = fixture(), prepared = await prepareNativeTaskRuntime(f.options)
+    f.setDecision(() => Effect.sync(() => { f.skills.data.splice(0, 1) }))
+    // when
+    const work = prepared.authorizeSkills(caller, ["alpha"], signal())
+    // then
+    await expect(work).rejects.toThrow("Host skill identity changed during authorization: alpha")
+    expect(f.permissionRequests).toHaveLength(1)
+  })
+
+  test("#when an SDK entry has no usable id #then it is unavailable and never asserted or delivered", async () => {
+    // given
+    const f = fixture()
+    f.skills.data.push({ ...f.skills.data[0], id: "", name: "anonymous" } as SkillsResult["data"][number])
+    const prepared = await prepareNativeTaskRuntime(f.options)
+    // when
+    const loaded = await load(prepared, ["anonymous"], f.cwd)
+    // then
+    expect(loaded).toMatchObject({ resolved: [], missing: ["anonymous"] })
+    expect(f.permissionRequests).toHaveLength(0)
+  })
+
+  test("#when two SDK entries share one id #then the whole snapshot is refused", async () => {
+    // given
+    const f = fixture()
+    f.skills.data.push({ ...f.skills.data[0], name: "alias" })
+    // when
+    const work = prepareNativeTaskRuntime(f.options)
+    // then
+    await expect(work).rejects.toThrow("Ambiguous host skill id")
+  })
+
+  test("#when the permission owner is a structural lookalike #then preparation refuses before any host work", async () => {
+    // given
+    const f = fixture()
+    // when
+    const work = prepareNativeTaskRuntime({ ...f.options, permission: { assert: async () => {}, close: async () => {} } })
+    // then
+    await expect(work).rejects.toThrow("genuine joined permission owner")
+    expect(f.receiverRows).toEqual([])
+  })
+
+  test("#when the operation signal aborts during the assert #then the abort reason rejects and no loader is returned", async () => {
+    // given
+    const f = fixture(), prepared = await prepareNativeTaskRuntime(f.options), controller = new AbortController(), reason = Error("operation aborted")
+    f.setDecision(() => Effect.never)
+    // when
+    const work = prepared.authorizeSkills(caller, ["alpha"], controller.signal)
+    for (let turn = 0; turn < 50 && f.permissionRequests.length === 0; turn++) await new Promise(done => setTimeout(done, 1))
+    controller.abort(reason)
+    // then
+    await expect(work).rejects.toBe(reason)
+    expect(f.permissionRequests).toHaveLength(1)
+  })
+
+  test("#when task input carries batch items #then requested names follow Native inheritance, each once", () => {
+    // given
+    const batch = { load_skills: ["top"], tasks: [{ prompt: "a", load_skills: ["own", "top"] }, { prompt: "b" }, { prompt: "c", load_skills: [] }] }
+    // when
+    const names = requestedTaskSkillNames(batch)
+    // then
+    expect(names).toEqual(["own", "top"])
+    expect(requestedTaskSkillNames({ prompt: "single" })).toEqual([])
+    expect(requestedTaskSkillNames({ prompt: "single", load_skills: ["x", "x"] })).toEqual(["x"])
+  })
+})
+
+describe("#given host skills that change after registration", () => {
+  test("#when a directory skill is discovered after preparation #then the call resolves, asserts and delivers it from a fresh listing", async () => {
+    // given
+    const f = fixture(), prepared = await prepareNativeTaskRuntime(f.options)
+    f.skills.data.push({ id: "late-id", name: "late", path: join(f.cwd, ".opencode", "skills", "late", "SKILL.md"), content: "LATE CONTENT" } as SkillsResult["data"][number])
+    // when
+    const loaded = await load(prepared, ["late"], f.cwd)
+    // then
+    expect(f.permissionRequests.map(request => request.resources)).toEqual([["late-id"]])
+    expect(loaded).toMatchObject({ resolved: ["late"], missing: [], skills: [{ name: "late", content: "LATE CONTENT" }] })
+  })
+
+  test("#when a skill is removed after preparation #then it is reported missing and never asserted", async () => {
+    // given
+    const f = fixture(), prepared = await prepareNativeTaskRuntime(f.options)
+    f.skills.data.splice(f.skills.data.findIndex(skill => skill.name === "alpha"), 1)
+    // when
+    const loaded = await load(prepared, ["alpha"], f.cwd)
+    // then
+    expect(f.permissionRequests).toHaveLength(0)
+    expect(loaded).toMatchObject({ resolved: [], missing: ["alpha"] })
+  })
+
+  test("#when the call-time listing carries a duplicate id #then authorization refuses before any assert", async () => {
+    // given
+    const f = fixture(), prepared = await prepareNativeTaskRuntime(f.options)
+    f.skills.data.push({ ...f.skills.data[0], name: "alias" })
+    // when
+    const work = prepared.authorizeSkills(caller, ["alpha"], new AbortController().signal)
+    // then
+    await expect(work).rejects.toThrow("Ambiguous host skill id")
+    expect(f.permissionRequests).toHaveLength(0)
+  })
 })

@@ -1165,7 +1165,7 @@ export async function withNativeTargetPermissionService(run:(value:{service:Serv
   const service=createNativeTaskService(f.ctx,options)
   // Obtain original canonical target objects from a deliberately unpublished UNIT bridge.
   const targetsReady=Promise.withResolvers<NativeTaskTargets>(),releaseTargets=Promise.withResolvers<void>(),finished=Error("Unit target inspection complete")
-  const inspection=createNativeTaskBridge({tool:{} as never,prepared:{config:await f.options.config(),agents:{},loadSkills:()=>({prepend:"",resolved:[],missing:[]})} as unknown as PreparedNativeTaskRuntime,
+  const inspection=createNativeTaskBridge({tool:{} as never,prepared:{config:await f.options.config(),agents:{},authorizeSkills:async()=>()=>({prepend:"",resolved:[],missing:[]})} as unknown as PreparedNativeTaskRuntime,
    async acquire(targets){targetsReady.resolve(targets);await releaseTargets.promise;throw finished},async rollbackAcquisition(){}})
   try{await run({service,registry,kernel,f,requests,targets:await targetsReady.promise,options,setFence(callback){fence=callback},retire(){current=false}})}finally{releaseTargets.resolve();await inspection.ready.catch(error=>{if(error!==finished)throw error});await inspection.close();await service.close();await Effect.runPromise(Scope.close(scope,Exit.succeed(undefined)))}
  })
@@ -1176,7 +1176,7 @@ test("canonical bridge registers real service targets without invented pretarget
  await withNativeTargetPermissionService(async({service,registry,kernel,f,requests})=>{
   const publicTools:UnitPublicTool[]=[]
   const tool={async hook(){return{async dispose(){}}},async transform(change:(editor:ToolEditor)=>void){change({list:()=>publicTools,get:(id:string)=>publicTools.find(t=>t.id===id),namespace(){},add(value){publicTools.push({...value,id:`public-${value.name}`})},update(id,edit){edit(defined(publicTools.find(t=>t.id===id)))},remove(){}});return{async dispose(){}}},async list(){return publicTools},async reload(){}}
-  const prepared={config:await f.options.config(),agents:{},loadSkills:()=>({prepend:"",resolved:[],missing:[]})} as unknown as PreparedNativeTaskRuntime
+  const prepared={config:await f.options.config(),agents:{},authorizeSkills:async()=>()=>({prepend:"",resolved:[],missing:[]})} as unknown as PreparedNativeTaskRuntime
   const bridge=createNativeTaskBridge({tool,prepared,async rollbackAcquisition(){await service.close()},async acquire(targets){
    const targetPermissions=targets.tools.map(tool=>({tool,permission:service.targetPermission(tool)}))
    registry.replace(targets.tools,targets.codecs,targets.normalizers,targetPermissions)
@@ -1200,7 +1200,7 @@ test("allowed public task start binds the configured G3 producer for the admitte
  await withNativeTargetPermissionService(async({service,registry,kernel,f,requests})=>{
   const publicTools:UnitPublicTool[]=[]
   const tool={async hook(){return{async dispose(){}}},async transform(change:(editor:ToolEditor)=>void){change({list:()=>publicTools,get:(id:string)=>publicTools.find(t=>t.id===id),namespace(){},add(value){publicTools.push({...value,id:`public-${value.name}`})},update(id,edit){edit(defined(publicTools.find(t=>t.id===id)))},remove(){}});return{async dispose(){}}},async list(){return publicTools},async reload(){}}
-  const prepared={config:await f.options.config(),agents:{},loadSkills:()=>({prepend:"",resolved:[],missing:[]})} as unknown as PreparedNativeTaskRuntime
+  const prepared={config:await f.options.config(),agents:{},authorizeSkills:async()=>()=>({prepend:"",resolved:[],missing:[]})} as unknown as PreparedNativeTaskRuntime
   const bridge=createNativeTaskBridge({tool,prepared,async rollbackAcquisition(){await service.close()},async acquire(targets){
    const targetPermissions=targets.tools.map(tool=>({tool,permission:service.targetPermission(tool)}))
    registry.replace(targets.tools,targets.codecs,targets.normalizers,targetPermissions)

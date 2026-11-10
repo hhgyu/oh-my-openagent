@@ -14,7 +14,7 @@ import { bindToolValueCodec, type ToolCodecAssociation } from "../host/tool-valu
 import type { ToolNormalizerAssociation } from "../host/tool-argument-normalizer"
 import type { NativeTaskTargetPermissionAssociation, createNativeTaskService } from "../orchestration/native-task/service"
 import { issueNativeTaskCodecs, nativeTaskInputSchemas } from "./native-task-codecs"
-import type { PreparedNativeTaskRuntime } from "./native-task-preparation"
+import { requestedTaskSkillNames, type PreparedNativeTaskRuntime } from "./native-task-preparation"
 import { adaptNativeTaskResult } from "./native-task-result"
 
 const canonicalTargets = new WeakMap<ListedTool, { readonly id: string; readonly name: string; readonly execute: ListedTool["execute"] }>()
@@ -130,10 +130,15 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
         const context = await resources.context(caller, signal)
         signal.throwIfAborted(); current()
         if (context.sessionManager.getSessionId() !== caller.sessionID) throw Error("Foreign Native task context")
+        // Availability is not authorization: THIS caller's `skill` decisions precede any child
+        // staging, and a deny/reject propagates unchanged. The loader serves only those names.
+        const skillSignal = AbortSignal.any([caller.signal, signal])
+        const loadSkills = await options.prepared.authorizeSkills(caller, requestedTaskSkillNames(input as TaskToolParamsStatic), skillSignal)
+        skillSignal.throwIfAborted(); current()
         const execute = buildTaskExecute({
           ...resources.taskDependencies(caller), manager: operation.task,
           omoConfig: options.prepared.config, agents: options.prepared.agents, resolveAncestry,
-          prepareRuntime: async () => { current(); signal.throwIfAborted() }, loadSkills: options.prepared.loadSkills,
+          prepareRuntime: async () => { current(); signal.throwIfAborted() }, loadSkills,
         })
         const progress = operation.reportProgress
           ? (update: Parameters<NonNullable<Parameters<typeof execute>[3]>>[0]) => {

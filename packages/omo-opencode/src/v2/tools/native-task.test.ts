@@ -1,6 +1,7 @@
 import { withNativeTargetPermissionService } from "../orchestration/native-task/service.test"
-import { expect, test } from "bun:test"
-import { Schema } from "effect"
+import { describe, expect, test } from "bun:test"
+import { Effect, Exit, Schema, Scope } from "effect"
+import { join, resolve } from "node:path"
 import type { ToolContext, ToolDomain, ToolEditor, Info } from "@opencode/plugin/promise/tool"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import type { NativeOperationOwner } from "../orchestration/native-task/operation-ports"
@@ -9,7 +10,8 @@ import { createToolKernel } from "../host/tool-kernel"
 import { createSessionScopes } from "../host/session-state"
 import { createPolicyPipeline } from "../host/policy-pipeline"
 import { createNativeTaskBridge, nativeTaskPublicInput, type NativeTaskBridgeOwner, type NativeTaskBridgeOptions } from "./native-task"
-import type { PreparedNativeTaskRuntime } from "./native-task-preparation"
+import { prepareNativeTaskRuntime, type NativeTaskPreparationOptions, type PreparedNativeTaskRuntime } from "./native-task-preparation"
+import { acquireEffectPermissionApi, type JoinedPermissionApi } from "../host/effect-permission-api"
 import { nativeTaskInputSchemas } from "./native-task-codecs"
 
 function deferred<T>() {
@@ -21,13 +23,14 @@ const tick = async () => { for (let i = 0; i < 12; i++) await Promise.resolve() 
 
 /** Explicit controlled UNIT host. Actual registry/kernel issuance is exercised;
  * no SDK callback, host evaluator, child session or Native engine is claimed. */
-function unitFixture(initial: ListedTool[] = []) {
+function unitFixture(initial: ListedTool[] = [], sessionID = "unit-parent") {
   const events: string[] = [], starts: unknown[] = [], updates: unknown[] = [], entries = [...initial]
   let before: ((event: { tool: string; input: unknown }) => void | Promise<void>) | undefined
   let transform: ((editor: ToolEditor) => void) | undefined
   let parentGate: Promise<unknown> | undefined, acquisitionGate: Promise<unknown> | undefined
   let disposalFailures = 0, serviceFailures = 0, releaseFailures = 0
-  let rollbackFailures = 0
+  let rollbackFailures = 0, contextCwd = "C:/unit/project"
+  const callerController = new AbortController()
   let waitGate: ReturnType<typeof deferred<unknown>> | undefined, closeRejectsWait = false
   const waitEntered = deferred<void>()
   let startedResult: unknown = { kind: "started", task_id: "unit-child", status: "running", name: "unit-child", run_epoch: 1 }
@@ -57,11 +60,11 @@ function unitFixture(initial: ListedTool[] = []) {
   const prepared = {
     config: { task: { default_execution_mode: "in-process" } },
     agents: { worker: { name: "worker", prompt: "unit worker" } },
-    loadSkills: (names: readonly string[]) => ({ prepend: "KNOWN SKILL\n", resolved: names, missing: [] }),
+    authorizeSkills: async () => (names: readonly string[]) => ({ prepend: "KNOWN SKILL\n", resolved: names, missing: [] }),
   } as unknown as PreparedNativeTaskRuntime
   const caller = {
-    sessionID: "unit-parent", agent: "unit-agent", messageID: "unit-message", id: "unit-call",
-    signal: new AbortController().signal, progress: async update => { events.push("progress"); updates.push(update) },
+    sessionID, agent: "unit-agent", messageID: "unit-message", id: "unit-call",
+    signal: callerController.signal, progress: async update => { events.push("progress"); updates.push(update) },
   } as ToolContext
   let resources!: NativeTaskBridgeOwner
   const options: NativeTaskBridgeOptions = { tool, prepared,
@@ -97,7 +100,7 @@ function unitFixture(initial: ListedTool[] = []) {
       async close() { events.push("service:close"); if (serviceFailures-- > 0) throw 0; if (closeRejectsWait) waitGate?.reject(Error("unit service stopped")) },
     } as unknown as NativeTaskBridgeOwner["service"]
     resources = { registry, kernel, service,
-      context(actual) { events.push("context"); return { cwd: "C:/unit/project", sessionManager: { getSessionId: () => actual.sessionID } } },
+      context(actual) { events.push("context"); return { cwd: contextCwd, sessionManager: { getSessionId: () => actual.sessionID } } },
       taskDependencies: () => ({}), outputDependencies: () => ({ stateDir: "C:/unit/state" }),
       async release() { events.push("release"); if (releaseFailures-- > 0) throw null; scopes.dispose() },
     }
@@ -109,6 +112,8 @@ function unitFixture(initial: ListedTool[] = []) {
     failDisposal() { disposalFailures++ }, failService() { serviceFailures++ }, failRelease() { releaseFailures++ },
     failRollback() { rollbackFailures++ },
     setStart(value: unknown) { startedResult = value },
+    setCwd(value: string) { contextCwd = value },
+    abortCaller(reason: unknown) { callerController.abort(reason) },
     waitFor(work: ReturnType<typeof deferred<unknown>>, stopOnClose = false) { waitGate = work; closeRejectsWait = stopOnClose },
     async call(name: string, input: unknown) {
       const selected = defined(entries.find(entry => entry.name === name))
@@ -276,5 +281,180 @@ test("new Native permission mode rejects a different actual service and missing 
   const bridge=createNativeTaskBridge(protocol.options)
   try{await expect(bridge.ready).rejects.toThrow(wrongOwner?"Foreign Native task permission owner":"association differs");expect(protocol.events).not.toContain("hook")}finally{await bridge.close()}
  })
+})
+
+type SkillAssert = { readonly sessionID: string; readonly agent?: string; readonly action: string; readonly resources: readonly string[]; readonly source?: { readonly type: "tool"; readonly messageID: string; readonly id: string } }
+type SkillCatalog = Awaited<ReturnType<NativeTaskPreparationOptions["skills"]["list"]>>
+
+/** UNIT SDK domain behind the GENUINE joined permission owner (real Effect fibers, real AssertInput codec). */
+async function joinedSkillPermission(decide: (request: SkillAssert) => Effect.Effect<void, unknown> = () => Effect.void) {
+  const scope = Scope.makeUnsafe(), requests: SkillAssert[] = []
+  const api = await Effect.runPromise(Effect.provideService(acquireEffectPermissionApi({ assert: request => {
+    requests.push(request); return decide(request) as Effect.Effect<void, ToolError>
+  } }), Scope.Scope, scope))
+  return { api, requests, skillRequests: () => requests.filter(request => request.action === "skill"),
+    async close() { await api.close(); await Effect.runPromise(Scope.close(scope, Exit.succeed(undefined))) } }
+}
+
+/** The REAL preparation over a UNIT SDK skill catalog; the live catalog may be changed after the snapshot. */
+async function preparedWithSkills(permission: JoinedPermissionApi) {
+  const home = resolve("virtual-native-task-skill-home"), cwd = join(home, "project"), user = join(home, ".omo", "omo.jsonc")
+  const config = { task: { default_execution_mode: "in-process" }, memory: { enabled: false }, disabled_skills: ["disabled"] }
+  let catalog: SkillCatalog = { location: { directory: cwd }, data: [
+    { id: "alpha-id", name: "alpha", path: join(home, "skills", "alpha", "SKILL.md"), content: "ALPHA CONTENT" },
+    { id: "skill-beta-7", name: "beta", path: join(home, "skills", "beta", "SKILL.md"), content: "BETA CONTENT" },
+    { id: "disabled-id", name: "disabled", path: join(home, "skills", "disabled", "SKILL.md"), content: "DISABLED CONTENT" },
+  ] } as SkillCatalog
+  let lists = 0
+  const empty = { location: { directory: cwd }, data: [] }
+  const options = { cwd, permission, signal: new AbortController().signal, assertCurrent() {},
+    models: { model: { async list() { return empty } }, provider: { async list() { return empty } } },
+    skills: { async list() { lists++; return structuredClone(catalog) } },
+    canonical: {
+      resolveTaskAgents: () => ({ worker: { name: "worker", prompt: "unit worker" } }),
+      buildSkillPrepend: (selected: readonly { readonly name: string; readonly content: string }[], prompt: string) => selected.map(skill => `<${skill.name}>${skill.content}</${skill.name}>\n`).join("") + prompt,
+    },
+    configOptions: { env: { HOME: home }, platform: "linux", fileSystem: {
+      existsSync: (path: string) => path === user,
+      readFileSync: (path: string) => { if (path !== user) throw Error("Virtual config only"); return JSON.stringify(config) },
+    } },
+  } as unknown as NativeTaskPreparationOptions
+  const prepared = await prepareNativeTaskRuntime(options)
+  return { prepared, cwd, lists: () => lists, replaceCatalog(change: (value: SkillCatalog) => SkillCatalog) { catalog = change(structuredClone(catalog)) } }
+}
+
+async function skillBridge(decide?: (request: SkillAssert) => Effect.Effect<void, unknown>) {
+  const permission = await joinedSkillPermission(decide), real = await preparedWithSkills(permission.api)
+  const f = unitFixture([], "ses_unit_parent"); f.setCwd(real.cwd)
+  const component = createNativeTaskBridge({ ...f.options, prepared: real.prepared })
+  await component.ready
+  return { f, permission, real, component, async close() { await component.close(); await permission.close() } }
+}
+
+describe("#given task load_skills reaching an owned child", () => {
+  test("#when one allowed skill is requested #then the genuine caller asserts its SDK id before the child receives content", async () => {
+    // given
+    const unit = await skillBridge()
+    try {
+      // when
+      await unit.f.call("task", { prompt: "work", subagent_type: "worker", run_in_background: true, load_skills: ["alpha"] })
+      // then
+      expect(unit.f.starts).toHaveLength(1)
+      expect(unit.f.starts[0]).toMatchObject({ prompt: "<alpha>ALPHA CONTENT</alpha>\nwork" })
+      expect(unit.permission.skillRequests()).toEqual([{ sessionID: "ses_unit_parent", agent: "unit-agent", action: "skill", resources: ["alpha-id"],
+        source: { type: "tool", messageID: "unit-message", id: "unit-call" } }])
+    } finally { await unit.close() }
+  })
+
+  test("#when the display name differs from the SDK id #then the assert uses the id and the name is never a resource", async () => {
+    // given
+    const unit = await skillBridge()
+    try {
+      // when
+      await unit.f.call("task", { prompt: "work", subagent_type: "worker", run_in_background: true, load_skills: ["beta"] })
+      // then
+      expect(unit.permission.skillRequests().map(request => request.resources)).toEqual([["skill-beta-7"]])
+      expect(unit.f.starts[0]).toMatchObject({ prompt: "<beta>BETA CONTENT</beta>\nwork" })
+    } finally { await unit.close() }
+  })
+
+  test("#when one of two skill ids is denied #then the whole task is refused with the permission error and no child is staged", async () => {
+    // given
+    const denial = new ToolError({ message: "skill denied by rule" })
+    const unit = await skillBridge(request => request.resources[0] === "skill-beta-7" ? Effect.fail(denial) : Effect.void)
+    try {
+      // when
+      const work = unit.f.call("task", { prompt: "work", subagent_type: "worker", run_in_background: true, load_skills: ["alpha", "beta"] })
+      // then
+      await expect(work).rejects.toBe(denial)
+      expect(unit.permission.skillRequests().map(request => request.resources)).toEqual([["alpha-id"], ["skill-beta-7"]])
+      expect(unit.f.starts).toHaveLength(0)
+    } finally { await unit.close() }
+  })
+
+  test("#when batch items overlap and inherit skills #then each SDK id is asserted exactly once for the call", async () => {
+    // given
+    const unit = await skillBridge()
+    try {
+      // when
+      await unit.f.call("task", { subagent_type: "worker", run_in_background: true, load_skills: ["alpha"], tasks: [
+        { prompt: "one", load_skills: ["beta", "alpha"] }, { prompt: "two", load_skills: ["beta"] }, { prompt: "three" },
+      ] })
+      // then
+      expect(unit.permission.skillRequests().map(request => request.resources)).toEqual([["skill-beta-7"], ["alpha-id"]])
+      expect(unit.f.starts.map(spec => (spec as { prompt: string }).prompt).sort()).toEqual([
+        "<alpha>ALPHA CONTENT</alpha>\nthree", "<beta>BETA CONTENT</beta>\n<alpha>ALPHA CONTENT</alpha>\none", "<beta>BETA CONTENT</beta>\ntwo",
+      ])
+    } finally { await unit.close() }
+  })
+
+  test("#when the host catalog remaps the name to another id while its assert is pending #then the post-assert recheck fails closed", async () => {
+    // given
+    let remap = () => {}
+    const unit = await skillBridge(() => Effect.sync(() => remap()))
+    remap = () => unit.real.replaceCatalog(catalog => ({ ...catalog, data: catalog.data.map(skill => skill.name === "beta" ? { ...skill, id: "replacement-id" } : skill) }) as SkillCatalog)
+    try {
+      // when
+      const work = unit.f.call("task", { prompt: "work", subagent_type: "worker", run_in_background: true, load_skills: ["beta"] })
+      // then
+      await expect(work).rejects.toThrow("Host skill identity changed during authorization: beta")
+      expect(unit.permission.skillRequests().map(request => request.resources)).toEqual([["skill-beta-7"]])
+      expect(unit.f.starts).toHaveLength(0)
+    } finally { await unit.close() }
+  })
+
+  test("#when a project skill is discovered after registration #then the task asserts and delivers it at call time", async () => {
+    // given
+    const unit = await skillBridge()
+    unit.real.replaceCatalog(catalog => ({ ...catalog, data: [...catalog.data, { id: "project-late-id", name: "late", path: join(unit.real.cwd, ".opencode", "skills", "late", "SKILL.md"), content: "LATE CONTENT" }] }) as SkillCatalog)
+    try {
+      // when
+      await unit.f.call("task", { prompt: "work", subagent_type: "worker", run_in_background: true, load_skills: ["late"] })
+      // then
+      expect(unit.permission.skillRequests().map(request => request.resources)).toEqual([["project-late-id"]])
+      expect(unit.f.starts[0]).toMatchObject({ prompt: "<late>LATE CONTENT</late>\nwork" })
+    } finally { await unit.close() }
+  })
+
+  test("#when no load_skills are requested #then no skill permission is asserted and the child still starts", async () => {
+    // given
+    const unit = await skillBridge()
+    try {
+      // when
+      await unit.f.call("task", { prompt: "work", subagent_type: "worker", run_in_background: true })
+      // then
+      expect(unit.permission.skillRequests()).toHaveLength(0)
+      expect(unit.real.lists()).toBe(1)
+      expect(unit.f.starts[0]).toMatchObject({ prompt: "work" })
+    } finally { await unit.close() }
+  })
+
+  test("#when only disabled or missing names are requested #then nothing is asserted and Native resolution data is kept", async () => {
+    // given
+    const unit = await skillBridge()
+    try {
+      // when
+      await unit.f.call("task", { prompt: "work", subagent_type: "worker", run_in_background: true, load_skills: ["disabled", "absent"] })
+      // then
+      expect(unit.permission.skillRequests()).toHaveLength(0)
+      expect(unit.f.starts[0]).toMatchObject({ prompt: "work", skills: { missing: ["absent"] } })
+    } finally { await unit.close() }
+  })
+
+  test("#when the caller aborts while the skill assert is pending #then the call rejects with the abort reason and no child is staged", async () => {
+    // given
+    const unit = await skillBridge(() => Effect.never)
+    const reason = Error("caller aborted during skill permission")
+    try {
+      // when
+      const work = unit.f.call("task", { prompt: "work", subagent_type: "worker", run_in_background: true, load_skills: ["alpha"] })
+      for (let turn = 0; turn < 50 && unit.permission.skillRequests().length === 0; turn++) await new Promise(done => setTimeout(done, 1))
+      expect(unit.permission.skillRequests()).toHaveLength(1)
+      unit.f.abortCaller(reason)
+      // then
+      await expect(work).rejects.toBe(reason)
+      expect(unit.f.starts).toHaveLength(0)
+    } finally { await unit.close() }
+  })
 })
 function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }

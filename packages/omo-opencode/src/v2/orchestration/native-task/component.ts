@@ -113,7 +113,7 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
   try {
     seedTaskIdFloor(directory)
     const prepared = await prepareNativeTaskRuntime({ cwd: directory, models: control, skills: control.skill,
-      canonical: { resolveTaskAgents, buildSkillPrepend }, signal: lifetime.signal, assertCurrent: current })
+      canonical: { resolveTaskAgents, buildSkillPrepend }, signal: lifetime.signal, assertCurrent: current, permission: owners.permission })
     const preparedGeneration = generation
     const initial = childCatalog(await control.tool.list())
     current()
