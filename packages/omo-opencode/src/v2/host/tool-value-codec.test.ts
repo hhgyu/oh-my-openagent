@@ -2,10 +2,10 @@ import { expect, test } from "bun:test"
 import type { ListedTool } from "./tool-registry"
 import { decodeToolValue, issueToolValueCodec, type ToolValueCodec } from "./tool-value-codec"
 
-export function rawTool(): ListedTool {
+function rawTool(): ListedTool {
   return { id: "native", name: "native", description: "strict JSON", input: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] }, execute: async () => ({ content: "ok" }) }
 }
-export function issueInput(tool: ListedTool, decodeUnknown = (value: unknown) => {
+function issueInput(tool: ListedTool, decodeUnknown = (value: unknown) => {
   if (!value || typeof value !== "object" || typeof (value as { prompt?: unknown }).prompt !== "string") throw Error("private validator diagnostic")
   return value
 }) {

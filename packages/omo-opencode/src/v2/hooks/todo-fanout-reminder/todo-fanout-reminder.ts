@@ -24,7 +24,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * list, so any call carrying todos is the task-adding call. A Senpi-shaped `todo` tool keeps the
  * original op rule.
  */
-export function addsTodos(tool: string, input: unknown): boolean {
+function addsTodos(tool: string, input: unknown): boolean {
   if (!isRecord(input)) return false
   if (tool === "todo") return typeof input.op === "string" && TASK_ADDING_OPS.has(input.op)
   if (tool === "todowrite") return Array.isArray(input.todos) && input.todos.length > 0

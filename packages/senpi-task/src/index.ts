@@ -106,7 +106,7 @@ export {
 } from "./progress"
 export { createMinimalSenpiResourceLoader } from "./senpi/minimal-resource-loader"
 export type { MinimalSenpiResourceLoaderOptions } from "./senpi/minimal-resource-loader"
-export { readSettingsDefaultRoute, resolveExplicitTaskPin, splitModelDecorators } from "./senpi/explicit-pin"
+export { readSettingsDefaultRoute } from "./senpi/explicit-pin"
 export type {
   ExplicitPinFailure,
   ExplicitPinResolution,
@@ -675,4 +675,4 @@ export type {
 
 export * from "./tools/team"
 export { createEvalHandleHost, type EvalHandleHostDeps } from "./eval-handles"
-export { isPriorityAliasOf, type PriorityPairingRegistry } from "./runners/pinned-model-equivalence"
+export type { PriorityPairingRegistry } from "./runners/pinned-model-equivalence"

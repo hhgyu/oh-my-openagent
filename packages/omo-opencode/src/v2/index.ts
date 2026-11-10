@@ -19,7 +19,7 @@ import type { NativeTaskEffectOwners } from "./orchestration/native-task/compone
 export const PLUGIN_ID = "oh-my-openagent"
 export const BOOTSTRAP_STAGE = "bootstrap"
 
-export const statusOutputSchema = z.object({
+const statusOutputSchema = z.object({
   ok: z.boolean(),
   stage: z.string(),
   plugin: z.string(),
@@ -137,7 +137,7 @@ export function setupV2EffectHost(context: EffectPlugin.Context): Effect.Effect<
   })
 }
 
-export const omoV2Plugin = {
+const omoV2Plugin = {
   ...Plugin.define({ id: PLUGIN_ID, setup: setupV2Host }),
   effect: setupV2EffectHost,
 }

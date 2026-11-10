@@ -10,7 +10,7 @@ import type { BoundMemorySession, MemoryBinder } from "./binding"
 
 export const MEMORY_TOOL_NAME = "memory"
 export const MEMORY_APPLY_PATCH_TOOL_NAME = "memory_apply_patch"
-export const UNBOUND_MEMORY_MESSAGE =
+const UNBOUND_MEMORY_MESSAGE =
   "no memory identity is bound to this session: memory is written only from a root session with memory enabled"
 
 const reason = z.string().describe("Git commit message recorded for this memory change.")

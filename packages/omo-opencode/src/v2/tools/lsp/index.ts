@@ -2,8 +2,7 @@ import type * as Plugin from "@opencode/plugin/promise/plugin"
 import type { Info, Result, ToolContext } from "@opencode/plugin/promise/tool"
 import { createLspRuntime, type LspRuntimeOptions, type LspFormatResult, LspToolFailure } from "./runtime"
 import { LSP_TOOL_NAMES, lspSchemas, type LspToolName } from "./schemas"
-export { LSP_TOOL_NAMES, lspSchemas } from "./schemas"
-export { createLspRuntime, LspToolFailure, type LspMutation, type LspRuntimeOptions, type LspFormatResult } from "./runtime"
+export { LspToolFailure, type LspMutation, type LspRuntimeOptions, type LspFormatResult } from "./runtime"
 
 const descriptions: Record<LspToolName, string> = {
   lsp_diagnostics: "Get language server errors/warnings/hints for a file or directory. Bun TypeScript directories use bun check and optional bun lint. Severity defaults to all.",

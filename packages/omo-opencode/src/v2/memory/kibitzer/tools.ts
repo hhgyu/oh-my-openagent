@@ -12,11 +12,11 @@ import type { KibitzerToolBinding } from "./contract"
 import { applyNudge, KIBITZER_NUDGE_DESCRIPTION, KIBITZER_NUDGE_HINT_DESCRIPTION, KIBITZER_NUDGE_TOOL_NAME } from "./nudge"
 import type { KibitzerSidecar } from "./sidecar"
 
-export const KIBITZER_SESSION_ENTRIES_TOOL_NAME = "session_entries"
+const KIBITZER_SESSION_ENTRIES_TOOL_NAME = "session_entries"
 export const KIBITZER_MEMORY_TOOL_NAME = "memory"
-export const KIBITZER_FOREIGN_SESSION_MESSAGE = "this tool is available only to a live Kibitzer judge session issued by the memory component"
+const KIBITZER_FOREIGN_SESSION_MESSAGE = "this tool is available only to a live Kibitzer judge session issued by the memory component"
 
-export const KIBITZER_TOOL_CAPS = { sessionEntries: 30, sessionEntryChars: 600, memorySearchResults: 8, memoryReadChars: 6000 } as const
+const KIBITZER_TOOL_CAPS = { sessionEntries: 30, sessionEntryChars: 600, memorySearchResults: 8, memoryReadChars: 6000 } as const
 
 export interface KibitzerCaller {
   readonly sidecar: KibitzerSidecar
@@ -94,7 +94,7 @@ export function createKibitzerTools(deps: KibitzerToolsDeps): readonly [Info<typ
 }
 
 /** The read-only committed-memory operations, for a live Kibitzer caller. */
-export async function runKibitzerMemory(deps: KibitzerToolsDeps, input: z.infer<typeof kibitzerMemoryInput>, context: ToolContext): Promise<Result> {
+async function runKibitzerMemory(deps: KibitzerToolsDeps, input: z.infer<typeof kibitzerMemoryInput>, context: ToolContext): Promise<Result> {
   const found = caller(deps, context, KIBITZER_MEMORY_TOOL_NAME)
   charged(found, context, KIBITZER_MEMORY_TOOL_NAME)
   const corpus = await deps.corpus(found.binding.parentSessionId)
@@ -158,7 +158,7 @@ function rejection(code: RejectionCode, message: string, path?: string): ToolErr
 }
 
 /** Repo-relative POSIX paths only; the reserved root `system/` tree is invisible to the judge. */
-export function normalizeMemoryPath(input: string): { readonly ok: true; readonly path: string } | { readonly ok: false; readonly code: RejectionCode; readonly message: string } {
+function normalizeMemoryPath(input: string): { readonly ok: true; readonly path: string } | { readonly ok: false; readonly code: RejectionCode; readonly message: string } {
   if (input.trim().length === 0) return { ok: false, code: "path_empty", message: "A memory path is required." }
   if (input.includes("\\")) return { ok: false, code: "path_separator", message: "Memory paths use '/' separators." }
   if (input.startsWith("/") || /^[A-Za-z]:/.test(input)) return { ok: false, code: "path_absolute", message: "Memory paths are relative to the memory repo." }
@@ -171,7 +171,7 @@ export function normalizeMemoryPath(input: string): { readonly ok: true; readonl
 }
 
 /** Redaction FIRST (a secret split by truncation would escape the pattern), then the cap. */
-export function boundedText(text: string, cap: number): string {
+function boundedText(text: string, cap: number): string {
   const redacted = redactUrl(text)
   return redacted.length <= cap ? redacted : `${redacted.slice(0, cap)}\n[truncated: ${cap} of ${redacted.length} chars]`
 }

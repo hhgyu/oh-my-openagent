@@ -30,16 +30,6 @@ export {
   HYPERPLAN_MODE_PROMPT,
   TEAM_MODE_PROMPT,
 } from "./mode-prompts"
-export {
-  classifyUltraworkInput,
-  isUltraworkInput,
-  maskNegatedInvocations,
-  NOT_AFTER_IDENTIFIER,
-  NOT_BEFORE_PATH,
-  NOT_INTO_IDENTIFIER,
-  stripQuotedRegions,
-  stripQuotedSpans,
-} from "./ultrawork-keyword"
 export type {
   ArmingSnapshot,
   UltraworkClassification,

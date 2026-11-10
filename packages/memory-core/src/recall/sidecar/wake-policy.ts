@@ -98,7 +98,7 @@ export function decideWake(input: WakeDecisionInput): WakeDecision {
 }
 
 /** `system/` memories are never nudge-eligible (the nudge tool rejects them), so they never wake either. */
-export function isSystemMemoryPath(path: string): boolean {
+function isSystemMemoryPath(path: string): boolean {
   return path === "system/" || path.startsWith("system/")
 }
 

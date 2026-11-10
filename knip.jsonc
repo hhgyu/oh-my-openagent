@@ -112,7 +112,11 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) TAURI_APP_IDENTIFIER, TAURI_APP_IDENTIFIER_DEV, isDevBuild, getOpenCodeConfigDir, getOpenCodeConfigPaths, detectExistingConfigDir
       "packages/claude-code-compat-core/src/shared/opencode-config-dir.ts": ["TAURI_APP_IDENTIFIER", "TAURI_APP_IDENTIFIER_DEV", "isDevBuild", "getOpenCodeConfigDir", "getOpenCodeConfigPaths", "detectExistingConfigDir"],
       // pre-existing at origin dev 4686e425b5: unused export(s) extractApplyPatchEdits, getApplyPatchMetadataFiles, readApplyPatchMetadataFiles, parseApplyPatchRequests, makeAccumulator, getString, joinPatchLines, isRecord, COMMENT_CHECKER_RELEASE_VERSION, COMMENT_CHECKER_RELEASE_REPO and 11 more
-      "packages/comment-checker-core/index.d.ts": ["extractApplyPatchEdits", "getApplyPatchMetadataFiles", "readApplyPatchMetadataFiles", "parseApplyPatchRequests", "makeAccumulator", "getString", "joinPatchLines", "isRecord", "COMMENT_CHECKER_RELEASE_VERSION", "COMMENT_CHECKER_RELEASE_REPO", "resolveCommentCheckerReleaseAsset", "commentCheckerBinaryName", "commentCheckerCacheDir", "COMMENT_CHECKER_VERSION_MARKER", "isCachedCommentCheckerCurrent", "recordCachedCommentCheckerRelease", "COMMENT_CHECKER_PACKAGE_NAME", "findCommentCheckerPackageBinary", "resolveCommentCheckerBinary", "runCommentChecker", "sendAndCloseStdin"],
+      // The OpenCode 2 host commit moved the shared session, tool-result parsing, installed-binary, download, Node spawn and feedback
+      // logic into this package (src/index.ts): the new names are declared here for the package's consumers, which typecheck against
+      // this declaration file but import the implementation (src/index.ts) and never this file, so knip reports them unused exactly
+      // as it does the names above (same reasoning as telemetry-core/index.d.ts, #11572). The exports stay; only their rows grow.
+      "packages/comment-checker-core/index.d.ts": ["extractApplyPatchEdits", "getApplyPatchMetadataFiles", "readApplyPatchMetadataFiles", "parseApplyPatchRequests", "makeAccumulator", "getString", "joinPatchLines", "isRecord", "COMMENT_CHECKER_RELEASE_VERSION", "COMMENT_CHECKER_RELEASE_REPO", "resolveCommentCheckerReleaseAsset", "commentCheckerBinaryName", "commentCheckerCacheDir", "COMMENT_CHECKER_VERSION_MARKER", "isCachedCommentCheckerCurrent", "recordCachedCommentCheckerRelease", "COMMENT_CHECKER_PACKAGE_NAME", "findCommentCheckerPackageBinary", "resolveCommentCheckerBinary", "runCommentChecker", "sendAndCloseStdin", "COMMENT_CHECKER_FEEDBACK_HEADER", "commentCheckerFailureNotice", "COMMENT_CHECKER_CACHE_DIR_NAME", "resolveInstalledCommentCheckerBinary", "defaultCommentCheckerCacheDir", "downloadCommentCheckerBinary", "runCommentCheckerWithNodeSpawn", "parseToolResultEvent", "parseToolResultContext", "createCommentCheckerSession"],
       // pre-existing at origin dev 4686e425b5: unused export(s) readApplyPatchMetadataFiles, parseApplyPatchRequests, makeAccumulator, joinPatchLines
       "packages/comment-checker-core/src/apply-patch-edits.ts": ["readApplyPatchMetadataFiles", "parseApplyPatchRequests", "makeAccumulator", "joinPatchLines"],
       // pre-existing at origin dev 4686e425b5: unused export(s) joinPatchLines, makeAccumulator, parseApplyPatchRequests, readApplyPatchMetadataFiles, COMMENT_CHECKER_RELEASE_REPO, COMMENT_CHECKER_PACKAGE_NAME
@@ -1156,8 +1160,8 @@
       "packages/omo-senpi/src/components/memory/index.ts": ["getMemoryRepo"],
       // pre-existing at origin dev 4686e425b5: unused export(s) UNAVAILABLE_CATEGORY_MAX_CHARS, GATE_MODEL_MAX_CHARS
       "packages/omo-senpi/src/components/memory/kibitzer/notice.ts": ["UNAVAILABLE_CATEGORY_MAX_CHARS", "GATE_MODEL_MAX_CHARS"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) encodeKibitzerSessionId, kibitzerSidecarsRoot, kibitzerWakeRecord, redactKibitzerWakeReason
-      "packages/omo-senpi/src/components/memory/kibitzer/observe.ts": ["encodeKibitzerSessionId", "kibitzerSidecarsRoot", "kibitzerWakeRecord", "redactKibitzerWakeReason"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) encodeKibitzerSessionId, kibitzerWakeRecord, redactKibitzerWakeReason
+      "packages/omo-senpi/src/components/memory/kibitzer/observe.ts": ["encodeKibitzerSessionId", "kibitzerWakeRecord", "redactKibitzerWakeReason"],
       // pre-existing at origin dev 4686e425b5: unused export(s) branchOf, manualTimers
       "packages/omo-senpi/src/components/memory/kibitzer/sidecar.test-support.ts": ["branchOf", "manualTimers"],
       // pre-existing at origin dev 4686e425b5: unused export(s) KIBITZER_REJECTED_AFTER_WAKES
@@ -1168,8 +1172,6 @@
       "packages/omo-senpi/src/components/memory/kibitzer/tools/test-support.ts": ["IDENTITY", "AUTHOR"],
       // pre-existing at origin dev 4686e425b5: unused export(s) KIBITZER_TELEMETRY_OBSERVERS_KEY
       "packages/omo-senpi/src/components/memory/kibitzer/wake-observers.ts": ["KIBITZER_TELEMETRY_OBSERVERS_KEY"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) isSystemMemoryPath
-      "packages/omo-senpi/src/components/memory/kibitzer/wake-policy.ts": ["isSystemMemoryPath"],
       // pre-existing at origin dev 4686e425b5: unused export(s) MEMORY_CHILD_SAME_MODEL_RETRIES
       "packages/omo-senpi/src/components/memory/memory-child-model-chain.ts": ["MEMORY_CHILD_SAME_MODEL_RETRIES"],
       // pre-existing at origin dev 4686e425b5: unused export(s) REMEMBERED_TITLE, LET_GO_TITLE, ordinal, formatBytes
@@ -1639,8 +1641,8 @@
       "packages/senpi-task/src/tools/control/tool-result.ts": ["isTerminalStatus", "finalResponseHead"],
       // pre-existing at origin dev 4686e425b5: unused export(s) TaskOutputParams, TRANSCRIPT_MAX_CHARS, TRANSCRIPT_ASSISTANT_EVENT, TRANSCRIPT_TOOL_EVENT, childSessionDir, parseSessionTranscript, readEventLogTranscript, readSessionDirTranscript
       "packages/senpi-task/src/tools/output/index.ts": ["TaskOutputParams", "TRANSCRIPT_MAX_CHARS", "TRANSCRIPT_ASSISTANT_EVENT", "TRANSCRIPT_TOOL_EVENT", "childSessionDir", "parseSessionTranscript", "readEventLogTranscript", "readSessionDirTranscript"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) TRANSCRIPT_ASSISTANT_EVENT, TRANSCRIPT_ERROR_EVENT, TRANSCRIPT_TOOL_EVENT
-      "packages/senpi-task/src/tools/output/transcript/event-log.ts": ["TRANSCRIPT_ASSISTANT_EVENT", "TRANSCRIPT_ERROR_EVENT", "TRANSCRIPT_TOOL_EVENT"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) TRANSCRIPT_ASSISTANT_EVENT, TRANSCRIPT_TOOL_EVENT
+      "packages/senpi-task/src/tools/output/transcript/event-log.ts": ["TRANSCRIPT_ASSISTANT_EVENT", "TRANSCRIPT_TOOL_EVENT"],
       // pre-existing at origin dev 4686e425b5: unused export(s) TRANSCRIPT_ASSISTANT_EVENT, TRANSCRIPT_TOOL_EVENT, readEventLogTranscript, readEventLogTranscriptResult, MAX_TRANSCRIPT_SOURCE_BYTES, readBoundedFileText, readSessionDirTranscript, readSessionDirTranscriptResult, parseSessionTranscript
       "packages/senpi-task/src/tools/output/transcript/index.ts": ["TRANSCRIPT_ASSISTANT_EVENT", "TRANSCRIPT_TOOL_EVENT", "readEventLogTranscript", "readEventLogTranscriptResult", "MAX_TRANSCRIPT_SOURCE_BYTES", "readBoundedFileText", "readSessionDirTranscript", "readSessionDirTranscriptResult", "parseSessionTranscript"],
       // pre-existing at origin dev 4686e425b5: unused export(s) OMO_CONFIG
@@ -2098,6 +2100,8 @@
         "script/preflight-trust.mjs",
         "script/release-version.mjs",
         "script/verify-npm-payload.mjs",
+        // run by path as the "v2-personas" node of script/build-nodes.ts (bun run build)
+        "script/stage-v2-personas.ts",
         "script/wait-registry-versions.mjs",
         "script/senpi-worker-compile.ts",
         "test-support/remove-tree.ts",
@@ -2322,6 +2326,8 @@
         "@oh-my-opencode/omo-codex",
         // pre-existing at origin dev 4686e425b5: a declared devDependency nothing imports
         "@oh-my-opencode/omo-opencode",
+        // script/package-registration-audit.test.ts requires every managed workspace package as a root workspace:* devDependency
+        "@oh-my-opencode/orchestration-core",
         // pre-existing at origin dev 4686e425b5: a declared devDependency nothing imports
         "@oh-my-opencode/openclaw-core",
         // pre-existing at origin dev 4686e425b5: a declared devDependency nothing imports
@@ -2352,6 +2358,9 @@
         "@xterm/xterm",
         // pre-existing at origin dev 4686e425b5: a declared devDependency nothing imports
         "diff",
+        // the OpenCode 2 host supplies effect (root peerDependency, external in the V2 build); the root devDependency pins the
+        // development copy that packages/omo-opencode/src/dependency-security.test.ts checks against bun.lock
+        "effect",
         // pre-existing at origin dev 4686e425b5: a declared devDependency nothing imports
         "picocolors",
         // pre-existing at origin dev 4686e425b5: a declared devDependency nothing imports

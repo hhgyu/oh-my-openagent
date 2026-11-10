@@ -1,8 +1,5 @@
 // Moved to @oh-my-opencode/memory-core/recall-sidecar; re-exported so local importers keep this path.
 export {
-  KIBITZER_EVENT_WINDOW,
-  KIBITZER_FIELD_CAPS,
-  KIBITZER_RESEED_MAX_CHARS,
   KIBITZER_SIDECAR_TOOL_NAMES,
   renderKibitzerReseedPrompt,
   renderKibitzerSeedPrompt,

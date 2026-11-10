@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import rootPlugin from "../index"
-import { omoV2Plugin, setupV2EffectHost, setupV2Host } from "./index"
+import omoV2Plugin, { setupV2EffectHost, setupV2Host } from "./index"
 
 const directories: string[] = []
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }) })

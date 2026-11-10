@@ -3,7 +3,7 @@ import { Effect, Scope, Exit } from "effect"
 import type { ToolDomain } from "@opencode/plugin/effect/tool"
 import { acquireEffectToolMetadataSource, openOwnedToolMetadataSubscription } from "./effect-tool-metadata-source"
 
-export async function metadataFixture(options = {}) {
+async function metadataFixture(options = {}) {
  const scope=Scope.makeUnsafe();let callback:((input:unknown)=>Effect.Effect<void>)|undefined,disposed=0
  const tool={hook(name:string,fn:(input:unknown)=>Effect.Effect<void>){expect(name).toBe("execute.after");return Effect.gen(function*(){callback=fn;const dispose=Effect.sync(()=>{disposed++;callback=undefined});yield*Effect.addFinalizer(()=>dispose);return {dispose}})}} as unknown as ToolDomain
  const source=await Effect.runPromise(Effect.provideService(acquireEffectToolMetadataSource(tool,options),Scope.Scope,scope))

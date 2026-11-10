@@ -14,7 +14,7 @@ export async function runCommentCheckerWithNodeSpawn(input: RunCommentCheckerInp
   })
 }
 
-export function spawnCommentCheckerProcess(args: readonly string[]): SpawnProcess {
+function spawnCommentCheckerProcess(args: readonly string[]): SpawnProcess {
   const [command, ...commandArgs] = args
   if (command === undefined) {
     throw new Error("comment-checker command is required")

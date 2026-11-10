@@ -16,11 +16,11 @@ type SharedMethod = Exclude<keyof FullSessionSurface, "instructions" | "update">
 // Wire codecs validate full results; retain the backend's narrower branded identity
 // view alongside the complete Promise SDK DTO instead of projecting any fields away.
 type JoinedCall<K extends SharedMethod> = (...args: Parameters<FullSessionSurface[K]>) => Promise<Awaited<ReturnType<FullSessionSurface[K]>> & Awaited<ReturnType<SessionBackendApi[K]>>>
-export class SessionCodecError extends Error {
+class SessionCodecError extends Error {
   override readonly name = "SessionCodecError"
   constructor() { super("Invalid session API value") }
 }
-export class SessionTransportClosedError extends Error {
+class SessionTransportClosedError extends Error {
   override readonly name = "SessionTransportClosedError"
   constructor() { super("Session transport owner closed") }
 }

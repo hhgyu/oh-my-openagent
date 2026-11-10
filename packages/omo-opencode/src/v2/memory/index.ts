@@ -13,11 +13,9 @@ import { createKibitzerComponent, kibitzerCategoryModel, kibitzerHostCapable, re
 import { loadRuntimeConfig } from "../config/runtime"
 import { createMemoryTools, MEMORY_APPLY_PATCH_TOOL_NAME, MEMORY_TOOL_NAME } from "./tools"
 
-export { MEMORY_ENABLED_OPTION, memoryComponentEnabled, resolveSafeMemoryRoot } from "./config"
 export { MEMORY_BINDING_KEY } from "./binding"
 export { MEMORY_PART_MARKER, PROJECTION_PIN_KEY } from "./projection"
 export { RECALL_PART_MARKER } from "./recall-delivery"
-export { MEMORY_APPLY_PATCH_TOOL_NAME, MEMORY_TOOL_NAME } from "./tools"
 
 export type MemoryHost = Pick<Plugin.Context, "session" | "tool" | "options" | "location"> & Partial<Pick<Plugin.Context, "app" | "agent">>
 

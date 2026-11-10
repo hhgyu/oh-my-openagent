@@ -2,7 +2,7 @@
 export { resolveTaskAgents } from "../../agents/task-agents"
 export { buildSkillPrepend } from "./skills"
 export { filterSharedParentTools } from "../../runners/in-process/shared-tool-filter"
-export { CHILD_HOST_TOOLS, childStructuralToolNames, SENPI_SESSION_BUILTIN_NAMES } from "../../runners/in-process/host-tools"
+export { CHILD_HOST_TOOLS, childStructuralToolNames } from "../../runners/in-process/host-tools"
 // The SAME process-wide task id floor the manager seeds from its own store.
 export { parseTaskId, syncTaskIdFloor } from "../../state/id"
 export type { DagTaskOwner } from "../../dag/owner"

@@ -5,7 +5,7 @@ const text = z.string().min(1).max(4096)
 const integer = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 export const observedModelSchema = z.object({ providerID: text, id: text, variant: text.optional() }).strict()
 const tokensSchema = z.object({ input: integer.optional(), output: integer.optional(), reasoning: integer.optional(), cacheRead: integer.optional(), cacheWrite: integer.optional() }).strict()
-export const safeChildEventSchema = z.object({
+const safeChildEventSchema = z.object({
   id: text, type: z.string().min(1).max(512), created: integer, sessionID: text,
   durable: z.object({ aggregateID: text, seq: integer, version: integer }).strict().optional(),
   data: z.object({

@@ -9,7 +9,7 @@ type PersonaArtifacts = { stageRuntimePersonas(repoRoot: string, outputDir: stri
  * builds split chunks into dist/ (root entry, which lazily loads V2) and dist/v2, so both receive
  * the personas. Without them the Kibitzer agent transform fails and the host disables the plugin.
  */
-export async function stageV2Personas(repoRoot: string): Promise<void> {
+async function stageV2Personas(repoRoot: string): Promise<void> {
 	// The SAME runtime persona list the Senpi plugin build stages next to its bundle (untyped .mjs).
 	const artifacts = pathToFileURL(join(repoRoot, "packages", "omo-senpi", "plugin", "scripts", "persona-artifacts.mjs")).href
 	const { stageRuntimePersonas } = (await import(artifacts)) as PersonaArtifacts

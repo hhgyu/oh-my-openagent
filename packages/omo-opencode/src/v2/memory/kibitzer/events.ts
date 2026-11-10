@@ -18,10 +18,10 @@ export interface KibitzerEventCaps {
   readonly prompt: number
 }
 
-export const DEFAULT_KIBITZER_EVENT_CAPS: KibitzerEventCaps = { toolArgs: 400, resultHead: 600, assistant: 1500, prompt: 4000 }
-export const KIBITZER_EVENT_BUFFER_SIZE = 20
+const DEFAULT_KIBITZER_EVENT_CAPS: KibitzerEventCaps = { toolArgs: 400, resultHead: 600, assistant: 1500, prompt: 4000 }
+const KIBITZER_EVENT_BUFFER_SIZE = 20
 /** Entries `session_entries` can page back through; older ones are gone. */
-export const KIBITZER_HISTORY_SIZE = 500
+const KIBITZER_HISTORY_SIZE = 500
 
 export interface KibitzerEvent {
   readonly seq: number

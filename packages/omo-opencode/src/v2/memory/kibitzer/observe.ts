@@ -7,7 +7,7 @@ import { dirname } from "node:path"
 import { redactKibitzerEventText } from "@oh-my-opencode/memory-core/recall-sidecar"
 import type { KibitzerWakeOutcome } from "./outcome"
 
-export const KIBITZER_WAKE_RECORD_MAX_CHARS = 4096
+const KIBITZER_WAKE_RECORD_MAX_CHARS = 4096
 const PATH_CAP = 200
 
 export interface KibitzerWakeRecorder {
@@ -15,7 +15,7 @@ export interface KibitzerWakeRecorder {
   idle(): Promise<void>
 }
 
-export function kibitzerWakeRecord(outcome: KibitzerWakeOutcome, at: number): string {
+function kibitzerWakeRecord(outcome: KibitzerWakeOutcome, at: number): string {
   const base = {
     at: new Date(at).toISOString(), wake: outcome.wake, generation: outcome.generation, status: outcome.status,
     ...(outcome.cause === undefined ? {} : { cause: outcome.cause }),

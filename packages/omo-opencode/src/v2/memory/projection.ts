@@ -110,7 +110,7 @@ function carriesMemoryBlock(system: SessionContext["system"]): boolean {
 }
 
 /** The pin this session wrote; a fork's copied metadata names the parent session and is ignored. */
-export function readPin(metadata: Readonly<Record<string, unknown>>, sessionID: string): ProjectionPin | undefined {
+function readPin(metadata: Readonly<Record<string, unknown>>, sessionID: string): ProjectionPin | undefined {
   const value = metadata[PROJECTION_PIN_KEY]
   if (!isRecord(value) || value.version !== 1 || value.sessionId !== sessionID) return undefined
   const { revision, pinnedAtMs } = value

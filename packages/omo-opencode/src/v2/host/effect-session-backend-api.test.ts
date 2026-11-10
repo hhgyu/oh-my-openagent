@@ -16,7 +16,7 @@ const runtime=Context.make(Scope.Scope,testScope)
 afterAll(()=>Effect.runPromise(Scope.close(testScope,Exit.succeed(undefined))))
 const endpoints=ClientApi.groups["server.session"].endpoints
 // Compile-checked public composition: no raw Context/domain assertion.
-export function composePromiseSession(context:PromisePlugin.Context,bridge:EffectSessionBackendApi):PromisePlugin.Context {
+function composePromiseSession(context:PromisePlugin.Context,bridge:EffectSessionBackendApi):PromisePlugin.Context {
  return {...context,session:{...context.session,...bridge}}
 }
 function output(name:keyof typeof endpoints,wire:unknown):unknown {

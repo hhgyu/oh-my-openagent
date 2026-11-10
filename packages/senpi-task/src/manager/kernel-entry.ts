@@ -6,7 +6,6 @@ export type { TaskManagerOptions, TaskManager, ManagedRunner, ManagedStartSpec, 
 export type { ManagedChildHandle, ManagedChildEvent, ManagedChildListener, PreparedFollowUp, PreparedFollowUpResult } from "./child-handle"
 export { ChildObservationUncertain } from "./observation-uncertain"
 export { InputUncertainError } from "../runners/input-effects"
-export { ExecutionModeUnavailable } from "./runner-routing"
 export { createTaskRecordStore } from "../store/record-store"
 export type { TaskRecordStore } from "../store/types"
 export type { TaskRecord, OwnedSessionIdentity, TaskRunStats } from "../state"

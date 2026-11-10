@@ -30,7 +30,7 @@ export function kibitzerCategoryModel(config: Pick<OmoConfig, "categories">, cat
   return model !== undefined && model.includes("/") ? model : undefined
 }
 
-export function applyKibitzerAgent(editor: AgentEditor, options: { readonly persona: string; readonly model?: string; readonly warn?: (message: string) => void }): void {
+function applyKibitzerAgent(editor: AgentEditor, options: { readonly persona: string; readonly model?: string; readonly warn?: (message: string) => void }): void {
   editor.update(KIBITZER_AGENT_ID, agent => {
     agent.name = Agent.Name.make("Kibitzer")
     agent.description = "Read-only memory recall judge; nudges only through the nudge tool."

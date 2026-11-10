@@ -21,7 +21,7 @@ export interface NudgeCheckInput {
   readonly accepted: readonly RecallNudge[]
 }
 
-export function rejectNudge(params: { readonly path: string; readonly hint: string }, input: NudgeCheckInput): string | undefined {
+function rejectNudge(params: { readonly path: string; readonly hint: string }, input: NudgeCheckInput): string | undefined {
   if (!input.offered.has(params.path) && !input.searched.has(params.path)) return `"${params.path}" is not one of the offered candidates.`
   if (input.surfaced.has(params.path)) return `"${params.path}" was already surfaced in this session.`
   if (params.path === "system/" || params.path.startsWith("system/")) return `"${params.path}" is a system/ path and cannot be nudged.`

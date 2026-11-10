@@ -57,7 +57,7 @@ export function canonical(value: unknown): string {
   return JSON.stringify(value) ?? "null"
 }
 export function rules(value: readonly SessionRule[]): SessionRule[] { return value.map(rule => ({ action: rule.action, resource: rule.resource, effect: rule.effect })) }
-export function parkedRules(parking: Pick<ParkingDescriptor, "original">): SessionRule[] { return [...rules(parking.original.rules), { ...PARKED_DENY_RULE }] }
+function parkedRules(parking: Pick<ParkingDescriptor, "original">): SessionRule[] { return [...rules(parking.original.rules), { ...PARKED_DENY_RULE }] }
 export function parkingMarker(record: Pick<ChildRecord, "key">, parking: Pick<ParkingDescriptor, "id" | "owner" | "fingerprint">): SessionMetadata {
   return { format: 1, parking: parking.id, key: record.key, owner: parking.owner, fingerprint: parking.fingerprint }
 }

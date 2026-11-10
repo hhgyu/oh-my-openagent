@@ -1,6 +1,6 @@
 import type { LoadOmoConfigOptions } from "@oh-my-opencode/omo-config-core"
 import { loadRuntimeConfig } from "../config/runtime"
-export { agentOverrideSchema, type AgentOverride, type AgentsConfig } from "../config/agent-overrides"
+export type { AgentOverride, AgentsConfig } from "../config/agent-overrides"
 
 /** Compatibility view for the existing eleven OpenCode agents. */
 export function loadAgentsConfig(options: LoadOmoConfigOptions) {

@@ -6,7 +6,7 @@
 import { containsSecretLikeMaterial, type RecallNudge } from "@oh-my-opencode/memory-core"
 import type { KibitzerChildTurnReport } from "./contract"
 
-export const GATE_REASON_MAX_CHARS = 160
+const GATE_REASON_MAX_CHARS = 160
 
 export type KibitzerWakeAbort = "tool_budget" | "deadline" | "shutdown"
 export type KibitzerWakeFailureCause = "child_failed" | "child_failed_upstream" | "start_failed"
@@ -69,7 +69,7 @@ export function isDiagnosticWakeEnd(end: KibitzerWakeEnd): boolean {
 }
 
 /** Bounded, control-free, secret-safe one-line reason. */
-export function normalizeGateReason(message: string | undefined): string | undefined {
+function normalizeGateReason(message: string | undefined): string | undefined {
   if (message === undefined) return undefined
   const text = message.replace(/[\u0000-\u001F\u007F-\u009F]/gu, "").replace(/\s+/gu, " ").trim()
   if (text.length === 0) return undefined

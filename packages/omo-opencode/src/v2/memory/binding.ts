@@ -111,7 +111,7 @@ function adoptIdentity(recorded: MemorySessionBinding | undefined, resolved: Ide
   return recorded.repoPathHash === hashRepoPath(adopted.paths.repo) ? adopted : undefined
 }
 
-export function readBinding(metadata: Readonly<Record<string, unknown>>): MemorySessionBinding | undefined {
+function readBinding(metadata: Readonly<Record<string, unknown>>): MemorySessionBinding | undefined {
   const value = metadata[MEMORY_BINDING_KEY]
   if (!isRecord(value) || value.version !== 1) return undefined
   const { identity, repoPathHash, boundAt } = value
@@ -119,7 +119,7 @@ export function readBinding(metadata: Readonly<Record<string, unknown>>): Memory
   return { version: 1, identity, repoPathHash, boundAt }
 }
 
-export function hashRepoPath(repoPath: string): string {
+function hashRepoPath(repoPath: string): string {
   return createHash("sha256").update(repoPath, "utf8").digest("hex")
 }
 

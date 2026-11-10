@@ -14,7 +14,7 @@ import { createSessionBackend, SessionBackendError, type ChildHandle, type Sessi
 import type { SessionLease, SessionScopes, SessionToolPolicy } from "../../host/session-state"
 import type { KibitzerChild, KibitzerChildPort, KibitzerChildTurnReport } from "./contract"
 
-export const KIBITZER_BACKEND_ID = "omo-kibitzer-opencode"
+const KIBITZER_BACKEND_ID = "omo-kibitzer-opencode"
 export const KIBITZER_JOURNAL_FILENAME = "children.sqlite"
 
 type Backend = ReturnType<typeof createSessionBackend>

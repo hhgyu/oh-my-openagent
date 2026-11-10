@@ -7,7 +7,7 @@ import { isCachedCommentCheckerCurrent } from "./cached-release"
 import { COMMENT_CHECKER_PACKAGE_NAME } from "./package-binary"
 import { commentCheckerBinaryName, commentCheckerCacheDir } from "./release"
 
-export const COMMENT_CHECKER_ENV_KEY = "OMO_COMMENT_CHECKER_BIN"
+const COMMENT_CHECKER_ENV_KEY = "OMO_COMMENT_CHECKER_BIN"
 // Must equal the OpenCode edition's CACHE_DIR_NAME (omo-opencode shared/plugin-identity.ts) so one
 // downloaded binary serves every edition; the Native downloader test pins the equality.
 export const COMMENT_CHECKER_CACHE_DIR_NAME = "oh-my-opencode"

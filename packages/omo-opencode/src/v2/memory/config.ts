@@ -6,7 +6,7 @@ import type * as Plugin from "@opencode/plugin/promise/plugin"
 import { loadRuntimeConfig } from "../config/runtime"
 
 /** Plugin option that turns the whole memory component off regardless of `memory.enabled`. */
-export const MEMORY_ENABLED_OPTION = "omo-memory-enabled"
+const MEMORY_ENABLED_OPTION = "omo-memory-enabled"
 
 export type MemoryEnv = Readonly<Record<string, string | undefined>>
 
