@@ -2,8 +2,13 @@ import { RecallCorpusCache } from "@oh-my-opencode/memory-core"
 import type { OmoMemorySettings } from "@oh-my-opencode/omo-config-core"
 import type * as Plugin from "@opencode/plugin/promise/plugin"
 import type { Registration } from "@opencode/plugin/promise/registration"
-import { createMemoryBinder, describeError } from "./binding"
+import type { RpcRegistration } from "@opencode/plugin/promise/rpc"
+import { createMemoryBinder, describeError, type BoundMemorySession } from "./binding"
+import { createMemoryCommands } from "./commands"
+import { memoryCommandRpc, stripMemoryCommandOutputs } from "./command-output"
+import { MEMORY_COMMAND_OUTPUT_EVENT } from "./command-output-event"
 import { consoleMemoryLogger, loadMemorySettings, memoryComponentEnabled, type MemoryEnv, type MemoryLogger } from "./config"
+import { createMemoryJournal } from "./journal"
 import { createMemoryProjection } from "./projection"
 import { createRecallCollector, fileRecallStores, type RecallStores } from "./recall"
 import { createRecallDelivery } from "./recall-delivery"
@@ -16,8 +21,10 @@ import { createMemoryTools, MEMORY_APPLY_PATCH_TOOL_NAME, MEMORY_TOOL_NAME } fro
 export { MEMORY_BINDING_KEY } from "./binding"
 export { MEMORY_PART_MARKER, PROJECTION_PIN_KEY } from "./projection"
 export { RECALL_PART_MARKER } from "./recall-delivery"
+export { MEMORY_COMMAND_NAMES, MEMORY_COMMAND_OUTPUT_KEY } from "./commands"
+export { MEMORY_COMMAND_OUTPUT_ID_PREFIX } from "./command-output"
 
-export type MemoryHost = Pick<Plugin.Context, "session" | "tool" | "options" | "location"> & Partial<Pick<Plugin.Context, "app" | "agent">>
+export type MemoryHost = Pick<Plugin.Context, "session" | "tool" | "options" | "location"> & Partial<Pick<Plugin.Context, "app" | "agent" | "command" | "rpc">>
 
 export interface MemoryComponentOptions {
   /** Environment for `OMO_MEMORY_HOME` and identity resolution; defaults to `process.env`. */
@@ -45,6 +52,12 @@ export interface MemoryComponentOptions {
  * - recall drain message -> one tagged recall system part, fed by `prompt` and `execute.before` collection;
  * - resident Kibitzer judge (P3) -> one owned child per bound root session (see `./kibitzer`): candidates
  *   are judged there and only its accepted nudges reach the recall part.
+ * - session_start / agent_settled transcript journal -> reconcile at first bind and on `experimental.idle`
+ *   (see `./journal`);
+ * - registerCommand memory suite -> `command.transform` adding the host-neutral memory-core commands,
+ *   output shown through the `rpc.omo-memory.command.output` event (OmO TUI dialog) and recorded as a
+ *   `resume: false` synthetic message that the `context`/`compaction` hooks strip from model requests
+ *   (see `./commands`, `./command-output`).
  * Nothing calls `session.prompt`; subagent children never bind; Kibitzer input goes through the owned
  * session backend's gated admission paths.
  */
@@ -54,9 +67,13 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
   const logger = options.logger ?? consoleMemoryLogger
   const now = options.now ?? Date.now
   const metadata = createSessionMetadataStore(context.session)
+  let closed = false
+  // The journal is created after the binder it reads; a bind before that has nothing to catch up.
+  let onBound: ((bound: BoundMemorySession) => void) | undefined
   const binder = createMemoryBinder({
     session: context.session, metadata, env: options.env ?? process.env, now, loadSettings, logger,
     ...(options.home === undefined ? {} : { home: options.home }),
+    onBound: bound => { if (!closed) onBound?.(bound) },
   })
   const stores = options.recallStores ?? fileRecallStores
   const projection = createMemoryProjection({ binder, metadata, now, logger })
@@ -78,13 +95,23 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
   const delivery = createRecallDelivery({ binder, stores, collector, logger })
   // Senpi persists this counter as a session entry; here it is process-local and restarts at 0 on reload.
   const userTurns = new Map<string, number>()
+  const journal = createMemoryJournal({
+    binder, session: context.session, logger,
+    ...(kibitzer === undefined ? {} : { isOwnedSession: (sessionID: string) => kibitzer.isKibitzerSession(sessionID) }),
+  })
+  onBound = bound => { void journal.onBound(bound) }
+  let outputEvents: RpcRegistration<typeof memoryCommandRpc>["events"] | undefined
+  const commands = context.command === undefined ? undefined : createMemoryCommands({
+    display: async output => { await outputEvents?.emit(MEMORY_COMMAND_OUTPUT_EVENT, { ...output }) },
+    binder, session: context.session, logger, isClosed: () => closed,
+    bustPromptCache: sessionID => { projection.markCompacted(sessionID) },
+  })
   const tools = createMemoryTools({
     binder, userTurns: sessionID => userTurns.get(sessionID) ?? 0,
     ...(options.lockWaitTimeoutMs === undefined ? {} : { lockWaitTimeoutMs: options.lockWaitTimeoutMs }),
     ...(options.lockRetryDelayMs === undefined ? {} : { lockRetryDelayMs: options.lockRetryDelayMs }),
   })
 
-  let closed = false
   const registrations: Registration[] = []
   let disposal: Promise<void> | undefined
   const cleanup = (): Promise<void> => {
@@ -92,10 +119,12 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       closed = true
       const results = await Promise.allSettled(registrations.map(registration => registration.dispose()))
       await collector.idle()
+      await Promise.allSettled([journal.settled(), commands?.settled()])
       if (kibitzer !== undefined) results.push(...await Promise.allSettled([kibitzer.close()]))
       await metadata.settled()
       binder.clear()
       projection.clear()
+      journal.clear()
       collector.clear()
       userTurns.clear()
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
@@ -135,6 +164,8 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       }
     }
     registrations.push(await context.session.hook("context", async value => {
+      // Command output records are for the user; they are dropped from every request, the judge's too.
+      stripMemoryCommandOutputs(value.messages)
       if (closed || kibitzer?.onContext(value) === true) return
       try {
         await projection.onContext(value)
@@ -143,7 +174,23 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
         logger.warn("memory context injection skipped", { sessionID: value.sessionID, error: describeError(error) })
       }
     }))
-    registrations.push(await context.session.hook("compaction", value => { projection.markCompacted(value.sessionID) }))
+    registrations.push(await context.session.hook("compaction", value => {
+      stripMemoryCommandOutputs(value.messages)
+      projection.markCompacted(value.sessionID)
+    }))
+    registrations.push(await context.session.hook("experimental.idle", async value => {
+      if (closed) return
+      await journal.onIdle(value.sessionID)
+    }))
+    if (commands !== undefined && context.command !== undefined) {
+      if (context.rpc !== undefined) {
+        const registration = await context.rpc.register(memoryCommandRpc, {})
+        registrations.push(registration)
+        outputEvents = registration.events
+      }
+      const definitions = commands.definitions
+      registrations.push(await context.command.transform(editor => { for (const definition of definitions) editor.add(definition) }))
+    }
     const [memoryTool, applyPatchTool] = tools
     const judgeTools = kibitzer?.tools(memoryTool)
     registrations.push(await context.tool.transform(editor => {

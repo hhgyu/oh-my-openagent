@@ -10,7 +10,7 @@ import {
   repairSkillNameFrontmatterContent,
   setSkillFrontmatterField,
 } from "./skill-frontmatter"
-import { removeTree } from "../../../../../../test-support/remove-tree"
+import { removeTree } from "../../../../test-support/remove-tree"
 
 const tempDirs: string[] = []
 

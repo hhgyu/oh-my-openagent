@@ -1,4 +1,4 @@
-// /memfs backup|restore|diff|tokens — thin git/filesystem wrappers.
+// /memfs backup|restore|diff|tokens - thin git/filesystem wrappers.
 //
 // `diff` mirrors the letta CLI exit-2 semantics for a dirty tree by returning
 // warning-level text; `tokens` is the bytes/4 system-prompt estimate.

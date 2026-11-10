@@ -11,6 +11,12 @@
     "./fs": {
       "import": "./src/fs/resilient.ts"
     },
+    "./commands": {
+      "import": "./src/commands/index.ts"
+    },
+    "./command-metadata": {
+      "import": "./src/commands/metadata.ts"
+    },
     "./recall-store": {
       "import": "./src/recall/bm25-persist.ts"
     },

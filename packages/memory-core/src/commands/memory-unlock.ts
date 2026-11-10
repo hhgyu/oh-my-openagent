@@ -1,10 +1,10 @@
-// /memory unlock <lock> — the way out of a kept stranded git lock (omo #10199). The command
+// /memory unlock <lock> - the way out of a kept stranded git lock (omo #10199). The command
 // re-checks the one lock, shows what it found, and removes it only after the user confirms;
 // --force skips the confirmation prompt only, it never overrides a refusal.
 
 import { isAbsolute, join } from "node:path"
 
-import { inspectStrandedGitLock, unlockStrandedGitLock, type UnlockFindings } from "@oh-my-opencode/memory-core"
+import { inspectStrandedGitLock, unlockStrandedGitLock, type UnlockFindings } from "../index"
 
 import { isInteractive, respond, type MemoryCommandContext, type MemoryCommandIdentity } from "./types"
 

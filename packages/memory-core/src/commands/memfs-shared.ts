@@ -1,6 +1,6 @@
 // Shared plumbing between the /memfs dispatcher and its subcommand handlers.
 
-import type { GitMemoryRepo } from "@oh-my-opencode/memory-core"
+import type { GitMemoryRepo } from "../index"
 
 import type { ParsedCommandArgs } from "./args"
 import { hasGitRepo, openRepo } from "./repo"
@@ -15,7 +15,7 @@ export interface MemfsSubcommandInput {
 
 export type MemfsSubcommand = (input: MemfsSubcommandInput) => Promise<string>
 
-export function noRepoText(identity: MemoryCommandIdentity): string {
+function noRepoText(identity: MemoryCommandIdentity): string {
   return `no memory repository for ${identity.identity} at ${identity.identityPaths.repo}; run /memfs init first`
 }
 
