@@ -17,11 +17,26 @@
     "./command-metadata": {
       "import": "./src/commands/metadata.ts"
     },
+    "./commands/agreements": {
+      "import": "./src/commands/agreements.ts"
+    },
     "./commands/args": {
       "import": "./src/commands/args.ts"
     },
     "./commands/backup": {
       "import": "./src/commands/backup.ts"
+    },
+    "./commands/facts": {
+      "import": "./src/commands/facts.ts"
+    },
+    "./commands/facts-failure-cause": {
+      "import": "./src/commands/facts-failure-cause.ts"
+    },
+    "./commands/facts-status": {
+      "import": "./src/commands/facts-status.ts"
+    },
+    "./commands/failure-detail": {
+      "import": "./src/commands/failure-detail.ts"
     },
     "./commands/repo": {
       "import": "./src/commands/repo.ts"

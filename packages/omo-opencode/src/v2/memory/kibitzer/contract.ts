@@ -1,10 +1,11 @@
 // The V2 resident Kibitzer's public contract: the same defaults and wake semantics as the Senpi
 // sidecar (`omo-senpi/.../kibitzer/sidecar-contract.ts`), expressed over a host-neutral child port
-// instead of a senpi-task ChildHandle. The child port is implemented over the V2 session backend in
-// `child-port.ts`; tests drive the lifecycle through a scripted port.
+// instead of a senpi-task ChildHandle. The child port is implemented over the shared memory child port
+// (`../memory-child-port.ts`) in `child-port.ts`; tests drive the lifecycle through a scripted port.
 
 import type { RecallCandidate, RecallNudge } from "@oh-my-opencode/memory-core"
 import type { KibitzerWakeSlot, WakeSilenceReason } from "@oh-my-opencode/memory-core/recall-sidecar"
+import type { MemoryChild, MemoryChildTimers, MemoryChildTurnReport } from "../memory-child-port"
 import type { KibitzerEventCaps } from "./events"
 import type { KibitzerWakeOutcome } from "./outcome"
 
@@ -24,40 +25,13 @@ export const KIBITZER_REJECTED_AFTER_WAKES = 3
 export type KibitzerSidecarState = "idle" | "turn_running" | "reseeding" | "backoff" | "disposed"
 
 /** Injectable timers: production uses unref'd runtime timers; tests fire them by hand. */
-export interface KibitzerSidecarTimers {
-  set(callback: () => void, ms: number): unknown
-  clear(handle: unknown): void
-}
+export type KibitzerSidecarTimers = MemoryChildTimers
 
 /** How one child turn settled, read from the child's own transcript after it went idle. */
-export interface KibitzerChildTurnReport {
-  readonly status: "completed" | "error" | "cancelled"
-  readonly message?: string
-  /** `provider/model` of the newest assistant message. */
-  readonly model?: string
-  /** Provider usage summed over the turn's assistant messages. */
-  readonly usage?: { readonly input: number; readonly output: number; readonly cacheRead: number; readonly cacheWrite: number }
-  /** `input + cacheRead` of the newest assistant message. */
-  readonly contextTokens?: number
-  /** User texts the child transcript holds, so the sidecar can confirm which steers it read. */
-  readonly userTexts: readonly string[]
-}
+export type KibitzerChildTurnReport = MemoryChildTurnReport
 
 /** One live resident child. Every input goes through the owner's gated admission paths. */
-export interface KibitzerChild {
-  readonly sessionID: string
-  readonly generation: number
-  /** Revives an idle child with a fresh turn (queued delivery). */
-  followUp(text: string): Promise<void>
-  /** Joins the running turn (steer delivery). */
-  steer(text: string): Promise<void>
-  /** Interrupts the running turn; settlement still reports through `waitForIdle`. */
-  abort(): Promise<void>
-  /** Resolves once the current turn has settled. */
-  waitForIdle(): Promise<KibitzerChildTurnReport>
-  /** Closes the child and releases its custody. Idempotent. */
-  dispose(): Promise<void>
-}
+export type KibitzerChild = MemoryChild
 
 export interface KibitzerChildStartInput {
   readonly sessionId: string

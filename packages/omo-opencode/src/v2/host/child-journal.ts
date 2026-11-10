@@ -88,6 +88,8 @@ export interface DurableChildJournal extends ChildJournal {
   readonly owner: string
   assertCurrent(expected: ChildRecord): undefined
   writeSync(previous: ChildRecord, next: ChildRecord): undefined
+  /** Every readable custody row, for an owner that must find stranded children it holds no key for. */
+  list(): Promise<ChildRecord[]>
   /** Release custody only after all backend work has joined. Future calls fail. */
   close(): void
 }
@@ -185,6 +187,17 @@ export async function openChildJournal(options: ChildJournalOptions): Promise<Du
       },
       writeSync,
       async write(previous, next) { writeSync(previous, next) },
+      async list() {
+        active()
+        const records: ChildRecord[] = []
+        for (const row of db.query<Row & { key: string }, []>("SELECT key, body FROM children ORDER BY key").all()) {
+          let record: ChildRecord | undefined
+          // A corrupt row stays for inspection; it never blocks the readable ones.
+          try { record = read(row.key) } catch { continue }
+          if (record !== undefined) records.push(record)
+        }
+        return records
+      },
       close() {
         if (closed) return
         db.transaction(() => { db.query("UPDATE owners SET body=? WHERE token=?").run(JSON.stringify({ ...owner, released: 1 }), owner.token) }).immediate()

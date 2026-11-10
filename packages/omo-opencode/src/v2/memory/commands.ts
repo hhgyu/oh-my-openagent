@@ -26,6 +26,8 @@ export const MEMORY_COMMAND_NAMES: Readonly<Record<CoreMemoryCommandName, string
   recompile: "recompile",
   "memory-repository": "memory-repository",
   search: "search",
+  facts: "facts",
+  agreements: "agreements",
 }
 
 type SyntheticPort = Pick<Plugin.Context["session"], "synthetic">
@@ -39,6 +41,8 @@ export interface MemoryCommandsDeps {
   readonly isClosed: () => boolean
   /** Shows the output right away (the `omo-memory` RPC event the OmO TUI plugin renders). */
   readonly display?: (output: MemoryCommandOutputEvent) => Promise<void>
+  /** `/facts retry`: one launch attempt of the facts extractor for this session's identity. */
+  readonly factsRetry?: (sessionID: string) => Promise<void>
   /** Session message IDs of output records; defaults to `msg_omo_memory_output_<uuid>`. */
   readonly newOutputID?: () => string
 }
@@ -110,6 +114,8 @@ export function createMemoryCommands(deps: MemoryCommandsDeps): MemoryCommands {
     }))
   }
 
+  const retry = deps.factsRetry
+
   async function execute(name: CoreMemoryCommandName, invocation: CommandInvocation): Promise<void> {
     if (deps.isClosed()) return
     const command = MEMORY_COMMAND_NAMES[name]
@@ -133,6 +139,7 @@ export function createMemoryCommands(deps: MemoryCommandsDeps): MemoryCommands {
         bustPromptCache: () => { deps.bustPromptCache(sessionID) },
         transcriptSource: () => journalTranscriptSource(identity),
         commandNames: MEMORY_COMMAND_NAMES,
+        ...(retry === undefined ? {} : { factsSink: { reconcile: () => retry(sessionID) } }),
         sendUserMessage: async text => {
           if (deps.isClosed()) throw new Error("memory component is closed")
           await deps.session.synthetic({

@@ -58,6 +58,8 @@ export interface MemoryCommandDeps {
    * one, and those commands report it instead of writing anything.
    */
   sendUserMessage?(text: string): void | Promise<void>
+  /** `/facts retry`: one reconcile/launch attempt of the host's facts extractor; absent means none. */
+  readonly factsSink?: { reconcile(): Promise<void> }
   /** Staged-commit checker the memory git hooks run; absent installs the default hooks. */
   hookChecker?(): MemoryHookChecker
   /** Slash names this host registered under a different name (e.g. `init` -> `memory-init`). */
