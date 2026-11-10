@@ -1,3 +1,4 @@
+import { parseOwnedSession, parseObservationUncertainty } from "./owned-session-parse"
 import { RESIDENCY_STATES, TASK_STATUSES, type TaskRecord } from "../state"
 import { parseTaskId } from "../state/id"
 import {
@@ -97,7 +98,7 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
   const runStartEpoch = readOptionalNumber(value, "run_start_epoch")
   const burntEpoch = readOptionalNumber(value, "burnt_epoch")
   const startQueued = parseOptionalStartQueued(value)
-  const runnerKind = readOptionalRunnerKind(value)
+  const storedRunnerKind = readOptionalRunnerKind(value)
   const suspensionReason = readOptionalSuspensionReason(value)
   const revivalDeferredReason = readOptionalString(value, "revival_deferred_reason")
   const recoveryDeadlineAt = readOptionalNumber(value, "recovery_deadline_at")
@@ -106,11 +107,18 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
   // An unknown cause (a newer build's) is dropped: the record still parses and the interrupt stays silent.
   const interruptCause = value.interrupt_cause === "session_replaced" ? "session_replaced" : undefined
   const failureReason = readOptionalTaskStartFailureReason(value)
+  const ownedSession = parseOwnedSession(value.owned_session)
+  // New writes retain R0's host-session enum. Only a valid owned reference restores
+  // the adapter-specific kind; all existing mixing and custody checks still apply.
+  const runnerKind = storedRunnerKind === "host-session" && ownedSession !== undefined ? "owned-session" : storedRunnerKind
+  const observationUncertain = parseObservationUncertainty(value.observation_uncertain)
+  if ((ownedSession !== undefined) !== (runnerKind === "owned-session") || ownedSession !== undefined && (pid !== undefined || value.host_session !== undefined)) throw new Error("Owned session identity is inconsistent")
   const hostSession = parseOptionalHostSession(value)
   validateHostSessionConsistency(runnerKind, hostSession)
   const fallbackHandoffEpoch = readOptionalNumber(value, "fallback_handoff_epoch")
   const closingChild = parseOptionalClosingChild(value)
   const residencyClaim = readOptionalString(value, "residency_claim")
+  if (ownedSession && (ownedSession.runEpoch !== parseNotification(value).run_epoch || ownedSession.residencyClaim !== residencyClaim || ownedSession.parentID !== value.parent_session_id || ownedSession.sessionID !== value.child_session_id)) throw new Error("Owned session task fence is inconsistent")
   const cancelRequested = parseOptionalCancelRequest(value)
   const awaitingInput = parseOptionalAwaitingInput(value)
   const provisionalExit = parseOptionalProvisionalExit(value)
@@ -187,6 +195,8 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
     ...(runPause === undefined ? {} : { run_pause: runPause }),
     ...(runnerKind === undefined ? {} : { runner_kind: runnerKind }),
     ...(hostSession === undefined ? {} : { host_session: hostSession }),
+    ...(ownedSession === undefined ? {} : { owned_session: ownedSession }),
+    ...(observationUncertain === undefined ? {} : { observation_uncertain: observationUncertain }),
     ...(fallbackHandoffEpoch === undefined ? {} : { fallback_handoff_epoch: fallbackHandoffEpoch }),
     ...(closingChild === undefined ? {} : { fallback_closing_child: closingChild }),
     ...(residencyClaim === undefined ? {} : { residency_claim: residencyClaim }),

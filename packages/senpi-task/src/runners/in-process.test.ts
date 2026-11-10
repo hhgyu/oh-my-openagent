@@ -39,11 +39,17 @@ describe("InProcessRunner", () => {
   test("#given a session that starts on a different model than the spec resolved #when start runs #then it fails typed as model_unavailable and disposes the session (#9722)", async () => {
     // given: the spec asks for model A; the engine hands back a session on model B
     const fake = createFakeSession()
-    fake.session = { ...fake.session, model: { provider: "vendor-b", id: "substitute" } }
+    const closed = Promise.withResolvers<void>()
+    let joinCalls = 0
+    fake.session = {
+      ...fake.session,
+      model: { provider: "vendor-b", id: "substitute" },
+      whenToolChildClosed() { expect(this).toBe(fake.session); joinCalls++; return closed.promise },
+    }
     const runner = new InProcessRunner({ createSession: async () => fake.session })
 
     // when / then: the spawn refuses the substitution, and the opened session is torn down
-    const failure = await runner
+    const starting = runner
       .start(
         baseSpec({
           model: realModel("vendor-a", "pinned"),
@@ -57,9 +63,39 @@ describe("InProcessRunner", () => {
         }),
       )
       .catch((error: unknown) => error)
+    let settled = false
+    void starting.then(() => { settled = true })
+    await Bun.sleep(0)
+    const beforeJoin = { settled, joinCalls }
+    closed.resolve()
+    const failure = await starting
+    expect(beforeJoin).toEqual({ settled: false, joinCalls: 1 })
     expect(RunnerError.is(failure) ? failure.failure.kind : undefined).toBe("model_unavailable")
     expect(failure instanceof Error ? failure.message : "").toContain("vendor-b/substitute")
     expect(failure instanceof Error ? failure.message : "").toContain("vendor-a/pinned")
+    expect(fake.disposeCount).toBe(1)
+    expect(fake.promptCalls).toBe(0)
+  })
+
+  test("a handle-construction failure waits for session close and preserves the original error", async () => {
+    const fake = createFakeSession()
+    const construction = new Error("controlled observer construction failure")
+    const closed = Promise.withResolvers<void>()
+    let joinCalls = 0
+    fake.session = {
+      ...fake.session,
+      subscribe() { throw construction },
+      whenToolChildClosed() { expect(this).toBe(fake.session); joinCalls++; return closed.promise },
+    }
+    const runner = new InProcessRunner({ createSession: async () => fake.session })
+    const starting = runner.start(baseSpec()).catch((error: unknown) => error)
+    let settled = false
+    void starting.then(() => { settled = true })
+    await Bun.sleep(0)
+    const beforeJoin = { settled, joinCalls }
+    closed.resolve()
+    expect(await starting).toBe(construction)
+    expect(beforeJoin).toEqual({ settled: false, joinCalls: 1 })
     expect(fake.disposeCount).toBe(1)
     expect(fake.promptCalls).toBe(0)
   })

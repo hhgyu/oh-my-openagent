@@ -1,9 +1,11 @@
+import type { TaskInterruptCause } from "@oh-my-opencode/orchestration-core/contracts/child-outcome"
 import type { DagTaskOwner } from "../dag/owner"
 import type { TaskStartFailureRecordFields } from "./start-failure"
 import type {
   BackgroundMode,
   EffectiveModelRecord,
   HostSessionIdentity,
+  OwnedSessionIdentity,
   IsolationRecord,
   ResolvedModelRecord,
   ResidencyState,
@@ -16,7 +18,7 @@ import type {
 import type { TaskRunStats } from "./run-stats-types"
 
 /** An interrupt the parent did not request: the host replaced the child's session mid-turn. */
-export type TaskInterruptCause = "session_replaced"
+export type { TaskInterruptCause } from "@oh-my-opencode/orchestration-core/contracts/child-outcome"
 
 export const MODEL_REFUSAL_REASONS = ["usage_limit", "not_signed_in", "unavailable", "refused", "error"] as const
 
@@ -123,6 +125,8 @@ export type TaskRecordInput = {
   readonly config_generation?: number
   readonly background_mode?: BackgroundMode
   readonly runner_kind?: RunnerKind
+  readonly owned_session?: OwnedSessionIdentity
+  readonly observation_uncertain?: { readonly reason: string; readonly startEventID?: string }
   readonly host_session?: HostSessionIdentity
 }
 
@@ -199,11 +203,14 @@ export type TaskRecord = TaskRecordInput & TaskStartFailureRecordFields & {
   // The run that paused this child (senpi#3811): a restarted host re-holds it under exactly this owner.
   readonly run_pause?: RecordedRunPause
   readonly runner_kind?: RunnerKind
+  readonly owned_session?: OwnedSessionIdentity
+  readonly observation_uncertain?: { readonly reason: string; readonly startEventID?: string }
   readonly host_session?: HostSessionIdentity
   readonly fallback_handoff_epoch?: number
   readonly fallback_closing_child?: {
     readonly pid?: number
-    readonly host_session?: HostSessionIdentity
+    readonly owned_session?: OwnedSessionIdentity
+  readonly host_session?: HostSessionIdentity
     // #9350: silence is not proof of closure after a suspended daemon child is failed.
     readonly requires_confirmation?: boolean
   }

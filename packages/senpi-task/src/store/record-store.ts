@@ -1,4 +1,5 @@
 import {
+  closeSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -53,6 +54,7 @@ export type TaskRecordStoreResidentFigures = {
 }
 
 export type ResidentTaskRecordStore = TaskRecordStore & {
+  close(): void
   residentFigures(): TaskRecordStoreResidentFigures
 }
 
@@ -61,6 +63,8 @@ export function createTaskRecordStore(config: StateDirConfig, options: TaskRecor
   const platform = options.platform ?? process.platform
   const cache = new Map<string, CacheEntry>()
   const appendFds: AppendFdCache = new Map()
+  let closed = false
+  function active() { if (closed) throw new Error("Task record store closed") }
 
   function cacheSet(path: string): void {
     const warnings: string[] = []
@@ -72,17 +76,28 @@ export function createTaskRecordStore(config: StateDirConfig, options: TaskRecor
 
   return {
     stateDir,
+    close() {
+      closed = true
+      const errors: unknown[] = []
+      for (const [path, fd] of appendFds) {
+        try { closeSync(fd); appendFds.delete(path) } catch (error) { errors.push(error) }
+      }
+      cache.clear()
+      if (errors.length) throw new AggregateError(errors, "Task record store close incomplete")
+    },
     residentFigures() {
       let cachedRecordBytes = 0
       for (const entry of cache.values()) cachedRecordBytes += entry.size
       return { cachedRecords: cache.size, cachedRecordBytes, openEventLogs: appendFds.size }
     },
     save(record) {
+      active()
       const path = taskPath(stateDir, parseTaskId(record.task_id))
       writeRecord(path, record, "create", platform)
       cacheSet(path)
     },
     replace(record) {
+      active()
       const taskId = parseTaskId(record.task_id)
       const path = taskPath(stateDir, taskId)
       withTaskRecordLock(path, () => {
@@ -91,6 +106,7 @@ export function createTaskRecordStore(config: StateDirConfig, options: TaskRecor
       })
     },
     mutate(taskId, mutation) {
+      active()
       const parsedTaskId = parseTaskId(taskId)
       const path = taskPath(stateDir, parsedTaskId)
       return withTaskRecordLock(path, () => {
@@ -103,15 +119,19 @@ export function createTaskRecordStore(config: StateDirConfig, options: TaskRecor
       })
     },
     load(taskId) {
+      active()
       return readCached(taskPath(stateDir, parseTaskId(taskId)), cache)
     },
     list() {
+      active()
       return listRecords(stateDir, cache)
     },
     appendEvent(taskId, event) {
+      active()
       return appendTaskEvent(stateDir, parseTaskId(taskId), event, appendFds)
     },
     transition(taskId, transition) {
+      active()
       const parsedTaskId = parseTaskId(taskId)
       const path = taskPath(stateDir, parsedTaskId)
       return withTaskRecordLock(path, () => {
@@ -125,11 +145,13 @@ export function createTaskRecordStore(config: StateDirConfig, options: TaskRecor
       })
     },
     remove(taskId) {
+      active()
       const parsedTaskId = parseTaskId(taskId)
       const path = taskPath(stateDir, parsedTaskId)
       withTaskRecordLock(path, () => removeRecord(stateDir, parsedTaskId, cache, appendFds))
     },
     tombstoneIfExpired(taskId, shouldRetain, owner) {
+      active()
       const parsedTaskId = parseTaskId(taskId)
       const path = taskPath(stateDir, parsedTaskId)
       // The lock file lives beside the record, so the tasks dir must exist even when the record
@@ -148,6 +170,7 @@ export function createTaskRecordStore(config: StateDirConfig, options: TaskRecor
       })
     },
     completeExpunge(taskId, owner) {
+      active()
       const parsedTaskId = parseTaskId(taskId)
       const tombstone = tombstonePath(stateDir, parsedTaskId)
       // Phase 2 (and crash recovery): the tombstone is committed to deletion and invisible to load/list.
@@ -159,21 +182,26 @@ export function createTaskRecordStore(config: StateDirConfig, options: TaskRecor
       return true
     },
     loadExpunging(taskId) {
+      active()
       return readRecord(tombstonePath(stateDir, parseTaskId(taskId)))
     },
     restoreExpunging(taskId, owner) {
+      active()
       const parsedTaskId = parseTaskId(taskId)
       const path = taskPath(stateDir, parsedTaskId)
       if (restoreTombstone(path, tombstonePath(stateDir, parsedTaskId), owner)) cache.delete(path)
     },
     readExpungeOwner(taskId) {
+      active()
       return readExpungeOwnerFile(tombstonePath(stateDir, parseTaskId(taskId)))
     },
     takeOverExpunging(taskId, from, to) {
+      active()
       const parsedTaskId = parseTaskId(taskId)
       return takeOverTombstone(taskPath(stateDir, parsedTaskId), tombstonePath(stateDir, parsedTaskId), from, to)
     },
     listExpunging() {
+      active()
       const tasksDir = join(stateDir, "tasks")
       return readDirectoryNames(tasksDir)
         .filter((entry) => entry.endsWith(TOMBSTONE_SUFFIX))

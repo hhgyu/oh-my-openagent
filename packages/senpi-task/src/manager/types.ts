@@ -23,7 +23,7 @@ import type { ChildExtensionEvent } from "../runners/child-extension-events"
 import type { ExitConfirmationSchedule } from "./provisional-exit"
 import type { ChildCreationPort, ChildPausePort, ResumedChildTurn, RunPauseOwner } from "../pause/ports"
 import type { AdmissionBarrier, ResumeCredential } from "../pause/admission-barrier"
-import type { HeldStart, StartAdmission } from "./start-admission"
+import type { HeldStart, StartAdmission, HostStartAuthority } from "./start-admission"
 import type { HostLivenessStatus } from "../runners/rpc-host/handle-heartbeat"
 
 export type { ExecutionMode, ExecutionModeGate } from "./execution-mode"
@@ -273,6 +273,7 @@ export type TrustedRespawnLaunch = {
 export type TrustedRespawnLaunchResolver = (record: TaskRecord) => Promise<TrustedRespawnLaunch | undefined>
 
 export type TaskManagerOptions = {
+  readonly captureStartAuthority?: (spec: ManagerStartSpec) => HostStartAuthority
   readonly onChildLiveness?: (record: TaskRecord, status: HostLivenessStatus) => void
   readonly onPausedChild?: (record: TaskRecord, owner: RunPauseOwner, childSeq: number) => void
   readonly childCreationPort?: ChildCreationPort
@@ -285,7 +286,8 @@ export type TaskManagerOptions = {
   // parent checkout, so a wiring that forgot it can never break the isolation promise.
   readonly isolation?: IsolationRuntime
   readonly store: TaskRecordStore
-  readonly runners: Readonly<Record<ExecutionMode, ManagedRunner>>
+  readonly runners?: Readonly<Record<ExecutionMode, ManagedRunner>>
+  readonly runnerPort?: import("./runner-routing").ManagedRunnerPort
   readonly planner: ChildPlanner
   readonly config: OmoTaskSettings
   readonly cwd: string

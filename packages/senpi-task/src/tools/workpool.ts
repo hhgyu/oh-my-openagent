@@ -77,11 +77,17 @@ export function createWorkpoolTool(deps: WorkpoolToolDeps): ToolDefinition<typeo
   }
 }
 
-export function createWorkpoolWorkerTool(deps: {
+export type WorkpoolWorkerDeps = {
   readonly workpools: Pick<WorkpoolEngine, "yieldResults">
   readonly taskId: string
   readonly runEpoch: () => number
-}): ToolDefinition {
+}
+/** Only the original yield closure; no leader TaskToolContext is required. */
+export type WorkpoolWorkerTool = Omit<ToolDefinition, "execute"> & {
+  readonly execute: (toolCallId: string, params: unknown) => Promise<WorkpoolToolResult>
+}
+
+export function createWorkpoolWorkerTool(deps: WorkpoolWorkerDeps): WorkpoolWorkerTool {
   return markWorkpoolYieldTool({
     name: "workpool", label: "Workpool yield", description: "Yield JSON data or a typed error for each assigned key. Identical repeated yields are idempotent; conflicting or stale yields are refused. This tool cannot schedule or spawn workers.",
     parameters: WorkpoolWorkerYieldParams,
@@ -92,5 +98,5 @@ export function createWorkpoolWorkerTool(deps: {
       }
       catch (error) { return failure(error) }
     },
-  })
+  }) as WorkpoolWorkerTool
 }

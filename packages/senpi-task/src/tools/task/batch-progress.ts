@@ -1,11 +1,10 @@
 import type { AgentToolUpdateCallback } from "@code-yeongyu/senpi"
 
-import type { TaskManager } from "../../manager"
 import { createChildProgress, type ChildProgressTarget, type ToolProgressDetails } from "../../progress"
 import { composeStatusLine, formatStatusTarget, taskIdentityLabel } from "../../status-line"
 import { startedDetail, type StartedResult } from "./batch-item-details"
 import { withLiveSpawnFacts } from "./result-details"
-import type { ResolvedSpawnItem, TaskSkillSummary, TaskToolDetails } from "./types"
+import type { ResolvedSpawnItem, TaskOperationManager, TaskSkillSummary, TaskToolDetails } from "./types"
 
 const EMIT_INTERVAL_MS = 250
 
@@ -21,7 +20,7 @@ export type BatchProgressTracker = {
 }
 
 type BatchProgressInput = {
-  readonly manager: TaskManager
+  readonly manager: Pick<TaskOperationManager, "whenLaunched" | "get" | "subscribeChild">
   readonly live: readonly LiveBatchStart[]
   readonly onUpdate: AgentToolUpdateCallback<TaskToolDetails & Pick<ToolProgressDetails, "progress">> | undefined
 }

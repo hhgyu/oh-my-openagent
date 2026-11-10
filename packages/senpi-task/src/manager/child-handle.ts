@@ -3,7 +3,7 @@ import { mapExitOutcomeToError } from "../runners/rpc/exit-mapping"
 import type { HostSessionChildHandle } from "../runners/rpc-host/handle-port"
 import type { HostSessionReplaced } from "../runners/rpc-host/session-client"
 import type { InputIdentity, RpcChildHandle, RpcEntriesResult, RpcSpawnSpec, RpcSwitchSessionResult } from "../runners/types"
-import type { SuspensionReason, TaskStatus } from "../state"
+import type { SuspensionReason, TaskRecord, TaskStatus } from "../state"
 import type { ChildExtensionListener } from "../runners/child-extension-events"
 import { HOST_TURN_RESUMED_EVENT } from "./host-turn-resumed"
 import type { EffectiveModel } from "../runners/pinned-model-equivalence"
@@ -13,22 +13,25 @@ import type { HostLivenessStatus } from "../runners/rpc-host/handle-heartbeat"
 
 export type { RunnerOutcome } from "../runners/in-process/child-handle"
 
-// The child-event seam the manager subscribes to for transcript logging. `type` is the discriminator;
-// the transcript-bearing fields are OPTIONAL so both runners' concrete events (in-process
-// ChildSessionEvent and rpc AgentSessionEvent) remain assignable to this widened shape.
-export type ManagedChildEvent = {
-  readonly type: string
-  readonly message?: unknown
-  readonly toolCallId?: string
-  readonly toolName?: string
-  readonly args?: unknown
-  readonly input?: unknown
-  readonly result?: unknown
-  readonly isError?: boolean
-  readonly to?: string
-}
+import type { ManagedChildEvent, ManagedChildListener } from "@oh-my-opencode/orchestration-core/contracts/child-event"
+export type { ManagedChildEvent, ManagedChildListener } from "@oh-my-opencode/orchestration-core/contracts/child-event"
 
-export type ManagedChildListener = (event: ManagedChildEvent) => void
+export type PreparedFollowUpResult =
+  | { readonly kind: "accepted" }
+  /** Issued only from the host adapter's private actual-call-not-started witness. */
+  | { readonly kind: "not-dispatched"; readonly reason: string }
+
+export interface PreparedFollowUp {
+  /** Synchronous custody check; changes only this ticket's owned-session reference. */
+  stamp(next: TaskRecord): TaskRecord
+  dispatch(message: string): Promise<PreparedFollowUpResult>
+  /** Refresh the prior run reference from actual current journal custody, or throw. */
+  restoreOwnedReference(prior: TaskRecord): TaskRecord["owned_session"]
+  /** Publish a new local rejected outcome; never fabricate a host terminal or admission ACK. */
+  retainFailure(reason: string): void
+  /** Join only unpublished resources. A committed/retained current remains owned by its handle. */
+  release(): Promise<void>
+}
 
 // The ONE handle seam the TaskManager (and todos 10-12) program against. Both runners' divergent
 // handle surfaces are normalized here: a promise-returning dispose, an optional pid/sessionId, and a
@@ -42,7 +45,15 @@ export type ManagedChildHandle = {
   readonly runPause?: NativeRunPause
   // Which runner owns this child. `pid` cannot answer that: a daemon session has no pid either.
   // Absent only on handles built before the field shipped (they are in-process by construction).
-  readonly kind?: "in-process" | "rpc" | "host-session"
+  readonly kind?: "in-process" | "rpc" | "host-session" | "owned-session"
+  readonly ownedSession?: import("../state").OwnedSessionIdentity
+  /** Required external ownership check; throws on retired journal/task generation. */
+  assertOwned?(): void
+  /** Optional host bookkeeping handoff after canonical reattach publication, before outcome arming.
+   * This is not a newly observed child turn or permission to replay its input. */
+  bindReattachedRun?(before: TaskRecord, actual: TaskRecord): Promise<void> | void
+  readonly observationCoverage?: "partial" | "complete"
+  subscribeTranscript?(store: import("./transcript-log").TranscriptLogStore, taskId: string): () => void
   readonly sessionId: string | undefined
   readonly pid: number | undefined
   // Present only on a daemon-session child: what the record persists so a later process can find
@@ -79,6 +90,8 @@ export type ManagedChildHandle = {
   // child then holds it under (#2838 step 4); without it the runner mints one.
   steer(text: string, identity?: InputIdentity): Promise<void>
   followUp(text: string, identity?: InputIdentity): Promise<void>
+  /** Optional host preparation before Native publishes a new run; absent runners keep their original path. */
+  prepareFollowUp?(prior: TaskRecord, nextEpoch: number): Promise<PreparedFollowUp>
   abort(): Promise<void>
   subscribe(listener: ManagedChildListener): () => void
   subscribeExtensionEvents?(listener: ChildExtensionListener): () => void

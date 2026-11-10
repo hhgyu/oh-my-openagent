@@ -66,7 +66,7 @@ function taskOutputResultRow(details: TaskOutputDetails): ResultRow {
           resolvedModel: details.snapshot.resolved_model,
           effectiveModel: details.snapshot.effective_model,
         }) ?? `model:${normalizeRendererText(details.snapshot.model)}`
-      const statusLabel = details.snapshot.suspended?.explanation ?? normalizeRendererText(details.snapshot.status)
+      const statusLabel = details.snapshot.observation_uncertain ? `observation unknown: ${normalizeRendererText(details.snapshot.observation_uncertain.reason)}` : details.snapshot.suspended?.explanation ?? normalizeRendererText(details.snapshot.status)
       return {
         color: statusThemeColor(details.snapshot.status),
         text: `${joinRendererTokens([`task_output ${identity}`, idSuffix, statusLabel])} · ${target}${runStatsSuffix(details.snapshot.run_stats)}`,
@@ -101,35 +101,7 @@ function notFoundRow(details: Extract<TaskOutputDetails, { readonly kind: "not_f
   return joinRendererTokens([`task_output not found: ${details.reason}`, known])
 }
 
-// Model-facing model summary for the task_output status view text (TUI rows use formatStatusTarget).
-// The effective route is what the child actually ran (#9722); when it differs from the plan the
-// plan is shown alongside, never instead of it.
-export function taskOutputModelText(snapshot: TaskSnapshot): string {
-  const display = nonEmpty(snapshot.resolved_model?.display)
-  const model = normalizeRendererText(snapshot.model)
-  const reasoning = nonEmpty(snapshot.resolved_model?.reasoning) ?? nonEmpty(snapshot.resolved_model?.reasoning_effort)
-  const variant = nonEmpty(snapshot.resolved_model?.variant)
-  const details = [
-    reasoning === undefined ? undefined : `reasoning ${reasoning}`,
-    variant === undefined ? undefined : `variant ${variant}`,
-  ].filter((part) => part !== undefined)
-  const planned = `${display ?? model}${details.length > 0 ? ` (${details.join(", ")})` : ""}`
-  const effective = nonEmpty(snapshot.effective_model?.display)
-  const sameModel =
-    snapshot.effective_model !== undefined &&
-    snapshot.resolved_model !== undefined &&
-    snapshot.effective_model.provider === snapshot.resolved_model.provider &&
-    snapshot.effective_model.model_id === snapshot.resolved_model.model_id
-  const operatorMark = snapshot.effective_model?.switched_by_operator === true ? " (switched by operator)" : ""
-  return effective === undefined || sameModel
-    ? `model ${planned}${operatorMark}`
-    : `model ${effective}${operatorMark} (planned ${planned})`
-}
-
-function nonEmpty(value: string | undefined): string | undefined {
-  const normalized = value === undefined ? undefined : excerptRendererText(value)
-  return normalized !== undefined && normalized.length > 0 ? normalized : undefined
-}
+export { taskOutputModelText } from "./model-text"
 
 function snapshotIdentity(snapshot: TaskSnapshot): string {
   return taskIdentityLabel({

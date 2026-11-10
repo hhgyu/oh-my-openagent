@@ -33,7 +33,11 @@ export async function reconcileScopedRevival(
   if (!reconciliationActive(context) || context.config.resume_children === false) return []
 
   const outcomes: ReconcileOutcome[] = []
-  const sessionRecords = records.filter((record) => record.parent_session_id === parentSessionId)
+  const sessionRecords = records.filter((record) => record.parent_session_id === parentSessionId && record.owned_session === undefined)
+  for (const record of records.filter(record => record.parent_session_id === parentSessionId && record.owned_session !== undefined)) {
+    if (!context.ownedSessions) throw new Error("Owned session lifecycle port required")
+    outcomes.push(await context.ownedSessions.reconcile(record))
+  }
   const expected = new Map<string, TaskRecord>(sessionRecords.filter(isSuspended).map(record => [record.task_id, record]))
   const canClaim = (fresh: TaskRecord) => {
     const observed = expected.get(fresh.task_id)

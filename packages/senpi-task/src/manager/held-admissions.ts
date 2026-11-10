@@ -5,17 +5,20 @@ import type { TaskConcurrency } from "./concurrency"
 import type { LaunchContext, LaunchOutcome } from "./launch-task"
 import { buildRespawnManagedSpec, isTerminalRecord } from "./manager-helpers"
 import { RunPauseAdmissionHeld } from "./run-pause"
-import { enterStartAdmission } from "./start-admission"
+import { enterStartAdmission, type HostStartAuthority } from "./start-admission"
+import type { ManagerStartSpec } from "./types"
 import type { ManagedRunner } from "./types"
 
 export type HeldAdmissionResult = { readonly kind: "resumed" } | { readonly kind: "settled" }
 
 type HeldAdmissionPorts = {
+  readonly captureStartAuthority?: (spec: ManagerStartSpec) => HostStartAuthority
   readonly store: TaskRecordStore
   readonly barrier: AdmissionBarrier
   readonly concurrency: TaskConcurrency
   readonly hostPid: number
-  readonly runners: Readonly<Record<"in-process" | "process", ManagedRunner>>
+  readonly runners?: Readonly<Record<"in-process" | "process", ManagedRunner>>
+  readonly resolveRunner?: (mode: "in-process" | "process") => ManagedRunner
   launch(context: LaunchContext): void
 }
 
@@ -69,13 +72,16 @@ export class HeldAdmissions {
     if (rebuilt !== undefined && !rebuilt.ok) throw new HeldAdmissionError(taskId, "spawn_spec_unavailable")
     const prepared = warm?.managedSpec ?? (rebuilt?.ok === true ? rebuilt.spec : undefined)
     if (prepared === undefined) throw new HeldAdmissionError(taskId, "spawn_spec_unavailable")
+    const resumeSpec: ManagerStartSpec = {
+      prompt: prepared.prompt, parent_session_id: record.parent_session_id,
+      ...(record.root_session_id === undefined ? {} : { root_session_id: record.root_session_id }), depth: record.depth,
+    }
+    const authority = this.#ports.captureStartAuthority?.(resumeSpec)
+    if (this.#ports.captureStartAuthority && !authority) throw new Error("Missing host authority for held resume")
     const entered = enterStartAdmission({
       barrier: this.#ports.barrier, taskId, runRef: participant.runRef, credential,
-      spec: {
-        prompt: prepared.prompt, parent_session_id: record.parent_session_id,
-        ...(record.root_session_id === undefined ? {} : { root_session_id: record.root_session_id }),
-        depth: record.depth,
-      },
+      spec: resumeSpec,
+      ...(authority ? { hostAuthority: authority } : {}),
     })
     if (entered.kind === "held") throw new RunPauseAdmissionHeld()
     try {
@@ -89,7 +95,7 @@ export class HeldAdmissions {
       if (!claimed || owned === null) throw new HeldAdmissionError(taskId, "owner_changed")
       const context: LaunchContext = {
         record: owned, managedSpec: { ...prepared, admission: entered.scope },
-        runner: warm?.runner ?? this.#ports.runners[owned.execution_mode === "in-process" ? "in-process" : "process"],
+        runner: warm?.runner ?? (this.#ports.resolveRunner?.(owned.execution_mode === "in-process" ? "in-process" : "process") ?? this.#ports.runners![owned.execution_mode === "in-process" ? "in-process" : "process"]),
         model: allocation.model,
       }
       this.#contexts.set(taskId, context)

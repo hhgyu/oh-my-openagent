@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, type ExtensionToolContext } from "@code-yeongyu/senpi"
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@code-yeongyu/senpi"
+import { curatedReadonlyFormatter } from "../../../../utils/src/curated-readonly-presentation"
 
 import {
   createCuratedReadonlyBashTool,
@@ -21,8 +22,6 @@ async function executeFakeGitHub(endpoint: "bytes" | "error" | "lines" | "small"
     "call-1",
     { program: "gh", args: ["api", endpoint] },
     undefined,
-    undefined,
-    {} as unknown as ExtensionToolContext,
   )
   const [part] = result.content
   if (part?.type !== "text") throw new Error("expected a text tool result")
@@ -64,6 +63,69 @@ describe("createCuratedReadonlyBashTool", () => {
   test("#given output within both limits #when the tool returns #then it stays byte-identical", async () => {
     expect(await executeFakeGitHub("small")).toBe("line one\nline two")
   })
+})
+
+test("explicit real formatter matches default Native success/error bytes and original error causes", async () => {
+  for (const text of ["small\nresponse", "x".repeat(60000), "界😀".repeat(16000), Array(2501).fill("row").join("\n")]) {
+    const original = new CuratedReadonlyCommandError(text)
+    for (const failed of [false, true]) {
+      const executor = async () => { if (failed) throw original; return text }
+      const defaultTool = createCuratedReadonlyBashTool("/fixture", executor)
+      const explicitTool = createCuratedReadonlyBashTool("/fixture", executor, curatedReadonlyFormatter)
+      const input = { program: "gh" as const, args: ["api", "endpoint"] }
+      if (!failed) expect(await explicitTool.execute("id", input, undefined)).toEqual(await defaultTool.execute("id", input, undefined))
+      else {
+        let defaultError: unknown, explicitError: unknown
+        try { await defaultTool.execute("id", input, undefined) } catch (error) { defaultError = error }
+        try { await explicitTool.execute("id", input, undefined) } catch (error) { explicitError = error }
+        expect(defaultError).toBeInstanceOf(CuratedReadonlyCommandError)
+        expect(explicitError).toBeInstanceOf(CuratedReadonlyCommandError)
+        if (!(defaultError instanceof Error) || !(explicitError instanceof Error)) throw Error("Missing actual errors")
+        expect(explicitError.message).toBe(defaultError.message)
+        expect(explicitError.cause).toBe(original)
+        expect(defaultError.cause).toBe(original)
+      }
+    }
+  }
+})
+
+test("both presentation routes preserve arbitrary error and original cancellation signal identity", async () => {
+  for (const formatter of [undefined, curatedReadonlyFormatter]) {
+    const controller = new AbortController(), reason = Error("original cancellation")
+    controller.abort(reason)
+    let calls = 0
+    const tool = createCuratedReadonlyBashTool("/original-cwd", async (command, cwd, seconds, signal) => {
+      calls++
+      expect(command).toEqual({ program: "curl", args: ["--disable", "https://example.com"] })
+      expect(cwd).toBe("/original-cwd")
+      expect(seconds).toBe(7)
+      expect(signal).toBe(controller.signal)
+      throw signal!.reason
+    }, formatter)
+    await expect(tool.execute("id", { program: "curl", args: ["https://example.com"], timeout_seconds: 7 }, controller.signal)).rejects.toBe(reason)
+    expect(calls).toBe(1)
+  }
+})
+
+test("fresh default warms Native before planning; explicit formatter needs no Native but rejects same unsafe request", () => {
+  const source = `
+    let attempts=0, planned=0, executed=0;
+    Bun.plugin({name:"native-warmup-tripwire",setup(build){build.onLoad({filter:/node_modules[\\\\/](?:\\.bun[\\\\/]@code-yeongyu\\+senpi|@code-yeongyu[\\\\/]senpi)/},()=>{attempts++;throw Error("NATIVE_WARMUP_MARKER")})}});
+    const {createCuratedReadonlyBashTool,CuratedReadonlyCommandError}=await import(${JSON.stringify(new URL("./curated-readonly-bash.ts", import.meta.url).href)});
+    const {curatedReadonlyFormatter}=await import(${JSON.stringify(new URL("../../../../utils/src/curated-readonly-presentation.ts", import.meta.url).href)});
+    const input={program:"gh",get args(){planned++;return ["repo","clone","acme/repo"]}};
+    let first,second;
+    try{await createCuratedReadonlyBashTool("/fixture",async()=>{executed++;return "bad"}).execute("id",input,undefined)}catch(e){first=e}
+    if(!String(first).includes("NATIVE_WARMUP_MARKER")||planned!==0||attempts!==1)throw Error("Default warmup/planning order changed");
+    try{await createCuratedReadonlyBashTool("/fixture",async()=>{executed++;return "bad"},curatedReadonlyFormatter).execute("id",input,undefined)}catch(e){second=e}
+    if(!(second instanceof CuratedReadonlyCommandError)||planned!==1||attempts!==1||executed!==0)throw Error("Explicit formatter bypassed command policy or loaded Native");
+    console.log(JSON.stringify({defaultWarmupBeforePlan:true,explicitNoNative:true,unsafeExecutorCalls:executed}));
+  `
+  const child = Bun.spawnSync([process.execPath, "--eval", source], { env: process.env, timeout: 10000, maxBuffer: 1024 * 1024 })
+  if (child.exitCode !== 0) throw Error(child.stderr.toString())
+  expect(child.exitCode).toBe(0)
+  expect(child.stdout.toString()).toContain('"defaultWarmupBeforePlan":true')
+  expect(child.stdout.toString()).toContain('"unsafeExecutorCalls":0')
 })
 
 describe("planCuratedReadonlyCommand", () => {

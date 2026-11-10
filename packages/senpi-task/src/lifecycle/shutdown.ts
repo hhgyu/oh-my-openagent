@@ -102,6 +102,15 @@ export async function suspendHandle(
   reason: string,
   owns: () => boolean = () => true,
 ): Promise<void> {
+  const owned = context.store.load(handle.task_id)
+  if (owned?.owned_session !== undefined) {
+    if (!context.ownedSessions) throw new Error("Owned session lifecycle port required")
+    await context.ownedSessions.suspend(owned, reason)
+    if (!owns()) return
+    if (owns()) context.registry.forget(handle.task_id, { path: "park" })
+    context.store.transition(handle.task_id, { type: "persist_only", timestamp: nowIso(context) })
+    return
+  }
   if (owns()) context.registry.forget(handle.task_id, { path: "park" })
   const target = { taskId: handle.task_id, pid: handle.pid }
   if (handle.kind !== "host-session") {

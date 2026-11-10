@@ -11,6 +11,24 @@ export type HeldStart = {
 }
 
 const heldErrors = new WeakSet<object>()
+const hostRefusals = new WeakSet<object>()
+
+/** Transient host provenance; never part of a TaskRecord or persisted spawn specification. */
+export interface HostStartAuthority {
+  readonly admissionSignal: AbortSignal
+  readonly lifetimeSignal: AbortSignal
+  assertAdmission(): void
+  assertLifetime(): void
+}
+export class HostStartAdmissionRefused extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "Host start authority is unavailable", { cause })
+    hostRefusals.add(this)
+  }
+}
+export function isHostStartAdmissionRefused(value: unknown): value is HostStartAdmissionRefused {
+  return typeof value === "object" && value !== null && hostRefusals.has(value)
+}
 
 export class AdmissionHeld extends Error {
   constructor(readonly result: HeldStart) {
@@ -24,6 +42,10 @@ export function isAdmissionHeld(value: unknown): value is AdmissionHeld {
 }
 
 export type StartAdmission = AdmissionTicket & {
+  readonly hostAuthority?: HostStartAuthority
+  hostSignal?(): AbortSignal
+  /** Matching first input ACK only; Native transfer/commit/queue acceptance is not this proof. */
+  hostAccepted?(): void
   readonly taskId: string
   readonly rootSessionId: string
   readonly runRef: RunRef
@@ -40,8 +62,18 @@ export function enterStartAdmission(input: {
   readonly runRef?: RunRef
   readonly credential?: ResumeCredential
   readonly held?: (result: HeldStart, spec: ManagerStartSpec) => void
+  readonly hostAuthority?: HostStartAuthority
 }) {
   const { barrier, spec, runRef, credential, held } = input
+  let accepted = false
+  const authority = input.hostAuthority
+  function assertHost() {
+    if (!authority) return
+    try { if (accepted) authority.assertLifetime(); else authority.assertAdmission() }
+    catch (cause) { throw new HostStartAdmissionRefused(cause) }
+  }
+  // A refused host call must never allocate an unowned Native barrier participant.
+  assertHost()
   let taskId = input.taskId
   const rootSessionId = spec.root_session_id ?? spec.parent_session_id
   const participant = { key: taskId, runRef: runRef ?? { kind: "task" as const, id: taskId } }
@@ -55,6 +87,8 @@ export function enterStartAdmission(input: {
   let transferred = false
   const scope: StartAdmission = {
     ...entered.ticket, get taskId() { return taskId }, rootSessionId,
+    ...(authority ? { hostAuthority: authority, hostSignal: () => accepted ? authority.lifetimeSignal : authority.admissionSignal,
+      hostAccepted: () => { accepted = true }, commit: () => { assertHost(); return entered.ticket.commit() } } : {}),
     creating: () => entered.ticket.creating(taskId),
     get runRef() { return participant.runRef },
     bind: id => {
@@ -71,6 +105,7 @@ export function enterStartAdmission(input: {
       return custody
     },
     assertOpen: () => {
+      assertHost()
       const check = entered.ticket.check()
       if (check.kind === "held") throw new AdmissionHeld(result(check.pauseSeq))
     },
@@ -78,14 +113,17 @@ export function enterStartAdmission(input: {
   return { kind: "entered" as const, scope, spec: { ...spec, admission: scope }, transferred: () => transferred }
 }
 
-export function createStartAdmissions(barrier: AdmissionBarrier, held?: (result: HeldStart, spec: ManagerStartSpec) => void, now = Date.now) {
+export function createStartAdmissions(barrier: AdmissionBarrier, held?: (result: HeldStart, spec: ManagerStartSpec) => void, now = Date.now,
+  capture?: (spec: ManagerStartSpec) => HostStartAuthority) {
   async function run<T>(
     spec: ManagerStartSpec,
     runRef: RunRef | undefined,
     body: (admitted: ManagerStartSpec) => Promise<T>,
     credential?: ResumeCredential,
   ): Promise<T | HeldStart> {
-    const entered = enterStartAdmission({ barrier, spec, taskId: createTaskId(now()), runRef, credential, held })
+    const authority = capture?.(spec)
+    if (capture && !authority) throw new HostStartAdmissionRefused(new Error("Missing host start authority"))
+    const entered = enterStartAdmission({ barrier, spec, taskId: createTaskId(now()), runRef, credential, held, ...(authority ? { hostAuthority: authority } : {}) })
     if (entered.kind === "held") return entered.result
     try { return await body(entered.spec) }
     catch (error) {

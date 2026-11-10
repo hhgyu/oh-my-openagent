@@ -25,6 +25,7 @@ const DEFAULT_ORPHAN_KILL_DELAY_MS = 5_000
 const DEFAULT_HOST_CLOSE_TIMEOUT_MS = 10_000
 
 export type LifecycleContext = {
+  readonly ownedSessions?: import("./port").OwnedSessionLifecyclePort
   // Captures one startup generation; shutdown or its caller's abort permanently invalidates it.
   readonly reconcileActive?: () => boolean
   readonly deferUnresumable?: boolean
@@ -87,6 +88,7 @@ export const defaultSignaller: ProcessSignaller = {
 
 export function resolveContext(deps: LifecycleDeps): LifecycleContext {
   return {
+    ownedSessions: deps.ownedSessions,
     store: deps.store,
     revivePolicy: deps.revivePolicy,
     registry: deps.registry,

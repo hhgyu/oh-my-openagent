@@ -7,7 +7,7 @@ import { workpoolProcessLaunch } from "./workpool-process-launch"
 
 export function respawnWithWorkpool(
   input: Parameters<typeof respawnManagedTask>[0] & { readonly inheritedExtensions?: InheritedExtensions },
-  workpools: WorkpoolEngine,
+  workpools: Pick<WorkpoolEngine, "ownsTask" | "yieldResults">,
   epoch: () => number,
 ) {
   if (!workpools.ownsTask(input.record.task_id)) return respawnManagedTask(input)

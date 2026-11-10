@@ -34,6 +34,15 @@ export async function destroyResidentTask(
   cause: DestroyCause,
   orphan?: OrphanTarget,
 ): Promise<void> {
+  const owned = context.store.load(taskId) ?? orphan?.record
+  if (owned?.owned_session !== undefined) {
+    if (!context.ownedSessions) throw new Error("Owned session lifecycle port required")
+    await context.ownedSessions.destroy(owned, cause)
+    context.failedTeardowns.delete(taskId)
+    context.registry.forget(taskId, { path: cause === "recovery_detach" ? "park" : "end" })
+    if (cause !== "recovery_detach" && cause !== "fallback_handoff" && cause !== "redispatch") recordResidency(context, taskId, cause)
+    return
+  }
   if (cause === "recovery_detach") {
     // A typed pre-delivery refusal says nothing about the daemon's running turn. dispose drops
     // only our protocol connection; abort/terminate would close the session we intend to reattach.

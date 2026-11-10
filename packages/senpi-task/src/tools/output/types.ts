@@ -7,20 +7,8 @@ import type { CallerSessionResolver } from "../control"
 
 export type OutputManager = Pick<TaskManager, "get" | "list" | "concurrency">
 
-export type TranscriptEntry =
-  | { readonly kind: "assistant"; readonly text: string }
-  | { readonly kind: "tool"; readonly tool: string; readonly is_error: boolean }
-  | { readonly kind: "error"; readonly message: string }
-
-export type TranscriptSource = "event-log" | "session-jsonl" | "none"
-
-export type TranscriptReadResult = {
-  readonly entries: readonly TranscriptEntry[]
-  readonly source: TranscriptSource
-  readonly truncated?: boolean
-}
-
-export type TranscriptReader = (input: { readonly taskId: string; readonly stateDir: string }) => TranscriptReadResult
+import type { TranscriptSource, TranscriptReader } from "@oh-my-opencode/orchestration-core/contracts/transcript"
+export type { TranscriptEntry, TranscriptSource, TranscriptReadResult, TranscriptReader } from "@oh-my-opencode/orchestration-core/contracts/transcript"
 
 export type LostBreadcrumbs = {
   readonly explanation: string
@@ -38,6 +26,7 @@ export type SuspendedDetails = {
 }
 
 export type TaskSnapshot = {
+  readonly observation_uncertain?: { readonly reason: string; readonly startEventID?: string }
   readonly task_id: string
   readonly lease?: "held" | "parked"
   readonly name?: string

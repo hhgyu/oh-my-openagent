@@ -1,6 +1,5 @@
-import type { TaskManager } from "../../manager"
 import type { TaskRecord } from "../../state"
-import type { TaskToolContext } from "./types"
+import type { TaskOperationManager, TaskToolContext } from "./types"
 
 const PROMPT_CACHE_SAFE_WAIT_ENV = "PI_PROMPT_CACHE_SAFE_WAIT_SECONDS"
 // A 15-minute bound on how long a parent turn blocks on a foreground task, whatever the cache TTL allows.
@@ -18,7 +17,7 @@ export type ForegroundWaitResult =
   | { readonly kind: "promoted"; readonly budgetSeconds: number }
 
 export type ForegroundWaitInput = ForegroundWaitOptions & {
-  readonly manager: TaskManager
+  readonly manager: Pick<TaskOperationManager, "waitFor" | "promoteToBackground">
   readonly taskId: string
   readonly signal: AbortSignal | undefined
   readonly ctx: TaskToolContext

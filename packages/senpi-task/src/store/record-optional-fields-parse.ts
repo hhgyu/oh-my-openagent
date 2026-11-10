@@ -1,3 +1,4 @@
+import { parseOwnedSession } from "./owned-session-parse"
 import { BACKGROUND_MODES, type BackgroundMode, type TaskRecord } from "../state"
 import { AWAITING_INPUT_REASONS } from "../state/types"
 import { parseOptionalHostSession } from "./record-blocks-parse"
@@ -29,11 +30,14 @@ export function parseOptionalClosingChild(record: Record<string, unknown>): Task
   if (!isRecord(value)) throw new Error("fallback_closing_child is not an object")
   const pid = readOptionalNumber(value, "pid")
   const hostSession = parseOptionalHostSession(value)
+  const ownedSession = parseOwnedSession(value.owned_session)
+  if (ownedSession !== undefined && (pid !== undefined || hostSession !== undefined)) throw new Error("Closing owned identity is mixed")
   const confirmation = readOptionalBoolean(value, "requires_confirmation")
   return {
     ...(pid === undefined ? {} : { pid }),
     ...(hostSession === undefined ? {} : { host_session: hostSession }),
     ...(confirmation === undefined ? {} : { requires_confirmation: confirmation }),
+    ...(ownedSession === undefined ? {} : { owned_session: ownedSession }),
   }
 }
 

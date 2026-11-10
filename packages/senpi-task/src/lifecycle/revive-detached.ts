@@ -64,6 +64,11 @@ export async function reviveDetachedTerminal(
 ): Promise<DetachedRevivalResult> {
   const observed = context.store.load(taskId)
   if (observed === null || !isColdRevivalCandidate(observed)) return { ok: false, reason: "task is not a continuable parked child" }
+  // A Native transcript cannot reacquire an external host's control/journal
+  // custody. Its adapter must recover that control before a resident follow-up.
+  if (observed.runner_kind === "owned-session" || observed.owned_session !== undefined) {
+    return { ok: false, reason: "external owned session requires explicit host control recovery" }
+  }
   if (observed.isolation !== undefined) return refused("isolated_not_revivable")
   if (observed.host_pid !== undefined && observed.host_pid !== context.hostPid) return refused("foreign_owner")
   const sessionPath = newestSessionPath(context, taskId)

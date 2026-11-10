@@ -12,7 +12,7 @@ import {
 } from "../state"
 import { R0_ENUM_FIELDS, validateR0Enums } from "./__fixtures__/r0-ebd01f84e-enums"
 import { parseR0PersistedReasons } from "./__fixtures__/r0-ebd01f84e-reasons"
-import { storedStatus } from "./storable-record"
+import { storedRunnerKind, storedStatus } from "./storable-record"
 
 function recordWith(path: string, value: unknown): Record<string, unknown> {
   const nest = (parts: readonly string[]): unknown => {
@@ -45,9 +45,12 @@ describe("R0 persisted enum compatibility", () => {
     "run_stats.duration_status": DURATION_SOURCE_STATUSES,
   })) {
     test(`#given current ${path} vocabulary #when read by R0 #then every value remains readable`, () => {
-      // A status is checked in its on-disk encoding: the store never writes a status R0 cannot read.
+      // Check the actual on-disk vocabulary, including additive owned-runner metadata.
+      // The frozen R0 reader must not learn new enum values from this build.
       const persisted = (value: string): Record<string, unknown> =>
-        path === "status" ? { ...storedStatus(TASK_STATUSES.find(status => status === value) ?? "running") } : recordWith(path, value)
+        path === "status" ? { ...storedStatus(TASK_STATUSES.find(status => status === value) ?? "running") }
+          : path === "runner_kind" ? recordWith(path, storedRunnerKind(RUNNER_KINDS.find(kind => kind === value) ?? "child-process"))
+            : recordWith(path, value)
       for (const value of values) expect(() => parseR0PersistedReasons(persisted(value))).not.toThrow()
     })
   }

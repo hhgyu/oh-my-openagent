@@ -144,6 +144,15 @@ describe("in-process child teardown shuts down its extensions (#9413)", () => {
       disposed = true
       dispose()
     }
+    let joinCalls = 0
+    let joined = false
+    const originalJoin = session.whenToolChildClosed
+    session.whenToolChildClosed = function () {
+      expect(this).toBe(session)
+      expect(disposed).toBe(true)
+      joinCalls++
+      return originalJoin.call(this).then(() => { joined = true })
+    }
     const handle = createRestoredChildHandle({ taskId: "hung-child", session })
 
     // when: teardown waits only for the budget, never for the hung handler
@@ -152,5 +161,7 @@ describe("in-process child teardown shuts down its extensions (#9413)", () => {
     // then: the handler was asked to stop at the budget, and the session was still disposed
     expect(shutdownSignal?.aborted).toBe(true)
     expect(disposed).toBe(true)
+    expect(joinCalls).toBe(1)
+    expect(joined).toBe(true)
   }, 120_000)
 })

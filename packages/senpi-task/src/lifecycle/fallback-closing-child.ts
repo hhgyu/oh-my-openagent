@@ -16,6 +16,12 @@ const closingAttempts = new Map<string, Promise<boolean>>()
 export async function endClosingFallbackChild(context: LifecycleContext, record: TaskRecord): Promise<boolean> {
   const closing = record.fallback_closing_child
   if (closing === undefined) return true
+  if (closing.owned_session !== undefined) {
+    if (!context.ownedSessions) throw new Error("Owned session lifecycle port required")
+    await context.ownedSessions.destroy({ ...record, owned_session: closing.owned_session, runner_kind: "owned-session" }, "fallback_handoff")
+    context.store.mutate(record.task_id, fresh => forgetClosedChild(fresh, closing))
+    return true
+  }
   if (closing.requires_confirmation === true && closing.host_session !== undefined) {
     const { socket, session_path, instance_id, routing_id } = closing.host_session
     const key = JSON.stringify([context.store.stateDir, record.task_id, socket, session_path, instance_id, routing_id])

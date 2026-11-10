@@ -4,6 +4,7 @@ import type { ListScope, ListedTask } from "../../manager"
 import type { TaskRecord } from "../../state"
 import { makeRecord } from "./__fixtures__/records"
 import { createTaskOutputTool, type TaskOutputInput } from "./output"
+import { forgetTaskOutputSessionReads, runTaskOutput } from "../task/operations"
 import type { OutputManager } from "./types"
 
 function context(sessionId: string) {
@@ -11,6 +12,38 @@ function context(sessionId: string) {
 }
 
 describe("task_output polling guard", () => {
+  test("adapter-owned and factory caches forget only the exact escaped caller", async () => {
+    const caller = 'session-"a' + String.fromCharCode(92) + "edge"
+    const neighbor = caller + "-neighbor"
+    const records = [
+      makeRecord({ task_id: "st_reset_a", parent_session_id: caller }),
+      makeRecord({ task_id: "st_reset_b", parent_session_id: neighbor }),
+    ]
+    const manager: OutputManager = {
+      get: id => records.find(record => record.task_id === id),
+      list: scope => records.filter(record => scope.scope === "all" || record.parent_session_id === scope.session_id).map(record => ({ record })),
+    }
+    const deps = { manager, stateDir: "/tmp/state" }
+    const reads = new Map<string, string>()
+    const factory = createTaskOutputTool(deps)
+    for (const useFactory of [false, true]) {
+      const read = (index: number) => {
+        const record = records[index]!
+        return useFactory
+          ? factory.execute("call", { task_id: record.task_id }, undefined, undefined, context(record.parent_session_id))
+          : runTaskOutput(deps, { task_id: record.task_id }, record.parent_session_id, reads)
+      }
+      for (const index of [0, 1]) {
+        expect((await read(index)).details.kind).toBe("status")
+        expect((await read(index)).details.kind).toBe("no_progress")
+      }
+      if (useFactory) { factory.forgetSession(caller); factory.forgetSession(caller) }
+      else { forgetTaskOutputSessionReads(reads, caller); forgetTaskOutputSessionReads(reads, caller) }
+      expect((await read(0)).details.kind).toBe("status")
+      expect((await read(1)).details.kind).toBe("no_progress")
+    }
+  })
+
   test("#given one status peek #when the same caller reads the unchanged task again #then the full snapshot is not replayed", async () => {
     // given
     const parentA = makeRecord({ task_id: "st_parent_a", name: "worker", parent_session_id: "session-a" })

@@ -71,11 +71,27 @@ export type TaskAgentInfo = {
   readonly description?: string
 }
 
+/** The canonical task operation consumes these manager methods and its existing lane allocator. */
+export type TaskOperationManager = Pick<TaskManager,
+  | "start"
+  | "get"
+  | "waitFor"
+  | "subscribeChild"
+  | "whenLaunched"
+  | "promoteToBackground"
+  | "cancelTask"
+  | "findTaskByChildSession"
+  | "concurrency"
+>
+
 export type TaskToolDeps = {
-  readonly manager: TaskManager
+  readonly manager: TaskOperationManager
   readonly omoConfig: OmoConfig
   readonly agents: Readonly<Record<string, AgentDefinition>>
   readonly resolveAncestry?: ResolveAncestry
+  // Prepare the host runtime before each spawn captures skills and builds its start spec.
+  // Absent keeps the Native senpi barrel warmup, even when a custom skill loader is supplied.
+  readonly prepareRuntime?: () => Promise<void>
   readonly loadSkills?: SkillLoader
   // Session-scoped skill-invocation state for plan-gated agents (plan-consultant/plan-reviewer). When absent the
   // invocation gate fails CLOSED: without a resolver there is no proof ulw-plan was invoked.

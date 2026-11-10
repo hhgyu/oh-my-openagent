@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { coldReviveHarness } from "./__fixtures__/cold-revive-harness"
 import { realColdRevive } from "./__fixtures__/real-cold-revive"
 import { idleReplacementCycles } from "./__fixtures__/idle-replacement-cycles"
@@ -10,14 +10,45 @@ import { createTaskManager } from "../manager/manager"
 import { FakeRunner, cleanupProjects, makeHandle, settings, tempProject } from "../manager/__fixtures__/manager-fakes"
 import type { ManagedStartSpec } from "../manager/types"
 import { createTaskRecord } from "../state"
-import { createTaskRecordStore } from "../store"
+import { createTaskRecordStore, type TaskRecordStore } from "../store"
 import { createTaskLifecycle } from "./create"
 import { FakeRegistry } from "./__fixtures__/lifecycle-fakes"
 import { NO_HOST_ENDPOINT } from "./host-session"
+import { reviveDetachedTerminal } from "./revive-detached"
+import type { LifecycleContext } from "./context"
 
 afterEach(cleanupProjects)
 
 describe("idle cold revival", () => {
+  test("external owned-session cannot revive from an available Native transcript", async () => {
+    const h = coldReviveHarness()
+    const recordPath = join(h.store.stateDir, "tasks", h.record.task_id + ".json"), original = readFileSync(recordPath)
+    h.store.mutate(h.record.task_id, record => ({ ...record, runner_kind: "owned-session", child_session_id: "owned-fixture", residency_claim: "owned-claim",
+      owned_session: { format: 1, backendID: "external-owned-test", location: h.project, hostVersion: "2.2.6", parentID: "parent", sessionID: "owned-fixture",
+        generation: 1, journalKey: `${record.task_id}:0`, journalOwner: "owned-test", journalRevision: 0, runEpoch: record.notification.run_epoch, residencyClaim: "owned-claim" } }))
+    const before = h.store.load(h.record.task_id)
+    try {
+      if (!before) throw Error("Missing stored external fixture")
+      for (const row of [
+        { ...before, owned_session: undefined },
+        { ...before, runner_kind: "host-session" as const },
+      ]) {
+        // Test each marker independently before even consulting a transcript
+        // directory. These deliberately mixed in-memory inputs are unit data.
+        const store: TaskRecordStore = { ...h.store, load: () => row }
+        Object.defineProperty(store, "stateDir", { get() { throw Error("External record reached Native transcript lookup") } })
+        const result = await reviveDetachedTerminal({ store } as LifecycleContext, row.task_id)
+        expect(result).toEqual({ ok: false, reason: "external owned session requires explicit host control recovery" })
+      }
+      const outcome = await h.send()
+      expect(outcome.kind).toBe("not_continuable")
+      expect(h.resumed).toHaveLength(0)
+      expect(h.fake.followUpCalls).toHaveLength(0)
+      expect(h.store.load(h.record.task_id)).toEqual(before)
+      expect(h.manager.concurrency?.getCount("fixture/model")).toBe(0)
+    } finally { writeFileSync(recordPath, original); await h.dispose() }
+  })
+
   test("#given four concurrent children #when replacements cycle four times across idle parking #then ordinary idle children remain continuable", async () => {
     expect(await idleReplacementCycles()).toMatchObject({ cycles: 4, concurrentTurns: 4, peakResidents: 4, evicted: 0, nonContinuable: 0 })
   })
