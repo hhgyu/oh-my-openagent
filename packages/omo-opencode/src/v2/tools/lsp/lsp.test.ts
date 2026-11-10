@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, symlinkSync } from "node:fs"
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, symlinkSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -16,7 +16,7 @@ type LspHost = Parameters<ReturnType<typeof createLspComponent>["register"]>[0]
 type ToolAdder = (editor: { add: (tool: Info) => void }) => void
 const server: ResolvedServer = { id: "fixture", command: ["fixture"], extensions: [".ts"], priority: 0 }
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "v2-lsp-unit-"))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "v2-lsp-unit-")))
   const a=join(root,"a.ts"), b=join(root,"b.ts")
   writeFileSync(a,"const original = 1\n");writeFileSync(b,"original\n")
   let starts=0, stops=0, requests=0, formats=0, syncs=0
@@ -81,7 +81,7 @@ describe("Native six-tool LSP OpenCode adapter",()=>{
   try{await expect(f.runtime.execute("lsp_rename",{filePath:"a.ts",line:1,character:6,newName:"x"},f.caller)).rejects.toBe(reason);expect(readFileSync(f.a,"utf8")).toContain("original");expect(readFileSync(f.b,"utf8")).toBe("original\n");expect(f.events).toHaveLength(0)}finally{await f.cleanup()}
  })
  test("external edits rejected; symlink escape never writes target",async()=>{
-  const f=fixture();const outside=mkdtempSync(join(tmpdir(),"v2-lsp-outside-"));const target=join(outside,"escape.ts");writeFileSync(target,"original\n")
+  const f=fixture();const outside=realpathSync(mkdtempSync(join(tmpdir(),"v2-lsp-outside-")));const target=join(outside,"escape.ts");writeFileSync(target,"original\n")
   const bad=(p:string):WorkspaceEdit=>({changes:{[pathToFileURL(p).href]:[{range:{start:{line:0,character:0},end:{line:0,character:8}},newText:"BAD"}]}})
   try{
    f.setEdit(bad(target));await expect(f.runtime.execute("lsp_rename",{filePath:"a.ts",line:1,character:6,newName:"x"},f.caller)).rejects.toThrow("outside workspace")
@@ -165,7 +165,7 @@ describe("owned internal LSP format backend",()=>{
   const f=fixture();try{f.setFormat(async file=>{writeFileSync(file,"concurrent external edit\n");return[{range:{start:{line:0,character:0},end:{line:0,character:5}},newText:"BAD"}]});await expect(f.runtime.format("a.ts",f.caller)).rejects.toThrow("changed");expect(readFileSync(f.a,"utf8")).toBe("concurrent external edit\n");expect(f.events).toHaveLength(0)}finally{await f.cleanup()}
  })
  test("changes during edit approval and symlink escape fail before formatting write",async()=>{
-  const f=fixture();const external=mkdtempSync(join(tmpdir(),"v2-format-outside-"));const file=join(external,"a.ts");writeFileSync(file,"outside\n")
+  const f=fixture();const external=realpathSync(mkdtempSync(join(tmpdir(),"v2-format-outside-")));const file=join(external,"a.ts");writeFileSync(file,"outside\n")
   try{f.options.permission.assert=async(input:PermissionInput)=>{if(input.action==="edit")writeFileSync(f.a,"changed during approval\n")};await expect(f.runtime.format("a.ts",f.caller)).rejects.toThrow("changed");expect(readFileSync(f.a,"utf8")).toBe("changed during approval\n");symlinkSync(external,join(f.root,"link"),process.platform==="win32"?"junction":"dir");const before=f.counts().formats;await expect(f.runtime.format("link/a.ts",f.caller)).rejects.toThrow("workspace");expect(f.counts().formats).toBe(before);expect(readFileSync(file,"utf8")).toBe("outside\n")}finally{await f.cleanup();rmSync(external,{recursive:true,force:true})}
  })
  test("abort and final disposal reject pending format and never recreate the client",async()=>{

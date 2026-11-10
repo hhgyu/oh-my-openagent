@@ -1,7 +1,7 @@
 import { Database, constants } from "../../shared/bun-sqlite-shim"
 import { randomUUID } from "node:crypto"
-import { lstatSync, mkdirSync, realpathSync } from "node:fs"
-import { dirname, isAbsolute, parse, resolve } from "node:path"
+import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs"
+import { basename, dirname, isAbsolute, parse, resolve } from "node:path"
 import { z } from "zod"
 import { getPidLiveness, getProcessStartIdentity, startIdentitiesConflict } from "@oh-my-opencode/memory-core/process-identity"
 import { SessionBackendError, type ChildJournal, type ChildRecord } from "./session-backend"
@@ -51,9 +51,23 @@ function advance(revision: number): number {
   if (revision >= Number.MAX_SAFE_INTEGER) fail("Child journal revision exhausted")
   return revision + 1
 }
+/** The deepest directory that already exists is taken at its physical location, so links the OS
+ * owns above the application's state (macOS `/var` -> `/private/var`) are accepted. Everything the
+ * application creates below it, and the database file itself, must not be a link. */
+function physicalPrefix(absolute: string): string {
+  const created = [basename(absolute)]
+  let existing = dirname(absolute)
+  while (!existsSync(existing)) {
+    const parent = dirname(existing)
+    if (parent === existing) break
+    created.unshift(basename(existing))
+    existing = parent
+  }
+  return resolve(realpathSync(existing), ...created)
+}
 export function resolveTrustedChildStatePath(path: string) {
   if (!isAbsolute(path)) fail("Child journal requires an absolute trusted state path")
-  const absolute = resolve(path)
+  const absolute = physicalPrefix(resolve(path))
   let current = parse(absolute).root
   for (const part of absolute.slice(current.length).split(/[\\/]/).filter(Boolean)) {
     current = resolve(current, part)

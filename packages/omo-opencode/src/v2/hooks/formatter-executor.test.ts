@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs"
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { spawnSync } from "node:child_process"
 import { dirname, join } from "node:path"
@@ -14,13 +14,21 @@ function defined<T>(value: T): NonNullable<T> {
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "omo-format-test-")); roots.push(root)
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "omo-format-test-"))); roots.push(root)
   const file = join(root, "main.go"); writeFileSync(file, "package main\nfunc main(){println(1)}\n")
   const controller = new AbortController()
   const caller = { sessionID: "session", agent: "agent", messageID: "message", id: "call", signal: controller.signal, progress: async () => {} } as unknown as ToolContext
   const grants: unknown[] = []
   const request = { filePath: file, cwd: root, binary: process.execPath, timeoutMs: 2000, formatter: { tool: "gofmt" as const, command: "gofmt", args: ["-e", "require('fs').appendFileSync(process.argv.at(-1),'// formatted\\n')"] } }
   return { root, file, caller, controller, grants, request }
+}
+function fixtureGofmt(root: string): string {
+  const bin = join(root, "fixture-bin"); mkdirSync(bin, { recursive: true })
+  const entry = join(bin, "gofmt-fixture.cjs")
+  writeFileSync(entry, "const fs=require('fs');const [flag,file,...rest]=process.argv.slice(2);if(flag!=='-w'||!file||rest.length)process.exit(2);const out='package main\\n\\nfunc main() { println(1) }\\n';if(fs.readFileSync(file,'utf8')!==out)fs.writeFileSync(file,out)\n")
+  if (process.platform === "win32") { const launcher = join(bin, "gofmt.cmd"); writeFileSync(launcher, `@"${process.execPath}" "%~dp0gofmt-fixture.cjs" %*\r\n`); return launcher }
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+  const launcher = join(bin, "gofmt"); writeFileSync(launcher, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(entry)} "$@"\n`); chmodSync(launcher, 0o755); return launcher
 }
 function localGit(root: string, script: string) {
   writeFileSync(join(root, "package.json"), "{}")
@@ -79,8 +87,9 @@ describe("formatter executor", () => {
     expect(existsSync(marker)).toBe(false)
   })
   test("installed gofmt preserves Native argv and reports actual changed/unchanged bytes", async () => {
-    const f = fixture(); const binary = Bun.which("gofmt")
-    expect(binary).not.toBeNull()
+    // The installed gofmt when the runner has one; otherwise a fixture gofmt that refuses any argv but
+    // Native `-w <file>` and writes gofmt's output, so the argv and byte assertions below always run.
+    const f = fixture(); const binary = Bun.which("gofmt") ?? fixtureGofmt(f.root)
     const executor = createFormatterExecutor({ directory: f.root, authorize: () => {}, permission: { assert: async () => {} } })
     try {
       const request = { ...f.request, binary: defined(binary), formatter: { tool: "gofmt" as const, command: "gofmt", args: ["-w"] } }

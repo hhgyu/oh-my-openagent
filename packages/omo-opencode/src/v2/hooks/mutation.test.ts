@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync, renameSync } from "node:fs"
+import { mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync, renameSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { z } from "zod"
@@ -13,7 +13,7 @@ function defined<T>(value: T): NonNullable<T> {
 
 const directories: string[] = []
 afterEach(() => { for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }) })
-function fixture() { const root = mkdtempSync(join(tmpdir(), "omo-mutation-unit-")); directories.push(root); return root }
+function fixture() { const root = realpathSync(mkdtempSync(join(tmpdir(), "omo-mutation-unit-"))); directories.push(root); return root }
 function deferred<T = void>() { let resolve!: (value: T | PromiseLike<T>) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
 function caller(id: string, controller = new AbortController(), progress: ToolContext["progress"] = async () => {}) {
   return { caller: { id, sessionID: "session-" + id, messageID: "message-" + id, agent: "build", signal: controller.signal, progress } as ToolContext, controller }

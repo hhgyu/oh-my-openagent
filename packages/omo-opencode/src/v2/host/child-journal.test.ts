@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, symlinkSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Database } from "bun:sqlite"
@@ -89,6 +89,14 @@ test("foreign databases and symlink database paths are rejected without adopting
  const file=path();const db=new Database(file);db.exec("CREATE TABLE unrelated (value TEXT)");db.close()
  await expect(openChildJournal({path:file})).rejects.toThrow("Foreign")
  const alias=join(defined(directories.at(-1)),"alias.sqlite");symlinkSync(file,alias,"file")
+ await expect(openChildJournal({path:alias})).rejects.toThrow("link")
+})
+test("an existing linked ancestor is taken at its physical path while a linked database file stays refused", async () => {
+ const real=mkdtempSync(join(tmpdir(),"omo-child-journal-real-")),holder=mkdtempSync(join(tmpdir(),"omo-child-journal-link-"));directories.push(real,holder)
+ const linked=join(holder,"state-root");symlinkSync(real,linked,process.platform==="win32"?"junction":"dir")
+ const journal=await open(join(linked,"nested","state.sqlite"));await journal.claim("child",journal.owner,record(journal.owner))
+ expect(existsSync(join(real,"nested","state.sqlite"))).toBe(true)
+ const alias=join(linked,"nested","alias.sqlite");symlinkSync(join(real,"nested","state.sqlite"),alias,"file")
  await expect(openChildJournal({path:alias})).rejects.toThrow("link")
 })
 test("a corrupted record fails closed instead of erasing custody", async () => {
