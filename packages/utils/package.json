@@ -112,6 +112,10 @@
     "./shell-quote": {
       "types": "./src/shell-quote.ts",
       "import": "./src/shell-quote.ts"
+    },
+    "./curated-readonly-presentation": {
+      "types": "./src/curated-readonly-presentation.ts",
+      "import": "./src/curated-readonly-presentation.ts"
     }
   },
   "types": "./index.d.ts",

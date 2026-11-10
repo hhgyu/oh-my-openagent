@@ -1,3 +1,7 @@
 export * from "./model-selection"
 export * from "./retry-guidance"
 export * from "./retry-patterns"
+export * from "./model-profile/resolve"
+export * from "./model-profile/builtin-profiles"
+export type { DeclaredModelProvider } from "./model-profile/types"
+export * from "./model-profile/default-profile"

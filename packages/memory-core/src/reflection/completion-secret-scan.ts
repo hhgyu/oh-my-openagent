@@ -45,7 +45,7 @@ export async function findSecretLikeFailures(
   baseSha: string,
   tipSha: string,
 ): Promise<SecretLikeFailure[]> {
-  const revList = await run(["rev-list", "--reverse", `${baseSha}..${tipSha}`])
+  const revList = await run(["rev-list", "--reverse", `${baseSha}..${tipSha}`, "--"])
   if (revList.code !== 0) throw new Error(revList.stderr.trim() || "git rev-list failed")
   const failures: SecretLikeFailure[] = []
   for (const commit of revList.stdout.split(/\r?\n/).filter(Boolean)) {

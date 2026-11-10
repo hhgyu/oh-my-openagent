@@ -100,7 +100,7 @@ async function renameSources(run: Run, baseSha: string, tipSha: string): Promise
 }
 
 export async function commitCount(exec: GitExec, dir: string, baseSha: string, tipSha: string): Promise<number> {
-  const out = await must(runner(exec, dir), ["rev-list", "--count", `${baseSha}..${tipSha}`])
+  const out = await must(runner(exec, dir), ["rev-list", "--count", `${baseSha}..${tipSha}`, "--"])
   return Number.parseInt(out.trim(), 10)
 }
 

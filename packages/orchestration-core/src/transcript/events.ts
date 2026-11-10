@@ -1,0 +1,73 @@
+import type { ManagedChildEvent } from "../contracts/child-event"
+import type { ProjectedTranscriptEvent } from "../contracts/transcript"
+
+// The transcript event types the runner subscription writes into OUR JSONL event log. The task_output
+// event-log reader (tools/output/transcript/event-log.ts) lifts exactly these back out, so the two
+// names are the contract between writer and reader.
+export const TRANSCRIPT_ASSISTANT_EVENT = "assistant_message"
+export const TRANSCRIPT_TOOL_EVENT = "tool_execution"
+export const TRANSCRIPT_ERROR_EVENT = "child_error"
+
+export function toPersistedEvent(event: ManagedChildEvent): ProjectedTranscriptEvent | undefined {
+  if (event.type === "message_end") {
+    const failure = assistantFailure(event.message)
+    if (failure !== undefined) return { type: TRANSCRIPT_ERROR_EVENT, payload: failure }
+    const text = assistantText(event.message)
+    return text === undefined ? undefined : { type: TRANSCRIPT_ASSISTANT_EVENT, payload: { text } }
+  }
+  if (event.type === "tool_execution_end" && typeof event.toolName === "string") {
+    return { type: TRANSCRIPT_TOOL_EVENT, payload: { tool: event.toolName, is_error: event.isError === true } }
+  }
+  if (event.type === "retry_fallback_applied") {
+    return {
+      type: event.type,
+      payload: {
+        from: readEventString(event, "from"),
+        to: readEventString(event, "to"),
+        chain_key: readEventString(event, "chainKey"),
+        reason: readEventString(event, "reason"),
+      },
+    }
+  }
+  if (event.type === "retry_fallback_exhausted") {
+    return {
+      type: event.type,
+      payload: {
+        chain_key: readEventString(event, "chainKey"),
+        last_error: readEventString(event, "lastError"),
+      },
+    }
+  }
+  return undefined
+}
+
+function readEventString(event: ManagedChildEvent, key: string): string | undefined {
+  const value = Reflect.get(event, key)
+  return typeof value === "string" ? value : undefined
+}
+
+function assistantFailure(message: unknown): { readonly message: string; readonly stop_reason: string } | undefined {
+  if (!isRecord(message) || message.role !== "assistant") return undefined
+  if (message.stopReason !== "error") return undefined
+  const diagnostic = typeof message.errorMessage === "string" && message.errorMessage.length > 0
+    ? message.errorMessage
+    : "child turn failed without a diagnostic message"
+  return { message: diagnostic, stop_reason: "error" }
+}
+
+function assistantText(message: unknown): string | undefined {
+  if (!isRecord(message) || message.role !== "assistant" || !Array.isArray(message.content)) return undefined
+  const text = message.content
+    .filter((part: unknown): part is { readonly type: "text"; readonly text: string } => isTextPart(part))
+    .map((part) => part.text)
+    .join("")
+  return text.length > 0 ? text : undefined
+}
+
+function isTextPart(part: unknown): part is { readonly type: "text"; readonly text: string } {
+  return isRecord(part) && part.type === "text" && typeof part.text === "string"
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}

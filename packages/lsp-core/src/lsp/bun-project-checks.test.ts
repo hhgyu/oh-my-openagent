@@ -168,3 +168,18 @@ describe("bun command output", () => {
 		expect(parseBunLintJson("not json")).toBeUndefined();
 	});
 });
+
+describe("owned Bun command probes", () => {
+ it("uses the supplied authority boundary on each call instead of the shared default probe cache", async () => {
+  const root=createProject({"bun.lock":""});let calls=0;
+  const options={resolveBun:()=>"/owned/never-executed-bun",hasCommand:async(path:string,command:string)=>{calls++;expect(path).toBe("/owned/never-executed-bun");expect(command).toBe("format");return true}};
+  expect(await resolveBunProjectCommand("format",root,options)).toBe("/owned/never-executed-bun");
+  expect(await resolveBunProjectCommand("format",root,options)).toBe("/owned/never-executed-bun");expect(calls).toBe(2);
+ });
+ it("preserves rejection identity and does not probe a shadowed project command", async () => {
+  const root=createProject({"bun.lock":""}),rejection=Error("probe approval rejected");
+  expect(await resolveBunProjectCommand("format",root,{resolveBun:()=>"/owned/bun",hasCommand:async()=>{throw rejection}}).catch(error=>error)).toBe(rejection);
+  const shadow=createProject({"bun.lock":"","package.json":'{"scripts":{"format":"must-not-run"}}'});let calls=0;
+  expect(await resolveBunProjectCommand("format",shadow,{resolveBun:()=>"/owned/bun",hasCommand:async()=>{calls++;return true}})).toBeUndefined();expect(calls).toBe(0);
+ });
+});

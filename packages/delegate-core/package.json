@@ -6,17 +6,22 @@
   "description": "Harness-neutral delegate task selection and retry primitives for oh-my-opencode.",
   "exports": {
     ".": {
-      "types": "./index.d.ts",
+      "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./model-profile/*": {
+      "types": "./src/model-profile/*.ts",
+      "import": "./src/model-profile/*.ts"
     }
   },
-  "types": "./index.d.ts",
+  "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsgo --noEmit -p tsconfig.json",
-    "test": "bun test src/*.test.ts"
+    "test": "bun test src/"
   },
   "dependencies": {
-    "@oh-my-opencode/model-core": "workspace:*"
+    "@oh-my-opencode/model-core": "workspace:*",
+    "@oh-my-opencode/omo-config-core": "workspace:*"
   },
   "sideEffects": false
 }

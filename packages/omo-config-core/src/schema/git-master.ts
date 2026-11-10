@@ -39,12 +39,13 @@ type GitMasterSettingKey = keyof OmoGitMasterSettings
 type GitMasterSettingPath = `git_master.${GitMasterSettingKey}`
 
 export const GIT_MASTER_HARNESS_SUPPORT: Record<GitMasterSettingPath, readonly OmoHarnessId[]> = {
-  "git_master.commit_footer": ["native"],
-  "git_master.include_co_authored_by": ["native"],
-  "git_master.git_env_prefix": ["native"],
+  "git_master.commit_footer": ["native", "opencode"],
+  "git_master.include_co_authored_by": ["native", "opencode"],
+  "git_master.git_env_prefix": ["native", "opencode"],
 } as const
 
 /** Resolve the effective git-master attribution settings, applying defaults when the section is absent. */
 export function resolveOmoGitMasterSettings(config: OmoGitMasterConfigView): OmoGitMasterSettings {
   return config.git_master ?? OmoGitMasterSettingsSchema.parse({})
 }
+

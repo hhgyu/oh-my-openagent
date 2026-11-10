@@ -10,6 +10,8 @@ export type BunProjectCommand = "check" | "lint" | "format";
 export interface BunProjectChecksOptions {
 	readonly resolveBun?: (cwd: string) => string | null;
 	readonly homeDir?: string;
+	/** An owned host probe may supply its own permission/cancellation boundary. */
+	readonly hasCommand?: (bunPath: string, command: BunProjectCommand) => Promise<boolean>;
 }
 
 export interface BunCommandRun {
@@ -176,7 +178,7 @@ export async function resolveBunProjectCommand(
 	if (projectShadowsBunCommand(command, cwd)) return undefined;
 	const bunPath = (options.resolveBun ?? defaultResolveBun)(cwd);
 	if (!bunPath) return undefined;
-	return (await bunHasCommand(bunPath, command)) ? bunPath : undefined;
+	return (await (options.hasCommand ?? bunHasCommand)(bunPath, command)) ? bunPath : undefined;
 }
 
 function defaultResolveBun(cwd: string): string | null {

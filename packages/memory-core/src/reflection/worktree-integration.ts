@@ -155,7 +155,7 @@ async function findExactRunReceipt(
   runId: string,
   validatedTipSha?: string,
 ): Promise<string | null> {
-  const commits = await run(worktree.exec, worktree.parent.dir, ["rev-list", `${worktree.baseSha}..HEAD`])
+  const commits = await run(worktree.exec, worktree.parent.dir, ["rev-list", `${worktree.baseSha}..HEAD`, "--"])
   if (commits.code !== 0) return null
   for (const commit of commits.stdout.split(/\r?\n/).filter(Boolean)) {
     if (!await hasExactRunReceipt(worktree.exec, worktree.parent.dir, commit, runId)) continue
