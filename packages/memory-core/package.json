@@ -17,6 +17,24 @@
     "./command-metadata": {
       "import": "./src/commands/metadata.ts"
     },
+    "./commands/args": {
+      "import": "./src/commands/args.ts"
+    },
+    "./commands/backup": {
+      "import": "./src/commands/backup.ts"
+    },
+    "./commands/repo": {
+      "import": "./src/commands/repo.ts"
+    },
+    "./commands/skill-frontmatter": {
+      "import": "./src/commands/skill-frontmatter.ts"
+    },
+    "./commands/tokens": {
+      "import": "./src/commands/tokens.ts"
+    },
+    "./commands/types": {
+      "import": "./src/commands/types.ts"
+    },
     "./recall-store": {
       "import": "./src/recall/bm25-persist.ts"
     },

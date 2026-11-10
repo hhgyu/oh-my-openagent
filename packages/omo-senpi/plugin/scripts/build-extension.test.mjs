@@ -283,7 +283,7 @@ describe("checkExtensionCurrent", () => {
     const { mainInputs, memoryMemfsInputs } = await sharedOutputs()
     for (const suffix of [
       "packages/omo-senpi/src/components/memory/commands/memfs-runtime.ts",
-      "packages/omo-senpi/src/components/memory/commands/memfs-extra.ts",
+      "packages/memory-core/src/commands/memfs-extra.ts",
     ]) {
       expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
       expect(memoryMemfsInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
@@ -363,7 +363,7 @@ describe("checkExtensionCurrent", () => {
       "packages/omo-senpi/src/components/memory/commands/dream-staging.ts",
       "packages/omo-senpi/src/components/memory/commands/agreements.ts",
       "packages/omo-senpi/src/components/memory/commands/memory.ts",
-      "packages/omo-senpi/src/components/memory/commands/memory-unlock.ts",
+      "packages/memory-core/src/commands/memory-unlock.ts",
       "packages/omo-senpi/src/components/memory/commands/search.ts",
       "packages/omo-senpi/src/components/memory/commands/facts.ts",
       // A dream fire loads its conversation selection from this sidecar (keeps omo.js inside its byte budget).

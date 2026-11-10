@@ -18,7 +18,7 @@ export {
   type MemoryCommandIdentity,
   type MemoryCommandUi,
   type NotifyLevel,
-} from "@oh-my-opencode/memory-core/commands"
+} from "@oh-my-opencode/memory-core/commands/types"
 
 /** P22 trigger-wiring seam: a manual `/reflect` request the scheduler reserves or queues. */
 export interface ManualReflectionRequest {
