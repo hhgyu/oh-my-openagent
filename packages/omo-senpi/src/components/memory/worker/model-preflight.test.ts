@@ -7,6 +7,7 @@ import type { Server, Socket } from "node:net"
 
 import { preflightMemoryModels, resetModelPreflightCacheForTests } from "./model-preflight"
 import type { MemoryModelChain } from "./memory-model-attempts"
+import { runMemoryModelAttempts } from "./memory-model-attempts"
 import { identityMatches, killIfAlive, pidAlive, pidTerminalWithin, readPidFileWhenWritten, readPidOnce, readPidWhenWritten, waitForFileToExist } from "./process-liveness.test-support"
 
 const roots: string[] = []
@@ -280,7 +281,7 @@ control.once("error", () => process.exit(0))
       ])
 
       // then
-      expect(result).toEqual({ kind: "unavailable", candidates })
+      expect(result).toEqual({ kind: "unavailable", candidates: withExtensions(candidates) })
       expect(Date.now() - startedAt).toBeLessThan(outerBoundMs)
 
       // and then: the ORIGINAL wrapper is observed through its own pid file - production must
@@ -336,8 +337,33 @@ control.once("error", () => process.exit(0))
     })
 
     // then
-    expect(result).toEqual({ kind: "unavailable", candidates })
+    expect(result).toEqual({ kind: "unavailable", candidates: withExtensions(candidates) })
     expect(warnings.join("\n")).toContain("exited with code 7")
+  })
+
+  test("#given an unavailable catalog and extension-only first model #when reactive attempts run #then the first model retains its extension route instead of falsely exhausting", async () => {
+    const item = await fixture('process.stderr.write("probe failed"); process.exit(7)')
+    const preflight = await preflightMemoryModels({
+      candidates,
+      launch: item.launch,
+      env: { PATH: process.env.PATH },
+      configSources: [{ path: item.config, exists: true }],
+    })
+    const attempted: unknown[] = []
+    const result = await runMemoryModelAttempts(preflight.candidates, async (candidate, attempt, nextAttempt) => {
+      attempted.push({ candidate, attempt, nextAttempt })
+      return candidate.loadExtensions === true
+        ? { code: 0, signal: null, stdout: "reflection completed", stderr: "", timedOut: false }
+        : { code: 1, signal: null, stdout: "", stderr: `Error: Model "${candidate.model}" not found. Use --list-models to see available models.`, timedOut: false }
+    })
+    expect(preflight.kind).toBe("unavailable")
+    expect(attempted).toEqual([{
+      candidate: { ...candidates[0], loadExtensions: true }, attempt: 1,
+      nextAttempt: { attempt: 2, model: candidates[1]!.model, thinking: candidates[1]!.thinking },
+    }])
+    expect(result.candidate).toEqual({ ...candidates[0], loadExtensions: true })
+    expect(result.child.code).toBe(0)
+    expect(candidates.every(candidate => candidate.loadExtensions === undefined)).toBe(true)
   })
 
   test("#given a table catalog whose model column contains a slash #when candidates are preflighted #then the slashed model id stays visible", async () => {

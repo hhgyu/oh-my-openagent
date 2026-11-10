@@ -86,6 +86,8 @@ function driveSenpi(senpiBin, scenario, prompt, pids, sessionId) {
       encoding: "utf8",
       timeout: 120_000,
       maxBuffer: 64 * 1024 * 1024,
+      // Without it every senpi launch opens a visible console window on win32 when the driver has none.
+      windowsHide: true,
     },
   )
   if (typeof run.pid === "number") pids.push(run.pid)

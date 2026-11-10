@@ -30,6 +30,7 @@ test("#given a supervisor exits before TCP start #then the start wait reports it
     await expect(harness.waitStarted(run.id)).rejects.toThrow("supervisor exits-before-start exited")
     expect(await harness.outcome(run.runDir)).toMatchObject({ childExit: { code: 23 } })
     expect(harness.order).toEqual([])
+    expect(await supervisor.diagnostic()).toContain("fixture child failed")
   } finally {
     await harness.cleanup()
   }
@@ -119,7 +120,18 @@ test("a configured cap of two admits two children across identities", async () =
     const launched = runs.map((run) => harness.launch(run))
     await accounted
     harness.flow()
-    expect(await Promise.all(launched.map(({ exit }) => exit))).toEqual([0, 0, 0, 0, 0])
+    const exits = await Promise.all(launched.map(({ exit }) => exit))
+    if (exits.some((code) => code !== 0)) {
+      const diagnostics = await Promise.allSettled(launched.map(({ diagnostic }) => diagnostic()))
+      console.error("CAP2_SUPERVISOR_FAILURE", JSON.stringify({
+        exits,
+        runs: runs.map(({ id }) => id),
+        diagnostics: diagnostics.map((result) => result.status === "fulfilled"
+          ? { text: result.value.slice(0, 65_536), truncated: result.value.length > 65_536 }
+          : { error: String(result.reason) }),
+      }))
+    }
+    expect(exits).toEqual([0, 0, 0, 0, 0])
     expect(harness.peak()).toBe(2)
     expect((await Promise.all(runs.map(({ runDir }) => harness.outcome(runDir))))
       .every((outcome) => outcome.childExit.code === 0 && !outcome.timedOut)).toBe(true)

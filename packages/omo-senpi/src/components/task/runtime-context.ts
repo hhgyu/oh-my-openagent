@@ -41,7 +41,8 @@ export interface CapturedUi {
 
 export type ParentTransition = "compacting" | "session_switching" | "session_shutdown" | undefined
 
-export type ParentServiceTier = "auto" | "flex" | "priority"
+export type { ParentServiceTier } from "@oh-my-opencode/senpi-task/task-planner/types"
+import type { ParentServiceTier } from "@oh-my-opencode/senpi-task/task-planner/types"
 
 function isParentServiceTier(value: unknown): value is ParentServiceTier {
   return value === "auto" || value === "flex" || value === "priority"

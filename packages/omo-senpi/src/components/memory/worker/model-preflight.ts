@@ -64,7 +64,12 @@ export async function preflightMemoryModels(input: ModelPreflightInput): Promise
     input.warn?.("memory child model preflight failed; falling back to reactive model retries", {
       error: describe(error),
     })
-    return { kind: "unavailable", candidates: input.candidates }
+    // An unavailable catalog cannot establish that a model is visible without
+    // extensions. Keep the same permissive reactive route as an empty catalog.
+    return {
+      kind: "unavailable",
+      candidates: asMemoryModelChain(input.candidates.map((candidate) => ({ ...candidate, loadExtensions: true }))),
+    }
   }
   if (input.candidates.every((candidate) => core.has(candidate.model))) {
     return { kind: "filtered", candidates: input.candidates, rejected: [] }

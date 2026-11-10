@@ -6,6 +6,8 @@ The sidecar **must remain read-only**. Every child is quick-pinned and in-proces
 
 ## Anatomy
 
+The host-neutral modules `wake-policy`, `wake-slot`, `sidecar-prompt`, `sidecar-prompt-blocks`, `sidecar-prompt-reseed`, `events-text`, `sensitive-output*`, `observe-paths` and `observe-prune` now live in `packages/memory-core/src/recall/sidecar/` (subpath `@oh-my-opencode/memory-core/recall-sidecar`, tests included); the files here are re-export shims so every local importer keeps its path. The rows below still describe their behaviour.
+
 | Path | Purpose |
 |------|---------|
 | `events.ts` | Resident sidecar event feed: `createKibitzerEventStream` turns prompt / `tool_call` / `tool_result` hook payloads plus the branch snapshot into `KibitzerEvent` values (branch cursor = `getBranch().length`, newest assistant text emitted once ahead of the hook that revealed it). Bodies are redacted (`redactKibitzerEventText`: memory-core `redactUrl` then the senpi mirror) BEFORE truncation to the caps (tool args 400 / result head 600 / assistant 1500 / prompt 4000), `eval.summary` wins over `eval.code`, the newest 20 events stay verbatim and older ones fold into a one-line digest (<= 1024 chars, keeps first/last cursor). Malformed payloads return `false` and never throw into the hook. `renderKibitzerEventBatch` emits the escaped `<digest>` / `<event>` fragment for wake envelopes. The stream and the public surface live here; the payload readers and the bounded-text helpers are the two modules below, re-exported so every importer still reads from `./events`. |
