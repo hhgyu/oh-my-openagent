@@ -3,7 +3,7 @@ import { OmoTaskSettingsSchema } from "@oh-my-opencode/omo-config-core"
 import { buildTaskExecute, runTaskSend, runTaskCancel, runTaskOutput } from "@oh-my-opencode/senpi-task/task-operations"
 import type { NativeOperationOwner } from "./operation-ports"
 import type { ToolContext } from "@opencode/plugin/promise/tool"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { withNativeOperationService } from "./service.test"
 
@@ -60,10 +60,10 @@ test.each(["birth", "epoch", "claim", "reference", "root", "parent", "residency"
         if (field === "root") changed.root_session_id = "foreign-root"
         if (field === "parent") changed.parent_session_id = "foreign-parent"
         if (field === "residency") changed.residency_state = "resident"
-        writeFileSync(path, JSON.stringify(changed))
+        replaceRecord(path, JSON.stringify(changed))
         await expect(sending).rejects.toThrow("Stored send refusal identity changed")
         expect(nativeCalls).toBe(0)
-      } finally { manager.sendToTask = originalSend; writeFileSync(path, original) }
+      } finally { manager.sendToTask = originalSend; replaceRecord(path, original) }
     }), root)
     expect(f.calls.filter(call => call === "create" || call === "prompt")).toEqual(calls.filter(call => call === "create" || call === "prompt"))
   })
@@ -211,8 +211,8 @@ test.each(["journal-forward", "journal-rollback", "owner", "epoch", "claim", "ro
     if (mutation === "root") row.root_session_id = "foreign"
     if (mutation === "parent") { row.parent_session_id = "foreign"; row.owned_session.parentID = "foreign" }
     if (mutation === "depth") row.depth++
-    try { writeFileSync(path, JSON.stringify(row)); expect(() => owner.task.get(started.task_id)).toThrow(); expect(f.calls).toEqual(baseline) }
-    finally { writeFileSync(path, original) }
+    try { replaceRecord(path, JSON.stringify(row)); expect(() => owner.task.get(started.task_id)).toThrow(); expect(f.calls).toEqual(baseline) }
+    finally { replaceRecord(path, original) }
     expect(owner.task.get(started.task_id)?.task_id).toBe(started.task_id)
     await f.invoke(api => api.end(started.task_id), root)
   })
@@ -510,4 +510,7 @@ test("settled late callback failure is reported once and retained after resource
 })
 
 
+// Raw edits replace the record the way the store's writer does (atomic rename, a new inode), so a
+// same-length edit or restore inside one coarse mtime tick is still observed (record-store.ts #10708).
+function replaceRecord(path: string, body: string): void { const staged = `${path}.edit-${process.pid}`; writeFileSync(staged, body); renameSync(staged, path) }
 function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }
