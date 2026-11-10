@@ -34,6 +34,8 @@ export interface MemoryBinderDeps {
   readonly now: () => number
   readonly loadSettings: (cwd: string) => OmoMemorySettings
   readonly logger: MemoryLogger
+  /** Called once per successful bind (Senpi's `session_start` edge); must not throw. */
+  readonly onBound?: (bound: BoundMemorySession) => void
 }
 
 export interface MemoryBinder {
@@ -75,7 +77,9 @@ export function createMemoryBinder(deps: MemoryBinderDeps): MemoryBinder {
     if (recorded?.identity !== binding.identity || recorded.repoPathHash !== binding.repoPathHash) {
       await deps.metadata.write(sessionID, MEMORY_BINDING_KEY, { ...binding })
     }
-    return { sessionID, identity: adopted.id, paths: adopted.paths, settings, directory, metadata }
+    const bound: BoundMemorySession = { sessionID, identity: adopted.id, paths: adopted.paths, settings, directory, metadata }
+    deps.onBound?.(bound)
+    return bound
   }
 
   return {

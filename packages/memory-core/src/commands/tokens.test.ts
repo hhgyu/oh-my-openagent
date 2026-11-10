@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { estimateSystemTokens } from "./tokens"
 import { realpathSync } from "node:fs"
-import { removeTree } from "../../../../../../test-support/remove-tree"
+import { removeTree } from "../../../../test-support/remove-tree"
 
 const tempDirs: string[] = []
 

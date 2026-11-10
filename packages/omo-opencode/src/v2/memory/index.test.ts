@@ -26,7 +26,7 @@ describe("registerMemoryComponent", () => {
     const first = await registerMemoryComponent(disabledByConfig.host, disabledByConfig.options())
     const second = await registerMemoryComponent({ ...disabledByOption.host, options: { "omo-memory-enabled": false } }, disabledByOption.options())
     // then
-    expect([disabledByConfig.hooks.size, disabledByConfig.tools.size, disabledByOption.hooks.size, disabledByOption.tools.size]).toEqual([0, 0, 0, 0])
+    expect([disabledByConfig.hooks.size, disabledByConfig.tools.size, disabledByConfig.commands.size, disabledByOption.hooks.size, disabledByOption.tools.size, disabledByOption.commands.size]).toEqual([0, 0, 0, 0, 0, 0])
     await first(); await second()
   })
 
@@ -120,7 +120,7 @@ describe("registerMemoryComponent", () => {
     await cleanup()
   })
 
-  test("#given cleanup ran #then every hook and the tool transform are disposed", async () => {
+  test("#given cleanup ran #then every hook, the tool and command transforms and the output RPC are disposed", async () => {
     // given
     const f = fixture()
     const cleanup = await registerMemoryComponent(f.host, f.options())
@@ -128,6 +128,6 @@ describe("registerMemoryComponent", () => {
     await cleanup()
     await cleanup()
     // then
-    expect([f.hooks.size, f.tools.size, f.disposals()]).toEqual([0, 0, 5])
+    expect([f.hooks.size, f.tools.size, f.commands.size, f.disposals()]).toEqual([0, 0, 0, 8])
   })
 })

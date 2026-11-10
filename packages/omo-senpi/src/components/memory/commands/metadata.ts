@@ -3,33 +3,18 @@
 // (register.ts) and each command module uses the same entry, so a command reads the same before and
 // after its handler is loaded.
 
+import { CORE_MEMORY_COMMANDS } from "@oh-my-opencode/memory-core/command-metadata"
+
 import type { SenpiExtensionAPI } from "../../../extension/types"
 
 export type MemoryCommandPort = Pick<SenpiExtensionAPI, "registerCommand" | "sendUserMessage">
 
-export const MEMORY_REPOSITORY_SUBCOMMANDS = ["set", "unset", "status", "push"] as const
-
 export const LAZY_MEMORY_COMMANDS = {
-  memory: {
-    description: "View committed memory: HEAD, system bodies, external names, and uncommitted changes; unlock re-checks and removes a stranded git lock.",
-    argumentHint: "[unlock <lock path> [--force]]",
-  },
-  remember: {
-    description: "Persist text to long-term memory via a memory-tool turn.",
-    argumentHint: "<text>",
-  },
-  init: {
-    description: "Initialize the memory repository and instruct the agent to create initial memory.",
-    argumentHint: "",
-  },
-  recompile: {
-    description: "Recompile the memory block into the system prompt on the next agent run.",
-    argumentHint: "",
-  },
-  "memory-repository": {
-    description: "Configure the push-only mirror remote for the memory repository.",
-    argumentHint: `<${MEMORY_REPOSITORY_SUBCOMMANDS.join("|")}> [url]`,
-  },
+  memory: CORE_MEMORY_COMMANDS.memory,
+  remember: CORE_MEMORY_COMMANDS.remember,
+  init: CORE_MEMORY_COMMANDS.init,
+  recompile: CORE_MEMORY_COMMANDS.recompile,
+  "memory-repository": CORE_MEMORY_COMMANDS["memory-repository"],
   sleeptime: {
     description: "Show the resolved sleeptime memory settings for this identity.",
     argumentHint: "",
@@ -42,10 +27,7 @@ export const LAZY_MEMORY_COMMANDS = {
     description: "Request a manual multi-conversation memory dream run.",
     argumentHint: "[--auto | --recent N | --conversation <ids> | --from transcript:<path>] [--to <doc>] [focus]",
   },
-  search: {
-    description: "Search past session transcripts and show scored, numbered results.",
-    argumentHint: "<query> [--include-hidden]",
-  },
+  search: CORE_MEMORY_COMMANDS.search,
   facts: {
     description: "Show facts-extraction queue/backoff state, or manually retry parked batches.",
     argumentHint: "[retry [--conversation <id>]]",

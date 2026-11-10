@@ -1,0 +1,20 @@
+// Host-neutral memory slash-command handlers. Barrel exports only.
+export { runCoreMemoryCommand } from "./dispatch"
+export { journalTranscriptSource } from "./journal-transcripts"
+export { runMemfsCommand } from "./memfs"
+export { CORE_MEMORY_COMMANDS, type CoreMemoryCommandName } from "./metadata"
+export { runInitCommand } from "./init"
+export { runMemoryRepositoryCommand } from "./memory-repository"
+export { runMemoryViewCommand } from "./memory"
+export { runRecompileCommand } from "./recompile"
+export { REMEMBER_INSTRUCTION, runRememberCommand } from "./remember"
+export { runSearchCommand } from "./search"
+export {
+  type MemoryCommandContext,
+  type MemoryCommandDeps,
+  type MemoryCommandHandler,
+  type MemoryCommandIdentity,
+  type MemoryCommandUi,
+  type MemoryTranscriptSource,
+  type NotifyLevel,
+} from "./types"

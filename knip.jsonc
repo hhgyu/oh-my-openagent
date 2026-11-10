@@ -1127,18 +1127,10 @@
       "packages/omo-senpi/src/components/lsp/index.ts": ["createLspDiagnosticsRunner"],
       // pre-existing at origin dev 4686e425b5: unused export(s) extractMutatedFilePaths
       "packages/omo-senpi/src/components/lsp/post-edit-diagnostics.ts": ["extractMutatedFilePaths"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) BACKUP_PREFIX
-      "packages/omo-senpi/src/components/memory/commands/backup.ts": ["BACKUP_PREFIX"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) noRepoText
-      "packages/omo-senpi/src/components/memory/commands/memfs-shared.ts": ["noRepoText"],
       // pre-existing at origin dev 4686e425b5: unused export(s) buildAskPrompt
       "packages/omo-senpi/src/components/memory/commands/people-ask.ts": ["buildAskPrompt"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) REMEMBER_INSTRUCTION
-      "packages/omo-senpi/src/components/memory/commands/remember.ts": ["REMEMBER_INSTRUCTION"],
       // pre-existing at origin dev 4686e425b5: unused export(s) SLEEPTIME_OVERRIDE_MARK
       "packages/omo-senpi/src/components/memory/commands/sleeptime.ts": ["SLEEPTIME_OVERRIDE_MARK"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) identityFor
-      "packages/omo-senpi/src/components/memory/commands/types.ts": ["identityFor"],
       // pre-existing at origin dev 4686e425b5: unused export(s) getMemoryRepo
       // pre-existing at origin dev 4686e425b5: unused export(s) DEFAULT_SERVICE_API
       "packages/omo-senpi/src/components/memory/device-session/account-source.ts": ["DEFAULT_SERVICE_API"],
@@ -2654,6 +2646,14 @@
         "src/{index,cli,main}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.test-d.ts",
+        "src/commands/index.ts",
+        "src/commands/metadata.ts",
+        "src/commands/args.ts",
+        "src/commands/backup.ts",
+        "src/commands/repo.ts",
+        "src/commands/skill-frontmatter.ts",
+        "src/commands/tokens.ts",
+        "src/commands/types.ts",
         "src/git/test-repo-config.test-support.ts",
         "src/recall/bm25-persist.ts",
         "src/sync/item/test-support.ts",
