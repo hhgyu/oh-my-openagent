@@ -56,6 +56,14 @@ export async function readLine(stream: ReadableStream<Uint8Array>): Promise<{ re
 
 const isReply = (value: unknown): value is HelperReply => typeof value === "object" && value !== null && !Array.isArray(value)
 
+function toleratingClosedPipe(write: () => void): void {
+  try {
+    write()
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "EPIPE")) throw error
+  }
+}
+
 export async function createHarness(): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), "omo-keychain-helper-"))
   const keychain = join(dir, "throwaway.keychain-db")
@@ -80,10 +88,13 @@ export async function createHarness(): Promise<Harness> {
   const run: Harness["run"] = async (request, options = {}) => {
     const args = options.args ?? ["--keychain", keychain, "--no-ui"]
     const child = Bun.spawn([options.binary ?? helper, ...args], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: {} })
-    child.stdin.write(`${typeof request === "string" ? request : JSON.stringify(request)}\n`)
-    child.stdin.flush()
+    // A helper that refuses its argv replies and exits before reading stdin, so the pipe may already be closed.
+    toleratingClosedPipe(() => {
+      child.stdin.write(`${typeof request === "string" ? request : JSON.stringify(request)}\n`)
+      child.stdin.flush()
+    })
     const { line, rest } = await readLine(child.stdout)
-    child.stdin.end()
+    toleratingClosedPipe(() => child.stdin.end())
     const [tail, exitCode] = await Promise.all([rest, child.exited])
     const trimmed = line.trim()
     const parsed: unknown = trimmed === "" ? null : JSON.parse(trimmed)
