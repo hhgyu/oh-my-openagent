@@ -23,6 +23,19 @@ export function availableFactsModels(models: readonly CatalogModel[], config: Pi
     .filter(selector => !isExcludedModel(selector, config.exclude_models))
 }
 
+type CategoryEntry = NonNullable<OmoConfig["categories"]>[string]
+
+/** The `provider/model` candidates a user category declares, in category order (`models`, `model`, `fallback_models`). */
+export function declaredCategoryModels(category: CategoryEntry | undefined): readonly string[] {
+  if (category === undefined) return []
+  const fallbacks = category.fallback_models === undefined ? [] : (Array.isArray(category.fallback_models) ? category.fallback_models : [category.fallback_models])
+  return [...new Set([
+    ...(category.models ?? []).map(entry => typeof entry === "string" ? entry : entry.model),
+    ...(category.model === undefined ? [] : [category.model]),
+    ...fallbacks.map(entry => typeof entry === "string" ? entry : entry.model),
+  ])]
+}
+
 export function resolveFactsModel(
   config: Pick<OmoConfig, "memory" | "categories" | "exclude_models">,
   available: readonly string[] | undefined,
@@ -35,13 +48,7 @@ export function resolveFactsModel(
   if (available === undefined) return { kind: "unavailable", cause: "no_catalog" }
   const usable = new Set(available)
   if (configured === undefined && quick !== undefined && (quick.model !== undefined || (quick.models?.length ?? 0) > 0)) {
-    const declared = [
-      ...(quick.models ?? []).map(entry => typeof entry === "string" ? entry : entry.model),
-      ...(quick.model === undefined ? [] : [quick.model]),
-      ...(quick.fallback_models === undefined ? [] : (Array.isArray(quick.fallback_models) ? quick.fallback_models : [quick.fallback_models])
-        .map(entry => typeof entry === "string" ? entry : entry.model)),
-    ]
-    const candidates = [...new Set(declared)].filter(model => usable.has(model))
+    const candidates = declaredCategoryModels(quick).filter(model => usable.has(model))
     const [model, ...fallbacks] = candidates
     return model === undefined ? { kind: "unavailable", cause: "model_unavailable" } : { kind: "resolved", model, fallbacks }
   }

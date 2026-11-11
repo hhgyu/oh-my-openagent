@@ -10,6 +10,7 @@ import { describeError, type MemoryBinder } from "./binding"
 import type { MemoryCommandOutputEvent } from "./command-output-event"
 import { MEMORY_COMMAND_OUTPUT_ID_PREFIX } from "./command-output"
 import type { MemoryLogger } from "./config"
+import type { ExtraMemoryCommand } from "./reflect-command"
 
 /** Synthetic-message metadata key naming the memory command whose output the message carries. */
 export const MEMORY_COMMAND_OUTPUT_KEY = "omo.memory.command"
@@ -43,6 +44,8 @@ export interface MemoryCommandsDeps {
   readonly display?: (output: MemoryCommandOutputEvent) => Promise<void>
   /** `/facts retry`: one launch attempt of the facts extractor for this session's identity. */
   readonly factsRetry?: (sessionID: string) => Promise<void>
+  /** Commands outside the memory-core suite (`/reflect`); their output takes the same display + record route. */
+  readonly extraCommands?: readonly ExtraMemoryCommand[]
   /** Session message IDs of output records; defaults to `msg_omo_memory_output_<uuid>`. */
   readonly newOutputID?: () => string
 }
@@ -159,11 +162,31 @@ export function createMemoryCommands(deps: MemoryCommandsDeps): MemoryCommands {
     await postOutput(output)
   }
 
-  const definitions = (Object.keys(CORE_MEMORY_COMMANDS) as CoreMemoryCommandName[]).map((name): CommandDefinition => ({
-    name: MEMORY_COMMAND_NAMES[name],
-    description: CORE_MEMORY_COMMANDS[name].description,
-    execute: invocation => execute(name, invocation),
-  }))
+  async function executeExtra(command: ExtraMemoryCommand, invocation: CommandInvocation): Promise<void> {
+    if (deps.isClosed()) return
+    const { sessionID } = invocation
+    let output: Output
+    try {
+      const result = await command.run(await deps.binder.resolve(sessionID), invocation.prompt.text)
+      output = { sessionID, command: command.name, ...result }
+    } catch (error) {
+      output = { sessionID, command: command.name, text: redactSecretLikeMaterial(describeError(error)), level: "error" }
+    }
+    await postOutput(output)
+  }
+
+  const definitions = [
+    ...(Object.keys(CORE_MEMORY_COMMANDS) as CoreMemoryCommandName[]).map((name): CommandDefinition => ({
+      name: MEMORY_COMMAND_NAMES[name],
+      description: CORE_MEMORY_COMMANDS[name].description,
+      execute: invocation => execute(name, invocation),
+    })),
+    ...(deps.extraCommands ?? []).map((command): CommandDefinition => ({
+      name: command.name,
+      description: command.description,
+      execute: invocation => executeExtra(command, invocation),
+    })),
+  ]
 
   return {
     definitions,

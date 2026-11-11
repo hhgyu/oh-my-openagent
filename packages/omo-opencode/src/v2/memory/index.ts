@@ -19,6 +19,10 @@ import { loadRuntimeConfig } from "../config/runtime"
 import { registerFactsAgent } from "./facts-agent"
 import { createFactsComponent, type MemoryFactsSeams } from "./facts-component"
 import { createMemoryTools, MEMORY_APPLY_PATCH_TOOL_NAME, MEMORY_TOOL_NAME } from "./tools"
+import { registerReflectionAgent } from "./reflection-agent"
+import { createReflectionComponent, type MemoryReflectionSeams } from "./reflection-component"
+import { createReflectionTriggers } from "./reflection-triggers"
+import { createReflectCommand } from "./reflect-command"
 
 export { MEMORY_BINDING_KEY } from "./binding"
 export { MEMORY_PART_MARKER, PROJECTION_PIN_KEY } from "./projection"
@@ -26,7 +30,7 @@ export { RECALL_PART_MARKER } from "./recall-delivery"
 export { MEMORY_COMMAND_NAMES, MEMORY_COMMAND_OUTPUT_KEY } from "./commands"
 export { MEMORY_COMMAND_OUTPUT_ID_PREFIX } from "./command-output"
 
-export type MemoryHost = Pick<Plugin.Context, "session" | "tool" | "options" | "location"> & Partial<Pick<Plugin.Context, "app" | "agent" | "command" | "rpc" | "model" | "provider">>
+export type MemoryHost = Pick<Plugin.Context, "session" | "tool" | "options" | "location"> & Partial<Pick<Plugin.Context, "app" | "agent" | "command" | "rpc" | "model" | "provider" | "integration">>
 
 export interface MemoryComponentOptions {
   /** Environment for `OMO_MEMORY_HOME` and identity resolution; defaults to `process.env`. */
@@ -46,6 +50,8 @@ export interface MemoryComponentOptions {
   readonly kibitzer?: KibitzerSeams
   /** Facts extractor seams (child port, model catalog, deadline timers). */
   readonly facts?: MemoryFactsSeams
+  /** Reflection seams (child port, timers, deadline, liveness probes, run ids). */
+  readonly reflection?: MemoryReflectionSeams
 }
 
 /**
@@ -65,6 +71,10 @@ export interface MemoryComponentOptions {
  * - facts queue / extractor (`facts-wiring.ts`) -> `prompt` marks real user input, `experimental.idle` enqueues
  *   and debounces, an owned hidden `omo-facts` child records through `record_fact`, the parent applies, and the
  *   next bind enqueues a final delta and recovers stranded runs (see `./facts`).
+ * - reflection worker -> an owned hidden `omo-reflection` child editing through four private tools, a parent
+ *   runner that validates and merges its branch, and bind-time crash recovery (see `./reflection-component`);
+ *   step-count and compaction triggers on `experimental.idle` / `compaction` (see `./reflection-triggers`)
+ *   and `/reflect` (see `./reflect-command`).
  * Nothing calls `session.prompt`; subagent children never bind; Kibitzer input goes through the owned
  * session backend's gated admission paths.
  */
@@ -102,21 +112,30 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
   const facts = factsParts?.facts
   const factsHosting = factsParts?.hosting
   const factsPersona = factsParts?.persona
+  const reflection = createReflectionComponent(context, { logger, ...(options.reflection === undefined ? {} : { seams: options.reflection }) })
+  const isReflectionSession = (sessionID: string): boolean => reflection?.hosting.isReflectionSession(sessionID) === true
   const collector = createRecallCollector({ binder, stores, corpusCache, logger, ...(kibitzer === undefined ? {} : { judge: kibitzer }) })
   const delivery = createRecallDelivery({ binder, stores, collector, logger })
   // Senpi persists this counter as a session entry; here it is process-local and restarts at 0 on reload.
   const userTurns = new Map<string, number>()
   const journal = createMemoryJournal({
     binder, session: context.session, logger,
-    isOwnedSession: (sessionID: string) => kibitzer?.isKibitzerSession(sessionID) === true || facts?.isFactsSession(sessionID) === true,
+    isOwnedSession: (sessionID: string) => kibitzer?.isKibitzerSession(sessionID) === true || facts?.isFactsSession(sessionID) === true || isReflectionSession(sessionID),
   })
-  onBound = bound => { void journal.onBound(bound).then(() => facts?.onBound(bound)) }
+  const triggers = reflection === undefined ? undefined : createReflectionTriggers({
+    resolve: sessionID => binder.resolve(sessionID), session: context.session, logger,
+    evaluate: (bound, event) => reflection.evaluate(bound, event),
+    hasUserActivity: sessionID => (userTurns.get(sessionID) ?? 0) > 0,
+    isOwnedSession: sessionID => kibitzer?.isKibitzerSession(sessionID) === true || facts?.isFactsSession(sessionID) === true || isReflectionSession(sessionID),
+  })
+  onBound = bound => { void journal.onBound(bound).then(() => facts?.onBound(bound)).then(() => reflection?.onBound(bound)) }
   let outputEvents: RpcRegistration<typeof memoryCommandRpc>["events"] | undefined
   const commands = context.command === undefined ? undefined : createMemoryCommands({
     display: async output => { await outputEvents?.emit(MEMORY_COMMAND_OUTPUT_EVENT, { ...output }) },
     binder, session: context.session, logger, isClosed: () => closed,
     bustPromptCache: sessionID => { projection.markCompacted(sessionID) },
     ...(facts === undefined ? {} : { factsRetry: (sessionID: string) => facts.retry(sessionID) }),
+    ...(reflection === undefined ? {} : { extraCommands: [createReflectCommand((bound, event) => reflection.evaluate(bound, event))] }),
   })
   const tools = createMemoryTools({
     binder, userTurns: sessionID => userTurns.get(sessionID) ?? 0,
@@ -133,6 +152,9 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       await collector.idle()
       await Promise.allSettled([journal.settled(), commands?.settled()])
       if (facts !== undefined) results.push(...await Promise.allSettled([facts.close()]))
+      // Triggers stop before the component closes, so no evaluation reserves a run after its children die.
+      if (triggers !== undefined) results.push(...await Promise.allSettled([triggers.close()]))
+      if (reflection !== undefined) results.push(...await Promise.allSettled([reflection.close()]))
       if (kibitzer !== undefined) results.push(...await Promise.allSettled([kibitzer.close()]))
       await metadata.settled()
       binder.clear()
@@ -148,7 +170,7 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
   try {
     registrations.push(await context.session.hook("prompt", input => {
       if (closed) return
-      if (kibitzer?.isKibitzerSession(input.sessionID) === true || facts?.isFactsSession(input.sessionID) === true) return
+      if (kibitzer?.isKibitzerSession(input.sessionID) === true || facts?.isFactsSession(input.sessionID) === true || isReflectionSession(input.sessionID)) return
       facts?.onPrompt(input.sessionID)
       userTurns.set(input.sessionID, (userTurns.get(input.sessionID) ?? 0) + 1)
       kibitzer?.onPrompt(input.sessionID, input.prompt.text)
@@ -157,7 +179,7 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
     registrations.push(await context.tool.hook("execute.before", event => {
       if (closed) return
       kibitzer?.onToolBefore(event)
-      if (kibitzer?.isKibitzerSession(event.sessionID) === true || facts?.isFactsSession(event.sessionID) === true || event.tool === MEMORY_TOOL_NAME || event.tool === MEMORY_APPLY_PATCH_TOOL_NAME) return
+      if (kibitzer?.isKibitzerSession(event.sessionID) === true || facts?.isFactsSession(event.sessionID) === true || isReflectionSession(event.sessionID) || event.tool === MEMORY_TOOL_NAME || event.tool === MEMORY_APPLY_PATCH_TOOL_NAME) return
       collector.observeToolInput(event.sessionID, event.input)
     }))
     if (kibitzer !== undefined) {
@@ -180,7 +202,8 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
     registrations.push(await context.session.hook("context", async value => {
       // Command output records are for the user; they are dropped from every request, the judge's too.
       stripMemoryCommandOutputs(value.messages)
-      if (closed || factsHosting?.onContext(value) === true || kibitzer?.onContext(value) === true) return
+      // The reflection hosting runs first: it strips its four tools from every request but its child's.
+      if (closed || reflection?.hosting.onContext(value) === true || factsHosting?.onContext(value) === true || kibitzer?.onContext(value) === true) return
       try {
         await projection.onContext(value)
         await delivery.onContext(value)
@@ -191,15 +214,19 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
     registrations.push(await context.session.hook("compaction", value => {
       stripMemoryCommandOutputs(value.messages)
       projection.markCompacted(value.sessionID)
+      if (!closed) triggers?.onCompaction(value.sessionID)
     }))
     registrations.push(await context.session.hook("experimental.idle", async value => {
       if (closed) return
       await journal.onIdle(value.sessionID)
+      // Detached: evaluates after this reconcile counted the turn's steps, never blocks the idle edge.
+      if (!closed) triggers?.onIdle(value.sessionID)
       await facts?.onIdle(value.sessionID)
     }))
     if (facts !== undefined && factsPersona !== undefined && context.agent !== undefined) {
       registrations.push(await registerFactsAgent(context.agent, factsPersona))
     }
+    if (reflection !== undefined && context.agent !== undefined) registrations.push(await registerReflectionAgent(context.agent))
     if (commands !== undefined && context.command !== undefined) {
       if (context.rpc !== undefined) {
         const registration = await context.rpc.register(memoryCommandRpc, {})
@@ -212,11 +239,13 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
     const [memoryTool, applyPatchTool] = tools
     const judgeTools = kibitzer?.tools(memoryTool)
     const factsTool = factsHosting?.tool()
+    const reflectionTools = reflection?.hosting.tools() ?? []
     registrations.push(await context.tool.transform(editor => {
       if (judgeTools === undefined) editor.add(memoryTool)
       else for (const tool of judgeTools) editor.add(tool)
       editor.add(applyPatchTool)
       if (factsTool !== undefined) editor.add(factsTool)
+      for (const tool of reflectionTools) editor.add(tool)
     }))
   } catch (error) {
     try { await cleanup() } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Memory registration and rollback failed") }

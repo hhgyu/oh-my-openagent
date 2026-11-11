@@ -188,7 +188,7 @@ function peopleRouting(config: OmoConfig, identity: string): FactsPeopleRouting 
 }
 
 /** `provider/model` of the session's newest assistant message, tolerant of unknown message shapes. */
-async function latestSessionModel(session: MemoryFactsDeps["session"], sessionID: string): Promise<string | undefined> {
+export async function latestSessionModel(session: MemoryFactsDeps["session"], sessionID: string): Promise<string | undefined> {
   let messages: readonly unknown[]
   try {
     messages = await session.context({ sessionID })
