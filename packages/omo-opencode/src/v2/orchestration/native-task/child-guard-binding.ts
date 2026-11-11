@@ -7,6 +7,7 @@ import type { TeamMemberOwner } from "./live-member-owner"
 import type { ReadonlyBrokerOwner } from "./live-readonly-producer"
 import type { CodemodeReadonlyOwner } from "./live-codemode-readonly"
 import { CODEMODE_READONLY_NATIVE_NAME } from "../../tools/codemode-readonly"
+import { webfetchNetworkFor } from "./child-guard-binding-network"
 
 export interface NativeChildGuardBindingOptions {
   readonly assertGeneration: () => void
@@ -23,9 +24,10 @@ export interface NativeChildGuardBindingOptions {
   /** Live dedicated CodeMode `ls` counterpart registration. Absent: a granted `ls` call is refused. */
   readonly codemodeReadonly?: CodemodeReadonlyOwner
   /** The SAME owned-child guard the runner binds every child into. Its `webfetch` hook refuses every
-   * CodeMode `fetch` of a bound child that has no live network producer, and none is bound here, so
-   * with it `codemode-network-guard` is claimed as a deny-all guard. Absent: the requirement stays
-   * unbound and a CodeMode selection is refused. */
+   * CodeMode `fetch` of a bound child without a network binding; a child whose selection includes
+   * Native `webfetch` is bound for GET under Native's URL rules, any other child stays deny-all. With
+   * it `codemode-network-guard` is claimed. Absent: the requirement stays unbound and a CodeMode
+   * selection is refused. */
   readonly network?: { readonly guard: OwnedChildToolGuard }
 }
 /** Trusted runtime DATA from the ORIGINAL approved ManagerStartSpec, never from member tool closures. */
@@ -58,7 +60,7 @@ function combine(producers: readonly Producer[]): { revoke(): void; join(): Prom
 /** Trusted component binder for the runtime `childGuardBinding` seam. Only producers that are
  * actually installed are claimed as bound; kernel requirements and member slots other than
  * `task_send` stay unbound, so a selection needing them is refused by the runner as incomplete,
- * never silently widened. The network requirement is claimed only as the guard's deny-all fetch. */
+ * never silently widened. The network requirement is claimed by the guard: GET only with `webfetch`. */
 export function createNativeChildGuardBinding(options: NativeChildGuardBindingOptions) {
   const { assertGeneration } = options
   return function childGuardBinding(spec: ManagedStartSpec, approved: { readonly buildAgentID: string; readonly selection: PreparedHostTaskGrant }, origin: NativeChildGuardOrigin = {}) {
@@ -78,7 +80,9 @@ export function createNativeChildGuardBinding(options: NativeChildGuardBindingOp
     const coverage: Coverage = bound.length ? { boundRequirements: bound, targets } : { boundRequirements: [] }
     return { coverage, assertCurrent: assertGeneration, bind(child: ChildHandle, assertBackendCurrent: () => void): ChildGuardBinding {
       const current = () => { assertGeneration(); assertBackendCurrent() }
-      if (!broker && !member && !listing) return { child, agent: approved.buildAgentID, coverage, assertCurrent: current }
+      const network = options.network ? webfetchNetworkFor(selection, options.network.guard, current) : undefined
+      const fetching = network ? { network } : {}
+      if (!broker && !member && !listing) return { child, agent: approved.buildAgentID, coverage, assertCurrent: current, ...fetching }
       const sessionID = child.locator.sessionID
       const producers: Producer[] = []
       try {
@@ -95,7 +99,7 @@ export function createNativeChildGuardBinding(options: NativeChildGuardBindingOp
         for (const producer of producers) producer.revoke()
         throw error
       }
-      return { child, agent: approved.buildAgentID, coverage,
+      return { child, agent: approved.buildAgentID, coverage, ...fetching,
         assertCurrent() { current(); for (const producer of producers) producer.assertCurrent() },
         producers: combine(producers) }
     } }
