@@ -11,10 +11,13 @@
 //      Senpi failure classification, so the park streak and backoff match;
 //   7. a pending run the completion promoted to active is executed next, as Senpi's `launch` callback does.
 // A failure before the child starts settles as `failed`/`spawn_failed` (Senpi's pre-ledger path); any
-// later throw settles as `failed`/`runner_failed`. Nothing here is triggered automatically yet (S7g).
+// later throw settles as `failed`/`runner_failed`. A dream run (S7h) launches the `omo-dream` agent with
+// the dream inputs as its task prompt and records the dream system-token budget check once it merged.
 
 import type { ReflectionRequest, ReflectionWorktree, ReservedRun } from "@oh-my-opencode/memory-core"
 import type { BoundMemorySession } from "./binding"
+import { applyDreamTokenBudget } from "./dream-budget"
+import { buildDreamLaunchPrompt } from "./dream-inputs"
 import type { ReflectionChildHosting, ReflectionChildLaunch } from "./reflection-child"
 import { classifyReflectionFailure, type ReflectionDecision } from "./reflection-failure"
 import { cleanupRunWorktree, decideReflection } from "./reflection-finalize"
@@ -84,11 +87,14 @@ export function createReflectionRunner(deps: ReflectionRunnerDeps) {
     const withWriterLock = memoryWriterLock(bound, deps.lockWaitTimeoutMs)
     let worktree: ReflectionWorktree | undefined
     let transcriptPath: string
+    let prompt: string | undefined
     try {
       worktree = await createRunWorktree(bound, await openMemoryRepo(bound, withWriterLock), run.runId)
       transcriptPath = await writeTranscriptPayload(bound, run)
+      if (run.request.trigger === "dream") prompt = await buildDreamLaunchPrompt(bound, run, worktree.dir)
     } catch (error) {
       const cleanedUp = worktree === undefined || await cleanupRunWorktree(worktree, run.runId, deps.warn)
+      deps.warn("memory reflection not launched: run setup failed", { runId: run.runId, error: errorMessage(error) })
       return settle(bound, run, { outcome: "failed", reason: "spawn_failed", detail: errorMessage(error) }, cleanedUp)
     }
     let decision: ReflectionDecision
@@ -96,6 +102,7 @@ export function createReflectionRunner(deps: ReflectionRunnerDeps) {
       const launch: ReflectionChildLaunch = {
         runId: run.runId, parentSessionId: input.parentSessionId, worktreeDir: worktree.dir, transcriptPath,
         request: { trigger: run.request.trigger, ...(run.request.focus === undefined ? {} : { focus: run.request.focus }) },
+        ...(prompt === undefined ? {} : { prompt }),
         deadlineMs: deps.deadlineMs ?? reflectionSettings(bound).timeout_minutes * 60_000,
         ...(model === undefined ? {} : { model }),
         ...(input.onCancel === undefined ? {} : { onCancel: input.onCancel }),
@@ -105,6 +112,11 @@ export function createReflectionRunner(deps: ReflectionRunnerDeps) {
     } catch (error) {
       decision = { outcome: "failed", reason: "runner_failed", detail: errorMessage(error) }
     }
+    const decided = decision
+    decision = await applyDreamTokenBudget(bound, run, decided).catch((error: unknown) => {
+      deps.warn("dream token budget not checked", { runId: run.runId, error: errorMessage(error) })
+      return decided
+    })
     return settle(bound, run, decision, await cleanupRunWorktree(worktree, run.runId, deps.warn))
   }
 
@@ -115,6 +127,7 @@ export function createReflectionRunner(deps: ReflectionRunnerDeps) {
     await writeRunTerminal(bound, run, {
       kind: "final", outcome: decision.outcome, at,
       ...(decision.reason === undefined ? {} : { reason: decision.reason }),
+      ...(decision.detail === undefined ? {} : { detail: decision.detail }),
       ...(decision.integrationSha === undefined ? {} : { integrationSha: decision.integrationSha }),
     }).catch((error: unknown) => { deps.warn("reflection final sentinel not written", { runId: run.runId, error: errorMessage(error) }) })
     return { result: { runId: run.runId, cleanedUp, ...decision }, ...(completion.launch === undefined ? {} : { promoted: completion.launch }) }

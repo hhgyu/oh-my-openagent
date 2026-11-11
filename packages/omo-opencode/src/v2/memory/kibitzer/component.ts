@@ -31,7 +31,7 @@ import { contentText } from "./events"
 import { createKibitzerWakeRecorder } from "./observe"
 import type { KibitzerWakeOutcome } from "./outcome"
 import { createKibitzerSidecar, type KibitzerSidecar } from "./sidecar"
-import { createKibitzerTools, KIBITZER_MEMORY_DESCRIPTION, KIBITZER_MEMORY_TOOL_NAME, kibitzerMemoryInput, wrapMemoryTool, type KibitzerToolsDeps } from "./tools"
+import { createKibitzerTools, KIBITZER_MEMORY_DESCRIPTION, KIBITZER_MEMORY_TOOL_NAME, KIBITZER_PRIVATE_TOOL_NAMES, kibitzerMemoryInput, wrapMemoryTool, type KibitzerToolsDeps } from "./tools"
 
 export interface KibitzerPortRequest {
   readonly bound: BoundMemorySession
@@ -76,6 +76,8 @@ export interface KibitzerComponent {
   onToolAfter(event: { readonly sessionID: string; readonly tool: string; readonly id: string; readonly status: string; readonly result?: unknown; readonly error?: unknown }): void
   /** Returns true when the request belongs to a Kibitzer child (its tools were narrowed; nothing else applies). */
   onContext(value: Pick<SessionContext, "sessionID" | "tools" | "messages">): boolean
+  /** Tool exposure only, for every model request (compaction included): a child is narrowed to its contract tools, any other session loses the child-only ones. True for a child. */
+  narrowTools(value: Pick<SessionContext, "sessionID" | "tools">): boolean
   offer(bound: BoundMemorySession, candidates: readonly RecallCandidate[], surfaced: ReadonlySet<string>, recall: OmoMemoryRecall): Promise<KibitzerOfferResult | undefined>
   tools<S extends z.ZodObject<z.ZodRawShape>>(memory: Info<S>): readonly Info[]
   activeSessions(): readonly string[]
@@ -209,6 +211,17 @@ export function createKibitzerComponent(deps: KibitzerComponentDeps): KibitzerCo
     })
   }
 
+  function narrowTools(value: Pick<SessionContext, "sessionID" | "tools">): boolean {
+    if (!children.has(value.sessionID)) {
+      for (const name of KIBITZER_PRIVATE_TOOL_NAMES) Reflect.deleteProperty(value.tools, name)
+      return false
+    }
+    // Exposure follows the child's permissions: only the five contract tools, `memory` read-only.
+    for (const name of Object.keys(value.tools)) if (!(KIBITZER_SIDECAR_TOOL_NAMES as readonly string[]).includes(name)) Reflect.deleteProperty(value.tools, name)
+    if (value.tools[KIBITZER_MEMORY_TOOL_NAME] !== undefined) value.tools[KIBITZER_MEMORY_TOOL_NAME] = { description: KIBITZER_MEMORY_DESCRIPTION, input: KIBITZER_MEMORY_SCHEMA }
+    return true
+  }
+
   return {
     isKibitzerSession: sessionID => children.has(sessionID),
     onPrompt(sessionID, text) {
@@ -231,13 +244,9 @@ export function createKibitzerComponent(deps: KibitzerComponentDeps): KibitzerCo
       const isError = event.status !== "completed"
       capture(event.sessionID, sidecar => { sidecar.events.onToolResult(event.tool, event.id, isError, isError ? event.error : event.result) })
     },
+    narrowTools,
     onContext(value) {
-      if (children.has(value.sessionID)) {
-        // Exposure follows the child's permissions: only the five contract tools, `memory` read-only.
-        for (const name of Object.keys(value.tools)) if (!(KIBITZER_SIDECAR_TOOL_NAMES as readonly string[]).includes(name)) Reflect.deleteProperty(value.tools, name)
-        if (value.tools[KIBITZER_MEMORY_TOOL_NAME] !== undefined) value.tools[KIBITZER_MEMORY_TOOL_NAME] = { description: KIBITZER_MEMORY_DESCRIPTION, input: KIBITZER_MEMORY_SCHEMA }
-        return true
-      }
+      if (narrowTools(value)) return true
       const text = newestAssistantText(value.messages)
       if (text !== undefined) capture(value.sessionID, sidecar => { sidecar.events.onAssistant(text) })
       return false

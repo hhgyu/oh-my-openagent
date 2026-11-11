@@ -23,7 +23,7 @@ import {
   createMemoryChildPort, settleWithin, type IssuedMemoryChild, type MemoryChildPermissions, type MemoryChildPort, type MemoryChildTimers,
   type MemoryChildTurnReport,
 } from "./memory-child-port"
-import { REFLECTION_AGENT_ID, REFLECTION_PERMISSIONS } from "./reflection-agent"
+import { DREAM_AGENT_ID, REFLECTION_AGENT_ID, REFLECTION_PERMISSIONS } from "./reflection-agent"
 import { buildReflectionTaskPrompt } from "./reflection-persona"
 import { createReflectionRunScope, type ReflectionRunScope } from "./reflection-run-scope"
 import { createReflectionTools, REFLECTION_TOOL_NAMES } from "./reflection-tools"
@@ -58,6 +58,8 @@ export interface ReflectionChildLaunch {
   readonly worktreeDir: string
   readonly transcriptPath: string
   readonly request: Pick<ReflectionRequest, "trigger" | "focus">
+  /** The first user input; absent builds the reflection task prompt. A dream passes its own (`dream-inputs.ts`). */
+  readonly prompt?: string
   /** `provider/model`; absent keeps the agent's own model. */
   readonly model?: string
   readonly deadlineMs: number
@@ -118,7 +120,7 @@ export function createReflectionChildHosting(deps: ReflectionChildHostingDeps) {
     const scope = createReflectionRunScope({ runId: input.runId, worktreeDir: input.worktreeDir, transcriptPath: input.transcriptPath, agentId: bound.identity })
     const request: ReflectionPortRequest = {
       bound, parentSessionId: input.parentSessionId, journalPath: reflectionChildJournalPath(bound),
-      agent: REFLECTION_AGENT_ID, permissions: REFLECTION_PERMISSIONS.map(rule => ({ ...rule })), toolNames: [...REFLECTION_TOOL_NAMES], scopes,
+      agent: input.request.trigger === "dream" ? DREAM_AGENT_ID : REFLECTION_AGENT_ID, permissions: REFLECTION_PERMISSIONS.map(rule => ({ ...rule })), toolNames: [...REFLECTION_TOOL_NAMES], scopes,
       onIssued: child => { children.set(child.sessionID, { scope, lease: child.lease }) },
       onRetired: sessionID => { children.delete(sessionID) },
     }
@@ -131,7 +133,7 @@ export function createReflectionChildHosting(deps: ReflectionChildHostingDeps) {
       void port.close().catch((error: unknown) => { deps.warn("reflection child cancel incomplete", { runId: input.runId, error: String(error) }) })
     })
     try {
-      const child = await port.start({ generation: 1, prompt: buildReflectionTaskPrompt(input.request), ...(model === undefined ? {} : { model }) })
+      const child = await port.start({ generation: 1, prompt: input.prompt ?? buildReflectionTaskPrompt(input.request), ...(model === undefined ? {} : { model }) })
       const settled = await settleWithin(child, input.deadlineMs, deps.timers)
       if (settled === "deadline") return { status: "deadline", commits: scope.commits(), detail: `reflection child did not settle within ${input.deadlineMs} ms` }
       if (settled.status === "cancelled" || stopped) return { status: "cancelled", commits: scope.commits() }

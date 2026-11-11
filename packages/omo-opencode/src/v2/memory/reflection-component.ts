@@ -5,15 +5,18 @@
 // the hidden agent; a supplied `createPort` stands in for that host in tests. Triggers (S7g, see
 // `reflection-triggers.ts` and `/reflect`) go through `evaluate`, which is Senpi's
 // `runtime.store.evaluate` followed by a detached `runtime.launch` of the run that won the active slot;
+// dreams (S7h, see `dream-triggers.ts` and `/dream`) go through `requestDream` and the same launch;
 // recovery runs at every bind. Close cancels live children and waits for every tracked run, evaluation
 // and recovery to settle.
 
-import type { ReflectionEvent, ReflectionLockProbe, ReservationResult } from "@oh-my-opencode/memory-core"
+import type { ReflectionEvent, ReflectionLockProbe, ReservationResult, ReservedRun } from "@oh-my-opencode/memory-core"
 import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
 import { loadRuntimeConfig } from "../config/runtime"
 import type { probeJournalOwner } from "../host/child-journal"
 import { createModelCatalog, type CatalogModel } from "../host/model-catalog"
 import type { BoundMemorySession } from "./binding"
+import { fireDream, type DreamFireOutcome, type DreamRequest } from "./dream-fire"
+import { resolveDreamTriggerSettings, type DreamTriggerSettings, type V2DreamOrigin } from "./dream-gates"
 import type { MemoryLogger } from "./config"
 import { latestSessionModel } from "./facts"
 import { kibitzerHostCapable } from "./kibitzer"
@@ -49,6 +52,10 @@ export interface ReflectionComponent {
    * launched by the active run's completion. Returns the reservation result; `null` when nothing fired.
    */
   evaluate(bound: BoundMemorySession, event: ReflectionEvent): Promise<ReservationResult | null>
+  /** One dream request (`dream-fire.ts`) through the same reservation store and detached launch. */
+  requestDream(bound: BoundMemorySession, origin: V2DreamOrigin, request?: DreamRequest): Promise<DreamFireOutcome>
+  /** The dream policy of the bound identity, read from the freshly loaded config like the model category. */
+  dreamSettings(bound: BoundMemorySession): DreamTriggerSettings
   /** Bind-time crash recovery; never throws. */
   onBound(bound: BoundMemorySession): Promise<void>
   close(): Promise<void>
@@ -104,20 +111,29 @@ export function createReflectionComponent(context: MemoryHost, deps: { readonly 
     ...(seams.probeOwner === undefined ? {} : { probeOwner: seams.probeOwner }),
     runPromoted: (bound, run) => cancellable(onCancel => runner.runPromoted(bound, run, { parentSessionId: bound.sessionID, onCancel })),
   })
+  // A reservation taken while closing still launches: `cancellable` cancels it at once, so the
+  // runner settles it and releases `active.lock` instead of stranding it until the next bind.
+  const launchActive = (bound: BoundMemorySession, run: ReservedRun): void => {
+    void cancellable(onCancel => runner.runPromoted(bound, run, { parentSessionId: bound.sessionID, onCancel }))
+      .catch((error: unknown) => { warn("memory reflection run failed", { runId: run.runId, error: error instanceof Error ? error.message : String(error) }) })
+  }
+  const dreamSettings = (bound: BoundMemorySession) => resolveDreamTriggerSettings(loadConfig(bound.directory).memory ?? bound.settings, bound.identity)
   return {
     hosting,
     async evaluate(bound, event) {
       if (closed) return null
       const result = await track(reflectionStore(bound, store).evaluate(bound.sessionID, event))
-      // A reservation taken while closing still launches: `cancellable` cancels it at once, so the
-      // runner settles it and releases `active.lock` instead of stranding it until the next bind.
-      if (result?.status === "active") {
-        const run = result.run
-        void cancellable(onCancel => runner.runPromoted(bound, run, { parentSessionId: bound.sessionID, onCancel }))
-          .catch((error: unknown) => { warn("memory reflection run failed", { runId: run.runId, error: error instanceof Error ? error.message : String(error) }) })
-      }
+      if (result?.status === "active") launchActive(bound, result.run)
       return result
     },
+    async requestDream(bound, origin, request = {}) {
+      if (closed) return { fired: false, rejection: "no_session" }
+      return track(fireDream({
+        bound, origin, request, settings: dreamSettings(bound), store: reflectionStore(bound, store),
+        now: () => (seams.now?.() ?? new Date()).getTime(), launch: run => { launchActive(bound, run) },
+      }))
+    },
+    dreamSettings,
     async onBound(bound) {
       if (closed) return
       await track(recovery.onBound(bound))

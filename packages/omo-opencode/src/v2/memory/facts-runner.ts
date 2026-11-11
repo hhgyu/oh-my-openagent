@@ -8,17 +8,18 @@
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import {
-  buildDefaultSeedFiles, FactsFailureStore, FactsQueue, getProcessStartIdentity, GitMemoryRepo, readFactsPeoplePayload,
+  FactsFailureStore, FactsQueue, getProcessStartIdentity, GitMemoryRepo, readFactsPeoplePayload,
   selectCappedFactsBatch, selectLaunchable, serializeFactsPayload,
   type ConsentExchange, type FactsPayload, type FactsPeopleRouting, type FactsQueueEntry, type MemoryIdentityPaths,
 } from "@oh-my-opencode/memory-core"
-import { existsSync, writeFile } from "@oh-my-opencode/memory-core/fs"
+import { writeFile } from "@oh-my-opencode/memory-core/fs"
 import { describeError } from "./binding"
 import type { MemoryLogger } from "./config"
 import { finalizeFactsRun } from "./facts-finalize"
 import type { FactsModelResolution } from "./facts-model"
 import { payloadExchanges } from "./facts-record-tool"
 import { recoverFactsRuns } from "./facts-recovery"
+import { memoryWriterLock, openMemoryRepo } from "./memory-repo-open"
 import {
   createFactsTerminal, FACTS_EXTRACTION_FILE, FACTS_PAYLOAD_FILE, outcomePath, queueTargets, readRunJson, reserveFactsRunDir, writeRunJson,
   ledgerPath, type FactsRunLedger, type FactsRunOutcome, type FactsRunTerminal,
@@ -61,6 +62,8 @@ interface FactsRunnerDeps {
   readonly deadlineMs: number
   /** Whether a ledger's owner is a live component instance other than this one. */
   readonly ownerAlive: (ledger: FactsRunLedger) => boolean
+  /** `memory-write` wait budget when this run seeds a brand-new repo; defaults to 5000ms. */
+  readonly lockWaitTimeoutMs?: number
 }
 
 interface FactsLaunchRequest {
@@ -131,8 +134,9 @@ export function createFactsRunner(deps: FactsRunnerDeps) {
     let batch: readonly FactsQueueEntry[] = []
     let payload: FactsPayload
     try {
-      const memoryRepo = repo()
-      if (!existsSync(join(memoryRepo.dir, ".git"))) await memoryRepo.init({ seedFiles: buildDefaultSeedFiles() })
+      // A brand-new identity is seeded only under the `memory-write` lock, like reflection and the memory tool.
+      const writerLock = memoryWriterLock(deps, `memory facts (${deps.identity})`, deps.lockWaitTimeoutMs === undefined ? {} : { waitTimeoutMs: deps.lockWaitTimeoutMs })
+      const memoryRepo = await openMemoryRepo(deps, writerLock)
       const people = await readFactsPeoplePayload(memoryRepo.dir)
       const envelope = { version: 1, identity: deps.identity, today: deps.now().toISOString().slice(0, 10), ...people } as const
       const capped = selectCappedFactsBatch({ entries, envelope, now: deps.now() })
