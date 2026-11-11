@@ -23,6 +23,8 @@ import { prepareNativeTaskRuntime } from "../../tools/native-task-preparation"
 import { createNativeChildGuardBinding } from "./child-guard-binding"
 import { acquireTeamMemberOwner, type TeamMemberOwner } from "./live-member-owner"
 import { acquireReadonlyBroker, type ReadonlyBrokerOwner } from "./live-readonly-producer"
+import { acquireCodemodeReadonly, type CodemodeReadonlyOwner } from "./live-codemode-readonly"
+import { CODEMODE_READONLY_NATIVE_NAME } from "../../tools/codemode-readonly"
 import { createNativeTaskService } from "./service"
 import { READONLY_BROKER_TOOL_NAME } from "../../tools/curated-readonly"
 import { TEAM_MEMBER_SEND_TOOL_NAME } from "../../tools/team-member-send"
@@ -49,6 +51,8 @@ export interface NativeTaskEffectOwners {
   readonly readonly: ReadonlyBrokerOwner
   /** Dedicated team member send registration, executable only by its bound in-process member. */
   readonly member: TeamMemberOwner
+  /** Dedicated CodeMode `ls` counterpart registration, executable only by its bound owned child. */
+  readonly codemodeReadonly: CodemodeReadonlyOwner
 }
 
 /** The task settings of a lead's per-lead team service: its team storage lives in the lead's own
@@ -91,8 +95,9 @@ export function acquireNativeTaskEffectOwners(context: EffectPlugin.Context, ses
     // Registered BEFORE the guard: transforms run in registration order, so the guard wraps it too.
     const readonly = yield* acquireReadonlyBroker({ tool: context.tool }, permission)
     const member = yield* acquireTeamMemberOwner({ tool: context.tool })
+    const codemodeReadonly = yield* acquireCodemodeReadonly({ tool: context.tool }, permission)
     const guard = yield* acquireOwnedChildToolGuard({ tool: context.tool, permission: context.permission })
-    return { session, metadataSource, permission, guard, readonly, member }
+    return { session, metadataSource, permission, guard, readonly, member, codemodeReadonly }
   })
 }
 
@@ -155,6 +160,11 @@ export function hideUnboundTeamMemberSend(context: ModelContext, owner: Pick<Tea
   hideUnbound(context, owner)
 }
 
+/** Parents and children without the `ls` grant never see the CodeMode counterpart. */
+export function hideUnboundCodemodeReadonly(context: ModelContext, owner: Pick<CodemodeReadonlyOwner, "hostID" | "isBound">): void {
+  hideUnbound(context, owner)
+}
+
 export interface NativeTaskComponentOptions {
   /** The lead team component, assembled over this component's SAME registry, kernel and service. */
   readonly team?: (host: NativeTeamHost) => NativeTeamComponent
@@ -195,6 +205,9 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     const memberVisibility = await control.session.hook("context", context => hideUnboundTeamMemberSend(context, owners.member))
     closers.push(() => memberVisibility.dispose())
     current()
+    const listingVisibility = await control.session.hook("context", context => hideUnboundCodemodeReadonly(context, owners.codemodeReadonly))
+    closers.push(() => listingVisibility.dispose())
+    current()
     const routable = [...PUBLIC_TOOLS, ...initial.map(tool => tool.id)]
     const registry = createToolRegistry([], {})
     const kernel = createToolKernel({ registry, scopes, pipeline: createPolicyPipeline(), permission: owners.permission })
@@ -212,13 +225,17 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
         signal.throwIfAborted(); assertGeneration()
         const catalog = childCatalog(await control.tool.list())
         signal.throwIfAborted(); assertGeneration()
-        return { nativeTools: childStructuralToolNames(CUSTOM_CANDIDATES).map(name => ({ name })), catalog }
+        // Native `ls` maps to the CodeMode counterpart only while its registration is in the actual catalog.
+        const listing = owners.codemodeReadonly.hostID
+        const customCounterparts = catalog.some(tool => tool.id === listing) ? [{ nativeName: CODEMODE_READONLY_NATIVE_NAME, hostID: listing }] : []
+        return { nativeTools: childStructuralToolNames(CUSTOM_CANDIDATES).map(name => ({ name })), catalog, customCounterparts }
       } },
       childToolGuard: owners.guard,
-      // Only the read-only broker and the member task_send producers are installed. Kernel/network
-      // requirements and other member slots stay unbound, so a selection needing one is refused by
-      // the runner, never silently widened.
+      // The read-only broker, member task_send and CodeMode `ls` producers are installed; CodeMode
+      // fetch is bound only as the guard's deny-all. Kernel requirements and other member slots stay
+      // unbound, so a selection needing one is refused by the runner, never silently widened.
       childGuardBinding: createNativeChildGuardBinding({ assertGeneration, readonly: owners.readonly,
+        codemodeReadonly: owners.codemodeReadonly, network: { guard: owners.guard },
         member: { owner: owners.member, teamConfigFor: lead => nativeTeamConfig(directory, lead, prepared.config),
           onBound: member => teamComponent?.memberBound(member) ?? (() => {}) } }),
     })

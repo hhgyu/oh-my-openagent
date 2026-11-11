@@ -5,6 +5,8 @@ import type { ChildHandle } from "../../host/session-backend"
 import { createNativeChildGuardBinding } from "./child-guard-binding"
 import { checkHostGrantTarget, prepareHostTaskGrant, type PreparedHostTaskGrant } from "./host-grant"
 import type { ReadonlyBrokerOwner } from "./live-readonly-producer"
+import type { CodemodeReadonlyOwner } from "./live-codemode-readonly"
+import type { OwnedChildToolGuard } from "../../host/owned-child-tool-guard"
 
 const BROKER_ID = "omo_native_readonly"
 const catalog = [
@@ -198,5 +200,65 @@ describe("#given an in-process team member selection that needs member live bind
     expect(producer.coverage.boundRequirements).not.toContain("member-live-bindings")
     expect(runnerRefuses(selection, producer.coverage)).toBe(true)
     expect(checkHostGrantTarget(selection, MEMBER_ID, producer.coverage)).not.toBe("selected")
+  })
+})
+
+const LISTING_ID = "omo_native_ls"
+const NETWORK = { guard: {} as unknown as OwnedChildToolGuard }
+function listingGrant(agentType: string): PreparedHostTaskGrant {
+  return prepareHostTaskGrant({ spec: { prompt: "unit", parent_session_id: "ses_parent", depth: 1 }, plan: { model: "unit/model", agentType },
+    includeTaskTools: true, nativeTools: [...nativeTools, { name: "ls" }], catalog: [...catalog, { id: LISTING_ID, name: LISTING_ID, options: { codemode: true } }],
+    customCounterparts: [{ nativeName: "ls", hostID: LISTING_ID }], canonical: { filterSharedParentTools } })
+}
+function fakeListingOwner(events: string[]): CodemodeReadonlyOwner {
+  return {
+    hostID: LISTING_ID,
+    isBound: () => false,
+    bindChild(input) {
+      events.push(`listing-bind:${input.sessionID}:${input.agent}:${input.cwd}`)
+      return { assertCurrent() { events.push("listing-current") }, revoke() { events.push("listing-revoke") }, async join() { events.push("listing-join") } }
+    },
+  }
+}
+
+describe("#given a selection whose CodeMode ls counterpart needs the network guard", () => {
+  test("#when no network guard is supplied #then the requirement stays unbound and the runner refuses it", () => {
+    // given
+    const selection = listingGrant("sisyphus-junior")
+    expect(selection.requirements).toEqual(["codemode-network-guard"])
+    // when
+    const producer = createNativeChildGuardBinding({ assertGeneration() {}, codemodeReadonly: fakeListingOwner([]) })(spec("sisyphus-junior"), { buildAgentID: "build", selection })
+    // then
+    expect(producer.coverage).toEqual({ boundRequirements: [] })
+    expect(runnerRefuses(selection, producer.coverage)).toBe(true)
+  })
+
+  test("#when the guard is supplied #then the requirement is claimed with no live network producer and the ls producer is bound", async () => {
+    // given
+    const selection = listingGrant("sisyphus-junior"), events: string[] = []
+    const binder = createNativeChildGuardBinding({ assertGeneration() {}, codemodeReadonly: fakeListingOwner(events), network: NETWORK })
+    // when
+    const producer = binder(spec("sisyphus-junior"), { buildAgentID: "build", selection })
+    const binding = producer.bind(child("ses_listing"), () => {})
+    binding.assertCurrent()
+    await binding.producers?.join()
+    // then
+    expect(producer.coverage).toEqual({ boundRequirements: ["codemode-network-guard"], targets: [] })
+    expect(runnerRefuses(selection, producer.coverage)).toBe(false)
+    expect(checkHostGrantTarget(selection, LISTING_ID, producer.coverage)).toBe("selected")
+    expect(binding.network).toBeUndefined()
+    expect(events).toEqual(["listing-bind:ses_listing:build:/project", "listing-current", "listing-revoke", "listing-join"])
+  })
+
+  test("#when the selection has no CodeMode tool #then the guard claims nothing and no ls producer is bound", () => {
+    // given
+    const selection = grantFor("sisyphus-junior"), events: string[] = []
+    // when
+    const producer = createNativeChildGuardBinding({ assertGeneration() {}, codemodeReadonly: fakeListingOwner(events), network: NETWORK })(spec("sisyphus-junior"), { buildAgentID: "build", selection })
+    const binding = producer.bind(child("ses_plain"), () => {})
+    // then
+    expect(producer.coverage).toEqual({ boundRequirements: [] })
+    expect(binding.producers).toBeUndefined()
+    expect(events).toEqual([])
   })
 })
