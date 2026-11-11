@@ -25,6 +25,10 @@ export type LeadPollerDeps = {
   readonly deliveryJournal?: LeadDeliveryJournal
   readonly appendEvent?: (taskId: string, event: PersistedTaskEvent) => void
   readonly eventTaskId: (message: Message) => string | undefined; readonly leadSessionFile?: () => string | undefined
+  /** Host-owned delivery evidence. When present it replaces the lead session-file marker scan, and a
+   * flushed injection that is not delivered is released for redelivery: the sink calls `onFlushed`
+   * once it is done with an injection, whether or not the host accepted it. Absent: unchanged. */
+  readonly isDelivered?: (messageId: string) => boolean | Promise<boolean>
 }
 
 export type PendingPhase = "awaiting_flush" | "awaiting_persistence" | "recovery"

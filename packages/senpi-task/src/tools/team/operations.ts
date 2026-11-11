@@ -3,6 +3,10 @@
 export { createTeamService, createTeamMailboxReconciler } from "../../team/service/team-service"
 export type { TeamMemberLaunch, TeamServiceDeps } from "../../team/service/team-service"
 export { TEAM_LEAD_SENTINEL, createLeadPoller } from "../../team"
+export type { LeadInjection, LeadInjectionSink, LeadPoller, LeadPollerDeps } from "../../team"
+// The member-side inbox poller, for host adapters that deliver lead mail into an in-process member.
+export { createMemberSelfPoller } from "../../team/member-extension/self-poller"
+export type { MemberSelfPoller, MemberSelfPollerDeps } from "../../team/member-extension/self-poller"
 export { buildLeadTeamTools } from "./index"
 // The operations behind the lead team tools `buildLeadTeamTools` composes, with their canonical input
 // schemas, for host adapters that publish each tool under their own tool API.

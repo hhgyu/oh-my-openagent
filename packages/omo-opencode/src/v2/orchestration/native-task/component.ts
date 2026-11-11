@@ -173,6 +173,8 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     const kernel = createToolKernel({ registry, scopes, pipeline: createPolicyPipeline(), permission: owners.permission })
     const host = { ...control, session: { ...control.session, ...owners.session } }
     const assertGeneration = () => { current(); if (generation !== preparedGeneration) throw Error("Retired Native task generation") }
+    // The team component is assembled after the service; a member bound before it exists gets no delivery.
+    let teamComponent: NativeTeamComponent | undefined
     const service = createNativeTaskService(host, {
       scopes, callAuthority: kernel.callAuthority, metadataSource: owners.metadataSource,
       agents: prepared.agents, config: () => prepared.config, stateDirFor: id => nativeTaskStateDir(directory, id),
@@ -190,7 +192,8 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
       // requirements and other member slots stay unbound, so a selection needing one is refused by
       // the runner, never silently widened.
       childGuardBinding: createNativeChildGuardBinding({ assertGeneration, readonly: owners.readonly,
-        member: { owner: owners.member, teamConfigFor: lead => nativeTeamConfig(directory, lead, prepared.config) } }),
+        member: { owner: owners.member, teamConfigFor: lead => nativeTeamConfig(directory, lead, prepared.config),
+          onBound: member => teamComponent?.memberBound(member) ?? (() => {}) } }),
     })
     closers.push(() => service.close())
     // The team targets join the task targets in ONE registry generation; the team bridge waits for it.
@@ -198,7 +201,11 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     const teamRegistered = Promise.withResolvers<readonly NativeTaskTargetPermissionAssociation[]>()
     void teamRegistered.promise.catch(() => {})
     const team = options.team?.({ tool: control.tool, directory, prepared, registry, kernel, service, assertCurrent: current,
+      delivery: { session: owners.session, assertGeneration, isMemberBound: sessionID => owners.member.isBound(sessionID),
+        teamConfigFor: lead => nativeTeamConfig(directory, lead, prepared.config),
+        journalPathFor: lead => join(nativeTaskStateDir(directory, lead), "team-deliveries.sqlite") },
       register(targets) { teamTargets.resolve(targets); return teamRegistered.promise } })
+    teamComponent = team
     if (!team) teamTargets.resolve(undefined)
     const closeTeam = async () => { teamRegistered.reject(Error("Native task component closed")); await team?.close() }
     closers.push(closeTeam)

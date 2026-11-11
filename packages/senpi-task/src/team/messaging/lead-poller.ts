@@ -49,16 +49,16 @@ async function settlePending(deps: LeadPollerDeps, state: LeadPollState): Promis
     let releaseWhenMissing: boolean
     switch (delivery.phase) {
       case "awaiting_flush": continue
-      case "awaiting_persistence": releaseWhenMissing = false; break
+      // With host delivery evidence a flushed injection the host did not accept is not delivered.
+      case "awaiting_persistence": releaseWhenMissing = deps.isDelivered !== undefined; break
       case "recovery": releaseWhenMissing = true; break
       default: {
         const exhaustive: never = delivery.phase
         throw new TypeError(`Unexpected lead delivery phase: ${exhaustive}`)
       }
     }
-    const sessionFile = deps.leadSessionFile?.()
-    if (sessionFile === undefined) continue
-    const persisted = await state.markerIndex.contains(sessionFile, delivery.message.messageId)
+    const persisted = await isPersisted(deps, state, delivery.message.messageId)
+    if (persisted === undefined) continue
     if (!persisted && !releaseWhenMissing) continue
     if (!persisted) {
       await releaseDeliveryReservation(delivery.reservation)
@@ -88,8 +88,7 @@ async function processMessage(deps: LeadPollerDeps, message: Message, state: Lea
   }
   deps.deliveryJournal?.record(deps.teamRunId, message)
 
-  const sessionFile = deps.leadSessionFile?.()
-  if (await state.markerIndex.contains(sessionFile, message.messageId)) {
+  if (await isPersisted(deps, state, message.messageId) === true) {
     await commitDeliveryReservation(reservation)
     deps.deliveryJournal?.markReported(deps.teamRunId, message.messageId)
     appendDeliveredEvent(deps, message)
@@ -133,10 +132,10 @@ async function recoverReservations(deps: LeadPollerDeps, state: LeadPollState): 
       deps.teamRunId, TEAM_LEAD_SENTINEL, message.messageId, deps.config,
     )
     if (reservation === null) continue
-    const sessionFile = deps.leadSessionFile?.()
-    if (sessionFile === undefined) {
+    const persisted = await isPersisted(deps, state, message.messageId)
+    if (persisted === undefined) {
       state.pending.set(message.messageId, { message, reservation, phase: "recovery" })
-    } else if (await state.markerIndex.contains(sessionFile, message.messageId)) {
+    } else if (persisted) {
       await commitDeliveryReservation(reservation)
       deps.deliveryJournal?.markReported(deps.teamRunId, message.messageId)
       appendDeliveredEvent(deps, message)
@@ -144,6 +143,15 @@ async function recoverReservations(deps: LeadPollerDeps, state: LeadPollState): 
       await releaseDeliveryReservation(reservation)
     }
   }
+}
+
+/** Whether the message reached the lead: host delivery evidence when the port is present, else the
+ * lead session-file marker scan. Undefined when there is no session file to scan yet. */
+async function isPersisted(deps: LeadPollerDeps, state: LeadPollState, messageId: string): Promise<boolean | undefined> {
+  if (deps.isDelivered !== undefined) return deps.isDelivered(messageId)
+  const sessionFile = deps.leadSessionFile?.()
+  if (sessionFile === undefined) return undefined
+  return state.markerIndex.contains(sessionFile, messageId)
 }
 
 async function readReservedMessage(path: string): Promise<Message> {

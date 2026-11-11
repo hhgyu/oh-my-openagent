@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -158,6 +158,73 @@ describe("lead poller injection delivery", () => {
     await leadPoller.pollOnce()
 
     // then
+    expect(existsSync(processedPath(harness, value))).toBe(true)
+  })
+})
+
+describe("lead poller with a host delivery evidence port", () => {
+  function portPoller(harness: Harness, delivered: Set<string>): LeadPoller {
+    return createLeadPoller({
+      teamRunId: TEAM_RUN_ID,
+      config: harness.config,
+      coordinator: { enqueue: (injection) => harness.injections.push(injection) },
+      eventTaskId: () => undefined,
+      isDelivered: (messageId) => delivered.has(messageId),
+    })
+  }
+
+  test("#given host evidence for a flushed injection #when the lead polls twice #then it injects once and commits without a session file", async () => {
+    // given
+    const harness = createHarness(false)
+    const delivered = new Set<string>()
+    const value = message("33333333-3333-4333-8333-333333333331")
+    await seed(harness, value)
+    const leadPoller = portPoller(harness, delivered)
+
+    // when
+    await leadPoller.pollOnce()
+    delivered.add(value.messageId)
+    flushLatest(harness)
+    await leadPoller.pollOnce()
+
+    // then
+    expect(harness.injections).toHaveLength(1)
+    expect(existsSync(processedPath(harness, value))).toBe(true)
+  })
+
+  test("#given a flushed injection the host did not accept #when the lead polls again #then the reservation is released and the mail redelivers", async () => {
+    // given
+    const harness = createHarness(false)
+    const delivered = new Set<string>()
+    const value = message("33333333-3333-4333-8333-333333333332")
+    await seed(harness, value)
+    const leadPoller = portPoller(harness, delivered)
+    await leadPoller.pollOnce()
+    flushLatest(harness)
+
+    // when
+    await leadPoller.pollOnce({ from: "\u0000" })
+    const afterSettle = readdirSync(harness.inboxDir).filter((name) => name.startsWith(".delivering-"))
+    await leadPoller.pollOnce()
+
+    // then
+    expect(afterSettle).toEqual([])
+    expect(harness.injections).toHaveLength(2)
+    expect(existsSync(processedPath(harness, value))).toBe(false)
+  })
+
+  test("#given a crash with a reservation the host already accepted #when a fresh poller resumes #then it commits without reinjecting", async () => {
+    // given
+    const harness = createHarness(false)
+    const value = message("33333333-3333-4333-8333-333333333333")
+    await seed(harness, value)
+    await portPoller(harness, new Set()).pollOnce()
+
+    // when
+    await portPoller(harness, new Set([value.messageId])).pollOnce()
+
+    // then
+    expect(harness.injections).toHaveLength(1)
     expect(existsSync(processedPath(harness, value))).toBe(true)
   })
 })
