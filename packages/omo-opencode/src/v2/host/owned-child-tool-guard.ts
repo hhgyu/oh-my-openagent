@@ -43,6 +43,9 @@ export interface OwnedChildToolGuard {
    * backend validates its opaque parked receipt for this exact child. Frees the active claim
    * while keeping the owned-ID deny tombstone; the host deny rule fences fresh snapshots. */
   retireParked(stage: ChildGuardStage, receipt: object, validate: (receipt: object, child: object) => void): void
+  /** Trusted binder only: the pre-wrap ORIGINAL executor of the stock `webfetch` host tool with this
+   * ID, the one value a binding may name as `network.intrinsicGetOriginal`. Any other tool: undefined. */
+  intrinsicGetOriginal(hostID: string): ToolInfo["execute"] | undefined
   close(): Effect.Effect<void>
 }
 type Approval = { token: ChildGuardApproval; selection: PreparedHostTaskGrant; assertCurrent(): void; stage?: Stage }
@@ -63,7 +66,7 @@ export function acquireOwnedChildToolGuard(domains: { readonly tool: Pick<ToolDo
   return Effect.gen(function* () {
     const approvals = new WeakMap<object, Approval>(), admissions = new WeakSet<object>()
     const stages = new WeakMap<object, Stage>(), sessions = new Map<string, Stage>(), children = new WeakSet<object>(), parkedReceipts = new WeakSet<object>()
-    const originals = new WeakMap<ToolInfo["execute"], ToolInfo["execute"]>()
+    const originals = new WeakMap<ToolInfo["execute"], ToolInfo["execute"]>(), webfetchOriginals = new Map<string, ToolInfo["execute"]>()
     // Public Permission.assert -> evaluate hooks run in the original Effect
     // context. This private per-owner reference cannot be borrowed by parallel
     // calls with equal SDK call IDs (CodeMode inner calls share those IDs).
@@ -84,6 +87,7 @@ export function acquireOwnedChildToolGuard(domains: { readonly tool: Pick<ToolDo
     const toolRegistration = yield* domains.tool.transform(editor => {
       for (const tool of editor.list()) {
         const original = originals.get(tool.execute) ?? tool.execute
+        if (tool.name === "webfetch") webfetchOriginals.set(tool.id, original); else webfetchOriginals.delete(tool.id)
         const wrapped: ToolInfo["execute"] = (input, context) => {
           // Generation captured at CALL creation: a lazy effect from an older stage (or an
           // unrelated issuance) cannot borrow a renewed stage by an equal session ID.
@@ -217,6 +221,7 @@ export function acquireOwnedChildToolGuard(domains: { readonly tool: Pick<ToolDo
         // Deny tombstone stays in sessions; prior wrappers and lazy effects remain denied.
         stage.state = "parked"; stage.parkedReceipt = receipt; parkedReceipts.add(receipt)
       },
+      intrinsicGetOriginal(hostID) { current(); return webfetchOriginals.get(hostID) },
       close() {
         stopped = true
         const owned = [...sessions.values()].filter(stage => !retired(stage)); for (const stage of owned) stage.state = "revoked"

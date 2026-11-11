@@ -232,7 +232,7 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
       } },
       childToolGuard: owners.guard,
       // The read-only broker, member task_send and CodeMode `ls` producers are installed; CodeMode
-      // fetch is bound only as the guard's deny-all. Kernel requirements and other member slots stay
+      // fetch GET is bound only for a child granted Native `webfetch`, deny-all otherwise. Kernel requirements and other member slots stay
       // unbound, so a selection needing one is refused by the runner, never silently widened.
       childGuardBinding: createNativeChildGuardBinding({ assertGeneration, readonly: owners.readonly,
         codemodeReadonly: owners.codemodeReadonly, network: { guard: owners.guard },
