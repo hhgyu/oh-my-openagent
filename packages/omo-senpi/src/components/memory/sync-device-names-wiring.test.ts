@@ -12,7 +12,7 @@ import { GitMemoryRepo, resolveMemoryIdentity } from "@oh-my-opencode/memory-cor
 import { ensureIdentityRuntimeDirs } from "./context"
 import { createMemoryComponent } from "./index"
 import { MemoryFakeExtensionAPI, componentContext, loadedMemoryConfig, memorySettings } from "./memory.test-support"
-import type { SyncRunner } from "./sync-runner"
+import type { SyncRunner } from "@oh-my-opencode/memory-core/sync-runner"
 import { rmEfaultTolerant } from "./teardown.test-support"
 
 const SESSION_ID = "session-device-names"

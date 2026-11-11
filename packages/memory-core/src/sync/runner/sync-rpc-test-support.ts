@@ -1,8 +1,8 @@
 import { registerSyncRpc } from "./sync-rpc-registration"
 import type { SyncRpcAccount, SyncRpcContext, SyncRpcOptions, SyncRpcRegistration, SyncRpcRuntime } from "./sync-rpc-ports"
-import { newDevice, removeWorldStateDirs } from "../../../../memory-core/src/sync/recovery/testing/world.test-support"
-import { createAccountHttp } from "../../../../memory-core/src/sync/account/http"
-import { createPairingHttp } from "../../../../memory-core/src/sync/account/pairing-http"
+import { newDevice, removeWorldStateDirs } from "../recovery/testing/world.test-support"
+import { createAccountHttp } from "../account/http"
+import { createPairingHttp } from "../account/pairing-http"
 
 type Handler = Parameters<SyncRpcRegistration["handle"]>[1]
 const cleanups: (() => Promise<void>)[] = []

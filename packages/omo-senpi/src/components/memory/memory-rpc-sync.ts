@@ -2,22 +2,11 @@
 // footer reads, so the desktop shows what the TUI shows. Omitted while this device does not sync the
 // repository (sync off, signed out, or another process holds the engine), and when the read fails.
 
-import type { SyncFailureKind } from "@oh-my-opencode/memory-core/sync-engine"
+import type { MemoryRpcSync } from "@oh-my-opencode/memory-core/sync-runner"
 
 import type { SyncStatusReader } from "./sync-status-surface"
 
-export interface MemoryRpcSync {
-  readonly state: "never_synced" | "synced" | "paused" | "failing" | "unavailable"
-  readonly lastSyncedAtISO?: string
-  readonly failure?: {
-    readonly kind: SyncFailureKind
-    readonly reason: string
-    readonly action: string
-    readonly sinceISO: string
-    readonly attempts: number
-    readonly paths?: readonly string[]
-  }
-}
+export type { MemoryRpcSync } from "@oh-my-opencode/memory-core/sync-runner"
 
 export async function readMemoryRpcSync(read: SyncStatusReader | undefined, repo: string): Promise<MemoryRpcSync | undefined> {
   if (read === undefined) return undefined

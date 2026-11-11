@@ -6,7 +6,7 @@ import { Worker } from "node:worker_threads"
 import { once } from "node:events"
 import { createSyncRpcClaims } from "./sync-rpc-claims"
 import { observeLockWorker } from "../../../../team-core/src/team-state-store/lock-worker-lifetime"
-import type { SyncRpcAuthority, SyncRpcIdentity } from "./sync-rpc-ports"
+import type { SyncRpcAuthority, SyncRpcIdentity } from "@oh-my-opencode/memory-core/sync-runner"
 
 const roots: string[] = []
 const workers: Worker[] = []

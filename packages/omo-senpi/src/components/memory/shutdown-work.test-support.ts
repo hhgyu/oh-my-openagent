@@ -6,7 +6,7 @@ import { join } from "node:path"
 import { GitMemoryRepo } from "@oh-my-opencode/memory-core"
 
 import type { MemoryIdentityRuntime } from "./identity-runtime"
-import type { SyncRunner } from "./sync-runner"
+import type { SyncRunner } from "@oh-my-opencode/memory-core/sync-runner"
 import type { TransientSweepResult } from "./transient-sweep"
 import { rmEfaultTolerant } from "./teardown.test-support"
 

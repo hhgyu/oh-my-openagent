@@ -1,7 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads"
 import { z } from "zod"
 import { createSyncRpcClaims } from "./sync-rpc-claims"
-import type { SyncRpcClaim } from "./sync-rpc-ports"
+import type { SyncRpcClaim } from "@oh-my-opencode/memory-core/sync-runner"
 
 const data = z.object({
   root: z.string(),

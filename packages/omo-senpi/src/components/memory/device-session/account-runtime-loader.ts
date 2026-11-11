@@ -10,7 +10,7 @@ import { isMainThread } from "node:worker_threads"
 import { provideSessionWorkerData } from "@code-yeongyu/senpi/session-worker-data"
 import { type HostMemorySync, type MemorySyncSelection, MEMORY_SYNC_WORKER_DATA, selectHostMemorySyncSource } from "../desktop-sync/hostSelection"
 import { launchCarriedPrivateTable } from "../desktop-sync/launchClassification"
-import { SyncSidecarUnavailableError } from "../sync-runner"
+import { SyncSidecarUnavailableError } from "@oh-my-opencode/memory-core/sync-runner"
 import type { DeviceAccountSource } from "./account-source"
 import type * as AccountRuntime from "./account-runtime"
 

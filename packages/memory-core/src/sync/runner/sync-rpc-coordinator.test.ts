@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test"
 import { disposeSyncRpcFixtures, owner, setup } from "./sync-rpc-test-support"
-import { AccountHttpError } from "../../../../memory-core/src/sync/account/http"
+import { AccountHttpError } from "../account/http"
 const deferred = <T>() => Promise.withResolvers<T>()
 afterEach(disposeSyncRpcFixtures)
 

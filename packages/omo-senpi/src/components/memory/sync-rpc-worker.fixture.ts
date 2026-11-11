@@ -7,8 +7,7 @@ import { enableSync } from "../../../../memory-core/src/sync/account/enable"
 import { joinAccount } from "../../../../memory-core/src/sync/account/join"
 import { approveDevice } from "../../../../memory-core/src/sync/account/approve"
 import { createSyncRpcClaims } from "./sync-rpc-claims"
-import { registerSyncRpc } from "./sync-rpc-registration"
-import type { SyncRpcAccount, SyncRpcRegistration } from "./sync-rpc-ports"
+import { registerSyncRpc, type SyncRpcAccount, type SyncRpcRegistration } from "@oh-my-opencode/memory-core/sync-runner"
 
 const data = z.object({
   root: z.string(), api: z.string(), token: z.string(), principalId: z.string(),

@@ -5,7 +5,7 @@
 
 import type { EngineStatus } from "@oh-my-opencode/memory-core/sync-engine"
 
-import type { SyncConfigInvalidStatus, SyncUnavailableStatus } from "./sync-runner"
+import type { SyncConfigInvalidStatus, SyncUnavailableStatus } from "@oh-my-opencode/memory-core/sync-runner"
 
 // The runner also reports an invalid sync configuration (#10860); like "unavailable" it is not a failing cycle,
 // so the footer and the notice treat it the same way (the runner already logs why sync is off).

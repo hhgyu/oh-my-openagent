@@ -18,7 +18,7 @@ import {
   sessionContext,
   type SessionEntryFixture,
 } from "./memory.test-support"
-import type { SyncRunner } from "./sync-runner"
+import type { SyncRunner } from "@oh-my-opencode/memory-core/sync-runner"
 import { rmSyncEfaultTolerant } from "./teardown.test-support"
 
 const roots: string[] = []

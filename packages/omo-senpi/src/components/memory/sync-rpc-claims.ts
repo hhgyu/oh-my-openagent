@@ -5,7 +5,7 @@ import { z } from "zod"
 import { withLock } from "@oh-my-opencode/team-core/team-state-store/locks"
 import { buildLockRecord, isLockRecordStale } from "@oh-my-opencode/team-core/team-state-store/lock-record"
 import { forgetLockRecord, markLockRecordHeld, markLockRecordReleased } from "@oh-my-opencode/team-core/team-state-store/lock-worker-lifetime"
-import type { SyncRpcClaims } from "./sync-rpc-ports"
+import type { SyncRpcClaims } from "@oh-my-opencode/memory-core/sync-runner"
 
 const Lease = z.object({ owner: z.string(), expiresAt: z.number().finite().nullable() }).strict()
 

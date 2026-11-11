@@ -13,7 +13,7 @@ import { type CredentialStore, type Credentials, SignInError } from "@oh-my-open
 
 import * as syncRuntime from "../sync-runtime"
 import { createCliAccountSource, type CliDeviceAccount } from "./account-source"
-import { createDeviceSessionResolver } from "./resolver"
+import { createDeviceSessionResolver } from "@oh-my-opencode/memory-core/sync-runner"
 
 const dirs: string[] = []
 afterEach(async () => {

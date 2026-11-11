@@ -7,10 +7,8 @@ import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
 import { createCredentialStore, quietNotice } from "@oh-my-opencode/omo-opencode/service-auth"
 
 import { readMemoryStatusSegments } from "../status"
-import { createSyncRunner } from "../sync-runner"
-import { SyncSessionDeferredError } from "../sync-session-deferred"
+import { createDeviceSessionResolver, createSyncRunner, SyncSessionDeferredError } from "@oh-my-opencode/memory-core/sync-runner"
 import { createCliAccountSource } from "./account-source"
-import { createDeviceSessionResolver } from "./resolver"
 
 const dirs: string[] = []
 afterEach(async () => {
@@ -58,6 +56,7 @@ describe("memory sync while the keychain waits for approval", () => {
     let attempts = 0
     const warnings: unknown[] = []
     const runner = createSyncRunner({
+      loadRuntime: () => import("#omo-memory-sync-runtime"),
       logger: { info: () => undefined, warn: (_message, detail) => warnings.push(detail), error: () => undefined },
       resolveSession: async () => {
         attempts += 1
@@ -91,6 +90,7 @@ describe("memory sync while the keychain waits for approval", () => {
     const paths = await identity()
     let attempts = 0
     const runner = createSyncRunner({
+      loadRuntime: () => import("#omo-memory-sync-runtime"),
       logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
       resolveSession: async () => {
         attempts += 1
@@ -117,6 +117,7 @@ describe("memory sync while the keychain waits for approval", () => {
     const paths = await identity()
     const messages: string[] = []
     const runner = createSyncRunner({
+      loadRuntime: () => import("#omo-memory-sync-runtime"),
       logger: { info: () => undefined, warn: (message) => messages.push(message), error: () => undefined },
       resolveSession: async () => {
         throw new SyncSessionDeferredError("approval pending", undefined)
@@ -155,6 +156,7 @@ describe("memory sync while the keychain waits for approval", () => {
     const warnings: string[] = []
     const { store } = unansweredKeychainStore()
     const runner = createSyncRunner({
+      loadRuntime: () => import("#omo-memory-sync-runtime"),
       logger: { info: () => undefined, warn: (message) => warnings.push(message), error: () => undefined },
       resolveSession: createDeviceSessionResolver({ source: createCliAccountSource({ api: "http://127.0.0.1:9", store }), pinDir: join(paths.root, "pins"), loadRuntime: noRuntime }),
       watchHead: () => () => undefined,
@@ -178,6 +180,7 @@ describe("memory sync while the keychain waits for approval", () => {
       secondResolve = resolve
     })
     const runner = createSyncRunner({
+      loadRuntime: () => import("#omo-memory-sync-runtime"),
       logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
       resolveSession: async (request) => {
         resolves += 1
