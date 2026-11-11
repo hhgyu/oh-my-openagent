@@ -3579,6 +3579,7 @@
         "src/v2/agents/test-support.ts",
         "src/v2/memory/test-support.ts",
         "src/v2/memory/kibitzer/test-support.ts",
+        "src/v2/orchestration/native-dag/test-support.ts",
         "test/fixtures/config-migration/opencode-side-effect-import.ts",
         // Test fixtures run as their own process by path (`bun run <dir>/fixtures/<name>.ts`), so nothing imports them.
         "src/hooks/prometheus-md-only/fixtures/*.ts",

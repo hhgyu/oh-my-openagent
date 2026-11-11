@@ -30,6 +30,9 @@ import { NATIVE_TASK_TOOL_NAMES } from "../../tools/native-task"
 import { NATIVE_TEAM_TOOL_NAMES } from "../../tools/native-team-codecs"
 import type { NativeTeamTargets } from "../../tools/native-team"
 import type { NativeTeamComponent, NativeTeamHost } from "../native-team/component"
+import { NATIVE_DAG_TOOL_NAME } from "../../tools/native-dag-codecs"
+import type { NativeDagTargets } from "../../tools/native-dag"
+import type { NativeDagComponent, NativeDagHost } from "../native-dag/component"
 import type { NativeTaskTargetPermissionAssociation } from "./service"
 
 type MetadataSource = Parameters<typeof createNativeTaskService>[1]["metadataSource"]
@@ -97,8 +100,8 @@ export function acquireNativeTaskEffectOwners(context: EffectPlugin.Context, ses
  * algorithm against the actual catalog; absent names stay unavailable, never invented. */
 const CUSTOM_CANDIDATES = CHILD_HOST_TOOLS.filter(tool => tool.sessionBuiltin !== true).map(tool => tool.name)
 
-/** The public Native targets: the 4 task tools and the 6 lead team tools. Never child catalog grants. */
-const PUBLIC_TOOLS: readonly string[] = [...NATIVE_TASK_TOOL_NAMES, ...NATIVE_TEAM_TOOL_NAMES]
+/** The public Native targets: the 4 task tools, the 6 lead team tools and `workflow`. Never child catalog grants. */
+const PUBLIC_TOOLS: readonly string[] = [...NATIVE_TASK_TOOL_NAMES, ...NATIVE_TEAM_TOOL_NAMES, NATIVE_DAG_TOOL_NAME]
 
 const TASK_RECORD_FILE = /^(st_[0-9a-f]{8})\.json$/
 
@@ -155,6 +158,8 @@ export function hideUnboundTeamMemberSend(context: ModelContext, owner: Pick<Tea
 export interface NativeTaskComponentOptions {
   /** The lead team component, assembled over this component's SAME registry, kernel and service. */
   readonly team?: (host: NativeTeamHost) => NativeTeamComponent
+  /** The blocking `workflow` component, assembled over the SAME registry, kernel and service. */
+  readonly dag?: (host: NativeDagHost) => NativeDagComponent
 }
 
 export async function registerNativeTaskComponent(control: PromisePlugin.Context, owners: NativeTaskEffectOwners, options: NativeTaskComponentOptions = {}): Promise<() => Promise<void>> {
@@ -231,19 +236,34 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
       register(targets) { teamTargets.resolve(targets); return teamRegistered.promise } })
     teamComponent = team
     if (!team) teamTargets.resolve(undefined)
-    const closeTeam = async () => { teamRegistered.reject(Error("Native task component closed")); await team?.close() }
+    // The workflow target joins the same registry generation, the same way.
+    const dagTargets = Promise.withResolvers<NativeDagTargets | undefined>()
+    const dagRegistered = Promise.withResolvers<readonly NativeTaskTargetPermissionAssociation[]>()
+    void dagRegistered.promise.catch(() => {})
+    const dag = options.dag?.({ tool: control.tool, directory, prepared, registry, kernel, service, assertCurrent: current,
+      register(targets) { dagTargets.resolve(targets); return dagRegistered.promise } })
+    if (!dag) dagTargets.resolve(undefined)
+    const closeTeam = async () => {
+      teamRegistered.reject(Error("Native task component closed")); dagRegistered.reject(Error("Native task component closed"))
+      try { await dag?.close() } finally { await team?.close() }
+    }
     closers.push(closeTeam)
     const bridge = createNativeTaskBridge({ tool: control.tool, prepared, async rollbackAcquisition() { await service.close() }, async acquire(targets) {
       current()
-      let teamPermissions: NativeTaskTargetPermissionAssociation[] = [], targetPermissions: NativeTaskTargetPermissionAssociation[]
+      let teamPermissions: NativeTaskTargetPermissionAssociation[] = [], dagPermissions: NativeTaskTargetPermissionAssociation[] = []
+      let targetPermissions: NativeTaskTargetPermissionAssociation[]
       try {
-        const teamDefinitions = await teamTargets.promise
+        const [teamDefinitions, dagDefinitions] = await Promise.all([teamTargets.promise, dagTargets.promise])
         current()
         targetPermissions = targets.tools.map(tool => ({ tool, permission: service.targetPermission(tool) }))
         teamPermissions = teamDefinitions?.tools.map(tool => ({ tool, permission: service.targetPermission(tool) })) ?? []
-        registry.replace([...targets.tools, ...teamDefinitions?.tools ?? []], [...targets.codecs, ...teamDefinitions?.codecs ?? []], targets.normalizers, [...targetPermissions, ...teamPermissions])
-      } catch (error) { teamRegistered.reject(error); throw error }
+        dagPermissions = dagDefinitions?.tools.map(tool => ({ tool, permission: service.targetPermission(tool) })) ?? []
+        registry.replace([...targets.tools, ...teamDefinitions?.tools ?? [], ...dagDefinitions?.tools ?? []],
+          [...targets.codecs, ...teamDefinitions?.codecs ?? [], ...dagDefinitions?.codecs ?? []], targets.normalizers,
+          [...targetPermissions, ...teamPermissions, ...dagPermissions])
+      } catch (error) { teamRegistered.reject(error); dagRegistered.reject(error); throw error }
       teamRegistered.resolve(teamPermissions)
+      dagRegistered.resolve(dagPermissions)
       return { registry, kernel, service, targetPermissions,
         ...(team && { teamRouting: (caller: Parameters<NativeTeamComponent["teamRouting"]>[0], call: Parameters<NativeTeamComponent["teamRouting"]>[1]) => team.teamRouting(caller, call) }),
         async context(caller, signal) {
@@ -261,6 +281,7 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     closers.splice(closers.length - 2, 2, async () => { await service.close(); await closeTeam(); await bridge.close() })
     await bridge.ready
     await team?.ready
+    await dag?.ready
   } catch (error) {
     try { await close() } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Native task component setup failed and cleanup is incomplete") }
     throw error

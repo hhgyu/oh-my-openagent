@@ -1,0 +1,41 @@
+import { Compile } from "typebox/compile"
+import { DagToolParams, WORKFLOW_TOOL_NAME, type DagToolInput } from "@oh-my-opencode/senpi-task/dag-operations"
+import type { ListedTool } from "../host/tool-registry"
+import { issueToolValueCodec, type ToolCodecAssociation } from "../host/tool-value-codec"
+
+/** The Native DAG tool name. No stock OpenCode 2.2.6 tool uses it; publication still refuses an
+ * ambiguous catalog and replaces a single same-named entry, as the team tools do. */
+export const NATIVE_DAG_TOOL_NAME = WORKFLOW_TOOL_NAME
+/** The canonical Native `workflow` INPUT schema; the tool declares no output schema. */
+export const nativeDagInputSchema = DagToolParams
+
+const compiled = Compile(DagToolParams)
+
+export function isNativeDagToolName(name: string): name is typeof NATIVE_DAG_TOOL_NAME {
+  return name === NATIVE_DAG_TOOL_NAME
+}
+
+export function checkedNativeDagInput(input: unknown): DagToolInput {
+  if (!compiled.Check(input)) throw Error("Invalid Native workflow tool input")
+  return input
+}
+
+/** Trusted assembly only, before registry cloning. The strict decoder checks and returns the
+ * ORIGINAL input value; the workflow input needs no argument normalizer. */
+export function issueNativeDagCodec(tool: ListedTool): ToolCodecAssociation {
+  if ((tool.input as unknown) !== nativeDagInputSchema) throw Error("Native workflow input schema does not match tool definition")
+  const input = issueToolValueCodec(tool, "input", { schema: nativeDagInputSchema, decodeUnknown: value => checkedNativeDagInput(value) })
+  return Object.freeze({ tool, input })
+}
+
+/** The OpenCode 2 tool guide: the Native guidance, restated where this host behaves differently. */
+export const NATIVE_DAG_DESCRIPTION = [
+  "Dependency-graph execution for child tasks: partition the work into logically distinct steps, name one node per step, and wire the ordering as data.",
+  "A node starts only after every node it dependsOn has finished, and unrelated nodes run in parallel up to the resident-child cap.",
+  "dependsOn is ordering ONLY - no upstream output is substituted into a downstream prompt, so each prompt must stand alone.",
+  "Each node targets EITHER category OR subagent_type, never both; model is an explicit override valid only alongside subagent_type.",
+  "start is idempotent per definition key: re-starting the same key with the same graph reuses the run instead of duplicating it.",
+  "On OpenCode 2, nodes start only while a workflow call is in progress: start blocks until the run settles and returns its final snapshot, and wait requires detach=false and blocks the same way. If the call is interrupted, no further node starts until the next blocking workflow call on that run.",
+  "On OpenCode 2 these are not available yet and are refused: a detached start or wait, cancel, cancel_node, retry, send, amend, nodes that name load_skills, and nodes that resolve to process execution mode.",
+  "snapshot carries each settled node's own output plus outputBytes, and each running node's lastActivityAt.",
+].join(" ")

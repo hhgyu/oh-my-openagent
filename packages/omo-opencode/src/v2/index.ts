@@ -78,6 +78,11 @@ export function nativeTeamEnabled(options: Plugin.Context["options"] | undefined
   return options?.["omo-native-team-enabled"] !== false
 }
 
+/** The blocking `workflow` tool rides on the Native task component and defaults the same way. */
+function nativeDagEnabled(options: Plugin.Context["options"] | undefined): boolean {
+  return options?.["omo-native-dag-enabled"] !== false
+}
+
 export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners = {}): Promise<Cleanup> {
   const cleanups: Cleanup[] = []
   try {
@@ -103,7 +108,8 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
       const { registerNativeTaskComponent } = await import("./orchestration/native-task/component")
       // The lead team tools share the Native task component's registry, kernel and service.
       const team = nativeTeamEnabled(context.options) ? (await import("./orchestration/native-team/component")).registerNativeTeamComponent : undefined
-      cleanups.push(await registerNativeTaskComponent(context, owners.nativeTask, team ? { team } : {}))
+      const dag = nativeDagEnabled(context.options) ? (await import("./orchestration/native-dag/component")).registerNativeDagComponent : undefined
+      cleanups.push(await registerNativeTaskComponent(context, owners.nativeTask, { ...(team && { team }), ...(dag && { dag }) }))
     }
     cleanups.push(await registerBootstrap(context.rpc))
   } catch (error) {
