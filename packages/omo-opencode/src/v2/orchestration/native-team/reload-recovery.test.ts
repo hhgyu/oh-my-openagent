@@ -88,6 +88,12 @@ function knownMessageIds(directory: string, config: Config, runId: string, recip
   const done = existsSync(dir) ? readdirSync(dir).filter(name => name.endsWith(".json")).map(name => name.slice(0, -".json".length)) : []
   return [...new Set([...inboxIds(directory, config, runId, recipient), ...done])]
 }
+function sentMessageId(sent: Record<string, unknown>): string {
+  const team = sent["team"]
+  const id = typeof team === "object" && team !== null && "message_id" in team ? team.message_id : undefined
+  if (typeof id !== "string") throw new Error("Missing team message id in the send result")
+  return id
+}
 function processed(directory: string, config: Config, runId: string, recipient: string, messageId: string): boolean {
   return existsSync(join(getInboxDir(resolveBaseDir(leadTeamConfig(directory, config)), runId, recipient), "processed", `${messageId}.json`))
 }
@@ -225,7 +231,8 @@ describe("#given a lead team whose host reloaded with an un-ACKed member report"
       expect(sent.kind).toBe("team_message")
       expect(owner.isBound(defined(alpha))).toBe(true)
       expect(owner.isBound(defined(beta))).toBe(true)
-      const [toAlpha] = inboxIds(f.dir, before.config, before.runId, "alpha")
+      // The id comes from the send result: an in-flight delivery is a hidden `.delivering-*` file in the inbox.
+      const toAlpha = sentMessageId(sent)
       const alphaInput = teamDeliveryInputId(before.runId, "alpha", defined(toAlpha))
       await waitFor(() => processed(f.dir, before.config, before.runId, "alpha", defined(toAlpha)), "lead mail delivered to the restored member")
       await Bun.sleep(100)
