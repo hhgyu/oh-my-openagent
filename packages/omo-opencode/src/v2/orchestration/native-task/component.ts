@@ -2,7 +2,8 @@ import type * as EffectPlugin from "@opencode/plugin/effect/plugin"
 import type * as PromisePlugin from "@opencode/plugin/promise/plugin"
 import { readEventLogTranscriptResult } from "@oh-my-opencode/orchestration-core/transcript/event-log"
 import { buildSkillPrepend, CHILD_HOST_TOOLS, childStructuralToolNames, parseTaskId, resolveTaskAgents, syncTaskIdFloor } from "@oh-my-opencode/senpi-task/task-operations"
-import { teamStorageBaseDir, toTeamCoreConfig } from "@oh-my-opencode/senpi-task/team-operations"
+import { createTeamMailboxReconciler, teamStorageBaseDir, toTeamCoreConfig } from "@oh-my-opencode/senpi-task/team-operations"
+import { listActiveTeams } from "@oh-my-opencode/team-core/team-state-store"
 import { OmoTaskSettingsSchema, type OmoConfig } from "@oh-my-opencode/omo-config-core"
 import { Effect, type Scope } from "effect"
 import { createHash } from "node:crypto"
@@ -54,9 +55,30 @@ export function nativeTeamSettings(projectDirectory: string, leadSessionID: stri
 }
 
 /** The team-core config of a lead's team storage: the same root its per-lead team service writes. */
-function nativeTeamConfig(projectDirectory: string, leadSessionID: string, config: OmoConfig) {
+export function nativeTeamConfig(projectDirectory: string, leadSessionID: string, config: OmoConfig) {
   const settings = nativeTeamSettings(projectDirectory, leadSessionID, config)
   return toTeamCoreConfig(settings, teamStorageBaseDir({ project_dir: projectDirectory, task: { state_dir: settings.state_dir } }))
+}
+
+/** Leads with an active team in this project's Native state: each candidate comes from a team's own
+ * runtime state and must hash to the very state directory that state was read from, so a state file
+ * cannot name a lead whose storage lives elsewhere. Never scans when the project directory is $HOME. */
+export async function discoverTeamLeads(projectDirectory: string, config: OmoConfig): Promise<string[]> {
+  if (resolve(projectDirectory) === resolve(homedir())) return []
+  const root = join(projectDirectory, ".omo", "tasks", "opencode-v2")
+  if (!existsSync(root)) return []
+  const leads = new Set<string>()
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^[0-9a-f]{64}$/.test(entry.name)) continue
+    const stateDir = join(root, entry.name)
+    const settings = { ...OmoTaskSettingsSchema.parse(config.task ?? {}), state_dir: stateDir }
+    const teams = await listActiveTeams(toTeamCoreConfig(settings, teamStorageBaseDir({ project_dir: projectDirectory, task: { state_dir: stateDir } })))
+    for (const team of teams) {
+      const lead = team.leadSessionId
+      if (lead !== undefined && nativeTaskStateDir(projectDirectory, lead) === stateDir) leads.add(lead)
+    }
+  }
+  return [...leads]
 }
 
 export function acquireNativeTaskEffectOwners(context: EffectPlugin.Context, session: JoinedSession): Effect.Effect<NativeTaskEffectOwners, never, Scope.Scope> {
@@ -203,7 +225,9 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     const team = options.team?.({ tool: control.tool, directory, prepared, registry, kernel, service, assertCurrent: current,
       delivery: { session: owners.session, assertGeneration, isMemberBound: sessionID => owners.member.isBound(sessionID),
         teamConfigFor: lead => nativeTeamConfig(directory, lead, prepared.config),
-        journalPathFor: lead => join(nativeTaskStateDir(directory, lead), "team-deliveries.sqlite") },
+        journalPathFor: lead => join(nativeTaskStateDir(directory, lead), "team-deliveries.sqlite"),
+        discoverLeads: () => discoverTeamLeads(directory, prepared.config),
+        reconcileMailbox: lead => createTeamMailboxReconciler({ cwd: directory, settings: nativeTeamSettings(directory, lead, prepared.config), leadSessionId: () => lead })() },
       register(targets) { teamTargets.resolve(targets); return teamRegistered.promise } })
     teamComponent = team
     if (!team) teamTargets.resolve(undefined)

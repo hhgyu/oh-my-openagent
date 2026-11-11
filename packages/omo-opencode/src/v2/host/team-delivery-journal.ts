@@ -12,6 +12,8 @@ const recordSchema = keySchema.extend({
   /** The deterministic host message id every attempt of this delivery posts with. */
   inputID: text.refine(value => value.startsWith("msg_"), "Team delivery input id must be a host message id"),
   revision: integer,
+  /** Earlier receivers of this un-ACKed intent; the host may already hold the id in one of them. */
+  previousReceivers: z.array(text).max(64).optional(),
   phase: z.enum(["intent", "acked"]),
   ack: ackSchema.optional(),
 }).strict()
@@ -28,12 +30,21 @@ export interface TeamDeliveryJournalOptions {
 }
 export interface TeamDeliveryJournal {
   /** Durable intent BEFORE transport. An existing row is returned unchanged, so a retry after a crash
-   * reuses the SAME input id; a row for another receiver or input id is refused, never rewritten. */
+   * reuses the SAME input id; a row for another input id is refused, never rewritten. The intent
+   * belongs to (run, recipient, message), not to a session: an un-ACKed intent whose recipient is now
+   * bound to another session (a restored or respawned member) moves to that receiver with the SAME
+   * input id, remembering the earlier receiver; an ACKed row never moves. */
   recordIntent(key: TeamDeliveryKey, receiverSessionID: string, inputID: string): TeamDeliveryRecord
   /** Records the genuine synthetic ACK of an intent. Compare-and-set on the exact intent row. */
   markAcked(intent: TeamDeliveryRecord, ack: TeamDeliveryAck): TeamDeliveryRecord
   read(key: TeamDeliveryKey): TeamDeliveryRecord | undefined
   isAcked(key: TeamDeliveryKey): boolean
+  /** Every row of one team run. */
+  listTeam(teamRunId: string): TeamDeliveryRecord[]
+  /** Every un-ACKed intent, for reload reconciliation. */
+  listIntents(): TeamDeliveryRecord[]
+  /** Forgets one un-ACKed intent whose recipient is gone; an ACKed row is kept. */
+  dropIntent(key: TeamDeliveryKey): void
   /** Forgets a deleted team run. */
   dropTeam(teamRunId: string): void
   close(): void
@@ -41,13 +52,19 @@ export interface TeamDeliveryJournal {
 class TeamDeliveryJournalError extends Error { override readonly name = "TeamDeliveryJournalError" }
 function fail(message: string): never { throw new TeamDeliveryJournalError(message) }
 
+/** The receivers that may hold this delivery's input id: the current one and any earlier one. */
+export function teamDeliveryReceivers(value: Pick<TeamDeliveryRecord, "receiverSessionID" | "previousReceivers">): readonly string[] {
+  return [value.receiverSessionID, ...value.previousReceivers ?? []]
+}
+const receivers = teamDeliveryReceivers
+
 function validate(input: unknown): TeamDeliveryRecord {
   const parsed = recordSchema.safeParse(input)
   if (!parsed.success) fail("Invalid team delivery record")
   const value = parsed.data
   if ((value.phase === "acked") !== (value.ack !== undefined)) fail("Invalid team delivery acceptance state")
-  if (value.ack && (value.ack.id !== value.inputID || value.ack.sessionID !== value.receiverSessionID)) fail("Team delivery ACK differs from its intent")
-  return Object.freeze({ ...value, ...(value.ack && { ack: Object.freeze({ ...value.ack }) }) })
+  if (value.ack && (value.ack.id !== value.inputID || !receivers(value).includes(value.ack.sessionID))) fail("Team delivery ACK differs from its intent")
+  return Object.freeze({ ...value, ...(value.previousReceivers && { previousReceivers: Object.freeze([...value.previousReceivers]) }), ...(value.ack && { ack: Object.freeze({ ...value.ack }) }) })
 }
 
 /** Inert durable state only: neither an intent nor an ACK row is authority. Exclusive custody of one
@@ -97,8 +114,13 @@ export function openTeamDeliveryJournal(options: TeamDeliveryJournalOptions): Te
       return db.transaction(() => {
         const existing = readChecked(key)
         if (existing) {
-          if (existing.receiverSessionID !== value.receiverSessionID || existing.inputID !== value.inputID) fail("Team delivery intent is held by another receiver or input id")
-          return existing
+          if (existing.inputID !== value.inputID) fail("Team delivery intent is held by another input id")
+          if (existing.receiverSessionID === value.receiverSessionID) return existing
+          if (existing.phase === "acked") fail("Team delivery was already ACKed by another receiver")
+          const moved = validate({ ...existing, receiverSessionID: value.receiverSessionID, revision: existing.revision + 1,
+            previousReceivers: [...new Set([...receivers(existing)])].filter(receiver => receiver !== value.receiverSessionID) })
+          db.query("UPDATE deliveries SET body=? WHERE team_run_id=? AND recipient=? AND message_id=?").run(JSON.stringify(moved), key.teamRunId, key.recipient, key.messageId)
+          return moved
         }
         db.query("INSERT INTO deliveries VALUES (?,?,?,?)").run(key.teamRunId, key.recipient, key.messageId, JSON.stringify(value))
         return value
@@ -118,6 +140,23 @@ export function openTeamDeliveryJournal(options: TeamDeliveryJournalOptions): Te
     },
     read(key) { active(); return db.transaction(() => readChecked(parseKey(key))).immediate() },
     isAcked(key) { active(); return db.transaction(() => readChecked(parseKey(key))?.phase === "acked").immediate() },
+    listTeam(teamRunId) {
+      active()
+      return db.transaction(() => db.query<{ message_id: string; recipient: string }, [string]>("SELECT recipient, message_id FROM deliveries WHERE team_run_id=? ORDER BY recipient, message_id")
+        .all(text.parse(teamRunId)).flatMap(row => readChecked({ teamRunId, recipient: row.recipient, messageId: row.message_id }) ?? [])).immediate()
+    },
+    listIntents() {
+      active()
+      return db.transaction(() => db.query<{ team_run_id: string; recipient: string; message_id: string }, []>("SELECT team_run_id, recipient, message_id FROM deliveries ORDER BY team_run_id, recipient, message_id")
+        .all().flatMap(row => readChecked({ teamRunId: row.team_run_id, recipient: row.recipient, messageId: row.message_id }) ?? []).filter(row => row.phase === "intent")).immediate()
+    },
+    dropIntent(input) {
+      active()
+      const key = parseKey(input)
+      db.transaction(() => {
+        if (readChecked(key)?.phase === "intent") db.query("DELETE FROM deliveries WHERE team_run_id=? AND recipient=? AND message_id=?").run(key.teamRunId, key.recipient, key.messageId)
+      }).immediate()
+    },
     dropTeam(teamRunId) {
       active()
       db.transaction(() => { db.query("DELETE FROM deliveries WHERE team_run_id=?").run(text.parse(teamRunId)) }).immediate()

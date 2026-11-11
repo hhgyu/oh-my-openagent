@@ -39,6 +39,11 @@ export function createSessionScopes() {
       return lease
     },
     assert,
+    /** Every lease opened after this call has a generation above `floor`; it never lowers. */
+    raiseGeneration(floor: number) {
+      if (!Number.isSafeInteger(floor) || floor < 0) throw new Error("Invalid session generation floor")
+      if (floor > generation) generation = floor
+    },
     async authorize(lease: SessionLease, call: ToolAccess) {
       const { policy } = assert(lease)
       if (!policy.tools.includes(call.requested) || !policy.tools.includes(call.routed)) throw new Error("Tool outside session scope")

@@ -30,15 +30,15 @@ describe("team delivery journal", () => {
     expect(second.markAcked(again, { id: "msg_omo_team_a", sessionID: "ses_lead" })).toEqual(acked)
   })
 
-  test("#given an intent #when another receiver, input id or foreign ACK is offered #then it is refused", () => {
+  test("#given an intent #when another input id or foreign ACK is offered #then it is refused", () => {
     // given
     const journal = open()
     const intent = journal.recordIntent(key, "ses_lead", "msg_omo_team_a")
 
     // when / then
-    expect(() => journal.recordIntent(key, "ses_other", "msg_omo_team_a")).toThrow("another receiver")
-    expect(() => journal.recordIntent(key, "ses_lead", "msg_omo_team_b")).toThrow("another receiver")
+    expect(() => journal.recordIntent(key, "ses_lead", "msg_omo_team_b")).toThrow("another input id")
     expect(() => journal.markAcked(intent, { id: "msg_other", sessionID: "ses_lead" })).toThrow("ACK differs")
+    expect(() => journal.markAcked(intent, { id: "msg_omo_team_a", sessionID: "ses_foreign" })).toThrow("ACK differs")
     expect(() => journal.recordIntent({ ...key, messageId: "m-2" }, "ses_lead", "not-a-host-id")).toThrow("Invalid team delivery record")
     expect(journal.isAcked(key)).toBe(false)
   })
@@ -56,5 +56,21 @@ describe("team delivery journal", () => {
     expect(journal.read(key)).toBeUndefined()
     journal.close()
     expect(() => open(path, "/unit/other")).toThrow("Foreign team delivery journal namespace")
+  })
+
+  test("#given an un-ACKed intent #when its recipient is now bound to another session #then it moves there with the same input id; an ACKed row never moves", () => {
+    // given
+    const journal = open()
+    journal.recordIntent(key, "ses_member_old", "msg_omo_team_a")
+
+    // when
+    const moved = journal.recordIntent(key, "ses_member_new", "msg_omo_team_a")
+    const acked = journal.markAcked(moved, { id: "msg_omo_team_a", sessionID: "ses_member_new" })
+
+    // then
+    expect(moved).toMatchObject({ receiverSessionID: "ses_member_new", inputID: "msg_omo_team_a", previousReceivers: ["ses_member_old"], phase: "intent" })
+    expect(acked.phase).toBe("acked")
+    expect(() => journal.recordIntent(key, "ses_member_third", "msg_omo_team_a")).toThrow("already ACKed")
+    expect(journal.listIntents()).toEqual([])
   })
 })

@@ -23,6 +23,9 @@ export interface NativeOperationAccess {
   cancel(...args: Parameters<CancelManager["cancelTask"]>): ReturnType<CancelManager["cancelTask"]>
   waitFor(...args: Parameters<TaskOperationManager["waitFor"]>): ReturnType<TaskOperationManager["waitFor"]>
   destroyResidentTask(...args: Parameters<TeamServiceDeps["destruction"]["destroyResidentTask"]>): ReturnType<TeamServiceDeps["destruction"]["destroyResidentTask"]>
+  /** Restores a child its previous runtime parked at shutdown, under THIS call's fresh approval.
+   * True once a live control is installed; a released or unparked child is left as it is. */
+  restoreAfterReload(id: string): Promise<boolean>
 }
 
 /** A view of the SAME Native manager/allocator. No Native algorithms or new scheduler. */
@@ -207,7 +210,14 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
       return lifetime.track(access.destroyResidentTask(id, cause))
     },
   }
-  return Object.freeze({ task, send, cancel, output, destruction,
+  /** Lazy restore of a team member parked by a reload, before the lead's call acts on its team. */
+  const recovery = {
+    restoreAfterReload(id: string): Promise<boolean> {
+      current()
+      return lifetime.track(access.restoreAfterReload(id))
+    },
+  }
+  return Object.freeze({ task, send, cancel, output, destruction, recovery,
     /** Full canonical send lifetime. The low-level send port alone does not own
      * Native's mapped/late chain; the mandatory observer cannot be overridden. */
     runSend(params: TaskSendInput, options: Omit<TaskSendRunOptions, "retainWork"> & { readonly teamRouting?: TaskSendTeamRouting } = {}) {

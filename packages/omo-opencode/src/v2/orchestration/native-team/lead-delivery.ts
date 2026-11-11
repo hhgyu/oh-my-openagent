@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto"
 import type { TeamModeConfig } from "@oh-my-opencode/team-core/config"
-import { loadRuntimeState } from "@oh-my-opencode/team-core/team-state-store"
+import { listActiveTeams, loadRuntimeState } from "@oh-my-opencode/team-core/team-state-store"
 import { TEAM_LEAD_SENTINEL, createLeadPoller, createMemberSelfPoller, type LeadInjection, type LeadPoller, type MemberSelfPoller } from "@oh-my-opencode/senpi-task/team-operations"
-import { openTeamDeliveryJournal, type TeamDeliveryJournal } from "../../host/team-delivery-journal"
+import { openTeamDeliveryJournal, teamDeliveryReceivers, type TeamDeliveryJournal } from "../../host/team-delivery-journal"
 
 /** The two public session calls a delivery needs, projected from the joined session API. */
 export interface TeamDeliverySession {
@@ -22,6 +22,9 @@ export interface LeadDeliveryOptions {
   /** The S5b member producer: true only while a live producer is bound to this exact session. */
   readonly isMemberBound: (sessionID: string) => boolean
   readonly loadState?: typeof loadRuntimeState
+  readonly listTeams?: typeof listActiveTeams
+  /** Restores a lead's crash-stranded inbox reservations (team-core's stale reclaim) before a resume. */
+  readonly reconcileMailbox?: (leadSessionID: string) => Promise<void>
   /** Background tick period; 0 disables the timer (deliveries then run only on `refresh`). */
   readonly pollIntervalMs?: number
   readonly onError?: (error: unknown) => void
@@ -32,6 +35,9 @@ export interface LeadDeliveryOwner {
   memberBound(member: BoundMember): () => void
   /** Runs one serialized delivery pass for a team now: re-gates it, delivers due mail, settles. */
   refresh(teamRunId: string): Promise<void>
+  /** After a reload: reconciles a lead's mailbox and delivery journal and restarts its active teams'
+   * lead pollers, without waiting for a member to bind. Idempotent; refused while the lead session is gone. */
+  resumeLead(leadSessionID: string): Promise<void>
   close(): Promise<void>
 }
 
@@ -74,7 +80,8 @@ export function createLeadDeliveryOwner(options: LeadDeliveryOptions): LeadDeliv
   // Teams stopped while their run still existed (e.g. `deleting`): their journal rows wait until a
   // later refresh sees the run gone, so a delete's final refresh still drops them.
   const retired = new Map<string, Team>()
-  const transportStop = new AbortController(), loadState = options.loadState ?? loadRuntimeState
+  const transportStop = new AbortController(), loadState = options.loadState ?? loadRuntimeState, listTeams = options.listTeams ?? listActiveTeams
+  const resuming = new Map<string, Promise<void>>()
   const note = (error: unknown) => { options.onError?.(error) }
   let closed = false
   function journalFor(lead: string): TeamDeliveryJournal {
@@ -121,7 +128,8 @@ export function createLeadDeliveryOwner(options: LeadDeliveryOptions): LeadDeliv
     if (closed || team.stopped || target.member && (target.member.stopped || !options.isMemberBound(target.receiver))) return
     const result = await options.session.synthetic({ sessionID: target.receiver, id: inputID, text, delivery: "steer", resume: true,
       metadata: { omoTeamRunId: team.runId, omoTeamRecipient: target.recipient, omoTeamMessageId: messageId } }, { signal: transportStop.signal })
-    if (result.id !== inputID || result.sessionID !== target.receiver || result.type !== "synthetic" || result.payload.text !== text) throw Error("Foreign team delivery ACK")
+    // A moved intent may already be held by an earlier receiver; the host then answers with that row.
+    if (result.id !== inputID || !teamDeliveryReceivers(intent).includes(result.sessionID) || result.type !== "synthetic" || result.payload.text !== text) throw Error("Foreign team delivery ACK")
     journal.markAcked(intent, { id: result.id, sessionID: result.sessionID })
   }
   function own(team: Team, work: Promise<void>): Promise<void> {
@@ -207,6 +215,49 @@ export function createLeadDeliveryOwner(options: LeadDeliveryOptions): LeadDeliv
     team.chain = team.chain.then(() => pass(team)).catch(note)
     return team.chain
   }
+  /** Reconciles one lead after a reload. Each run with journal rows or an active state is re-gated:
+   * a live run gets its lead poller back (members rejoin when they bind again) and un-ACKed intents of
+   * recipients that left it are dropped; a gone run is dropped or retired exactly like a pass does.
+   * The poller then re-posts each un-ACKed intent with its SAME deterministic id. */
+  async function resume(lead: string): Promise<void> {
+    options.assertGeneration()
+    if (closed) return
+    const actual = await options.session.get({ sessionID: lead }, { signal: transportStop.signal })
+    options.assertGeneration()
+    if (closed || actual.id !== lead || actual.location.directory !== options.directory) return
+    if (options.reconcileMailbox) await options.reconcileMailbox(lead).catch(note)
+    const journal = journalFor(lead)
+    const intents = journal.listIntents()
+    const active = (await listTeams(options.teamConfigFor(lead))).filter(team => team.leadSessionId === lead)
+    for (const runId of new Set([...active.map(team => team.teamRunId), ...intents.map(intent => intent.teamRunId)])) {
+      if (closed) return
+      const existing = teams.get(runId)
+      if (existing && existing.lead !== lead) continue
+      const team = existing ?? createTeam(runId, lead)
+      const state = await gate(team)
+      if (state.kind === "gone") {
+        if (!existing) { team.stopped = true; team.poller.shutdown() } else stopTeam(team)
+        if (state.drop) drop(team)
+        else retired.set(runId, team)
+        continue
+      }
+      if (state.kind === "live") {
+        for (const intent of intents) {
+          if (intent.teamRunId === runId && intent.recipient !== TEAM_LEAD_SENTINEL && !state.members.includes(intent.recipient)) journal.dropIntent(intent)
+        }
+      }
+      if (!existing) { retired.delete(runId); teams.set(runId, team) }
+      await refresh(runId)
+    }
+  }
+  function resumeLead(lead: string): Promise<void> {
+    if (closed) return Promise.resolve()
+    const current = resuming.get(lead)
+    if (current) return current
+    const work = resume(lead).catch(note).finally(() => { if (resuming.get(lead) === work) resuming.delete(lead) })
+    resuming.set(lead, work)
+    return work
+  }
   const interval = options.pollIntervalMs ?? 1000
   const timer = interval > 0 ? setInterval(() => { for (const runId of new Set([...teams.keys(), ...retired.keys()])) void refresh(runId) }, interval) : undefined
   timer?.unref?.()
@@ -224,6 +275,7 @@ export function createLeadDeliveryOwner(options: LeadDeliveryOptions): LeadDeliv
       return () => { entry.stopped = true; entry.poller.shutdown(); if (owner.members.get(member.memberName) === entry) owner.members.delete(member.memberName) }
     },
     refresh,
+    resumeLead,
     async close() {
       if (closed) return
       closed = true
@@ -231,7 +283,7 @@ export function createLeadDeliveryOwner(options: LeadDeliveryOptions): LeadDeliv
       transportStop.abort(Error("Team delivery owner closed"))
       const all = [...teams.values(), ...retired.values()]
       for (const team of all) stopTeam(team)
-      await Promise.allSettled(all.flatMap(team => [team.chain, ...team.inflight]))
+      await Promise.allSettled([...resuming.values(), ...all.flatMap(team => [team.chain, ...team.inflight])])
       for (const journal of journals.values()) journal.close()
       journals.clear()
     },

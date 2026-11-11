@@ -2,6 +2,8 @@ import { assertCanonicalNativeTaskTarget, NATIVE_TASK_TOOL_NAMES } from "../../t
 import { assertCanonicalNativeTeamTarget } from "../../tools/native-team"
 import { isNativeTeamToolName } from "../../tools/native-team-codecs"
 import { AsyncLocalStorage } from "node:async_hooks"
+import { join } from "node:path"
+import { readStoredLocatorGenerationFloor } from "../../host/child-journal"
 import type { ToolContext } from "@opencode/plugin/promise/tool"
 import type { ListedTool } from "../../host/tool-registry"
 import { hasJoinedPermissionCancellation } from "../../host/effect-permission-api"
@@ -274,6 +276,9 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
       // No await between final lookup and root mint; owned children NEVER pass this branch.
       const concurrent = entries.get(caller.sessionID)
       if (concurrent) { open(concurrent); return concurrent.lease }
+      // After a reload fresh scopes restart lease generations; the root's stored children were
+      // recorded at higher ones and a recovery may only raise a locator's generation.
+      options.scopes.raiseGeneration(readStoredLocatorGenerationFloor(join(options.stateDirFor(caller.sessionID), "owned-children.sqlite")))
       const lease = options.scopes.open(caller.sessionID, options.policy)
       entries.set(caller.sessionID, { lease, stop: new AbortController(), state: "open" })
       return lease
