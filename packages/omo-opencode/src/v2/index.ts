@@ -79,7 +79,7 @@ export function nativeTeamEnabled(options: Plugin.Context["options"] | undefined
 }
 
 /** The blocking `workflow` tool rides on the Native task component and defaults the same way. */
-export function nativeDagEnabled(options: Plugin.Context["options"] | undefined): boolean {
+function nativeDagEnabled(options: Plugin.Context["options"] | undefined): boolean {
   return options?.["omo-native-dag-enabled"] !== false
 }
 
