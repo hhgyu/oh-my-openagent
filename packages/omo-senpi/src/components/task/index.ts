@@ -1,8 +1,6 @@
 // allow: SIZE_OK - register() is the remaining host-wiring graph after engine/runners/liveness splits; further cuts would scatter the register surface.
 import { loadSenpiOmoConfig } from "../config-resolution"
 import {
-  TEAM_LEAD_SENTINEL,
-  buildLeadTeamTools,
   createLeadDeliveryJournal,
   createTaskCancelTool,
   createTaskOutputTool,
@@ -21,6 +19,7 @@ import {
   type TaskSendTeamRouting,
   type TeamToolsService,
 } from "@oh-my-opencode/senpi-task"
+import { TEAM_LEAD_SENTINEL, buildLeadTeamTools } from "@oh-my-opencode/senpi-task/team-operations"
 
 import type { IdleInjectionCoordinator } from "../../extension/idle-injection-coordinator"
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"

@@ -1,6 +1,8 @@
 import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
+import { DEFAULT_CATEGORIES } from "../../category"
+import type { TaskManager } from "../../manager"
+import type { StateDirConfig } from "../../store"
 import {
-  DEFAULT_CATEGORIES,
   SenpiTeamSpecError,
   loadTeamRegistry,
   normalizeSenpiTeamSpec,
@@ -9,10 +11,8 @@ import {
   validateSenpiTeamMembers,
   type SenpiTeamMemberPorts,
   type ShutdownMessenger,
-  type StateDirConfig,
-  type TaskManager,
   type TeamSpecSource,
-} from "@oh-my-opencode/senpi-task"
+} from "../index"
 import type { TeamSpec } from "@oh-my-opencode/team-core/types"
 
 export type ResolvedTeamSpec = { readonly spec: TeamSpec; readonly source: TeamSpecSource }
