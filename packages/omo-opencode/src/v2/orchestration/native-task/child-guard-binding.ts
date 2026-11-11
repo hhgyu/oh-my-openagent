@@ -2,34 +2,79 @@ import type { ManagedStartSpec } from "@oh-my-opencode/senpi-task/manager-kernel
 import type { ChildGuardBinding } from "../../host/owned-child-tool-guard"
 import type { ChildHandle } from "../../host/session-backend"
 import type { HostGrantRequirement, PreparedHostTaskGrant } from "./host-grant"
+import type { TeamModeConfig } from "@oh-my-opencode/team-core/config"
+import type { TeamMemberOwner } from "./live-member-owner"
 import type { ReadonlyBrokerOwner } from "./live-readonly-producer"
 
 export interface NativeChildGuardBindingOptions {
   readonly assertGeneration: () => void
   /** Live dedicated broker registration. Absent: a curated selection stays unbound and is refused. */
   readonly readonly?: ReadonlyBrokerOwner
+  /** Live dedicated team member send registration and the trusted team-core config resolver of a
+   * lead's team storage. Absent: a member selection stays unbound and is refused. */
+  readonly member?: { readonly owner: TeamMemberOwner; readonly teamConfigFor: (leadSessionID: string) => TeamModeConfig }
+}
+/** Trusted runtime DATA from the ORIGINAL approved ManagerStartSpec, never from member tool closures. */
+export interface NativeChildGuardOrigin {
+  readonly team?: { readonly runId: string; readonly memberName: string }
 }
 type Coverage = NonNullable<ChildGuardBinding["coverage"]>
+type Target = NonNullable<Coverage["targets"]>[number]
+type Producer = { assertCurrent(): void; revoke(): void; join(): Promise<void> }
+
+/** The only member slot ported so far; workpool and other member tools stay unbound. */
+const MEMBER_SEND_NATIVE_NAME = "task_send"
+
+function targetsFor(selection: PreparedHostTaskGrant, requirement: HostGrantRequirement, hostID: string): Target[] {
+  return selection.bindingSlots.filter(slot => slot.requirement === requirement).map(slot => ({ requirement, nativeName: slot.nativeName, hostID }))
+}
+
+/** Revoke all, then join all; every join settles before the first failure is rethrown. */
+function combine(producers: readonly Producer[]): { revoke(): void; join(): Promise<void> } {
+  return {
+    revoke() { for (const producer of producers) producer.revoke() },
+    async join() {
+      for (const producer of producers) producer.revoke()
+      const failed = (await Promise.allSettled(producers.map(producer => producer.join()))).find(result => result.status === "rejected")
+      if (failed) throw failed.reason
+    },
+  }
+}
 
 /** Trusted component binder for the runtime `childGuardBinding` seam. Only producers that are
- * actually installed are claimed as bound; kernel/member/network requirements stay unbound, so a
- * selection needing them is refused by the runner as incomplete, never silently widened. */
+ * actually installed are claimed as bound; kernel/network requirements and member slots other
+ * than `task_send` stay unbound, so a selection needing them is refused by the runner as
+ * incomplete, never silently widened. */
 export function createNativeChildGuardBinding(options: NativeChildGuardBindingOptions) {
   const { assertGeneration } = options
-  return function childGuardBinding(spec: ManagedStartSpec, approved: { readonly buildAgentID: string; readonly selection: PreparedHostTaskGrant }) {
-    const broker = approved.selection.requirements.includes("curated-readonly-broker") ? options.readonly : undefined
-    const requirement: HostGrantRequirement = "curated-readonly-broker"
-    const coverage: Coverage = broker
-      ? { boundRequirements: [requirement], targets: approved.selection.bindingSlots.filter(slot => slot.requirement === requirement)
-        .map(slot => ({ requirement, nativeName: slot.nativeName, hostID: broker.hostID })) }
-      : { boundRequirements: [] }
+  return function childGuardBinding(spec: ManagedStartSpec, approved: { readonly buildAgentID: string; readonly selection: PreparedHostTaskGrant }, origin: NativeChildGuardOrigin = {}) {
+    const { selection } = approved
+    const broker = selection.requirements.includes("curated-readonly-broker") ? options.readonly : undefined
+    const memberSlots = selection.bindingSlots.filter(slot => slot.requirement === "member-live-bindings")
+    const team = origin.team
+    const member = selection.requirements.includes("member-live-bindings") && team && memberSlots.length > 0
+      && memberSlots.every(slot => slot.nativeName === MEMBER_SEND_NATIVE_NAME) ? options.member : undefined
+    const bound: HostGrantRequirement[] = [], targets: Target[] = []
+    if (broker) { bound.push("curated-readonly-broker"); targets.push(...targetsFor(selection, "curated-readonly-broker", broker.hostID)) }
+    if (member) { bound.push("member-live-bindings"); targets.push(...targetsFor(selection, "member-live-bindings", member.owner.hostID)) }
+    const coverage: Coverage = bound.length ? { boundRequirements: bound, targets } : { boundRequirements: [] }
     return { coverage, assertCurrent: assertGeneration, bind(child: ChildHandle, assertBackendCurrent: () => void): ChildGuardBinding {
       const current = () => { assertGeneration(); assertBackendCurrent() }
-      if (!broker) return { child, agent: approved.buildAgentID, coverage, assertCurrent: current }
-      const producer = broker.bindChild({ child, sessionID: child.locator.sessionID, agent: approved.buildAgentID, cwd: spec.cwd, assertCurrent: current })
+      if (!broker && !member) return { child, agent: approved.buildAgentID, coverage, assertCurrent: current }
+      const sessionID = child.locator.sessionID
+      const producers: Producer[] = []
+      try {
+        if (broker) producers.push(broker.bindChild({ child, sessionID, agent: approved.buildAgentID, cwd: spec.cwd, assertCurrent: current }))
+        if (member && team) producers.push(member.owner.bindChild({ child, sessionID, agent: approved.buildAgentID, taskId: spec.taskId,
+          leadSessionID: spec.parentSessionId, team, config: member.teamConfigFor(spec.parentSessionId), assertCurrent: current }))
+      } catch (error) {
+        // A partial bind never leaves a live producer behind; the owners still join it at close.
+        for (const producer of producers) producer.revoke()
+        throw error
+      }
       return { child, agent: approved.buildAgentID, coverage,
-        assertCurrent() { current(); producer.assertCurrent() },
-        producers: { revoke: () => producer.revoke(), join: () => producer.join() } }
+        assertCurrent() { current(); for (const producer of producers) producer.assertCurrent() },
+        producers: combine(producers) }
     } }
   }
 }

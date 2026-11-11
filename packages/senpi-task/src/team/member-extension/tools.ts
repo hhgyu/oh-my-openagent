@@ -40,8 +40,9 @@ export type MemberTaskSendDeps = {
   readonly newMessageId?: () => string
 }
 
-/** The original member closure uses no ExtensionContext or UI capability. */
-export type MemberTaskSendTool = Omit<ToolDefinition<typeof MemberTaskSendParams, MemberTaskSendDetails>, "execute"> & {
+/** The original member closure uses no ExtensionContext or UI capability. Its descriptor is the
+ * engine-wide ToolDefinition shape, so it can travel as a member-scoped tool of a start spec. */
+export type MemberTaskSendTool = Omit<ToolDefinition, "execute"> & {
   readonly execute: (toolCallId: string, params: MemberTaskSendInput) => Promise<AgentToolResult<MemberTaskSendDetails>>
 }
 

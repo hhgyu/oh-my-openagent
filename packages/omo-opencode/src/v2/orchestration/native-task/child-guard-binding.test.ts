@@ -105,3 +105,82 @@ describe("#given no live readonly owner", () => {
     expect(runnerRefuses(selection, producer.coverage)).toBe(true)
   })
 })
+
+const MEMBER_ID = "omo_team_send"
+const TEAM = { runId: "11111111-1111-4111-8111-111111111111", memberName: "alpha" }
+const TEAM_CONFIG = { enabled: true, tmux_visualization: false, max_parallel_members: 4, max_members: 8, max_messages_per_run: 10000, max_wall_clock_minutes: 120,
+  max_member_turns: 500, base_dir: "/teams", message_payload_max_bytes: 32768, recipient_unread_max_bytes: 262144, mailbox_poll_interval_ms: 3000 }
+type MemberScopedTools = NonNullable<Parameters<typeof prepareHostTaskGrant>[0]["spec"]["memberScopedTools"]>
+
+function memberGrant(names: readonly string[]): PreparedHostTaskGrant {
+  const memberScopedTools = names.map(name => ({ name })) as unknown as MemberScopedTools
+  return prepareHostTaskGrant({ spec: { prompt: "unit", parent_session_id: "ses_parent", depth: 1, memberScopedTools },
+    plan: { model: "unit/model", agentType: "sisyphus-junior" }, includeTaskTools: true, nativeTools, catalog, canonical: { filterSharedParentTools } })
+}
+function fakeMemberOwner(events: string[]): NonNullable<Parameters<typeof createNativeChildGuardBinding>[0]["member"]> {
+  return {
+    teamConfigFor: lead => { events.push(`config:${lead}`); return TEAM_CONFIG },
+    owner: {
+      hostID: MEMBER_ID,
+      isBound: () => false,
+      bindChild(input) {
+        events.push(`bind:${input.sessionID}:${input.agent}:${input.taskId}:${input.leadSessionID}:${input.team.runId}:${input.team.memberName}:${input.config.base_dir}`)
+        return { assertCurrent() { events.push("member-current") }, revoke() { events.push("member-revoke") }, async join() { events.push("member-join") } }
+      },
+    },
+  }
+}
+
+describe("#given an in-process team member selection that needs member live bindings", () => {
+  test("#when no member owner is installed #then the member slot stays unbound and the runner refuses it", () => {
+    // given
+    const selection = memberGrant(["task_send"])
+    expect(selection.requirements).toContain("member-live-bindings")
+    // when
+    const producer = createNativeChildGuardBinding({ assertGeneration() {} })(spec("sisyphus-junior"), { buildAgentID: "build", selection }, { team: TEAM })
+    // then
+    expect(producer.coverage).toEqual({ boundRequirements: [] })
+    expect(runnerRefuses(selection, producer.coverage)).toBe(true)
+  })
+
+  test("#when the approved spec has no team identity #then the member slot stays unbound even with an owner", () => {
+    // given
+    const selection = memberGrant(["task_send"]), events: string[] = []
+    // when
+    const producer = createNativeChildGuardBinding({ assertGeneration() {}, member: fakeMemberOwner(events) })(spec("sisyphus-junior"), { buildAgentID: "build", selection })
+    // then
+    expect(runnerRefuses(selection, producer.coverage)).toBe(true)
+    expect(events).toEqual([])
+  })
+
+  test("#when the member owner is installed #then the task_send slot is covered and one producer is bound to the child, session and team", async () => {
+    // given
+    const selection = memberGrant(["task_send"]), events: string[] = []
+    const binder = createNativeChildGuardBinding({ assertGeneration() { events.push("generation") }, member: fakeMemberOwner(events) })
+    // when
+    const producer = binder(spec("sisyphus-junior"), { buildAgentID: "build", selection }, { team: TEAM })
+    const binding = producer.bind(child("ses_member"), () => { events.push("backend") })
+    binding.assertCurrent()
+    binding.producers?.revoke()
+    await binding.producers?.join()
+    // then
+    expect(producer.coverage).toEqual({ boundRequirements: ["member-live-bindings"], targets: [{ requirement: "member-live-bindings", nativeName: "task_send", hostID: MEMBER_ID }] })
+    expect(runnerRefuses(selection, producer.coverage)).toBe(false)
+    expect(checkHostGrantTarget(selection, MEMBER_ID, producer.coverage)).toBe("selected")
+    expect(events.slice(0, 2)).toEqual(["config:ses_parent", `bind:ses_member:build:st_00000001:ses_parent:${TEAM.runId}:alpha:/teams`])
+    expect(events).toContain("member-current")
+    expect(events).toContain("member-revoke")
+    expect(events.at(-1)).toBe("member-join")
+  })
+
+  test("#when a member slot is not task_send #then the selection stays unbound and the runner refuses it", () => {
+    // given
+    const selection = memberGrant(["task_send", "workpool"]), events: string[] = []
+    // when
+    const producer = createNativeChildGuardBinding({ assertGeneration() {}, member: fakeMemberOwner(events) })(spec("sisyphus-junior"), { buildAgentID: "build", selection }, { team: TEAM })
+    // then
+    expect(producer.coverage.boundRequirements).not.toContain("member-live-bindings")
+    expect(runnerRefuses(selection, producer.coverage)).toBe(true)
+    expect(checkHostGrantTarget(selection, MEMBER_ID, producer.coverage)).not.toBe("selected")
+  })
+})

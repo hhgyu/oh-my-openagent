@@ -55,6 +55,11 @@ export type SpawnMemberExtensionConfig = TeamMemberExtensionConfig & {
   readonly teamConfig: string
 }
 
+// How team members start. "process" (the default) loads the member extension in a detached process;
+// "in-process" hands the host each member's task_send as a member-scoped tool, with no member
+// extension and no member environment.
+export type TeamMemberMode = "process" | "in-process"
+
 export type CreateTeamDeps = {
   readonly manager: TeamRuntimeManagerPort
   readonly stateDir: StateDirConfig
@@ -64,6 +69,7 @@ export type CreateTeamDeps = {
   readonly spawnDepth: number
   readonly now?: () => number
   readonly memberExtension?: TeamMemberExtensionConfig
+  readonly memberMode?: TeamMemberMode
   // Injectable member-sidecar writer (defaults to the atomic writeMemberTaskMap). Present so tests can
   // force the pre-activation write to fail and exercise the create rollback.
   readonly writeMemberMap?: (runtimeDir: string, map: MemberTaskMap) => Promise<void>
