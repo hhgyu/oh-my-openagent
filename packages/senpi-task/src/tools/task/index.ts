@@ -33,5 +33,4 @@ export type {
   TaskToolMode,
 } from "./types"
 export { evaluateSpawnPolicy, type SpawnPolicyVerdict } from "./spawn-policy"
-export { validateTaskTarget } from "./validation"
 export type { TaskTargetError, TaskTargetErrorCode, TaskTargetSelection } from "./validation"

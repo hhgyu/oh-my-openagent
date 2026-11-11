@@ -482,7 +482,6 @@ export {
   statusThemeColor,
   taskCallLines,
   taskResultLines,
-  validateTaskTarget,
   waitForForegroundTask,
 } from "./tools/task"
 export type {
