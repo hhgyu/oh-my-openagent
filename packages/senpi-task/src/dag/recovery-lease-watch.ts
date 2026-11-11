@@ -1,4 +1,4 @@
-import { defaultSignaller } from "../lifecycle/context"
+import { resolveDagLease, type DagLeasePort } from "./ports"
 
 export type DagLeaseWatchTimerHandle = ReturnType<typeof setTimeout> | number
 
@@ -8,6 +8,8 @@ export type DagLeaseWatchTimers = {
 }
 
 export type DagLeaseWatchOptions = {
+  // Liveness of a recorded lease holder; wins over `isProcessAlive` when set.
+  readonly lease?: DagLeasePort
   readonly isProcessAlive?: (pid: number) => boolean
   readonly timers?: DagLeaseWatchTimers
   readonly intervalMs?: number
@@ -31,7 +33,7 @@ const unrefTimers: DagLeaseWatchTimers = {
 }
 
 export function createDagLeaseWatch(options: DagLeaseWatchOptions = {}): DagLeaseWatch {
-  const isProcessAlive = options.isProcessAlive ?? defaultSignaller.isAlive
+  const lease = resolveDagLease(options)
   const timers = options.timers ?? unrefTimers
   const intervalMs = options.intervalMs ?? DAG_LEASE_WATCH_INTERVAL_MS
   const pending = new Map<symbol, DagLeaseWatchTimerHandle>()
@@ -49,7 +51,7 @@ export function createDagLeaseWatch(options: DagLeaseWatchOptions = {}): DagLeas
       const poll = (): void => {
         if (!pending.has(key)) return
         pending.delete(key)
-        if (isProcessAlive(holderPid)) {
+        if (lease.isAlive(holderPid)) {
           pending.set(key, timers.set(poll, intervalMs))
           return
         }

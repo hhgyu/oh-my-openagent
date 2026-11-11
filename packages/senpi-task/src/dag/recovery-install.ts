@@ -17,7 +17,7 @@ export async function installRecoveredDag(context: RecoveryContext, claimed: Rec
   try {
     if (claimed.pause?.reason === "user_stop" && context.pausedChildren !== undefined) {
       await recoverPausedDagChildren({
-        store: context.store, taskManager: context.taskManager, initialRecord: claimed, hostPid: context.hostPid, now: context.now,
+        store: context.store, taskManager: context.taskManager, initialRecord: claimed, lease: context.lease, now: context.now,
       }, context.pausedChildren)
       claimed = context.store.readCheckpoint<RecoverableRecord>(claimed.runId) ?? claimed
     }

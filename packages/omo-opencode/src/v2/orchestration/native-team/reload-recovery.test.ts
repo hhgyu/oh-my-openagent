@@ -82,6 +82,12 @@ function inboxIds(directory: string, config: Config, runId: string, recipient: s
   const dir = getInboxDir(resolveBaseDir(leadTeamConfig(directory, config)), runId, recipient)
   return existsSync(dir) ? readdirSync(dir).filter(name => name.endsWith(".json") && !name.startsWith(".")).map(name => String(JSON.parse(readFileSync(join(dir, name), "utf8")).messageId)) : []
 }
+// The lead poller can move a fresh message to processed/ before the test reads the inbox.
+function knownMessageIds(directory: string, config: Config, runId: string, recipient: string): string[] {
+  const dir = join(getInboxDir(resolveBaseDir(leadTeamConfig(directory, config)), runId, recipient), "processed")
+  const done = existsSync(dir) ? readdirSync(dir).filter(name => name.endsWith(".json")).map(name => name.slice(0, -".json".length)) : []
+  return [...new Set([...inboxIds(directory, config, runId, recipient), ...done])]
+}
 function processed(directory: string, config: Config, runId: string, recipient: string, messageId: string): boolean {
   return existsSync(join(getInboxDir(resolveBaseDir(leadTeamConfig(directory, config)), runId, recipient), "processed", `${messageId}.json`))
 }
@@ -226,10 +232,11 @@ describe("#given a lead team whose host reloaded with an un-ACKed member report"
       expect(f.synthetics.filter(entry => entry.input.id === alphaInput).map(entry => entry.input.sessionID)).toEqual([defined(alpha)])
 
       // when: the restored member reports through its rebound producer
+      const known = knownMessageIds(f.dir, before.config, before.runId, "lead")
       const reported = await memberSend(defined(alpha), { to: "lead", message: "restored report" })
       // then
       expect(Exit.isSuccess(reported)).toBe(true)
-      const fresh = inboxIds(f.dir, before.config, before.runId, "lead").filter(id => id !== before.reportId)
+      const fresh = knownMessageIds(f.dir, before.config, before.runId, "lead").filter(id => !known.includes(id))
       expect(fresh).toHaveLength(1)
       await waitFor(() => processed(f.dir, before.config, before.runId, "lead", defined(fresh[0])), "restored member report delivered")
       expect(f.synthetics.filter(entry => entry.input.id === teamDeliveryInputId(before.runId, "lead", defined(fresh[0]))).map(entry => entry.input.sessionID)).toEqual([LEAD])

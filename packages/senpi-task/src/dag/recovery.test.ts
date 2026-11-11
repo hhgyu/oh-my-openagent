@@ -411,6 +411,51 @@ describe("DAG crash recovery", () => {
     expect(store.readCheckpoint<DagRunRecordV1>(runId)?.status).toBe("paused")
   })
 
+  test("#given an injected DagLeasePort whose recorded holder is alive #when the session resumes #then the run stays paused as live_lease and no pid probe runs", async () => {
+    // given
+    const store = createDagFileStore({ project_dir: tempProject() })
+    const manager = new RecoveryTaskManager()
+    store.writeCheckpoint(runId, recoverableRecord(definition([node("only")]), {
+      only: { state: "scheduled" },
+    }, { previousLeaseHolderPid: 9001 }))
+    const probed: number[] = []
+    const lease = { holder: () => 5150, isAlive: (holder: number) => { probed.push(holder); return true } }
+
+    // when
+    const outcomes = await createDagRecovery({ store, taskManager: manager, lease, hostPid: 101, isProcessAlive: () => false })
+      .resumePausedRuns(parentSessionId)
+
+    // then
+    expect(outcomes).toEqual([{ runId, kind: "skipped", reason: "live_lease", holderPid: 9001 }])
+    expect(probed).toEqual([9001])
+    expect(manager.startOwnedCalls).toEqual([])
+    expect(store.readCheckpoint<DagRunRecordV1>(runId)?.status).toBe("paused")
+  })
+
+  test("#given an injected DagLeasePort whose recorded holder is dead #when the session resumes #then the run is claimed under the port's holder in the unchanged leaseHolderPid field", async () => {
+    // given
+    const store = createDagFileStore({ project_dir: tempProject() })
+    const manager = new RecoveryTaskManager({ autoCompleteStarts: false })
+    store.writeCheckpoint(runId, recoverableRecord(definition([node("only")]), {
+      only: { state: "scheduled" },
+    }, { previousLeaseHolderPid: 9001 }))
+    const lease = { holder: () => 5150, isAlive: () => false }
+    const installed: Promise<unknown>[] = []
+
+    // when
+    const outcomes = await createDagRecovery({ store, taskManager: manager, lease, hostPid: 101, isProcessAlive: () => true })
+      .installPausedRuns(parentSessionId, (run) => { installed.push(run.settled) })
+    const claimed = store.readCheckpoint<DagRunRecordV1 & { readonly leaseHolderPid?: number }>(runId)
+    manager.complete("task-only")
+    await Promise.all(installed)
+
+    // then
+    expect(outcomes).toEqual([{ runId, kind: "resumed" }])
+    expect(claimed?.leaseHolderPid).toBe(5150)
+    expect(manager.startOwnedCalls).toEqual(["only"])
+    expect(store.readCheckpoint<DagRunRecordV1 & { readonly leaseHolderPid?: number }>(runId)?.leaseHolderPid).toBeUndefined()
+  })
+
   test("#given scheduled nodes with and without durable owners #when resumed #then the owner is attached and only never-dispatched work starts", async () => {
     // given
     const projectDir = tempProject()

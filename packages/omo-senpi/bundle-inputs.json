@@ -1788,6 +1788,7 @@
     "packages/senpi-task/src/dag/paused-controls.ts",
     "packages/senpi-task/src/dag/paused-events.ts",
     "packages/senpi-task/src/dag/paused-node-encoding.ts",
+    "packages/senpi-task/src/dag/ports.ts",
     "packages/senpi-task/src/dag/recovery-install.ts",
     "packages/senpi-task/src/dag/recovery-lease-watch.ts",
     "packages/senpi-task/src/dag/recovery.ts",
