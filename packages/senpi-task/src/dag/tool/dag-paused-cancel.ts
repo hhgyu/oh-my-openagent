@@ -1,10 +1,10 @@
-import { cancelPausedDagNode } from "../../../../senpi-task/src/dag/paused-controls"
-import { DagNodeControlError } from "../../../../senpi-task/src/dag/node-control-context"
-import type { DagSchedulerOptions } from "../../../../senpi-task/src/dag/scheduler"
-import type { DagNodeId, DagRunId } from "../../../../senpi-task/src/dag/types"
-import type { DagRunRecordV1 } from "../../../../senpi-task/src/dag/manager"
-import { isTerminalRecord } from "../../../../senpi-task/src/manager/manager-helpers"
-import type { TaskManager } from "../../../../senpi-task/src/manager/types"
+import { cancelPausedDagNode } from "../paused-controls"
+import { DagNodeControlError } from "../node-control-context"
+import type { DagSchedulerOptions } from "../scheduler"
+import type { DagNodeId, DagRunId } from "../types"
+import type { DagRunRecordV1 } from "../manager"
+import { isTerminalRecord } from "../../manager/manager-helpers"
+import type { TaskManager } from "../../manager/types"
 
 export type PausedNodeHoldPort = {
   closeHold(taskId: string, cause: "node_cancelled" | "run_cancelled"): Promise<void>

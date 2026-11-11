@@ -4,7 +4,7 @@ import { pausedRun } from "../../../../senpi-task/src/dag/__fixtures__/paused-ru
 import { createDagManager } from "../../../../senpi-task/src/dag/manager"
 import { controlJournal } from "../../../../senpi-task/src/dag/node-control-context"
 import { runDagTool } from "./dag-tool"
-import type { DagToolDeps } from "./dag-tool-contract"
+import type { DagToolDeps } from "./dag-tool"
 
 afterEach(cleanupProjects)
 
@@ -20,7 +20,7 @@ test.each([
   const deps: DagToolDeps = {
     manager, parentSessionId: () => "parent-1", rootSessionId: () => "parent-1",
     guide: async (runId, command) => {
-      const { createDagRuntimeControls } = await import("./dag-runtime-controls")
+      const { createDagRuntimeControls } = await import("@oh-my-opencode/senpi-task/dag-operations")
       const controls = createDagRuntimeControls({
         coreManager: manager, schedulerOptions, schedulers: new Map(), sessionId: () => "parent-1",
         controller: () => { throw new Error("guidance must not create a scheduler") },

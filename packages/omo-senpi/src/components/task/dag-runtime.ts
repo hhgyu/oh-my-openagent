@@ -32,7 +32,17 @@ import {
 import type { IdleInjectionCoordinator } from "../../extension/idle-injection-coordinator"
 import type { ComponentLogger, SenpiExtensionAPI } from "../../extension/types"
 import { resolveDagForkSource } from "./dag-fork-source"
-import { scheduleDagRetentionSweep, type DagRetentionSweepOptions } from "./dag-retention-sweep"
+import {
+  createDagRunPauseSource,
+  createDagRuntimeControls,
+  createPausedNodeCancel,
+  endedChildClosure,
+  endPausedRunChildren,
+  scheduleDagRetentionSweep,
+  type DagGuidanceDelivery,
+  type DagRetentionSweepOptions,
+  type PausedNodeHoldPort,
+} from "@oh-my-opencode/senpi-task/dag-operations"
 import { createDagRpcBridge, type DagBridgeTimers } from "./dag-rpc-bridge"
 import { registerDagRpcHandlers } from "./dag-rpc-handlers"
 import { createDagStatusUi, type DagStatusUiTimers } from "./dag-status-ui"
@@ -46,10 +56,7 @@ import {
   type DagRunReentry,
 } from "../../../../senpi-task/src/dag/scheduler"
 import { createDagSkillMaterializer } from "../../../../senpi-task/src/dag/skills"
-import { createPausedNodeCancel, endedChildClosure, endPausedRunChildren, type PausedNodeHoldPort } from "./dag-paused-cancel"
-import { createDagRuntimeControls } from "./dag-runtime-controls"
 import type { PausedChildRecoveryPort } from "../../../../senpi-task/src/dag/paused-child-recovery"
-import { createDagRunPauseSource, type DagGuidanceDelivery } from "./dag-run-pause-source"
 import { ownedSubtree } from "./engine-run-pause"
 
 const EVENT_PAGE_SIZE = 1000

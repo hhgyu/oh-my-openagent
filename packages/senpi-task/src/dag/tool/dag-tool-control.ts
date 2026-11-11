@@ -1,7 +1,7 @@
 // The dag tool's three per-node control verbs: retry (fresh attempt), send (steer or revive), and
 // amend (edit the definition). Each validates its own arguments before touching the runtime, so an
 // impossible request is refused without a round trip through the scheduler.
-import type { DagRunId } from "@oh-my-opencode/senpi-task/dag"
+import type { DagRunId } from "../types"
 
 import {
   failure,

@@ -1,4 +1,4 @@
-import { DAG_NODE_QUIET_AFTER_MS } from "@oh-my-opencode/senpi-task/dag"
+import { DAG_NODE_QUIET_AFTER_MS } from "../types"
 
 export type QuietNodeInput = {
   readonly id: string

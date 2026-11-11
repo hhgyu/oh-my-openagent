@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from "bun:test"
-import { cleanupProjects } from "../../../../senpi-task/src/manager/__fixtures__/manager-fakes"
-import { pausedRun } from "../../../../senpi-task/src/dag/__fixtures__/paused-run"
-import { createDagRecovery, type InstalledDagRun } from "../../../../senpi-task/src/dag/recovery"
-import { AdmissionBarrier } from "../../../../senpi-task/src/pause/admission-barrier"
+import { cleanupProjects } from "../../manager/__fixtures__/manager-fakes"
+import { pausedRun } from "../__fixtures__/paused-run"
+import { createDagRecovery, type InstalledDagRun } from "../recovery"
+import { AdmissionBarrier } from "../../pause/admission-barrier"
 import { createDagRunPauseSource } from "./dag-run-pause-source"
-import { guidePausedDag } from "../../../../senpi-task/src/dag/paused-controls"
+import { guidePausedDag } from "../paused-controls"
 
 afterEach(cleanupProjects)
 

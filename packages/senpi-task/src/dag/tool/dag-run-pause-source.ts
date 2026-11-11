@@ -1,12 +1,12 @@
-import type { DagRunRecordV1 } from "../../../../senpi-task/src/dag/manager"
-import type { DagRecovery, InstalledDagRun } from "../../../../senpi-task/src/dag/recovery"
-import type { DagSchedulerOptions } from "../../../../senpi-task/src/dag/scheduler"
-import type { DagRunId } from "../../../../senpi-task/src/dag/types"
-import { controlJournal } from "../../../../senpi-task/src/dag/node-control-context"
-import { dispatchGuidance } from "../../../../senpi-task/src/pause/guidance"
-import type { AdmissionBarrier } from "../../../../senpi-task/src/pause/admission-barrier"
-import { RunPauseAdmissionHeld } from "../../../../senpi-task/src/manager/run-pause"
-import type { RunPauseSource } from "./engine-run-pause"
+import type { DagRunRecordV1 } from "../manager"
+import type { DagRecovery, InstalledDagRun } from "../recovery"
+import type { DagSchedulerOptions } from "../scheduler"
+import type { DagRunId } from "../types"
+import { controlJournal } from "../node-control-context"
+import { dispatchGuidance } from "../../pause/guidance"
+import type { AdmissionBarrier } from "../../pause/admission-barrier"
+import { RunPauseAdmissionHeld } from "../../manager/run-pause"
+import type { RunPauseSource } from "../../pause/ports"
 
 export type DagGuidanceDelivery = (taskId: string, input: {
   readonly inputId: string; readonly revision: number; readonly text: string

@@ -1,8 +1,19 @@
 import type { ManagedChildHandle, RunnerOutcome } from "../manager/child-handle"
 import type { ManagedRunner, ManagedStartSpec } from "../manager/types"
-import type { AdmissionTicket } from "./admission-barrier"
+import type { AdmissionTicket, ResumeCredential } from "./admission-barrier"
 
 export type RunRef = { readonly kind: "dag" | "task" | "workpool" | "team"; readonly id: string }
+
+/** One kind of run (dag, workpool, ...) the engine run-pause controller stops, guides and resumes. */
+export type RunPauseSource = {
+  refs(parentSessionId: string): readonly RunRef[]
+  runRefForTask?(taskId: string): RunRef | undefined
+  quiesce?(parentSessionId: string, pauseSeq: number): void | Promise<void>
+  dispatchGuidance?(parentSessionId: string, pauseSeq: number, resumeId: string): Promise<void>
+  install?(parentSessionId: string, pauseSeq: number, credential: ResumeCredential): Promise<void>
+  released?(parentSessionId: string): void | Promise<void>
+  cancel?(parentSessionId: string, runRef: RunRef): Promise<void>
+}
 
 export type RunPauseOwner = {
   readonly parentSessionId: string
