@@ -1,4 +1,4 @@
-import type { TaskManager } from "../manager/types"
+import type { DagTaskPort } from "./ports"
 import type { ResumeCredential } from "../pause/admission-barrier"
 import type { TaskRecord } from "../state"
 import type { DagJournal } from "./journal"
@@ -43,7 +43,7 @@ export { countDagNodes as countNodes } from "./counts"
 export type SchedulerContext = {
   readonly resumeCredential?: ResumeCredential
   readonly infrastructureRetries: InfrastructureRetries
-  readonly taskManager: TaskManager
+  readonly taskManager: DagTaskPort
   readonly journal: DagJournal<DagRunRecordV1>
   readonly definitionNodes: ReadonlyMap<string, DagPersistedNode>
   readonly executionMode?: Omit<DagExecutionModeSources, "route">

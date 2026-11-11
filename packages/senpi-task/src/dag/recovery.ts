@@ -6,8 +6,8 @@ import type { DagScheduler } from "./scheduler"
 import { installRecoveredDag } from "./recovery-install"
 import type { PausedChildRecoveryPort } from "./paused-child-recovery"
 
-import { defaultSignaller } from "../lifecycle/context"
-import type { ManagerStartSpec, TaskManager } from "../manager/types"
+import type { ManagerStartSpec } from "../manager/types"
+import { resolveDagLease, type DagLeasePort, type DagTaskPort } from "./ports"
 import type { TaskRecord, TaskStatus } from "../state"
 import { dagFingerprint, ownerFingerprintInput } from "./fingerprint"
 import {
@@ -59,7 +59,9 @@ export type DagRecoveryOutcome = {
 export type DagRecoveryOptions = {
   readonly pausedChildren?: PausedChildRecoveryPort
   readonly store: DagFileStore
-  readonly taskManager: TaskManager
+  readonly taskManager: DagTaskPort
+  // Lease identity + liveness; wins over the legacy `hostPid` / `isProcessAlive` pair when set.
+  readonly lease?: DagLeasePort
   readonly hostPid?: number
   // Liveness probe for a paused run's previous lease holder. Defaults to the lifecycle port's
   // signaller so the signal-0 existence check has exactly one implementation in the package.
@@ -97,8 +99,7 @@ export type InstalledDagRun = {
 export type RecoveryContext = Required<Pick<DagRecoveryOptions, "store" | "taskManager">> & {
   readonly pausedChildren?: PausedChildRecoveryPort
   readonly resumeCredential?: ResumeCredential
-  readonly hostPid: number
-  readonly isProcessAlive: (pid: number) => boolean
+  readonly lease: DagLeasePort
   readonly isRunHeldInProcess?: (runId: DagRunId) => boolean
   readonly now: () => number
   readonly subscriberRing?: number
@@ -121,8 +122,7 @@ export function createDagRecovery(options: DagRecoveryOptions): DagRecovery {
   const context: RecoveryContext = {
     store: options.store,
     taskManager: options.taskManager,
-    hostPid: options.hostPid ?? process.pid,
-    isProcessAlive: options.isProcessAlive ?? defaultSignaller.isAlive,
+    lease: resolveDagLease(options),
     ...(options.isRunHeldInProcess === undefined ? {} : { isRunHeldInProcess: options.isRunHeldInProcess }),
     now: options.now ?? Date.now,
     ...(options.subscriberRing === undefined ? {} : { subscriberRing: options.subscriberRing }),
@@ -158,7 +158,7 @@ function pauseRunsForShutdown(context: RecoveryContext, parentSessionId: string)
     context.store.withRunLock(observed.runId, () => {
       const fresh = context.store.readCheckpoint<RecoverableRecord>(observed.runId)
       if (fresh === null || fresh.status !== "paused") return
-      const previousLeaseHolderPid = fresh.leaseHolderPid ?? context.hostPid
+      const previousLeaseHolderPid = fresh.leaseHolderPid ?? context.lease.holder()
       const { leaseHolderPid: _leaseHolderPid, ...released } = fresh
       context.store.writeCheckpoint(observed.runId, { ...released, previousLeaseHolderPid })
     })
@@ -233,7 +233,7 @@ function claimOrphanedRun(context: RecoveryContext, observed: RecoverableRecord,
     if (fresh.parentSessionId !== observed.parentSessionId) return { kind: "skipped", reason: "foreign_session" }
     const holder = fresh.leaseHolderPid ?? fresh.previousLeaseHolderPid
     if (holder === undefined) return { kind: "skipped", reason: "foreign_session" }
-    if (holder !== context.hostPid && context.isProcessAlive(holder)) {
+    if (holder !== context.lease.holder() && context.lease.isAlive(holder)) {
       return { kind: "skipped", reason: "live_lease", holderPid: holder }
     }
     // Re-home fully: parent AND root move to the adopter so children spawned after the resume
@@ -242,7 +242,7 @@ function claimOrphanedRun(context: RecoveryContext, observed: RecoverableRecord,
       ...fresh,
       parentSessionId,
       rootSessionId: parentSessionId,
-      leaseHolderPid: context.hostPid,
+      leaseHolderPid: context.lease.holder(),
     }
     context.store.writeCheckpoint(runId, claimed)
     return { kind: "claimed", record: claimed }
@@ -258,7 +258,7 @@ function claimPausedRun(context: RecoveryContext, runId: DagRunId, parentSession
     if (priorHolder !== undefined && holderStillLive(context, runId, priorHolder)) {
       return { kind: "skipped", reason: "live_lease", holderPid: priorHolder }
     }
-    const claimed: RecoverableRecord = { ...fresh, leaseHolderPid: context.hostPid }
+    const claimed: RecoverableRecord = { ...fresh, leaseHolderPid: context.lease.holder() }
     context.store.writeCheckpoint(runId, claimed)
     return { kind: "claimed", record: claimed }
   })
@@ -269,8 +269,8 @@ function claimPausedRun(context: RecoveryContext, runId: DagRunId, parentSession
 // reopens the session in the same process holds nothing and claims. Every other pid keeps the
 // cross-host liveness fence: two live host processes must never both schedule a run.
 function holderStillLive(context: RecoveryContext, runId: DagRunId, holderPid: number): boolean {
-  if (holderPid === context.hostPid) return context.isRunHeldInProcess?.(runId) ?? false
-  return context.isProcessAlive(holderPid)
+  if (holderPid === context.lease.holder()) return context.isRunHeldInProcess?.(runId) ?? false
+  return context.lease.isAlive(holderPid)
 }
 
 async function resumeClaimedRun(context: RecoveryContext, claimed: RecoverableRecord): Promise<DagRecoveryOutcome> {
@@ -546,7 +546,7 @@ function failNode(
 function releaseLease(context: RecoveryContext, runId: DagRunId): void {
   context.store.withRunLock(runId, () => {
     const fresh = context.store.readCheckpoint<RecoverableRecord>(runId)
-    if (fresh === null || fresh.leaseHolderPid !== context.hostPid) return
+    if (fresh === null || fresh.leaseHolderPid !== context.lease.holder()) return
     const { leaseHolderPid: _leaseHolderPid, previousLeaseHolderPid: _previousLeaseHolderPid, ...released } = fresh
     context.store.writeCheckpoint(runId, released)
   })

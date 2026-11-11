@@ -1,4 +1,4 @@
-import type { TaskManager } from "../manager/types"
+import type { DagLeasePort, DagTaskPort } from "./ports"
 import type { ResumeCredential } from "../pause/admission-barrier"
 import type { DagExecutionModeSources } from "./execution-mode"
 import { createDagJournal, subscribeDagJournal, type DagJournalListener } from "./journal"
@@ -23,7 +23,7 @@ export type { DagNodeSendResult } from "./node-send"
 export type DagSchedulerOptions = {
   readonly resumeCredential?: ResumeCredential
   readonly store: DagFileStore
-  readonly taskManager: TaskManager
+  readonly taskManager: DagTaskPort
   readonly initialRecord: DagRunRecordV1
   readonly executionMode?: Omit<DagExecutionModeSources, "route">
   readonly ancestry?: { readonly depth: number }
@@ -39,7 +39,8 @@ export type DagSchedulerOptions = {
   // Skill materialization for a retry that carries a prompt override (it re-runs the amend path).
   readonly materializeSkills?: DagMaterializeSkills
   // Lease identity for the control verbs: a run leased by a DIFFERENT live process is not ours to
-  // retry. Defaults to this process and the lifecycle port's signal-0 probe.
+  // retry. Defaults to this process and the lifecycle port's signal-0 probe; `lease` wins when set.
+  readonly lease?: DagLeasePort
   readonly hostPid?: number
   readonly isProcessAlive?: (pid: number) => boolean
   readonly now?: () => number
@@ -85,9 +86,9 @@ export type DagScheduler = {
 
 type DagSchedulerObserver = (scheduler: DagScheduler) => void
 
-const schedulerObservers = new WeakMap<TaskManager, Set<DagSchedulerObserver>>()
+const schedulerObservers = new WeakMap<DagTaskPort, Set<DagSchedulerObserver>>()
 
-export function observeDagSchedulers(taskManager: TaskManager, observer: DagSchedulerObserver): () => void {
+export function observeDagSchedulers(taskManager: DagTaskPort, observer: DagSchedulerObserver): () => void {
   const observers = schedulerObservers.get(taskManager) ?? new Set<DagSchedulerObserver>()
   observers.add(observer)
   schedulerObservers.set(taskManager, observers)

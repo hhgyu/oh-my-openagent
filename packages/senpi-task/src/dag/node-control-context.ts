@@ -1,9 +1,9 @@
 // The shared boundary of the per-node control verbs: one refusal vocabulary, one ownership/lease
 // check, and one journal factory, so retry and send can never disagree about who owns a run.
-import { defaultSignaller } from "../lifecycle/context"
 import { createDagJournal, type DagJournal } from "./journal"
 import { skipDuplicateTerminalTransition, type DagRunRecordV1 } from "./manager"
 import { applyDagSchedulerEvent, type DagSchedulerOptions } from "./scheduler"
+import { resolveDagLease } from "./ports"
 import type { DagFileStore } from "./store"
 import type { DagNodeError, DagNodeId, DagRunId } from "./types"
 
@@ -62,10 +62,9 @@ export function ownedRecord(options: DagSchedulerOptions, runId: DagRunId): DagR
   if (record === null) {
     throw new DagNodeControlError({ code: "run_not_found", message: `unknown dag run "${runId}"`, runId })
   }
-  const hostPid = options.hostPid ?? process.pid
-  const isAlive = options.isProcessAlive ?? defaultSignaller.isAlive
+  const lease = resolveDagLease(options)
   const leaseHolderPid = (record as DagRunRecordV1 & { readonly leaseHolderPid?: number }).leaseHolderPid
-  if (leaseHolderPid !== undefined && leaseHolderPid !== hostPid && isAlive(leaseHolderPid)) {
+  if (leaseHolderPid !== undefined && leaseHolderPid !== lease.holder() && lease.isAlive(leaseHolderPid)) {
     throw new DagNodeControlError({
       code: "run_not_owned",
       message: `dag run "${runId}" is leased by live process ${leaseHolderPid}`,

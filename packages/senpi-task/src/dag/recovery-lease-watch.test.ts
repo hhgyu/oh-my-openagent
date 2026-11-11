@@ -97,6 +97,29 @@ describe("DAG lease watch", () => {
     expect(timers.pending()).toBe(0)
   })
 
+  test("#given an injected DagLeasePort #when the watched holder dies #then liveness comes from the port, not isProcessAlive", () => {
+    // given
+    const timers = new ManualTimers()
+    const probed: number[] = []
+    let alive = true
+    const lease = { holder: () => 5150, isAlive: (holder: number) => { probed.push(holder); return alive } }
+    const watch = createDagLeaseWatch({ lease, isProcessAlive: () => false, timers, intervalMs: 250 })
+    let fired = 0
+    watch.watch(9001, () => {
+      fired += 1
+    })
+
+    // when
+    timers.tick()
+    alive = false
+    timers.tick()
+
+    // then
+    expect(probed).toEqual([9001, 9001])
+    expect(fired).toBe(1)
+    expect(timers.pending()).toBe(0)
+  })
+
   test("#given the default timers #when a holder pid that cannot exist is watched #then the callback fires through the real timer path", async () => {
     // given - 2_147_483_647 is above every reachable pid, so the default probe reports it dead
     const watch = createDagLeaseWatch({ intervalMs: 1 })
