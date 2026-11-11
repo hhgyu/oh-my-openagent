@@ -1,4 +1,4 @@
-import { resolveDagNodeExecutionMode, type DagExecutionModeSources, type DagRoute, type DagRunStatus } from "@oh-my-opencode/senpi-task/dag"
+import { resolveDagNodeExecutionMode, type DagExecutionModeSources, type DagRoute } from "@oh-my-opencode/senpi-task/dag"
 import type { DagToolDefinitionInput, DagToolErrorCode, DagToolInput, DagToolResult } from "@oh-my-opencode/senpi-task/dag-operations"
 
 /** An OpenCode 2 refusal, returned to the model in the original tool's error envelope. */
@@ -16,24 +16,14 @@ export function refusalResult(refusal: NativeDagRefusal): DagToolResult {
 export type NativeDagExecutionSources = Omit<DagExecutionModeSources, "route" | "autoMode">
 
 const CONTROL_ACTIONS: ReadonlySet<string> = new Set(["cancel", "cancel_node", "retry", "send", "amend"])
-const TERMINAL: ReadonlySet<string> = new Set<DagRunStatus>(["completed", "failed", "cancelled"])
 
-/** Actions this host cannot run yet, refused before any engine work. */
+/** Actions this host cannot run yet, refused before any engine work. A detached start or wait is
+ * allowed: it admits inside its own call and the run wake (S6d) brings the model back. */
 export function refuseAction(params: DagToolInput): NativeDagRefusal | undefined {
   if (CONTROL_ACTIONS.has(params.action)) {
     return new NativeDagRefusal("invalid_arguments", `workflow action=${params.action} is not available on OpenCode 2 yet; it arrives with the workflow controls (S6e). Use action=snapshot to inspect the run.`)
   }
-  if (params.action === "start" && params.detach === true) {
-    return new NativeDagRefusal("invalid_arguments", "A detached workflow start is not available on OpenCode 2 yet (S6d). action=start blocks until the run settles; omit detach.")
-  }
   return undefined
-}
-
-/** A detached wait on a LIVE run would leave nodes nobody may start (no wake owner until S6d). A
- * settled run returns its result either way, as the original wait does. */
-export function refuseDetachedWait(params: DagToolInput, status: DagRunStatus): NativeDagRefusal | undefined {
-  if (params.action !== "wait" || params.detach === false || TERMINAL.has(status)) return undefined
-  return new NativeDagRefusal("invalid_arguments", `Dag run is ${status}. A detached wait is not available on OpenCode 2 yet (S6d): pass detach=false to block until the run settles, or use action=snapshot.`)
 }
 
 function nodeRoute(node: DagToolDefinitionInput["nodes"][number]): DagRoute | undefined {

@@ -14,6 +14,8 @@ export interface NativeDagRuntimeOptions {
   readonly settings?: Partial<DagSettings>
   readonly executionMode: NativeDagExecutionSources
   readonly lease: DagLeasePort
+  /** A call stopped driving `runId` (it returned, detached or was interrupted): arms its wake. */
+  readonly onDriveEnded?: (runId: DagRunId) => void
 }
 
 /** One call's authority over the runtime: its operation port, its abort signal and its spawn policy. */
@@ -28,8 +30,11 @@ export interface NativeDagRuntime {
   readonly manager: DagManager
   /** Drives `runId` inside `call` until it settles or the call aborts, then returns its result. */
   drive(runId: DagRunId, call: NativeDagCall): Promise<DagRunResult>
+  /** Detached: admits every node that can start now inside `call`, then returns without blocking. */
+  admit(runId: DagRunId, call: NativeDagCall): Promise<void>
   /** Number of runs a call is driving right now. */
   driving(): number
+  isDriving(runId: string): boolean
 }
 
 /** The DAG store, manager and per-run blocking drives of ONE root session, stored under that
@@ -42,19 +47,27 @@ export function createNativeDagRuntime(options: NativeDagRuntimeOptions): Native
   const manager = createDagManager({ store, ...(options.settings && { settings: options.settings }) })
   // Results are projected from the store; a drive returns only after its run is terminal.
   const results = createDagWaitSurface({ store, subscribe: () => () => {} })
-  const driving = new Set<DagRunId>()
+  const driving = new Set<string>()
+  async function run(runId: DagRunId, call: NativeDagCall, detach: boolean): Promise<void> {
+    if (driving.has(runId)) throw new NativeDagRefusal("run_still_active", `Dag run ${runId} is already being driven by another workflow call in this session.`)
+    driving.add(runId)
+    try {
+      await driveDagRun({ store, manager, runId, parentSessionID: options.parentSessionID, call: call.port, signal: call.signal, detach,
+        executionMode: options.executionMode, lease: options.lease, ...(call.spawnPolicy && { spawnPolicy: call.spawnPolicy }) })
+    } finally {
+      driving.delete(runId)
+      options.onDriveEnded?.(runId)
+    }
+  }
   return Object.freeze({
     store,
     manager,
     async drive(runId: DagRunId, call: NativeDagCall): Promise<DagRunResult> {
-      if (driving.has(runId)) throw new NativeDagRefusal("run_still_active", `Dag run ${runId} is already being driven by another workflow call in this session.`)
-      driving.add(runId)
-      try {
-        await driveDagRun({ store, manager, runId, parentSessionID: options.parentSessionID, call: call.port, signal: call.signal,
-          executionMode: options.executionMode, lease: options.lease, ...(call.spawnPolicy && { spawnPolicy: call.spawnPolicy }) })
-      } finally { driving.delete(runId) }
+      await run(runId, call, false)
       return results.wait(runId, options.parentSessionID)
     },
+    admit: (runId: DagRunId, call: NativeDagCall) => run(runId, call, true),
     driving: () => driving.size,
+    isDriving: (runId: string) => driving.has(runId),
   })
 }
