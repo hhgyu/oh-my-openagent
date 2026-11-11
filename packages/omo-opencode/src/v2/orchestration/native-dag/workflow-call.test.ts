@@ -37,7 +37,8 @@ function harness() {
   const fake = createFakeDagOperation(PARENT)
   const call = { port: nativeDagCallPort(fake.operation), signal: new AbortController().signal }
   const spied = { manager: runtime.manager, drive: (runId: DagRunId, borrowed: typeof call) => { drives.push(runId); return runtime.drive(runId, borrowed) },
-    admit: (runId: DagRunId, borrowed: typeof call) => { drives.push(runId); return runtime.admit(runId, borrowed) } }
+    admit: (runId: DagRunId, borrowed: typeof call) => { drives.push(runId); return runtime.admit(runId, borrowed) },
+    control: runtime.control }
   const run = (params: DagToolInput) => runNativeWorkflow({ runtime: spied, parentSessionID: PARENT, call, executionMode }, params)
   return { runtime, drives, fake, run }
 }
@@ -51,19 +52,6 @@ const definition = (nodes: NonNullable<DagToolInput["definition"]>["nodes"]) => 
 const oneNodeRun = { key: "s6c", name: "s6c", nodes: [{ id: "a", prompt: "p", category: "quick" }] }
 
 describe("OpenCode 2 workflow refusals", () => {
-  test.each(["cancel", "cancel_node", "retry", "send", "amend"] as const)("#given action=%s #when called #then it is refused until the S6e controls", async action => {
-    // given
-    const { run, drives } = harness()
-
-    // when
-    const refused = errorOf(await run({ action, run_id: "dag_any", node_id: "a", message: "m" }))
-
-    // then
-    expect(refused.code).toBe("invalid_arguments")
-    expect(refused.text).toBe(`workflow action=${action} is not available on OpenCode 2 yet; it arrives with the workflow controls (S6e). Use action=snapshot to inspect the run.`)
-    expect(drives).toEqual([])
-  })
-
   test("#given a node that names skills #when started #then it is refused until S6g and no run is created", async () => {
     // given
     const { run, runtime } = harness()

@@ -3,7 +3,7 @@ import { DagManagerError, type DagRunId, type DagRunRecordV1 } from "@oh-my-open
 import { openDagDeliveryJournal, type DagDeliveryJournal } from "../../host/dag-delivery-journal"
 import type { TeamDeliverySession } from "../native-team/lead-delivery"
 import type { NativeDagRuntime } from "./runtime"
-import { dagWakeInputId, projectDagWake } from "./wake-projection"
+import { dagWakeInputId, projectDagWake, type DagWakeChild } from "./wake-projection"
 
 export interface DagWakeOptions {
   /** The joined `session.get` and gated `session.synthetic` route; never a raw prompt. */
@@ -15,8 +15,8 @@ export interface DagWakeOptions {
   readonly journalPathFor: (rootSessionID: string) => string
   /** The root's existing DAG runtime, never a new one. */
   readonly runtimeFor: (rootSessionID: string) => Pick<NativeDagRuntime, "manager" | "isDriving"> | undefined
-  /** The persisted status of one of the root's child tasks, read without any call authority. */
-  readonly childStatus: (rootSessionID: string, taskId: string) => string | undefined
+  /** The persisted status and run epoch of one of the root's child tasks, read without any call authority. */
+  readonly childState: (rootSessionID: string, taskId: string) => DagWakeChild | undefined
   /** Background tick period; 0 disables the timer (wakes then run only on `refresh`). */
   readonly pollIntervalMs?: number
   readonly onError?: (error: unknown) => void
@@ -36,9 +36,12 @@ const TERMINAL_RUN: ReadonlySet<string> = new Set(["completed", "failed", "cance
  * tells the root session that a node it admitted settled, with `resume: true`, so the model's next
  * `workflow` call admits the next wave under that call's own authority.
  * ONE WAKE PER TRANSITION: nodes run attached (`notify_on_terminal` off), so no per-node notice
- * exists; the run wake is keyed by (run, checkpoint seq). Settles that land before the model acts
- * share the checkpoint and coalesce into the one pending wake; a call that folds them advances the
- * checkpoint, and only then can a later settle wake again.
+ * exists. The journal holds one row per (run, checkpoint seq): settles that land before the model
+ * acts share the checkpoint and coalesce into its one wake; a call that folds them advances the
+ * checkpoint, and only then can a later settle wake again. The wake's host id is derived from its
+ * CONTENT (the settles it reports, or the terminal generation), and content already journaled for
+ * the run at an earlier checkpoint keeps that row: a checkpoint that advanced without a fold (a
+ * steer) never re-announces an ACKed settle (D-3), while new content gets a new id.
  * Before EVERY delivery the owner re-checks: the component generation is current; no call drives the
  * run; the run still exists, is owned by this root and is not terminal; its checkpoint is unchanged;
  * the wake is not ACKed; `session.get(root)` succeeds in this directory. A failed check posts nothing. */
@@ -83,18 +86,20 @@ export function createNativeDagWakeOwner(options: DagWakeOptions): DagWakeOwner 
     if (runtime.isDriving(runId)) return
     const record = ownedRecord(runtime, root, runId)
     if (!record || TERMINAL_RUN.has(record.status)) { armed.delete(runId); return }
-    const decision = projectDagWake(record, taskId => options.childStatus(root, taskId))
+    const decision = projectDagWake(record, taskId => options.childState(root, taskId))
     if (!decision) return
     const journal = journalFor(root), key = { runId, seq: record.checkpointSeq }
-    const existing = journal.read(key)
+    const inputID = dagWakeInputId(runId, decision.kind === "finished" ? { terminalGeneration: record.generation } : { settled: decision.settled })
+    // This checkpoint's row coalesces later settles into its first wake; without one, the same
+    // content journaled at an earlier checkpoint keeps its one delivery under its own id.
+    const existing = journal.read(key) ?? journal.findInput(runId, inputID)
     if (existing?.phase === "acked" || !await authorized(root, runtime, runId, key.seq)) return
-    const intent = journal.recordIntent(key, existing ?? { kind: decision.kind, receiverSessionID: root, text: decision.text,
-      inputID: dagWakeInputId(runId, decision.kind === "finished" ? "terminal" : key.seq) })
+    const intent = existing ?? journal.recordIntent(key, { kind: decision.kind, receiverSessionID: root, text: decision.text, inputID })
     // Last same-stack fence before transport.
     options.assertGeneration()
     if (closed || runtime.isDriving(runId)) return
     const result = await options.session.synthetic({ sessionID: root, id: intent.inputID, text: intent.text, delivery: "steer", resume: true,
-      metadata: { omoDagRunId: runId, omoDagSeq: String(key.seq), omoDagWake: intent.kind } }, { signal: transportStop.signal })
+      metadata: { omoDagRunId: runId, omoDagSeq: String(intent.seq), omoDagWake: intent.kind } }, { signal: transportStop.signal })
     if (result.id !== intent.inputID || result.sessionID !== root || result.type !== "synthetic" || result.payload.text !== intent.text) throw Error("Foreign DAG wake ACK")
     journal.markAcked(intent, { id: result.id, sessionID: result.sessionID })
   }

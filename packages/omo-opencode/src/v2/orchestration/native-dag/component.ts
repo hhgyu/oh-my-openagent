@@ -65,7 +65,10 @@ export function registerNativeDagComponent(host: NativeDagHost): NativeDagCompon
   const wake = createNativeDagWakeOwner({ session: host.delivery.session, directory: host.directory, assertGeneration: host.delivery.assertGeneration,
     journalPathFor: root => join(nativeTaskStateDir(host.directory, root), "dag-wakes.sqlite"),
     runtimeFor: root => runtimes.get(root),
-    childStatus: (root, taskId) => taskRecordsFor(root).load(taskId)?.status })
+    childState: (root, taskId) => {
+      const child = taskRecordsFor(root).load(taskId)
+      return child ? { status: child.status, runEpoch: child.notification.run_epoch } : undefined
+    } })
   function runtimeFor(sessionID: string): NativeDagRuntime {
     const existing = runtimes.get(sessionID)
     if (existing) return existing

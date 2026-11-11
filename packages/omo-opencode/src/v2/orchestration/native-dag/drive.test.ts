@@ -5,6 +5,7 @@ import { join } from "node:path"
 import type { DagDefinition, DagNodeId, DagRunId } from "@oh-my-opencode/senpi-task/dag"
 import { createNativeDagGenerationLease } from "./lease"
 import { createNativeDagRuntime } from "./runtime"
+import { NativeDagRefusal } from "./refusals"
 import { createHeldDagTaskPort, NativeDagAdmissionHeld, nativeDagCallPort } from "./task-port"
 import { createFakeDagOperation } from "./test-support"
 
@@ -117,7 +118,7 @@ describe("native DAG spawn policy", () => {
 describe("held DAG task port", () => {
   test("#given no bound call #when the engine starts a node #then the start is held, never reaches a call, and ends on drop", async () => {
     // given
-    const held = createHeldDagTaskPort()
+    const held = createHeldDagTaskPort("dag_held" as DagRunId)
     const fake = createFakeDagOperation(PARENT)
     const owner = { kind: "dag" as const, runId: "dag_held" as DagRunId, nodeId: "a" as DagNodeId, fingerprint: "f" }
 
@@ -133,12 +134,12 @@ describe("held DAG task port", () => {
     expect(outcome).toBeInstanceOf(NativeDagAdmissionHeld)
     expect(fake.starts).toEqual([])
     expect(() => held.port.get("task-1")).toThrow(NativeDagAdmissionHeld)
-    expect(held.port.sendToTask({ idOrName: "task-1", message: "m" })).rejects.toThrow("S6e")
+    expect(() => held.port.sendToTask({ idOrName: "task-1", message: "m" })).toThrow(NativeDagAdmissionHeld)
   })
 
   test("#given a bound call #when it is released #then the port refuses to act for it", () => {
     // given
-    const held = createHeldDagTaskPort()
+    const held = createHeldDagTaskPort("dag_held" as DagRunId)
     const fake = createFakeDagOperation(PARENT)
     const release = held.bind(nativeDagCallPort(fake.operation))
 
@@ -149,5 +150,49 @@ describe("held DAG task port", () => {
     // then
     expect(during).toBeUndefined()
     expect(() => held.port.findOwnedTask({ kind: "dag", runId: "dag_x" as DagRunId, nodeId: "a" as DagNodeId })).toThrow(NativeDagAdmissionHeld)
+  })
+
+  test("#given the engine's all-scope send to this run's node child #when it reaches the port #then it goes through the call's scoped send", async () => {
+    // given
+    const runId = "dag_send" as DagRunId
+    const held = createHeldDagTaskPort(runId)
+    const fake = createFakeDagOperation(PARENT)
+    const release = held.bind(nativeDagCallPort(fake.operation))
+    const started = await held.port.startOwned({ prompt: "p", parent_session_id: PARENT, depth: 1 }, { kind: "dag", runId, nodeId: "a" as DagNodeId, fingerprint: "f" })
+    const taskId = started.kind === "started" ? started.task_id : "none"
+
+    // when
+    const outcome = await held.port.sendToTask({ idOrName: taskId, message: "focus", callerSessionId: PARENT, allScope: true })
+    release()
+
+    // then
+    expect(outcome).toEqual({ kind: "steered", task_id: taskId })
+    expect(fake.sent).toEqual([{ taskId, message: "focus" }])
+  })
+
+  test("#given a task outside this run #when the port is asked to send to it #then it refuses to the model and nothing is sent", () => {
+    // given
+    const runId = "dag_send" as DagRunId
+    const held = createHeldDagTaskPort(runId)
+    const fake = createFakeDagOperation(PARENT)
+    fake.seed("task-plain")
+    fake.seed("task-other-run", { owner: { kind: "dag", runId: "dag_other" as DagRunId, nodeId: "a" as DagNodeId, fingerprint: "f" } })
+    fake.seed("task-foreign-root", { parent: "ses_other_root", owner: { kind: "dag", runId, nodeId: "a" as DagNodeId, fingerprint: "f" } })
+    const call = nativeDagCallPort(fake.operation)
+    const release = held.bind(call)
+
+    // when
+    const attempts = ["task-plain", "task-other-run", "task-foreign-root", "task-missing"].map(idOrName => {
+      try { return held.port.sendToTask({ idOrName, message: "m", allScope: true }) } catch (error) { return error }
+    })
+    const direct = (() => { try { return call.sendToTask({ idOrName: "task-foreign-root", message: "m" }) } catch (error) { return error } })()
+    release()
+
+    // then
+    for (const attempt of attempts) expect(attempt).toBeInstanceOf(NativeDagRefusal)
+    expect(direct).toBeInstanceOf(NativeDagRefusal)
+    expect((attempts[1] as NativeDagRefusal).code).toBe("node_not_found")
+    expect((attempts[1] as NativeDagRefusal).message).toBe("Task task-other-run is not a node child of workflow run dag_send, so workflow send does not reach it. Send targets only this run's own nodes.")
+    expect(fake.sent).toEqual([])
   })
 })

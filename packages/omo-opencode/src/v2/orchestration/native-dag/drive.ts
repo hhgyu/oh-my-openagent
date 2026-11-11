@@ -1,4 +1,7 @@
-import { createDagScheduler, type DagFileStore, type DagLeasePort, type DagManager, type DagNodeId, type DagNodeSpawnPolicy, type DagRunId, type DagRunRecordV1 } from "@oh-my-opencode/senpi-task/dag"
+import {
+  createDagScheduler,
+  type DagFileStore, type DagLeasePort, type DagManager, type DagNodeId, type DagNodeSpawnPolicy, type DagRunId, type DagRunRecordV1, type DagScheduler, type DagSchedulerOptions,
+} from "@oh-my-opencode/senpi-task/dag"
 import { NativeDagRefusal, type NativeDagExecutionSources } from "./refusals"
 import { createHeldDagTaskPort, type NativeDagCallPort } from "./task-port"
 import { TERMINAL_TASK_STATUSES } from "./wake-projection"
@@ -20,11 +23,26 @@ export interface NativeDagDriveInput {
   /** Detached: return once the call admitted every ready node and folded every settled child,
    * instead of blocking until the run is terminal. */
   readonly detach?: boolean
+  /** A control verb's entry into the run inside this call (S6e); without it the call drives the run
+   * from its current record. */
+  readonly enter?: NativeDagEntry
 }
 
+/** The scheduler options of ONE call: every node start and child action goes through its held port. */
+type NativeDagSchedulerOptions = Omit<DagSchedulerOptions, "initialRecord">
+/** A scheduler that now owns the run (a retry or amend re-entry) and its run promise. */
+export interface NativeDagEntered {
+  readonly scheduler: DagScheduler
+  readonly run: Promise<DagRunRecordV1>
+}
+/** Runs a control verb with the call's scheduler options while the call is bound. Returns the
+ * re-entry to drive, or undefined when the verb finished its work without one. */
+export type NativeDagEntry = (options: NativeDagSchedulerOptions) => Promise<NativeDagEntered | undefined>
+
 /** Children an earlier call already admitted: re-entry attaches them instead of starting again. A
- * node whose admission was cut off with no task to attach cannot be resolved before recovery. */
-function admittedChildren(record: DagRunRecordV1, call: NativeDagCallPort): ReadonlyMap<DagNodeId, string> {
+ * node whose admission was cut off with no task to attach cannot be resolved before recovery, unless
+ * the caller is cancelling the run (`lenient`): such a node has no child, so it is only cancelled. */
+export function admittedChildren(record: DagRunRecordV1, call: Pick<NativeDagCallPort, "findOwnedTask">, lenient = false): ReadonlyMap<DagNodeId, string> {
   const attached = new Map<DagNodeId, string>()
   const lost: string[] = []
   for (const node of record.nodes) {
@@ -33,7 +51,7 @@ function admittedChildren(record: DagRunRecordV1, call: NativeDagCallPort): Read
     if (taskId === undefined) lost.push(node.id)
     else attached.set(node.id, taskId)
   }
-  if (lost.length > 0) {
+  if (lost.length > 0 && !lenient) {
     throw new NativeDagRefusal("run_still_active", `Node(s) ${lost.map(id => `"${id}"`).join(", ")} were being admitted when their workflow call ended and have no task yet. Resolving them needs workflow recovery, which is not available on OpenCode 2 yet (S6f).`, lost)
   }
   return attached
@@ -69,24 +87,47 @@ async function admissionSettled(snapshot: () => DagRunRecordV1, starting: () => 
   }
 }
 
+/** The call's own scheduler over the run's current record, re-attaching children earlier calls admitted. */
+function fresh(options: NativeDagSchedulerOptions, initialRecord: DagRunRecordV1, call: NativeDagCallPort): NativeDagEntered {
+  const scheduler = createDagScheduler({ ...options, initialRecord, preAttachedTasks: admittedChildren(initialRecord, call) })
+  return { scheduler, run: scheduler.run() }
+}
+
+/** A control verb that needed no re-entry (send, cancel_node) still honors the detached contract:
+ * a settled child the run has not folded is folded by THIS call before it returns, so the call's own
+ * journal entry (a steer) never leaves an announced settle unfolded behind a new checkpoint (D-3).
+ * Returns undefined when the run is not running or nothing settled; a node whose admission was cut
+ * off leaves the fold to recovery instead of failing the control that already acted. */
+function foldAfterControl(options: NativeDagSchedulerOptions, input: NativeDagDriveInput): NativeDagEntered | undefined {
+  const record = input.manager.record(input.runId, input.parentSessionID)
+  if (record.status !== "running" || !hasUnfoldedSettle(record, input.call)) return undefined
+  try {
+    return fresh(options, record, input.call)
+  } catch (error) {
+    if (error instanceof NativeDagRefusal) return undefined
+    throw error
+  }
+}
+
 /** Runs ONE call's drive of a run: a scheduler whose every node start goes through this call's
  * operation keeps admitting the frontier until the run is terminal, the call aborts or, detached,
  * the admission is quiet. When the call ends first, admission is held and the scheduler retires
  * without cancelling children, so nothing is started after the call returns. */
 export async function driveDagRun(input: NativeDagDriveInput): Promise<DagRunRecordV1> {
   const initialRecord = input.manager.record(input.runId, input.parentSessionID)
-  if (TERMINAL_RUN.has(initialRecord.status)) return initialRecord
+  // A settled run has nothing to drive, but a control (cancel, retry, amend, send) may still act on it.
+  if (input.enter === undefined && TERMINAL_RUN.has(initialRecord.status)) return initialRecord
   input.signal.throwIfAborted()
-  const held = createHeldDagTaskPort()
+  const held = createHeldDagTaskPort(input.runId)
   const release = held.bind(input.call), quiet = new AbortController()
   let retire: (() => Promise<void>) | undefined
   try {
-    const preAttachedTasks = admittedChildren(initialRecord, input.call)
-    const scheduler = createDagScheduler({
-      store: input.store, taskManager: held.port, initialRecord, preAttachedTasks,
-      executionMode: input.executionMode, ancestry: { depth: 0 }, lease: input.lease,
-      ...(input.spawnPolicy && { nodeSpawnPolicy: input.spawnPolicy }),
-    })
+    const options: NativeDagSchedulerOptions = { store: input.store, taskManager: held.port, executionMode: input.executionMode,
+      ancestry: { depth: 0 }, lease: input.lease, ...(input.spawnPolicy && { nodeSpawnPolicy: input.spawnPolicy }) }
+    const entered = input.enter ? await input.enter(options) : fresh(options, initialRecord, input.call)
+    const drive = entered ?? foldAfterControl(options, input)
+    if (drive === undefined) return input.manager.record(input.runId, input.parentSessionID)
+    const { scheduler, run: running } = drive
     retire = async () => {
       if (TERMINAL_RUN.has(scheduler.snapshot().status)) return
       const suspended = scheduler.suspend()
@@ -94,10 +135,9 @@ export async function driveDagRun(input: NativeDagDriveInput): Promise<DagRunRec
       held.dropHeld()
       await suspended
     }
-    const running = scheduler.run()
     // An aborted call stops waiting here; the retired scheduler's own outcome is the store's.
     void running.catch(() => {})
-    const record = await untilAborted(input.detach ? Promise.race([running, admissionSettled(scheduler.snapshot, held.starting, input.call, quiet.signal)]) : running, input.signal)
+    const record = await untilAborted(input.detach || entered === undefined ? Promise.race([running, admissionSettled(scheduler.snapshot, held.starting, input.call, quiet.signal)]) : running, input.signal)
     await scheduler.whenIdle()
     return record
   } finally {

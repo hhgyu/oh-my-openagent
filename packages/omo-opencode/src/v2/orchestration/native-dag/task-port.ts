@@ -1,13 +1,15 @@
-import type { DagTaskPort } from "@oh-my-opencode/senpi-task/dag"
+import type { DagRunId, DagTaskPort } from "@oh-my-opencode/senpi-task/dag"
 import type { NativeOperationOwner } from "../native-task/operation-ports"
+import { NativeDagRefusal } from "./refusals"
 
-/** The DAG engine slice ONE `workflow` call lends to a run's scheduler, over that call's Native
- * per-call operation. Never retained past the call: the held port drops it when the call ends. */
-export type NativeDagCallPort = Omit<DagTaskPort, "getResidentHandle" | "sendToTask">
+/** The DAG engine slice ONE `workflow` call lends to a run's scheduler and its control verbs, over
+ * that call's Native per-call operation. Never retained past the call: the held port drops it when
+ * the call ends. */
+export type NativeDagCallPort = Omit<DagTaskPort, "getResidentHandle">
 
 /** Every node start goes through THIS call's operation, so it uses this call's host authority.
  * Nodes run attached (`run_in_background:false`), exactly as the Native DAG runtime admits them. */
-export function nativeDagCallPort(operation: Pick<NativeOperationOwner, "task" | "dag">): NativeDagCallPort {
+export function nativeDagCallPort(operation: Pick<NativeOperationOwner, "task" | "dag" | "send">): NativeDagCallPort {
   return Object.freeze({
     startOwned: (spec, owner) => operation.dag.startOwned({ ...spec, run_in_background: false }, owner),
     findOwnedTask: key => operation.dag.findOwnedTask(key),
@@ -16,7 +18,28 @@ export function nativeDagCallPort(operation: Pick<NativeOperationOwner, "task" |
     subscribeChild: (id, listener) => operation.task.subscribeChild(id, listener),
     waitFor: (id, options) => operation.task.waitFor(id, options),
     cancelTask: (id, reason, extra) => operation.task.cancelTask(id, reason, extra),
+    // `send` steers or revives a node's child through THIS call's own scoped send port and its
+    // receipts. The engine asks for all-scope authority; a DAG node child is an owned child of this
+    // root, so it needs none, and the cross-parent request is dropped instead of widened.
+    sendToTask: input => {
+      const taskId = ownedNodeChild(operation, input.idOrName)
+      const { allScope: _crossParent, callerSessionId: _caller, ...scoped } = input
+      return operation.send.sendToTask({ ...scoped, idOrName: taskId })
+    },
   } satisfies NativeDagCallPort)
+}
+
+function refuseForeignSend(taskId: string, scope: string): never {
+  throw new NativeDagRefusal("node_not_found", `Task ${taskId} is not a node child of ${scope}, so workflow send does not reach it. Send targets only this run's own nodes.`)
+}
+
+/** Proves `taskId` is a DAG node child THIS root owns: its record names a DAG owner, and the owned
+ * lookup of that owner key, which answers only inside this call's root, resolves to the same task. */
+function ownedNodeChild(operation: Pick<NativeOperationOwner, "task" | "dag">, taskId: string): string {
+  const record = operation.task.get(taskId), owner = record?.owner
+  const owned = owner?.kind === "dag" ? operation.dag.findOwnedTask({ kind: "dag", runId: owner.runId, nodeId: owner.nodeId }) : undefined
+  if (record === undefined || owned?.task_id !== record.task_id) refuseForeignSend(taskId, "this session's workflow runs")
+  return record.task_id
 }
 
 /** Thrown into an admission that waited while no call was bound, once its scheduler retires. */
@@ -24,10 +47,11 @@ export class NativeDagAdmissionHeld extends Error {
   constructor() { super("DAG node admission is held: no workflow call is in progress") }
 }
 
-/** The scheduler's `DagTaskPort` for one run. While a call is bound, every method delegates to that
- * call's port. Unbound, a node start is HELD (it waits and never touches the host) and every other
- * method refuses: there is no authority to act outside a call. */
-export function createHeldDagTaskPort() {
+/** The scheduler's `DagTaskPort` for run `runId`. While a call is bound, every method delegates to
+ * that call's port. Unbound, a node start is HELD (it waits and never touches the host) and every
+ * other method refuses: there is no authority to act outside a call. A send reaches only a node
+ * child of THIS run. */
+export function createHeldDagTaskPort(runId: DagRunId) {
   let bound: NativeDagCallPort | undefined, starting = 0
   const waiting = new Set<{ resolve(call: NativeDagCallPort): void; reject(error: Error): void }>()
   function live(): NativeDagCallPort {
@@ -51,7 +75,11 @@ export function createHeldDagTaskPort() {
     cancelTask: (id, reason, extra) => live().cancelTask(id, reason, extra),
     residencyChanged: parentSessionID => live().residencyChanged(parentSessionID),
     getResidentHandle() { throw Error("Resident DAG node handles arrive with workflow recovery (S6f)") },
-    sendToTask() { return Promise.reject(Error("Sending to a DAG node arrives with workflow controls (S6e)")) },
+    sendToTask: input => {
+      const call = live(), owner = call.get(input.idOrName)?.owner
+      if (owner?.kind !== "dag" || owner.runId !== runId) refuseForeignSend(input.idOrName, `workflow run ${runId}`)
+      return call.sendToTask(input)
+    },
   } satisfies DagTaskPort)
   return Object.freeze({
     port,

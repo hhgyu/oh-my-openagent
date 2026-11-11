@@ -54,6 +54,23 @@ describe("DAG delivery journal", () => {
     expect(journal.listRuns()).toEqual(["dag_2"])
   })
 
+  test("#given the same wake id journaled at two checkpoints #when it is looked up by id #then the acked row is found, and another run or id finds nothing", () => {
+    // given
+    const journal = open()
+    journal.recordIntent(key, wake)
+    const later = journal.recordIntent({ runId: "dag_1", seq: 9 }, wake)
+    journal.markAcked(later, { id: wake.inputID, sessionID: "ses_root" })
+
+    // when
+    const found = journal.findInput("dag_1", wake.inputID)
+
+    // then
+    expect(found?.seq).toBe(9)
+    expect(found?.phase).toBe("acked")
+    expect(journal.findInput("dag_2", wake.inputID)).toBeUndefined()
+    expect(journal.findInput("dag_1", "msg_omo_dag_other")).toBeUndefined()
+  })
+
   test("#given a journal of another namespace #when it is opened #then it is refused", () => {
     // given
     const path = file()

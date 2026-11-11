@@ -1,5 +1,5 @@
 import { resolveDagNodeExecutionMode, type DagExecutionModeSources, type DagRoute } from "@oh-my-opencode/senpi-task/dag"
-import type { DagToolDefinitionInput, DagToolErrorCode, DagToolInput, DagToolResult } from "@oh-my-opencode/senpi-task/dag-operations"
+import type { DagToolDefinitionInput, DagToolErrorCode, DagToolResult } from "@oh-my-opencode/senpi-task/dag-operations"
 
 /** An OpenCode 2 refusal, returned to the model in the original tool's error envelope. */
 export class NativeDagRefusal extends Error {
@@ -15,17 +15,6 @@ export function refusalResult(refusal: NativeDagRefusal): DagToolResult {
 
 export type NativeDagExecutionSources = Omit<DagExecutionModeSources, "route" | "autoMode">
 
-const CONTROL_ACTIONS: ReadonlySet<string> = new Set(["cancel", "cancel_node", "retry", "send", "amend"])
-
-/** Actions this host cannot run yet, refused before any engine work. A detached start or wait is
- * allowed: it admits inside its own call and the run wake (S6d) brings the model back. */
-export function refuseAction(params: DagToolInput): NativeDagRefusal | undefined {
-  if (CONTROL_ACTIONS.has(params.action)) {
-    return new NativeDagRefusal("invalid_arguments", `workflow action=${params.action} is not available on OpenCode 2 yet; it arrives with the workflow controls (S6e). Use action=snapshot to inspect the run.`)
-  }
-  return undefined
-}
-
 function nodeRoute(node: DagToolDefinitionInput["nodes"][number]): DagRoute | undefined {
   if (node.category !== undefined) return { kind: "category", category: node.category }
   if (node.subagent_type !== undefined) return { kind: "agent", agent: node.subagent_type }
@@ -34,7 +23,8 @@ function nodeRoute(node: DagToolDefinitionInput["nodes"][number]): DagRoute | un
 
 function quoted(ids: readonly string[]): string { return ids.map(id => `"${id}"`).join(", ") }
 
-/** Definition features this host cannot run: named skills (S6g) and process execution mode (P-02). */
+/** Definition features this host cannot run, refused before any engine work for `start` and
+ * `amend`: named skills (S6g) and process execution mode (P-02). */
 export function refuseDefinition(definition: DagToolDefinitionInput | undefined, sources: NativeDagExecutionSources): NativeDagRefusal | undefined {
   if (definition === undefined) return undefined
   const skilled = definition.nodes.filter(node => (node.load_skills?.length ?? 0) > 0).map(node => node.id)

@@ -38,7 +38,7 @@ function harness() {
       async synthetic(input) { posts.push(input.id); return { id: input.id, sessionID: input.sessionID, type: "synthetic", payload: { text: input.text } } },
     },
     journalPathFor: () => join(directory, "dag-wakes.sqlite"), runtimeFor: () => runtime,
-    childStatus: (_root, taskId) => fakes.flatMap(fake => fake.tasksFrom().get(taskId)?.record.status ?? [])[0] })
+    childState: (_root, taskId) => fakes.flatMap(fake => fake.tasksFrom().get(taskId)?.record ?? []).map(child => ({ status: child.status, runEpoch: child.notification.run_epoch }))[0] })
   cleanups.push(() => wake.close())
   /** One `workflow` call over a fresh per-call operation that shares the earlier calls' children. */
   async function call(params: DagToolInput) {
@@ -95,7 +95,7 @@ describe("OpenCode 2 detached workflow", () => {
     expect(second.result.content[0]?.text).toStartWith(`Detached from dag run ${runId}. The run is running (1/3 nodes complete).`)
     expect(second.fake.starts.map(start => start.nodeId)).toEqual(["c"])
     expect(afterCall).toEqual(wokenOnce)
-    expect(dag.posts).toEqual([...wokenOnce, dagWakeInputId(runId, "terminal")])
+    expect(dag.posts).toEqual([...wokenOnce, dagWakeInputId(runId, { terminalGeneration: 1 })])
   })
 
   test("#given a run whose last nodes settled #when the model waits detached #then the call records the end and returns the final result", async () => {
