@@ -1,22 +1,14 @@
 // The dag tool's wire contract: the result/error shapes every action returns, the injection seams
 // the runtime fills, and the two constructors that keep every action's envelope identical.
-import type { AgentToolResult } from "@code-yeongyu/senpi"
-
-import { validateTaskTarget, type TaskTargetErrorCode } from "@oh-my-opencode/senpi-task"
-import type {
-  DagCompileError,
-  DagDefinition,
-  DagDiagnostic,
-  DagManager,
-  DagNodeInput,
-  DagRunId,
-  DagRunResult,
-  DagRunSnapshot,
-} from "@oh-my-opencode/senpi-task/dag"
+import { validateTaskTarget, type TaskTargetErrorCode } from "../../tools/task/validation"
+import type { DagCompileError, DagDefinition, DagNodeInput } from "../graph"
+import type { DagRunResult } from "../handle"
+import type { DagManager } from "../manager"
+import type { DagDiagnostic, DagRunId, DagRunSnapshot } from "../types"
 
 import type { DagToolDefinitionInput } from "./dag-tool-params"
-import type { Guidance } from "../../../../senpi-task/src/pause/guidance"
-import type { PausedDagGuideCommand } from "../../../../senpi-task/src/dag/paused-controls"
+import type { Guidance } from "../../pause/guidance"
+import type { PausedDagGuideCommand } from "../paused-controls"
 
 // Tool-level error vocabulary. Node target failures nest under invalid_definition and carry the
 // task-tool validation code verbatim, so the model sees one vocabulary across task and dag. The
@@ -103,12 +95,15 @@ export type DagToolDetails =
   | { readonly kind: "guided"; readonly run_id: string; readonly guidance: Guidance }
   | { readonly kind: "error"; readonly error: DagToolError }
 
-export type DagToolResult = AgentToolResult<DagToolDetails>
+// Host-neutral envelope, structurally assignable to a host text tool result (Senpi AgentToolResult).
+export type DagToolResult = { content: { type: "text"; text: string }[]; details: DagToolDetails; isError?: boolean }
 
 export type DagToolDeps = {
   readonly manager: DagManager
   readonly parentSessionId: () => string
   readonly rootSessionId: () => string
+  /** Warms a host's lazy skill boundary before start, since dag skill discovery runs synchronously. */
+  readonly warmSkills?: () => Promise<void>
   /**
    * Injection point for the scheduler-owned wait surface (createDagWaitSurface().wait). Absent until
    * the scheduler is wired; wait then reports the run's current state instead of blocking.

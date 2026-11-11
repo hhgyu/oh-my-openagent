@@ -1,6 +1,6 @@
-import type { DagRunId } from "@oh-my-opencode/senpi-task/dag"
-import type { PausedDagGuideCommand } from "../../../../senpi-task/src/dag/paused-controls"
-import { GuidanceError } from "../../../../senpi-task/src/pause/guidance"
+import type { DagRunId } from "../types"
+import type { PausedDagGuideCommand } from "../paused-controls"
+import { GuidanceError } from "../../pause/guidance"
 import { failure, toolResult, type DagToolDeps, type DagToolResult } from "./dag-tool-contract"
 import type { DagToolInput } from "./dag-tool-params"
 

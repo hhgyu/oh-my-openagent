@@ -1,22 +1,14 @@
 import type { TaskManager } from "../../../../senpi-task/src/manager/types"
 import type { TaskPauseMethods } from "../../../../senpi-task/src/manager/run-pause"
 import type { TaskRecord } from "../../../../senpi-task/src/state"
-import type { AdmissionBarrier, ResumeCredential } from "../../../../senpi-task/src/pause/admission-barrier"
-import type { EnginePauseState, RunRef, RunPauseOwner } from "../../../../senpi-task/src/pause/ports"
+import type { AdmissionBarrier } from "../../../../senpi-task/src/pause/admission-barrier"
+import type { EnginePauseState, RunRef, RunPauseOwner, RunPauseSource } from "../../../../senpi-task/src/pause/ports"
 import { PauseRegistry, type PauseParticipant } from "../../../../senpi-task/src/pause/registry"
 import { RunPauseController, type RunPauseEffects } from "../../../../senpi-task/src/pause/run-controller"
 import { EngineRunPauseBridge, type LostParticipantRecovery } from "./run-pause-bridge"
 import { createWorkpoolRunPauseSource } from "./workpool-run-pause-source"
 
-export type RunPauseSource = {
-  refs(parentSessionId: string): readonly RunRef[]
-  runRefForTask?(taskId: string): RunRef | undefined
-  quiesce?(parentSessionId: string, pauseSeq: number): void | Promise<void>
-  dispatchGuidance?(parentSessionId: string, pauseSeq: number, resumeId: string): Promise<void>
-  install?(parentSessionId: string, pauseSeq: number, credential: ResumeCredential): Promise<void>
-  released?(parentSessionId: string): void | Promise<void>
-  cancel?(parentSessionId: string, runRef: RunRef): Promise<void>
-}
+export type { RunPauseSource }
 
 // A restore that failed while the task host was changing generations usually succeeds a little later.
 const LOST_PARTICIPANT_RETRY_DELAYS_MS = [5_000, 30_000, 120_000] as const

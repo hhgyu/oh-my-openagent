@@ -1,6 +1,10 @@
-import type { DagFileStore } from "@oh-my-opencode/senpi-task/dag"
+import type { DagFileStore } from "../store"
 
-import type { ComponentLogger } from "../../extension/types"
+/** The two log levels the sweep reports through; a host logger satisfies it structurally. */
+export type DagRetentionSweepLogger = {
+  info(message: string): void
+  warn(message: string): void
+}
 
 /**
  * Schedules the once-per-runtime DAG retention sweep. Production defers it so session start never
@@ -11,7 +15,7 @@ export type DagRetentionSweepOptions = {
 }
 
 export type DagRetentionSweepDeps = {
-  readonly logger: ComponentLogger
+  readonly logger: DagRetentionSweepLogger
   readonly retentionSweep?: DagRetentionSweepOptions
 }
 

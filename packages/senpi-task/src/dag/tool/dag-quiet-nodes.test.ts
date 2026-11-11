@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { DAG_NODE_QUIET_AFTER_MS } from "@oh-my-opencode/senpi-task/dag"
+import { DAG_NODE_QUIET_AFTER_MS } from "../types"
 
 import { quietNodesNotice } from "./dag-quiet-nodes"
 

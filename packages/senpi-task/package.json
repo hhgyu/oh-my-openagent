@@ -77,6 +77,10 @@
       "types": "./src/tools/team/operations.ts",
       "import": "./src/tools/team/operations.ts"
     },
+    "./dag-operations": {
+      "types": "./src/dag/tool/index.ts",
+      "import": "./src/dag/tool/index.ts"
+    },
     "./task-planner": {
       "types": "./src/planning/child-planner.ts",
       "import": "./src/planning/child-planner.ts"

@@ -1,10 +1,10 @@
-import type { DagManager, DagRunRecordV1 } from "../../../../senpi-task/src/dag/manager"
-import type { DagNodeId, DagRunId, DagRunSnapshot } from "../../../../senpi-task/src/dag/types"
-import type { DagDefinition } from "@oh-my-opencode/senpi-task/dag"
-import { reenterDagRun, type DagNodeSendResult, type DagRunReentry, type DagScheduler, type DagSchedulerOptions } from "../../../../senpi-task/src/dag/scheduler"
-import { retryDagNodes } from "../../../../senpi-task/src/dag/node-retry"
-import { sendToDagNode } from "../../../../senpi-task/src/dag/node-send"
-import { applyPausedDagGuidance, type PausedDagGuideCommand } from "../../../../senpi-task/src/dag/paused-controls"
+import type { DagManager, DagRunRecordV1 } from "../manager"
+import type { DagNodeId, DagRunId, DagRunSnapshot } from "../types"
+import type { DagDefinition } from "../graph"
+import { reenterDagRun, type DagNodeSendResult, type DagRunReentry, type DagScheduler, type DagSchedulerOptions } from "../scheduler"
+import { retryDagNodes } from "../node-retry"
+import { sendToDagNode } from "../node-send"
+import { applyPausedDagGuidance, type PausedDagGuideCommand } from "../paused-controls"
 
 type OwnedScheduler = { readonly scheduler: DagScheduler; running?: Promise<DagRunRecordV1> }
 

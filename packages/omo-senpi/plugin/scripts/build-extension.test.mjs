@@ -258,6 +258,17 @@ describe("checkExtensionCurrent", () => {
     expect(taskInputs.some((input) => toPortableBuildPath(input).endsWith(suffix))).toBe(true)
   })
 
+  test("#given the split extension build #when metafile inputs are inspected #then the shared dag operations live only in the lazy task sidecar", async () => {
+    // given / when
+    const { mainInputs, taskInputs } = await sharedOutputs()
+    const prefix = "packages/senpi-task/src/dag/tool/"
+    const isDagOperation = (input) => toPortableBuildPath(input).includes(prefix)
+
+    // then
+    expect(mainInputs.some(isDagOperation)).toBe(false)
+    expect(taskInputs.some(isDagOperation)).toBe(true)
+  })
+
   test("#given the split extension build #when metafile inputs are inspected #then the computer-use implementation lives only in its lazy entry", async () => {
     // given / when
     const { mainInputs, computerUseInputs } = await sharedOutputs()

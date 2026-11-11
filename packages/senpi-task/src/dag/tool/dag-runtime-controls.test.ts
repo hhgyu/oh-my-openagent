@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test"
-import { cleanupProjects } from "../../../../senpi-task/src/manager/__fixtures__/manager-fakes"
-import { pausedRun } from "../../../../senpi-task/src/dag/__fixtures__/paused-run"
-import { createDagManager } from "../../../../senpi-task/src/dag/manager"
-import { cancelPausedDagNode } from "../../../../senpi-task/src/dag/paused-controls"
+import { cleanupProjects } from "../../manager/__fixtures__/manager-fakes"
+import { pausedRun } from "../__fixtures__/paused-run"
+import { createDagManager } from "../manager"
+import { cancelPausedDagNode } from "../paused-controls"
 import { createDagRuntimeControls } from "./dag-runtime-controls"
 
 afterEach(cleanupProjects)
