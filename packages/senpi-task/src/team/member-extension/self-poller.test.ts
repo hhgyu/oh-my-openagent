@@ -222,3 +222,53 @@ describe("member self-poller", () => {
     expect(readdirSync(harness.inboxDir).sort()).toEqual(before)
   })
 })
+
+describe("member self-poller with a host delivery evidence port", () => {
+  function portPoller(harness: Harness, accept: boolean, delivered: Set<string>) {
+    return createMemberSelfPoller({
+      teamRunId: TEAM_RUN_ID,
+      memberName: "alice",
+      config: harness.config,
+      sessionDir: harness.sessionDir,
+      inject: (content) => harness.injected.push(content),
+      appendEvent: (event) => harness.events.push(event),
+      async afterInject(value) { if (accept) delivered.add(value.messageId) },
+      isDelivered: (messageId) => delivered.has(messageId),
+    })
+  }
+
+  test("#given the host accepts the injection #when the member polls twice #then it injects once and commits at once", async () => {
+    // given
+    const harness = createHarness()
+    const value = message("44444444-4444-4444-8444-444444444441")
+    await seed(harness, value)
+    const memberPoller = portPoller(harness, true, new Set())
+
+    // when
+    await memberPoller.pollOnce()
+    await memberPoller.pollOnce()
+
+    // then
+    expect(harness.injected).toHaveLength(1)
+    expect(existsSync(join(harness.inboxDir, "processed", `${value.messageId}.json`))).toBe(true)
+    expect(harness.events.map((event) => event.type)).toEqual(["team_message_delivered"])
+  })
+
+  test("#given the host does not accept the injection #when the member polls #then the reservation is released for redelivery", async () => {
+    // given
+    const harness = createHarness()
+    const value = message("44444444-4444-4444-8444-444444444442")
+    await seed(harness, value)
+    const memberPoller = portPoller(harness, false, new Set())
+
+    // when
+    await memberPoller.pollOnce()
+    const reserved = readdirSync(harness.inboxDir).filter((name) => name.startsWith(".delivering-"))
+    await memberPoller.pollOnce()
+
+    // then
+    expect(reserved).toEqual([])
+    expect(harness.injected).toHaveLength(2)
+    expect(existsSync(join(harness.inboxDir, "processed", `${value.messageId}.json`))).toBe(false)
+  })
+})

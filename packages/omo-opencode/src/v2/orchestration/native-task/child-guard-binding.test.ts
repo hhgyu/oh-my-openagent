@@ -173,6 +173,22 @@ describe("#given an in-process team member selection that needs member live bind
     expect(events.at(-1)).toBe("member-join")
   })
 
+  test("#when a delivery hook is installed #then the bound member starts mail delivery and its release runs with the producers", async () => {
+    // given
+    const selection = memberGrant(["task_send"]), events: string[] = []
+    const member = { ...fakeMemberOwner(events), onBound(bound: { leadSessionID: string; teamRunId: string; memberName: string; sessionID: string }) {
+      events.push(`delivery:${bound.leadSessionID}:${bound.teamRunId}:${bound.memberName}:${bound.sessionID}`)
+      return () => { events.push("delivery-release") }
+    } }
+    // when
+    const binding = createNativeChildGuardBinding({ assertGeneration() {}, member })(spec("sisyphus-junior"), { buildAgentID: "build", selection }, { team: TEAM })
+      .bind(child("ses_member"), () => {})
+    await binding.producers?.join()
+    // then
+    expect(events.slice(1, 3)).toEqual([`bind:ses_member:build:st_00000001:ses_parent:${TEAM.runId}:alpha:/teams`, `delivery:ses_parent:${TEAM.runId}:alpha:ses_member`])
+    expect(events).toContain("delivery-release")
+  })
+
   test("#when a member slot is not task_send #then the selection stays unbound and the runner refuses it", () => {
     // given
     const selection = memberGrant(["task_send", "workpool"]), events: string[] = []

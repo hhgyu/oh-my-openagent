@@ -33,6 +33,10 @@ export type MemberSelfPollerDeps = {
   readonly inject: (content: string) => void
   readonly appendEvent?: (event: PersistedTaskEvent) => void
   readonly afterInject?: (message: Message) => Promise<void>
+  /** Host-owned delivery evidence. When present it replaces the session JSONL scan, and the
+   * reservation is settled as soon as `afterInject` resolves: committed when delivered, otherwise
+   * released for redelivery. Absent: unchanged. */
+  readonly isDelivered?: (messageId: string) => boolean | Promise<boolean>
 }
 
 export type MemberPollFilter = Readonly<{ from?: string }>
@@ -76,7 +80,7 @@ export function createMemberSelfPoller(deps: MemberSelfPollerDeps): MemberSelfPo
 
   const checkPendingUnderLease = async (): Promise<void> => {
     for (const delivery of [...pending.values()]) {
-      if (!(await sessionJsonlContainsMessage(deps.sessionDir, delivery.message.messageId))) continue
+      if (!(await isDelivered(deps, delivery.message.messageId))) continue
       await commitDeliveryReservation(delivery.reservation)
       pending.delete(delivery.message.messageId)
       appendDeliveredEvent(deps, delivery.message)
@@ -132,7 +136,7 @@ async function processMessage(
     return
   }
 
-  if (await sessionJsonlContainsMessage(deps.sessionDir, message.messageId)) {
+  if (await isDelivered(deps, message.messageId)) {
     await commitDeliveryReservation(reservation)
     appendDeliveredEvent(deps, message)
     return
@@ -141,6 +145,20 @@ async function processMessage(
   state.pending.set(message.messageId, { message, reservation })
   deps.inject(buildPeerMessageEnvelope(message))
   await deps.afterInject?.(message)
+  if (deps.isDelivered === undefined) return
+  state.pending.delete(message.messageId)
+  if (await deps.isDelivered(message.messageId)) {
+    await commitDeliveryReservation(reservation)
+    appendDeliveredEvent(deps, message)
+  } else {
+    await releaseDeliveryReservation(reservation)
+  }
+}
+
+/** Host delivery evidence when the port is present, else the member session JSONL scan. */
+function isDelivered(deps: MemberSelfPollerDeps, messageId: string): Promise<boolean> {
+  if (deps.isDelivered !== undefined) return Promise.resolve(deps.isDelivered(messageId))
+  return sessionJsonlContainsMessage(deps.sessionDir, messageId)
 }
 
 async function recoverReservations(deps: MemberSelfPollerDeps): Promise<void> {
@@ -163,7 +181,7 @@ async function recoverReservations(deps: MemberSelfPollerDeps): Promise<void> {
       deps.config,
     )
     if (reservation === null) continue
-    if (await sessionJsonlContainsMessage(deps.sessionDir, message.messageId)) {
+    if (await isDelivered(deps, message.messageId)) {
       await commitDeliveryReservation(reservation)
       appendDeliveredEvent(deps, message)
     } else {

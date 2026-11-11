@@ -12,7 +12,12 @@ export interface NativeChildGuardBindingOptions {
   readonly readonly?: ReadonlyBrokerOwner
   /** Live dedicated team member send registration and the trusted team-core config resolver of a
    * lead's team storage. Absent: a member selection stays unbound and is refused. */
-  readonly member?: { readonly owner: TeamMemberOwner; readonly teamConfigFor: (leadSessionID: string) => TeamModeConfig }
+  readonly member?: {
+    readonly owner: TeamMemberOwner
+    readonly teamConfigFor: (leadSessionID: string) => TeamModeConfig
+    /** Team mail delivery for a freshly bound member; returns its release, run when the producer goes. */
+    readonly onBound?: (member: { readonly leadSessionID: string; readonly teamRunId: string; readonly memberName: string; readonly sessionID: string }) => () => void
+  }
 }
 /** Trusted runtime DATA from the ORIGINAL approved ManagerStartSpec, never from member tool closures. */
 export interface NativeChildGuardOrigin {
@@ -65,8 +70,12 @@ export function createNativeChildGuardBinding(options: NativeChildGuardBindingOp
       const producers: Producer[] = []
       try {
         if (broker) producers.push(broker.bindChild({ child, sessionID, agent: approved.buildAgentID, cwd: spec.cwd, assertCurrent: current }))
-        if (member && team) producers.push(member.owner.bindChild({ child, sessionID, agent: approved.buildAgentID, taskId: spec.taskId,
-          leadSessionID: spec.parentSessionId, team, config: member.teamConfigFor(spec.parentSessionId), assertCurrent: current }))
+        if (member && team) {
+          producers.push(member.owner.bindChild({ child, sessionID, agent: approved.buildAgentID, taskId: spec.taskId,
+            leadSessionID: spec.parentSessionId, team, config: member.teamConfigFor(spec.parentSessionId), assertCurrent: current }))
+          const release = member.onBound?.({ leadSessionID: spec.parentSessionId, teamRunId: team.runId, memberName: team.memberName, sessionID })
+          if (release) producers.push({ assertCurrent() {}, revoke: release, async join() { release() } })
+        }
       } catch (error) {
         // A partial bind never leaves a live producer behind; the owners still join it at close.
         for (const producer of producers) producer.revoke()
