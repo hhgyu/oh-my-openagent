@@ -73,7 +73,8 @@ export async function createTeam(
     maxParallel: deps.taskSettings.team.max_parallel_members,
     deadlineAt: now() + deps.taskSettings.team.max_wall_clock_minutes * MS_PER_MINUTE,
     now,
-    ...(deps.memberExtension !== undefined ? {
+    ...(deps.memberMode === "in-process" ? { inProcess: { teamConfig: config } } : {}),
+    ...(deps.memberMode !== "in-process" && deps.memberExtension !== undefined ? {
       memberExtension: {
         ...deps.memberExtension,
         teamConfig: JSON.stringify({

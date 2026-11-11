@@ -7,7 +7,7 @@ import type { ToolContext } from "@opencode/plugin/promise/tool"
 import { acquireOwnedChildToolGuard, type OwnedChildToolGuard } from "../../host/owned-child-tool-guard"
 import { prepareHostTaskGrant, prepareRecoveryHostGrant } from "./host-grant"
 import type { ManagedStartSpec } from "@oh-my-opencode/senpi-task/manager-kernel"
-import { filterSharedParentTools } from "@oh-my-opencode/senpi-task/task-operations"
+import { createMemberTaskSendTool, filterSharedParentTools } from "@oh-my-opencode/senpi-task/task-operations"
 import { withOwnedRuntimeUnit } from "./runtime.test"
 import type { NativeOwnedTaskRuntimeOptions } from "./runtime"
 import { PARKED_DENY_RULE, PARKING_MARKER_KEY } from "../../host/child-parking"
@@ -139,6 +139,50 @@ test("G3 zero targets cannot conceal an unresolved live producer requirement", a
       const value = approved(spec, plan)
       return { ...value, selection: { ...value.selection, selected: [], requirements: ["kernel-live-bindings"], bindingSlots: [{ requirement: "kernel-live-bindings", nativeName: "actual-kernel" }], allowsCodeModeTransport: false } }
     }, childGuardBinding: (_spec, prepared) => ({ assertCurrent() {}, bind(child, assertCurrent) { return { child, agent: prepared.buildAgentID, assertCurrent } } }) })
+  })
+})
+
+const MEMBER_TEAM = { runId: "11111111-1111-4111-8111-111111111111", memberName: "alpha" }
+/** The member's ORIGINAL definition as data only; the guarded runner never invokes it. */
+function memberStart() {
+  const config = { enabled: true, tmux_visualization: false, max_parallel_members: 4, max_members: 8, max_messages_per_run: 10000, max_wall_clock_minutes: 120,
+    max_member_turns: 500, message_payload_max_bytes: 32768, recipient_unread_max_bytes: 262144, mailbox_poll_interval_ms: 3000 }
+  return { category: "qa", prompt: "in-process member", execution_mode: "in-process" as const, team_run_id: MEMBER_TEAM.runId, team_name: "unit-team",
+    team_member_name: MEMBER_TEAM.memberName, team_role: "member" as const,
+    memberScopedTools: [createMemberTaskSendTool({ teamRunId: MEMBER_TEAM.runId, memberName: MEMBER_TEAM.memberName, taskId: "team-member", config, members: ["alpha"] })] }
+}
+
+test("G3 member-scoped tools are refused before create when the binding lacks member live bindings", async () => {
+  await guardFixture(async g => {
+    await withOwnedRuntimeUnit(async (runtime, state) => {
+      // when
+      const outcome = await runtime.start(memberStart())
+      // then
+      expect(outcome.kind).toBe("start_failed"); expect(state.calls).not.toContain("create")
+    }, { childToolGuard: g.owner, authorizePlannedStart: async (spec, plan) => approved(spec, plan),
+      childGuardBinding: (_spec, prepared) => ({ coverage, assertCurrent() {}, bind(child, assertCurrent) { return { child, agent: prepared.buildAgentID, coverage, assertCurrent } } }) })
+  })
+})
+
+test("G3 member-scoped tools start when the binding covers member live bindings and receives the approved team identity", async () => {
+  await guardFixture(async g => {
+    const origins: unknown[] = []
+    const memberCoverage = { boundRequirements: ["codemode-network-guard" as const, "member-live-bindings" as const],
+      targets: [{ requirement: "member-live-bindings" as const, nativeName: "task_send", hostID: "omo_team_send" }] }
+    await withOwnedRuntimeUnit(async (runtime, state) => {
+      // when
+      const started = await runtime.start(memberStart())
+      // then
+      if (started.kind !== "started") throw Error(JSON.stringify(started))
+      try {
+        await runtime.wait(started.task_id)
+        expect(state.calls).toContain("create")
+        expect(origins).toEqual([{ team: MEMBER_TEAM }])
+        expect(Object.keys((state.contexts[0] as { tools: Record<string, unknown> }).tools).sort()).toEqual(["execute", "omo_team_send", "opaque-read"])
+      } finally { await runtime.end(started.task_id) }
+    }, { childToolGuard: g.owner, authorizePlannedStart: async (spec, plan) => approved(spec, plan),
+      childGuardBinding: (_spec, prepared, origin) => { origins.push(origin); return { coverage: memberCoverage, assertCurrent() {}, bind(child, assertCurrent) { return { child, agent: prepared.buildAgentID, coverage: memberCoverage, assertCurrent } } } } },
+    ["opaque-read", "opaque-edit", "execute", "omo_team_send"])
   })
 })
 

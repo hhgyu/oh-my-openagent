@@ -2,6 +2,8 @@ import type * as EffectPlugin from "@opencode/plugin/effect/plugin"
 import type * as PromisePlugin from "@opencode/plugin/promise/plugin"
 import { readEventLogTranscriptResult } from "@oh-my-opencode/orchestration-core/transcript/event-log"
 import { buildSkillPrepend, CHILD_HOST_TOOLS, childStructuralToolNames, parseTaskId, resolveTaskAgents, syncTaskIdFloor } from "@oh-my-opencode/senpi-task/task-operations"
+import { teamStorageBaseDir, toTeamCoreConfig } from "@oh-my-opencode/senpi-task/team-operations"
+import { OmoTaskSettingsSchema, type OmoConfig } from "@oh-my-opencode/omo-config-core"
 import { Effect, type Scope } from "effect"
 import { createHash } from "node:crypto"
 import { existsSync, readdirSync } from "node:fs"
@@ -18,9 +20,11 @@ import { createToolRegistry, type ListedTool } from "../../host/tool-registry"
 import { createNativeTaskBridge } from "../../tools/native-task"
 import { prepareNativeTaskRuntime } from "../../tools/native-task-preparation"
 import { createNativeChildGuardBinding } from "./child-guard-binding"
+import { acquireTeamMemberOwner, type TeamMemberOwner } from "./live-member-owner"
 import { acquireReadonlyBroker, type ReadonlyBrokerOwner } from "./live-readonly-producer"
 import { createNativeTaskService } from "./service"
 import { READONLY_BROKER_TOOL_NAME } from "../../tools/curated-readonly"
+import { TEAM_MEMBER_SEND_TOOL_NAME } from "../../tools/team-member-send"
 
 type MetadataSource = Parameters<typeof createNativeTaskService>[1]["metadataSource"]
 type JoinedSession = Effect.Success<ReturnType<typeof acquireEffectSessionBackendApi>>
@@ -34,6 +38,14 @@ export interface NativeTaskEffectOwners {
   readonly guard: OwnedChildToolGuard
   /** Dedicated curated read-only broker registration, executable only by its bound owned child. */
   readonly readonly: ReadonlyBrokerOwner
+  /** Dedicated team member send registration, executable only by its bound in-process member. */
+  readonly member: TeamMemberOwner
+}
+
+/** The team-core config of a lead's team storage: the same root its per-lead team service writes. */
+function nativeTeamConfig(projectDirectory: string, leadSessionID: string, config: OmoConfig) {
+  const settings = OmoTaskSettingsSchema.parse(config.task ?? {})
+  return toTeamCoreConfig(settings, teamStorageBaseDir({ project_dir: projectDirectory, task: { state_dir: nativeTaskStateDir(projectDirectory, leadSessionID) } }))
 }
 
 export function acquireNativeTaskEffectOwners(context: EffectPlugin.Context, session: JoinedSession): Effect.Effect<NativeTaskEffectOwners, never, Scope.Scope> {
@@ -42,8 +54,9 @@ export function acquireNativeTaskEffectOwners(context: EffectPlugin.Context, ses
     const permission = yield* acquireEffectPermissionApi(context.permission)
     // Registered BEFORE the guard: transforms run in registration order, so the guard wraps it too.
     const readonly = yield* acquireReadonlyBroker({ tool: context.tool }, permission)
+    const member = yield* acquireTeamMemberOwner({ tool: context.tool })
     const guard = yield* acquireOwnedChildToolGuard({ tool: context.tool, permission: context.permission })
-    return { session, metadataSource, permission, guard, readonly }
+    return { session, metadataSource, permission, guard, readonly, member }
   })
 }
 
@@ -81,15 +94,28 @@ export function nativeTaskStateDir(projectDirectory: string, parentSessionID: st
 }
 
 /** Unnamespaced actual catalog entries a Native child may be granted. Namespaced CodeMode tools,
- * raw subagent/execute, this component's own public targets and the dedicated read-only broker
- * (bound only through its `curated-readonly-broker` slot) are never catalog grants. */
+ * raw subagent/execute, this component's own public targets, the dedicated read-only broker
+ * (bound only through its `curated-readonly-broker` slot) and the dedicated team member send
+ * (bound only through its `member-live-bindings` slot) are never catalog grants. */
 export function childCatalog(actual: readonly ListedTool[]): ListedTool[] {
-  return actual.filter(tool => tool.options?.namespace === undefined && !["subagent", "execute", READONLY_BROKER_TOOL_NAME, ...PUBLIC_TOOLS].includes(tool.name))
+  return actual.filter(tool => tool.options?.namespace === undefined && !["subagent", "execute", READONLY_BROKER_TOOL_NAME, TEAM_MEMBER_SEND_TOOL_NAME, ...PUBLIC_TOOLS].includes(tool.name))
+}
+
+type ModelContext = { readonly sessionID: string; readonly tools: Record<string, unknown> }
+type BoundOwner = { readonly hostID: string; isBound(sessionID: string): boolean }
+
+function hideUnbound(context: ModelContext, owner: BoundOwner): void {
+  if (!owner.isBound(context.sessionID)) delete context.tools[owner.hostID]
 }
 
 /** Parents and non-curated children never see the broker; a bound curated child keeps it. */
-export function hideUnboundReadonlyBroker(context: { readonly sessionID: string; readonly tools: Record<string, unknown> }, owner: Pick<ReadonlyBrokerOwner, "hostID" | "isBound">): void {
-  if (!owner.isBound(context.sessionID)) delete context.tools[owner.hostID]
+export function hideUnboundReadonlyBroker(context: ModelContext, owner: Pick<ReadonlyBrokerOwner, "hostID" | "isBound">): void {
+  hideUnbound(context, owner)
+}
+
+/** Parents and non-member sessions never see the member send; a bound in-process member keeps it. */
+export function hideUnboundTeamMemberSend(context: ModelContext, owner: Pick<TeamMemberOwner, "hostID" | "isBound">): void {
+  hideUnbound(context, owner)
 }
 
 export async function registerNativeTaskComponent(control: PromisePlugin.Context, owners: NativeTaskEffectOwners): Promise<() => Promise<void>> {
@@ -121,6 +147,10 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     const brokerVisibility = await control.session.hook("context", context => hideUnboundReadonlyBroker(context, owners.readonly))
     closers.push(() => brokerVisibility.dispose())
     current()
+    // The member send is exposed to a model request only in a session with a live bound member producer.
+    const memberVisibility = await control.session.hook("context", context => hideUnboundTeamMemberSend(context, owners.member))
+    closers.push(() => memberVisibility.dispose())
+    current()
     const routable = [...PUBLIC_TOOLS, ...initial.map(tool => tool.id)]
     const registry = createToolRegistry([], {})
     const kernel = createToolKernel({ registry, scopes, pipeline: createPolicyPipeline(), permission: owners.permission })
@@ -139,9 +169,11 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
         return { nativeTools: childStructuralToolNames(CUSTOM_CANDIDATES).map(name => ({ name })), catalog }
       } },
       childToolGuard: owners.guard,
-      // Only the read-only broker producer is installed. Kernel/member/network requirements stay
-      // unbound, so a selection needing one is refused by the runner, never silently widened.
-      childGuardBinding: createNativeChildGuardBinding({ assertGeneration, readonly: owners.readonly }),
+      // Only the read-only broker and the member task_send producers are installed. Kernel/network
+      // requirements and other member slots stay unbound, so a selection needing one is refused by
+      // the runner, never silently widened.
+      childGuardBinding: createNativeChildGuardBinding({ assertGeneration, readonly: owners.readonly,
+        member: { owner: owners.member, teamConfigFor: lead => nativeTeamConfig(directory, lead, prepared.config) } }),
     })
     closers.push(() => service.close())
     const bridge = createNativeTaskBridge({ tool: control.tool, prepared, async rollbackAcquisition() { await service.close() }, async acquire(targets) {

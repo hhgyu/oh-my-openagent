@@ -10,6 +10,7 @@ import {
   type ManagedStartSpec,
   type RunnerOutcome,
 } from "@oh-my-opencode/senpi-task"
+import { createTeamService as createSharedTeamService } from "@oh-my-opencode/senpi-task/team-operations"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { composeTaskEngine } from "./engine"
@@ -73,7 +74,17 @@ function senpiAdapterHarness() {
     cwd,
     agentNames: new Set(Object.keys(engine.agents)),
   })
-  return { service, processStarts, inProcessStarts }
+  const inProcessService = createSharedTeamService({
+    manager: engine.manager,
+    destruction: engine.lifecycle,
+    leadSessionId: () => "lead-session",
+    memberLaunch: () => ({ kind: "in-process" }),
+    settings: engine.settings,
+    omoConfig,
+    cwd,
+    agentNames: new Set(Object.keys(engine.agents)),
+  })
+  return { service, inProcessService, processStarts, inProcessStarts }
 }
 
 describe("createTeamService Senpi adapter member launch", () => {
@@ -105,5 +116,28 @@ describe("createTeamService Senpi adapter member launch", () => {
     } finally {
       process.argv = originalArgv
     }
+  })
+
+  test("#given an in-process member launch #when createTeam runs #then the member starts in-process with its task_send and no extension or member env", async () => {
+    // given
+    const { inProcessService, processStarts, inProcessStarts } = senpiAdapterHarness()
+
+    // when
+    const created = await inProcessService.createTeam({
+      inlineSpec: {
+        name: "launch-spec",
+        members: [{ name: "beta", kind: "category", category: "quick", prompt: "work" }],
+      },
+    })
+
+    // then
+    expect(processStarts).toEqual([])
+    expect(inProcessStarts).toHaveLength(1)
+    const spec = inProcessStarts[0]
+    expect(spec?.extensions).toBeUndefined()
+    expect(spec?.memberEnv).toBeUndefined()
+    expect(spec?.memberScopedTools?.map((tool) => tool.name)).toEqual(["task_send"])
+    expect(spec?.memberScopedToolNames).toEqual(["task_send"])
+    expect(spec?.taskId).toBe(created.memberTaskIds.beta)
   })
 })

@@ -46,13 +46,20 @@ function assertCanonicalTeamRunId(teamRunId: string): void {
 // inherited extensions, and receives its member identity through `memberEnv`.
 type ProcessMemberLaunch = TeamMemberExtensionConfig & { readonly kind: "process" }
 
-/** How team members are started, discriminated by `kind`. */
-export type TeamMemberLaunch = ProcessMemberLaunch
+// A member started inside the host process: the start carries the member's task_send as a
+// member-scoped tool for the host to bind, with no member extension and no member environment.
+type InProcessMemberLaunch = { readonly kind: "in-process" }
 
-function memberExtensionFor(launch: TeamMemberLaunch): TeamMemberExtensionConfig {
+/** How team members are started, discriminated by `kind`. */
+export type TeamMemberLaunch = ProcessMemberLaunch | InProcessMemberLaunch
+
+function memberLaunchDeps(launch: TeamMemberLaunch): { readonly memberExtension: TeamMemberExtensionConfig } | { readonly memberMode: "in-process" } {
+  if (launch.kind === "in-process") return { memberMode: "in-process" }
   return {
-    entryPath: launch.entryPath,
-    ...(launch.inheritedExtensions !== undefined ? { inheritedExtensions: launch.inheritedExtensions } : {}),
+    memberExtension: {
+      entryPath: launch.entryPath,
+      ...(launch.inheritedExtensions !== undefined ? { inheritedExtensions: launch.inheritedExtensions } : {}),
+    },
   }
 }
 
@@ -155,7 +162,7 @@ export function createTeamService(deps: TeamServiceDeps): TeamToolsService {
         rootSessionId: ancestry?.rootSessionId ?? leadSessionId,
         spawnDepth: (ancestry?.depth ?? 0) + 1,
         ...(deps.now !== undefined ? { now: deps.now } : {}),
-        memberExtension: memberExtensionFor(deps.memberLaunch()),
+        ...memberLaunchDeps(deps.memberLaunch()),
       })
     },
     deleteTeam: async (input) => {

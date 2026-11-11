@@ -87,7 +87,9 @@ export interface NativeOwnedTaskRuntimeOptions {
   /** Trusted unregistered component injection. Both ports are required together;
    * bindings must come from original approved live producers, never catalog DATA. */
   readonly childToolGuard?: OwnedChildToolGuard
-  readonly childGuardBinding?: (spec: ManagedStartSpec, prepared: Awaited<ReturnType<NonNullable<NativeOwnedTaskRuntimeOptions["authorizePlannedStart"]>>>) => {
+  readonly childGuardBinding?: (spec: ManagedStartSpec, prepared: Awaited<ReturnType<NonNullable<NativeOwnedTaskRuntimeOptions["authorizePlannedStart"]>>>,
+    /** Team identity of the ORIGINAL approved ManagerStartSpec; absent on recovery. */
+    origin?: { readonly team?: { readonly runId: string; readonly memberName: string } }) => {
     readonly coverage?: ChildGuardBinding["coverage"]
     assertCurrent(): void
     bind(child: ChildHandle, assertBackendCurrent: () => void): ChildGuardBinding
@@ -97,6 +99,7 @@ export interface NativeOwnedTaskRuntimeOptions {
    * any guarded recovery; without a current call it must throw, so autonomous recovery refuses. */
   readonly authorizeRecovery?: (spec: ManagedStartSpec) => Promise<RecoveryAuthorization>
 }
+type ApprovedTeam = { readonly runId: string; readonly memberName: string }
 const failedInitialization = new WeakMap<object, () => Promise<void>>()
 /** Retained unpublished factory resources remain owned and retryable. */
 export function retainedNativeTaskInitializationCleanup(error: unknown): (() => Promise<void>) | undefined {
@@ -109,7 +112,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
   const startAuthorities = new WeakMap<ManagerStartSpec, HostStartAuthority>()
   type Admission = NonNullable<ManagerStartSpec["admission"]>
   type Planned = Awaited<ReturnType<NonNullable<NativeOwnedTaskRuntimeOptions["authorizePlannedStart"]>>>
-  const plannedGrants = new WeakMap<Admission, { authority: HostStartAuthority; parent: VerifiedParentBinding; prepared: Planned; spec: ManagerStartSpec; plan: Parameters<NonNullable<NativeOwnedTaskRuntimeOptions["authorizePlannedStart"]>>[1]; policyBasis: string; footprint: string; kernelTools: ManagerStartSpec["kernelTools"]; members: ManagerStartSpec["memberScopedTools"]; guardApproval?: ChildGuardApproval; assertLifetime(): void }>()
+  const plannedGrants = new WeakMap<Admission, { authority: HostStartAuthority; parent: VerifiedParentBinding; prepared: Planned; spec: ManagerStartSpec; plan: Parameters<NonNullable<NativeOwnedTaskRuntimeOptions["authorizePlannedStart"]>>[1]; policyBasis: string; footprint: string; kernelTools: ManagerStartSpec["kernelTools"]; members: ManagerStartSpec["memberScopedTools"]; team?: ApprovedTeam; guardApproval?: ChildGuardApproval; assertLifetime(): void }>()
   const grantFootprint = (value: { parent: string; root: string; depth: number; instructions?: string; agentType?: string; allow?: readonly string[]; deny?: readonly string[]; includeTaskTools: boolean }) => JSON.stringify(value)
   const acceptedStarts = new Map<string, { authority: HostStartAuthority; epoch: number }>()
   const closedControls = new Map<string, { identity: string; revision: number } & NotificationClosedSource>()
@@ -400,9 +403,9 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
   const freshRecoveries = options.childToolGuard && createFreshRecoveryApprovals({ guard: options.childToolGuard, stateDir: options.stateDir,
     ...(options.authorizeRecovery && { authorize: options.authorizeRecovery }), capture: () => options.captureStartAuthority() })
   /** Guarded child bindings from ONE original producer: planned admission or fresh recovery. */
-  function guardFor(spec: ManagedStartSpec, approval: ChildGuardApproval, prepared: Planned, assertLifetime: () => void, assertStageAdmission?: () => void) {
+  function guardFor(spec: ManagedStartSpec, approval: ChildGuardApproval, prepared: Planned, assertLifetime: () => void, assertStageAdmission?: () => void, team?: ApprovedTeam) {
     if (!options.childGuardBinding) throw Error("Child tool guard requires original planned authorization and live binding producer")
-    const producer = options.childGuardBinding(spec, prepared), footprint = JSON.stringify(producer.coverage)
+    const producer = options.childGuardBinding(spec, prepared, team ? { team } : {}), footprint = JSON.stringify(producer.coverage)
     const assertProducer = () => { assertLifetime(); producer.assertCurrent(); if (JSON.stringify(producer.coverage) !== footprint) throw Error("Original child binding targets changed") }
     assertProducer()
     return { approval, selection: prepared.selection, coverage: producer.coverage, buildAgentID: prepared.buildAgentID, assertLifetime: assertProducer,
@@ -417,7 +420,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       const admission = spec.admission, grant = admission && plannedGrants.get(admission)
       if (!admission || !grant?.guardApproval || admission.hostAuthority !== grant.authority) throw Error("Child stage has no original approved guard admission")
       grant.assertLifetime()
-      return guardFor(spec, grant.guardApproval, grant.prepared, () => grant.assertLifetime())
+      return guardFor(spec, grant.guardApproval, grant.prepared, () => grant.assertLifetime(), undefined, grant.team)
     } } }),
     async parentForSpec(spec, recovery) {
       if (recovery) {
@@ -658,6 +661,9 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         depth: spec.depth, instructions: spec.instructions ?? plan.instructions, agentType: spec.subagent_type ?? plan.agentType,
         allow: plan.toolAllowlist, deny: plan.toolDenylist, includeTaskTools: admission.runRef.kind !== "dag" })
       const kernelTools = spec.kernelTools, members = spec.memberScopedTools
+      // Team identity is snapshotted from the ORIGINAL approved spec before any hook work runs.
+      const team: ApprovedTeam | undefined = spec.team_role === "member" && spec.team_run_id && spec.team_member_name
+        ? Object.freeze({ runId: spec.team_run_id, memberName: spec.team_member_name }) : undefined
       const policyBasis = nativePolicyBasis(spec, plan)
       // Register ORIGINAL queued hook work before its producer can begin. This
       // nests under the original service/task operation, not its report waiter.
@@ -678,7 +684,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
           if (spec.admission !== admission || admission.hostAuthority !== authority || kernelTools !== spec.kernelTools || members !== spec.memberScopedTools || policyBasis !== nativePolicyBasis(spec, plan)) throw Error("Original approved child lifetime changed")
         }
         const guardApproval = options.childToolGuard?.approve(admission, { selection: prepared.selection, buildAgentID: prepared.buildAgentID, assertCurrent: assertLifetime })
-        plannedGrants.set(admission, { authority, parent, prepared, spec, plan, policyBasis, footprint, kernelTools, members, assertLifetime, ...(guardApproval && { guardApproval }) })
+        plannedGrants.set(admission, { authority, parent, prepared, spec, plan, policyBasis, footprint, kernelTools, members, ...(team && { team }), assertLifetime, ...(guardApproval && { guardApproval }) })
       })
       return bindings.track(parent, original)
     } }),

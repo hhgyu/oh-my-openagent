@@ -5,8 +5,10 @@ import type { TeamSpec } from "@oh-my-opencode/team-core/types"
 import type { ManagerStartSpec, PlanResolutionError, StartResult } from "../manager"
 import { resolveInheritedExtensionList } from "../runners/rpc/parent-extensions"
 import type { ResolvedModelRecord } from "../state"
+import { createMemberTaskSendTool } from "./member-extension/tools"
 import { assembleMemberExtensions } from "./member-extensions"
 import { projectMemberStatus, type RuntimeMemberStatus } from "./member-projection"
+import type { TeamCoreConfig } from "./runtime-config"
 import {
   SenpiTeamRuntimeError,
   type SpawnMemberExtensionConfig,
@@ -33,6 +35,9 @@ export type SpawnMembersInput = {
   readonly deadlineAt: number
   readonly now: () => number
   readonly memberExtension?: SpawnMemberExtensionConfig
+  // Present when members run inside the host process: each start carries the member's task_send as a
+  // member-scoped tool instead of the member extension and member environment.
+  readonly inProcess?: { readonly teamConfig: TeamCoreConfig }
 }
 
 export type SpawnMembersResult = {
@@ -100,7 +105,7 @@ async function spawnOneMember(input: SpawnMembersInput, member: TeamMember): Pro
   if (member.worktreePath !== undefined) await mkdir(member.worktreePath, { recursive: true })
 
   const launch = input.memberExtension
-  const extensions = launch === undefined
+  const extensions = launch === undefined || input.inProcess !== undefined
     ? undefined
     : assembleMemberExtensions(launch.entryPath, await resolveInheritedExtensionList(launch.inheritedExtensions))
   const result = await input.manager.start(buildMemberStartSpec(input, member, extensions))
@@ -139,6 +144,7 @@ function buildMemberStartSpec(
   member: TeamMember,
   extensions: readonly string[] | undefined,
 ): ManagerStartSpec {
+  if (input.inProcess !== undefined) return buildInProcessMemberStartSpec(input, member, input.inProcess.teamConfig)
   const launch = input.memberExtension
   return {
     prompt: buildMemberPrompt(input.spec, member),
@@ -162,6 +168,41 @@ function buildMemberStartSpec(
         SENPI_TASK_TEAM_CONFIG: launch.teamConfig,
       },
     } : {}),
+  }
+}
+
+// The host binds an in-process member's task_send through its own live producer, keyed on the team
+// identity below; the tool here is the member's original definition, not a launch capability.
+function buildInProcessMemberStartSpec(
+  input: SpawnMembersInput,
+  member: TeamMember,
+  teamConfig: TeamCoreConfig,
+): ManagerStartSpec {
+  const name = memberTaskName(input.teamRunId, member.name)
+  return {
+    prompt: buildMemberPrompt(input.spec, member),
+    parent_session_id: input.leadSessionId,
+    root_session_id: input.rootSessionId ?? input.leadSessionId,
+    depth: input.spawnDepth,
+    name,
+    execution_mode: "in-process",
+    run_in_background: true,
+    ...(member.kind === "category" ? { category: member.category } : { subagent_type: member.subagent_type }),
+    ...(member.task_summary !== undefined ? { task_summary: member.task_summary } : {}),
+    team_run_id: input.teamRunId,
+    team_name: input.spec.name,
+    team_member_name: member.name,
+    team_role: "member",
+    ...(member.worktreePath !== undefined ? { cwd: member.worktreePath } : {}),
+    // The task id is assigned by the start itself, so the definition addresses the member task by
+    // name and records no task event; a host that binds its own producer supplies the real task id.
+    memberScopedTools: [createMemberTaskSendTool({
+      teamRunId: input.teamRunId,
+      memberName: member.name,
+      taskId: name,
+      config: teamConfig,
+      members: input.spec.members.map((entry) => entry.name),
+    })],
   }
 }
 
