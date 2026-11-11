@@ -28,14 +28,8 @@ export const LAZY_MEMORY_COMMANDS = {
     argumentHint: "[--auto | --recent N | --conversation <ids> | --from transcript:<path>] [--to <doc>] [focus]",
   },
   search: CORE_MEMORY_COMMANDS.search,
-  facts: {
-    description: "Show facts-extraction queue/backoff state, or manually retry parked batches.",
-    argumentHint: "[retry [--conversation <id>]]",
-  },
-  agreements: {
-    description: "List, add, acknowledge, or drop your standing agreements with the agent.",
-    argumentHint: "[list] | add [--project] <text> | ack <id> | drop <id>",
-  },
+  facts: CORE_MEMORY_COMMANDS.facts,
+  agreements: CORE_MEMORY_COMMANDS.agreements,
 } as const satisfies Record<string, { readonly description: string; readonly argumentHint: string }>
 
 export type LazyMemoryCommandName = keyof typeof LAZY_MEMORY_COMMANDS

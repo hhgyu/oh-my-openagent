@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import type { FactsFailureRecord } from "@oh-my-opencode/memory-core"
+import type { FactsFailureRecord } from "../index"
 
 import { factsParkedCauseSummary } from "./facts-failure-cause"
 import {

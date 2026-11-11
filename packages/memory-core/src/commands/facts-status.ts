@@ -1,0 +1,165 @@
+// Read-only rendering of the facts failure ledger for `/facts`, `/doctor`, and the advisory line.
+//
+// FAIL-CLOSED SURFACING: an unreadable `failures.json` is rendered as CORRUPT, never as zeros.
+// Zeros would tell the user the pipeline is healthy while every launch is actually refused.
+
+import {
+  FactsFailuresCorruptError,
+  FactsFailureStore,
+  factsQueuePaths,
+  type FactsFailureRecord,
+  type MemoryIdentityPaths,
+} from "../index"
+import { isQueueEntryFileName } from "../facts/queue-scan"
+import { readdir } from "../fs/resilient"
+
+import { childFailureCause } from "./failure-detail"
+import { dominantFixFirstCause, parkedRunPath } from "./facts-failure-cause"
+
+/** How many failing conversations the status view lists, newest failure first. */
+const MAX_LISTED_CONVERSATIONS = 5
+const MINUTE_MS = 60_000
+const HOUR_MS = 60 * MINUTE_MS
+
+export interface FactsOverview {
+  readonly pending: number
+  readonly records: readonly FactsFailureRecord[]
+  readonly now: Date
+  /** The identity's facts dir; parked rows resolve their run log path under it. */
+  readonly factsDir?: string
+  /** Present only when the ledger could not be parsed; counts are meaningless then. */
+  readonly corrupt?: string
+}
+
+function parked(state: FactsOverview): readonly FactsFailureRecord[] {
+  return state.records.filter((record) => record.state === "parked")
+}
+
+function backoff(state: FactsOverview): readonly FactsFailureRecord[] {
+  return state.records.filter((record) => record.state === "backoff")
+}
+
+/** Earliest eligibility instant among backoff records, in ms from now (never negative). */
+function nextEligibleMs(state: FactsOverview): number | undefined {
+  const instants = backoff(state)
+    .map((record) => (record.nextEligibleAt === null ? Number.NaN : Date.parse(record.nextEligibleAt)))
+    .filter((value) => Number.isFinite(value))
+  if (instants.length === 0) return undefined
+  return Math.max(0, Math.min(...instants) - state.now.getTime())
+}
+
+function formatWait(deltaMs: number): string {
+  if (deltaMs <= 0) return "now"
+  if (deltaMs < MINUTE_MS) return `${Math.ceil(deltaMs / 1000)}s`
+  if (deltaMs < HOUR_MS) return `${Math.round(deltaMs / MINUTE_MS)}m`
+  return `${Math.round(deltaMs / HOUR_MS)}h`
+}
+
+/** One bounded advisory line, or nothing when the ledger is clean. */
+export function formatFactsAdvisory(state: FactsOverview): string | undefined {
+  if (state.corrupt !== undefined) return "facts: failure ledger unreadable (run /facts for detail)"
+  const parkedCount = parked(state).length
+  const backoffCount = backoff(state).length
+  if (parkedCount === 0 && backoffCount === 0) return undefined
+  const wait = nextEligibleMs(state)
+  const suffix = wait === undefined ? "" : ` (next ${formatWait(wait)})`
+  return `facts: ${parkedCount} parked / ${backoffCount} backoff${suffix}`
+}
+
+/**
+ * Advisory remediation as a plain-words to-do with the one action to take. A transient
+ * cause makes `/facts retry` itself the action; a cause only the user can fix names that
+ * fix (the setting, when the fix is a setting). Cause counts and the run log path ride
+ * along separately via `factsParkedCauseSummary`, never inside the to-do.
+ */
+export function factsRemediationHint(state: FactsOverview): string | undefined {
+  if (state.corrupt !== undefined) {
+    return `facts failure ledger is unreadable (${state.corrupt}); repair or delete failures.json to resume launches`
+  }
+  const parkedRecords = parked(state)
+  if (parkedRecords.length > 0) {
+    const fix = dominantFixFirstCause(parkedRecords)
+    if (fix === undefined) return "Some facts weren't saved yet. Run /facts retry."
+    if (fix.setting !== undefined) {
+      return `Some facts weren't saved yet. Set ${fix.setting}, then run /facts retry.`
+    }
+    return `Some facts weren't saved yet (${fix.label}). Run /facts retry once that is fixed.`
+  }
+  const backoffCount = backoff(state).length
+  if (backoffCount === 0) return undefined
+  const wait = nextEligibleMs(state)
+  return `${backoffCount} facts batch${backoffCount === 1 ? " is" : "es are"} backing off${wait === undefined ? "" : `; next attempt in ${formatWait(wait)}`}`
+}
+
+/** The full read-only `/facts` view. Never enters model context; callers notify + return it. */
+export function formatFactsStatus(identity: string, state: FactsOverview): string {
+  const lines = [`# Facts pipeline: ${identity}`, "", `queued: ${state.pending} pending`]
+  if (state.corrupt !== undefined) {
+    lines.push(
+      "",
+      `failure ledger is UNREADABLE: ${state.corrupt}`,
+      "launches are blocked until failures.json is repaired or removed (fail-closed by design)",
+    )
+    return lines.join("\n")
+  }
+
+  const parkedRecords = parked(state)
+  const backoffRecords = backoff(state)
+  if (parkedRecords.length === 0 && backoffRecords.length === 0) {
+    lines.push("no failing batches")
+    return lines.join("\n")
+  }
+
+  const wait = nextEligibleMs(state)
+  lines.push(
+    `parked: ${parkedRecords.length}`,
+    `backoff: ${backoffRecords.length}${wait === undefined ? "" : ` (next eligible ${formatWait(wait)})`}`,
+    "",
+  )
+  const newestFirst = [...state.records].sort(
+    (left, right) => Date.parse(right.lastFailureAt) - Date.parse(left.lastFailureAt),
+  )
+  for (const record of newestFirst.slice(0, MAX_LISTED_CONVERSATIONS)) {
+    const detail = childFailureCause(record.lastDetail)
+    const runPath = record.state === "parked" ? parkedRunPath([record], state.factsDir) : undefined
+    lines.push(
+      `- ${record.conversationId}: ${record.state} after ${record.streak} (${record.lastReason})${detail === undefined ? "" : ` - ${detail}`}${runPath === undefined ? "" : ` (last run: ${runPath})`}`,
+    )
+  }
+  if (newestFirst.length > MAX_LISTED_CONVERSATIONS) {
+    lines.push(`... and ${newestFirst.length - MAX_LISTED_CONVERSATIONS} more`)
+  }
+  lines.push("", "Unpark: /facts retry [--conversation <id>]")
+  return lines.join("\n")
+}
+
+/** Counts retained queue files with the queue scanner's own rule; its ledger files are state, not batches. */
+async function countPending(queueDir: string): Promise<number> {
+  try {
+    const names = await readdir(queueDir)
+    return names.filter(isQueueEntryFileName).length
+  } catch {
+    return 0
+  }
+}
+
+export interface ReadFactsOverviewInput {
+  readonly identityPaths: MemoryIdentityPaths
+  readonly now: Date
+}
+
+/** Reads the durable ledger + queue depth. A corrupt ledger becomes `corrupt`, not zeros. */
+export async function readFactsOverview(input: ReadFactsOverviewInput): Promise<FactsOverview> {
+  const layout = factsQueuePaths(input.identityPaths)
+  const pending = await countPending(layout.queueDir)
+  const store = new FactsFailureStore({ identityPaths: input.identityPaths, now: () => input.now })
+  try {
+    const failures = await store.readFailures()
+    return { pending, records: failures.entries, now: input.now, factsDir: input.identityPaths.facts }
+  } catch (error) {
+    const corrupt = error instanceof FactsFailuresCorruptError
+      ? error.message
+      : `failure ledger unreadable: ${error instanceof Error ? error.message : String(error)}`
+    return { pending, records: [], now: input.now, factsDir: input.identityPaths.facts, corrupt }
+  }
+}

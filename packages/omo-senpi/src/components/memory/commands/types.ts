@@ -12,7 +12,6 @@ import type { PeopleAskRunner } from "./people-ask"
 export {
   requireIdentity,
   respond,
-  sessionIdOf,
   type MemoryCommandContext,
   type MemoryCommandHandler,
   type MemoryCommandIdentity,

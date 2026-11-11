@@ -34,6 +34,14 @@ export const CORE_MEMORY_COMMANDS = {
     description: "Search past session transcripts and show scored, numbered results.",
     argumentHint: "<query> [--include-hidden]",
   },
+  facts: {
+    description: "Show facts-extraction queue/backoff state, or manually retry parked batches.",
+    argumentHint: "[retry [--conversation <id>]]",
+  },
+  agreements: {
+    description: "List, add, acknowledge, or drop your standing agreements with the agent.",
+    argumentHint: "[list] | add [--project] <text> | ack <id> | drop <id>",
+  },
 } as const satisfies Record<string, { readonly description: string; readonly argumentHint: string }>
 
 export type CoreMemoryCommandName = keyof typeof CORE_MEMORY_COMMANDS

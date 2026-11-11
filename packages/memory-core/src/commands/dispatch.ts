@@ -1,5 +1,7 @@
 // One entry point per host-neutral command name, so a harness registers the whole table in a loop.
 
+import { runAgreementsCommand } from "./agreements"
+import { runFactsCommand } from "./facts"
 import { runInitCommand } from "./init"
 import { runMemfsCommand } from "./memfs"
 import { runMemoryViewCommand } from "./memory"
@@ -20,6 +22,8 @@ const RUNNERS: Readonly<Record<CoreMemoryCommandName, CoreCommandRunner>> = {
   recompile: runRecompileCommand,
   "memory-repository": runMemoryRepositoryCommand,
   search: runSearchCommand,
+  facts: runFactsCommand,
+  agreements: runAgreementsCommand,
 }
 
 export function runCoreMemoryCommand(

@@ -7,6 +7,11 @@ import { parseQueueEntry, queueConversationHash, type FactsQueueEntry } from "./
 
 const LEDGER_FILES = new Set(["consumed.json", "failures.json", "claims.json"])
 
+/** A queue directory name that holds one batch; the ledger files beside them are state, not batches. */
+export function isQueueEntryFileName(name: string): boolean {
+  return name.endsWith(".json") && !LEDGER_FILES.has(name)
+}
+
 export type ScannedQueueEntry = FactsQueueEntry & { readonly filePath: string }
 
 export async function scanQueueEntries(dir: string, conversationId?: string): Promise<ScannedQueueEntry[]> {
@@ -22,7 +27,7 @@ export async function scanQueueEntries(dir: string, conversationId?: string): Pr
   const conversationPart = conversationId === undefined ? undefined : `-${queueConversationHash(conversationId)}-`
   const entries: ScannedQueueEntry[] = []
   for (const name of names.sort()) {
-    if (!name.endsWith(".json") || LEDGER_FILES.has(name)) continue
+    if (!isQueueEntryFileName(name)) continue
     if (conversationPart !== undefined && !name.includes(conversationPart)) continue
     const filePath = join(dir, name)
     const raw = await readFile(filePath, "utf8").catch(() => undefined)

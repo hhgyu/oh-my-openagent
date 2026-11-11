@@ -1,4 +1,5 @@
 export { loadFactsPersona } from "./assets/assets"
+export { readFactsPeoplePayload } from "./people-payload"
 export {
   FactsQueue,
   type FactsEnqueueRequest,
