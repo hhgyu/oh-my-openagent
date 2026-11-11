@@ -73,6 +73,10 @@
       "types": "./src/tools/task/operations.ts",
       "import": "./src/tools/task/operations.ts"
     },
+    "./team-operations": {
+      "types": "./src/tools/team/operations.ts",
+      "import": "./src/tools/team/operations.ts"
+    },
     "./task-planner": {
       "types": "./src/planning/child-planner.ts",
       "import": "./src/planning/child-planner.ts"

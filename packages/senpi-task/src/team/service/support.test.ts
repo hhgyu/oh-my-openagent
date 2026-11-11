@@ -3,10 +3,10 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { baseSpec, cleanupProjects, makeManager } from "../../../../senpi-task/src/manager/__fixtures__/manager-fakes"
-import { resolveTeamRuntimeDirs } from "@oh-my-opencode/senpi-task"
+import { baseSpec, cleanupProjects, makeManager } from "../../manager/__fixtures__/manager-fakes"
+import { resolveTeamRuntimeDirs } from "../index"
 
-import { makeShutdownMessenger } from "./team-service-support"
+import { makeShutdownMessenger } from "./support"
 
 afterEach(cleanupProjects)
 

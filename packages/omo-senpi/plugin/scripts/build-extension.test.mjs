@@ -248,6 +248,16 @@ describe("checkExtensionCurrent", () => {
       .toBe(true)
   })
 
+  test("#given the split extension build #when metafile inputs are inspected #then the shared team service lives only in the lazy task sidecar", async () => {
+    // given / when
+    const { mainInputs, taskInputs } = await sharedOutputs()
+    const suffix = "packages/senpi-task/src/team/service/team-service.ts"
+
+    // then
+    expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix))).toBe(false)
+    expect(taskInputs.some((input) => toPortableBuildPath(input).endsWith(suffix))).toBe(true)
+  })
+
   test("#given the split extension build #when metafile inputs are inspected #then the computer-use implementation lives only in its lazy entry", async () => {
     // given / when
     const { mainInputs, computerUseInputs } = await sharedOutputs()

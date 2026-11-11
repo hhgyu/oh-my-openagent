@@ -1,5 +1,4 @@
 import {
-  createLeadPoller,
   readMemberTaskMap,
   type ActiveTeamSummary,
   type DefaultTeamRunIdResolution,
@@ -11,6 +10,7 @@ import {
   type PersistedTaskEvent,
   type TeamCoreConfig,
 } from "@oh-my-opencode/senpi-task"
+import { createLeadPoller } from "@oh-my-opencode/senpi-task/team-operations"
 
 import { IdleInjectionRetiredError, type IdleInjectionCoordinator } from "../../extension/idle-injection-coordinator"
 import type { ComponentLogger, SenpiExtensionAPI } from "../../extension/types"

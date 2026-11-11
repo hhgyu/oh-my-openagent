@@ -116,17 +116,13 @@ export type {
 } from "./senpi/explicit-pin"
 export {
   MEMBER_IDENTITY_ENV,
-  SenpiTeamSpecError,
-  TEAM_LEAD_SENTINEL,
   ensureTeamRuntimeDirs,
   isTeamMemberProcess,
-  loadTeamRegistry,
   normalizeSenpiTeamSpec,
   resolveProjectTeamSpecPath,
   resolveTeamMemberInboxDir,
   resolveTeamRuntimeDirs,
   teamStorageBaseDir,
-  validateSenpiTeamMembers,
 } from "./team"
 export type {
   LoadTeamRegistryInput,
@@ -580,18 +576,15 @@ export type {
 export {
   buildPeerMessageEnvelope,
   buildTeamMessage,
-  createLeadPoller,
   createIncrementalSessionMarkerIndex,
   DEFAULT_STALE_RESERVATION_TTL_MS,
   MEMBER_EXTENSION_BUNDLE_NAME,
   parseMemberExtensionEnv,
   reclaimStaleTeamReservations,
-  reconcileTeamMailboxOnSessionStart,
   resolveMemberExtensionEntryPath,
   createLeadDeliveryJournal,
   createTeamMemberRespawnLaunchResolver,
   TeamMemberRespawnLaunchError,
-  sendTeamMessage,
 } from "./team"
 export type {
   BuildTeamMessageOptions,
@@ -614,22 +607,14 @@ export type {
   SendTeamMessageResult,
 } from "./team"
 export {
-  approveShutdown,
   canClaimTeamTask,
-  claimTeamTask,
-  createTeamTask,
   DELETABLE_MEMBER_STATUSES,
-  getTeamTask,
   isMemberDeletable,
-  listTeamTasks,
-  rejectShutdown,
-  requestShutdown,
   SenpiShutdownError,
   TeamTaskAlreadyClaimedError,
   TeamTaskBlockedByError,
   TeamTaskCrossOwnerUpdateError,
   TeamTaskInvalidTransitionError,
-  updateTeamTaskStatus,
 } from "./team"
 export type {
   ApproveShutdownDeps,
@@ -644,12 +629,9 @@ export type {
   TeamTasklistContext,
 } from "./team"
 export {
-  createTeam,
-  deleteTeam,
   isOwnedTeamMemberTask,
   parseTeamMemberTaskIdentity,
   readMemberTaskMap,
-  refreshTeamMemberStatuses,
   SenpiTeamRuntimeError,
   toTeamCoreConfig,
 } from "./team"
