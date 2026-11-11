@@ -25,6 +25,11 @@ import { acquireReadonlyBroker, type ReadonlyBrokerOwner } from "./live-readonly
 import { createNativeTaskService } from "./service"
 import { READONLY_BROKER_TOOL_NAME } from "../../tools/curated-readonly"
 import { TEAM_MEMBER_SEND_TOOL_NAME } from "../../tools/team-member-send"
+import { NATIVE_TASK_TOOL_NAMES } from "../../tools/native-task"
+import { NATIVE_TEAM_TOOL_NAMES } from "../../tools/native-team-codecs"
+import type { NativeTeamTargets } from "../../tools/native-team"
+import type { NativeTeamComponent, NativeTeamHost } from "../native-team/component"
+import type { NativeTaskTargetPermissionAssociation } from "./service"
 
 type MetadataSource = Parameters<typeof createNativeTaskService>[1]["metadataSource"]
 type JoinedSession = Effect.Success<ReturnType<typeof acquireEffectSessionBackendApi>>
@@ -42,10 +47,16 @@ export interface NativeTaskEffectOwners {
   readonly member: TeamMemberOwner
 }
 
+/** The task settings of a lead's per-lead team service: its team storage lives in the lead's own
+ * Native task state directory. */
+export function nativeTeamSettings(projectDirectory: string, leadSessionID: string, config: OmoConfig) {
+  return { ...OmoTaskSettingsSchema.parse(config.task ?? {}), state_dir: nativeTaskStateDir(projectDirectory, leadSessionID) }
+}
+
 /** The team-core config of a lead's team storage: the same root its per-lead team service writes. */
 function nativeTeamConfig(projectDirectory: string, leadSessionID: string, config: OmoConfig) {
-  const settings = OmoTaskSettingsSchema.parse(config.task ?? {})
-  return toTeamCoreConfig(settings, teamStorageBaseDir({ project_dir: projectDirectory, task: { state_dir: nativeTaskStateDir(projectDirectory, leadSessionID) } }))
+  const settings = nativeTeamSettings(projectDirectory, leadSessionID, config)
+  return toTeamCoreConfig(settings, teamStorageBaseDir({ project_dir: projectDirectory, task: { state_dir: settings.state_dir } }))
 }
 
 export function acquireNativeTaskEffectOwners(context: EffectPlugin.Context, session: JoinedSession): Effect.Effect<NativeTaskEffectOwners, never, Scope.Scope> {
@@ -64,7 +75,8 @@ export function acquireNativeTaskEffectOwners(context: EffectPlugin.Context, ses
  * algorithm against the actual catalog; absent names stay unavailable, never invented. */
 const CUSTOM_CANDIDATES = CHILD_HOST_TOOLS.filter(tool => tool.sessionBuiltin !== true).map(tool => tool.name)
 
-const PUBLIC_TOOLS = ["task", "task_output", "task_send", "task_cancel"]
+/** The public Native targets: the 4 task tools and the 6 lead team tools. Never child catalog grants. */
+const PUBLIC_TOOLS: readonly string[] = [...NATIVE_TASK_TOOL_NAMES, ...NATIVE_TEAM_TOOL_NAMES]
 
 const TASK_RECORD_FILE = /^(st_[0-9a-f]{8})\.json$/
 
@@ -118,7 +130,12 @@ export function hideUnboundTeamMemberSend(context: ModelContext, owner: Pick<Tea
   hideUnbound(context, owner)
 }
 
-export async function registerNativeTaskComponent(control: PromisePlugin.Context, owners: NativeTaskEffectOwners): Promise<() => Promise<void>> {
+export interface NativeTaskComponentOptions {
+  /** The lead team component, assembled over this component's SAME registry, kernel and service. */
+  readonly team?: (host: NativeTeamHost) => NativeTeamComponent
+}
+
+export async function registerNativeTaskComponent(control: PromisePlugin.Context, owners: NativeTaskEffectOwners, options: NativeTaskComponentOptions = {}): Promise<() => Promise<void>> {
   const directory = control.location.directory
   const lifetime = new AbortController(), scopes = createSessionScopes()
   let accepting = true, generation = 1
@@ -176,11 +193,28 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
         member: { owner: owners.member, teamConfigFor: lead => nativeTeamConfig(directory, lead, prepared.config) } }),
     })
     closers.push(() => service.close())
+    // The team targets join the task targets in ONE registry generation; the team bridge waits for it.
+    const teamTargets = Promise.withResolvers<NativeTeamTargets | undefined>()
+    const teamRegistered = Promise.withResolvers<readonly NativeTaskTargetPermissionAssociation[]>()
+    void teamRegistered.promise.catch(() => {})
+    const team = options.team?.({ tool: control.tool, directory, prepared, registry, kernel, service, assertCurrent: current,
+      register(targets) { teamTargets.resolve(targets); return teamRegistered.promise } })
+    if (!team) teamTargets.resolve(undefined)
+    const closeTeam = async () => { teamRegistered.reject(Error("Native task component closed")); await team?.close() }
+    closers.push(closeTeam)
     const bridge = createNativeTaskBridge({ tool: control.tool, prepared, async rollbackAcquisition() { await service.close() }, async acquire(targets) {
       current()
-      const targetPermissions = targets.tools.map(tool => ({ tool, permission: service.targetPermission(tool) }))
-      registry.replace(targets.tools, targets.codecs, targets.normalizers, targetPermissions)
+      let teamPermissions: NativeTaskTargetPermissionAssociation[] = [], targetPermissions: NativeTaskTargetPermissionAssociation[]
+      try {
+        const teamDefinitions = await teamTargets.promise
+        current()
+        targetPermissions = targets.tools.map(tool => ({ tool, permission: service.targetPermission(tool) }))
+        teamPermissions = teamDefinitions?.tools.map(tool => ({ tool, permission: service.targetPermission(tool) })) ?? []
+        registry.replace([...targets.tools, ...teamDefinitions?.tools ?? []], [...targets.codecs, ...teamDefinitions?.codecs ?? []], targets.normalizers, [...targetPermissions, ...teamPermissions])
+      } catch (error) { teamRegistered.reject(error); throw error }
+      teamRegistered.resolve(teamPermissions)
       return { registry, kernel, service, targetPermissions,
+        ...(team && { teamRouting: (caller: Parameters<NativeTeamComponent["teamRouting"]>[0], call: Parameters<NativeTeamComponent["teamRouting"]>[1]) => team.teamRouting(caller, call) }),
         async context(caller, signal) {
           const actual = await owners.session.get({ sessionID: caller.sessionID }, { signal })
           signal.throwIfAborted(); current()
@@ -193,8 +227,9 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     } })
     // Same order the actual public campaign proved: original service operations end first,
     // then the bridge joins public callbacks and disposes its registrations.
-    closers.splice(closers.length - 1, 1, async () => { await service.close(); await bridge.close() })
+    closers.splice(closers.length - 2, 2, async () => { await service.close(); await closeTeam(); await bridge.close() })
     await bridge.ready
+    await team?.ready
   } catch (error) {
     try { await close() } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Native task component setup failed and cleanup is incomplete") }
     throw error

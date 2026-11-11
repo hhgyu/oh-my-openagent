@@ -72,7 +72,10 @@ async function host(dir:string,closers:(()=>Promise<void>|void)[]) {
     async get({sessionID}:{sessionID:string}){calls.push("get");const value=sessions.get(sessionID);if(!value)throw Error("Missing protocol session");if(failChildGet&&sessionID.startsWith("ses_native_")){failChildGet=false;throw Error("controlled child get failure")};return value},
     async list(){return {data:[...sessions.values()],cursor:{}}},
     async hook(name:string,callback:(value:unknown)=>unknown){const list=hooks.get(name)??new Set();hooks.set(name,list);list.add(callback);return {dispose(){if(name==="context"){calls.push("policy-dispose-attempt");if(failPolicyDispose){failPolicyDispose=false;calls.push("policy-dispose-failed");throw Error("controlled policy dispose failed before removal")}};list.delete(callback);if(name==="context")calls.push("policy-disposed")}}},
-    async update(input:{sessionID:string}){if(holdObserverUpdate){observerUpdateEntered.resolve();await observerUpdateRelease.promise};emit("session.renamed",input.sessionID)},
+    // Host own-session update replaces permissions/metadata as sent, like the real backend does.
+    async update(input:{sessionID:string;permissions?:readonly unknown[];metadata?:Record<string,unknown>}){if(holdObserverUpdate){observerUpdateEntered.resolve();await observerUpdateRelease.promise}
+      const session=sessions.get(input.sessionID);if(session&&typeof session==="object"){if(input.permissions)Object.assign(session,{permissions:structuredClone([...input.permissions])});if(input.metadata)Object.assign(session,{metadata:structuredClone({...input.metadata})})}
+      emit("session.renamed",input.sessionID)},
     // Controlled protocol port only: this DTO and its events are unit data, never live SDK evidence.
     async synthetic(input: UnitSyntheticInput, options?: { signal?: AbortSignal }) {
       calls.push("synthetic")
@@ -1151,7 +1154,7 @@ test("operation issues a private fourth owner while preserving its original thre
 })
 
 /** Actual service/kernel/guard/permission implementations over explicitly controlled UNIT domains. */
-export async function withNativeTargetPermissionService(run:(value:{service:Service;registry:ReturnType<typeof createToolRegistry>;kernel:ReturnType<typeof createToolKernel>;f:Awaited<ReturnType<typeof host>>;requests:PermissionRequest[];targets:NativeTaskTargets;options:Parameters<typeof createNativeTaskService>[1];setFence(callback:()=>void):void;retire():void})=>Promise<void>,config:{denySubagent?:boolean;childGuardBinding?:Parameters<typeof createNativeTaskService>[1]["childGuardBinding"]}={}){
+export async function withNativeTargetPermissionService(run:(value:{service:Service;registry:ReturnType<typeof createToolRegistry>;kernel:ReturnType<typeof createToolKernel>;f:Awaited<ReturnType<typeof host>>;requests:PermissionRequest[];targets:NativeTaskTargets;options:Parameters<typeof createNativeTaskService>[1];setFence(callback:()=>void):void;retire():void})=>Promise<void>,config:{denySubagent?:boolean;childGuardBinding?:Parameters<typeof createNativeTaskService>[1]["childGuardBinding"];policyTools?:readonly string[]}={}){
  await fixture(async f=>{
   const scope=Scope.makeUnsafe(),requests:PermissionRequest[]=[]
   const permission=await Effect.runPromise(Effect.provideService(acquireEffectPermissionApi({assert:input=>Effect.suspend(()=>{requests.push(input);return config.denySubagent&&input.action==="subagent"?Effect.fail(new Error("Unit denied subagent")):Effect.void})}),Scope.Scope,scope))
@@ -1159,7 +1162,7 @@ export async function withNativeTargetPermissionService(run:(value:{service:Serv
   let current=true,fence:(()=>void)|undefined
   const registry=createToolRegistry([],{}),kernel=createToolKernel({registry,scopes:f.scopes,pipeline:createPolicyPipeline(),permission})
   const grantPort:NonNullable<Parameters<typeof createNativeTaskService>[1]["hostGrant"]>={permission,assertCurrent(){if(this!==grantPort)throw Error("Original grant receiver lost");fence?.();if(!current)throw Error("Unit owner retired")},async preparationFor(){return{nativeTools:[{name:"read"}],catalog:[{id:"read",name:"read",options:{codemode:false}}]}}}
-  const options:Parameters<typeof createNativeTaskService>[1]={...f.options,callAuthority:kernel.callAuthority,policy:{tools:["task","task_output","read"],authorize(){}},hostGrant:grantPort,
+  const options:Parameters<typeof createNativeTaskService>[1]={...f.options,callAuthority:kernel.callAuthority,policy:{tools:config.policyTools??["task","task_output","read"],authorize(){}},hostGrant:grantPort,
    childToolGuard:guard,childGuardBinding:config.childGuardBinding??function(_spec,prepared){return{assertCurrent(){if(!current)throw Error("Unit producer retired")},bind(child,assertBackendCurrent){return{child,agent:prepared.buildAgentID,assertCurrent:assertBackendCurrent}}}},
   }
   const service=createNativeTaskService(f.ctx,options)
