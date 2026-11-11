@@ -35,7 +35,8 @@ export const NATIVE_DAG_DESCRIPTION = [
   "dependsOn is ordering ONLY - no upstream output is substituted into a downstream prompt, so each prompt must stand alone.",
   "Each node targets EITHER category OR subagent_type, never both; model is an explicit override valid only alongside subagent_type.",
   "start is idempotent per definition key: re-starting the same key with the same graph reuses the run instead of duplicating it.",
-  "On OpenCode 2, nodes start only while a workflow call is in progress: start blocks until the run settles and returns its final snapshot, and wait requires detach=false and blocks the same way. If the call is interrupted, no further node starts until the next blocking workflow call on that run.",
-  "On OpenCode 2 these are not available yet and are refused: a detached start or wait, cancel, cancel_node, retry, send, amend, nodes that name load_skills, and nodes that resolve to process execution mode.",
+  "On OpenCode 2, nodes start only while a workflow call is in progress. start blocks until the run settles and returns its final snapshot; wait with detach=false blocks the same way.",
+  "start with detach=true and wait (detach defaults to true) admit every node that can start now inside the call and return at once. A background run then advances ONLY on your next workflow call: when an admitted node finishes, the session is woken once, and you must call workflow with action=wait and that run_id to admit the next ready nodes or record the result. If a call is interrupted, the same wake applies.",
+  "On OpenCode 2 these are not available yet and are refused: cancel, cancel_node, retry, send, amend, nodes that name load_skills, and nodes that resolve to process execution mode.",
   "snapshot carries each settled node's own output plus outputBytes, and each running node's lastActivityAt.",
 ].join(" ")

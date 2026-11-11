@@ -241,6 +241,7 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     const dagRegistered = Promise.withResolvers<readonly NativeTaskTargetPermissionAssociation[]>()
     void dagRegistered.promise.catch(() => {})
     const dag = options.dag?.({ tool: control.tool, directory, prepared, registry, kernel, service, assertCurrent: current,
+      delivery: { session: owners.session, assertGeneration },
       register(targets) { dagTargets.resolve(targets); return dagRegistered.promise } })
     if (!dag) dagTargets.resolve(undefined)
     const closeTeam = async () => {

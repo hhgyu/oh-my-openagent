@@ -2,15 +2,19 @@ import type { ToolDomain } from "@opencode/plugin/promise/tool"
 import { OmoTaskSettingsSchema, type OmoConfig } from "@oh-my-opencode/omo-config-core"
 import type { DagNodeSpawnPolicy } from "@oh-my-opencode/senpi-task/dag"
 import { evaluateSpawnPolicy } from "@oh-my-opencode/senpi-task/task-operations"
+import { createTaskRecordStore } from "@oh-my-opencode/senpi-task/manager-kernel"
+import { join } from "node:path"
 import type { createToolKernel } from "../../host/tool-kernel"
 import type { ToolRegistry } from "../../host/tool-registry"
 import { createNativeDagBridge, type NativeDagTargets } from "../../tools/native-dag"
 import type { NativeTaskOperationCall } from "../../tools/native-task"
+import { nativeTaskStateDir } from "../native-task/component"
 import type { NativeTaskTargetPermissionAssociation, createNativeTaskService } from "../native-task/service"
 import { createNativeDagGenerationLease } from "./lease"
 import type { NativeDagExecutionSources } from "./refusals"
 import { createNativeDagRuntime, type NativeDagRuntime } from "./runtime"
 import { nativeDagCallPort } from "./task-port"
+import { createNativeDagWakeOwner, type DagWakeOptions } from "./wake"
 import { runNativeWorkflow } from "./workflow-call"
 
 /** The Native task component's shared owner, handed to the workflow component during its assembly. */
@@ -22,6 +26,8 @@ export interface NativeDagHost {
   readonly kernel: ReturnType<typeof createToolKernel>
   readonly service: ReturnType<typeof createNativeTaskService>
   readonly assertCurrent: () => void
+  /** Trusted ports of the component-owned run wake (S6d). */
+  readonly delivery: Pick<DagWakeOptions, "session" | "assertGeneration">
   /** Hands the workflow target to the shared registry; resolves with its issued permission once the
    * registry owns it together with the task targets. */
   register(targets: NativeDagTargets): Promise<readonly NativeTaskTargetPermissionAssociation[]>
@@ -46,10 +52,25 @@ export function registerNativeDagComponent(host: NativeDagHost): NativeDagCompon
   const settings = OmoTaskSettingsSchema.parse(host.prepared.config.task ?? {}).dag
   const executionMode: NativeDagExecutionSources = { agents: host.prepared.agents, config: host.prepared.config }
   const runtimes = new Map<string, NativeDagRuntime>()
+  // Read-only views of each root's persisted task records: the wake reads child status with no call.
+  const taskRecords = new Map<string, ReturnType<typeof createTaskRecordStore>>()
+  function taskRecordsFor(root: string) {
+    let store = taskRecords.get(root)
+    if (!store) {
+      store = createTaskRecordStore({ project_dir: host.directory, task: { state_dir: nativeTaskStateDir(host.directory, root) } })
+      taskRecords.set(root, store)
+    }
+    return store
+  }
+  const wake = createNativeDagWakeOwner({ session: host.delivery.session, directory: host.directory, assertGeneration: host.delivery.assertGeneration,
+    journalPathFor: root => join(nativeTaskStateDir(host.directory, root), "dag-wakes.sqlite"),
+    runtimeFor: root => runtimes.get(root),
+    childStatus: (root, taskId) => taskRecordsFor(root).load(taskId)?.status })
   function runtimeFor(sessionID: string): NativeDagRuntime {
     const existing = runtimes.get(sessionID)
     if (existing) return existing
-    const created = createNativeDagRuntime({ directory: host.directory, parentSessionID: sessionID, executionMode, lease, ...(settings && { settings }) })
+    const created = createNativeDagRuntime({ directory: host.directory, parentSessionID: sessionID, executionMode, lease, ...(settings && { settings }),
+      onDriveEnded: runId => wake.arm(sessionID, runId) })
     runtimes.set(sessionID, created)
     return created
   }
@@ -77,7 +98,12 @@ export function registerNativeDagComponent(host: NativeDagHost): NativeDagCompon
   return Object.freeze({
     ready: bridge.ready,
     async close() {
-      try { await bridge.close() } finally { lease.dispose(); runtimes.clear() }
+      try { await bridge.close() } finally {
+        try { await wake.close() } finally {
+          for (const store of taskRecords.values()) store.close()
+          taskRecords.clear(); lease.dispose(); runtimes.clear()
+        }
+      }
     },
   })
 }

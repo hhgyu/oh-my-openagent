@@ -28,7 +28,7 @@ export class NativeDagAdmissionHeld extends Error {
  * call's port. Unbound, a node start is HELD (it waits and never touches the host) and every other
  * method refuses: there is no authority to act outside a call. */
 export function createHeldDagTaskPort() {
-  let bound: NativeDagCallPort | undefined
+  let bound: NativeDagCallPort | undefined, starting = 0
   const waiting = new Set<{ resolve(call: NativeDagCallPort): void; reject(error: Error): void }>()
   function live(): NativeDagCallPort {
     if (!bound) throw new NativeDagAdmissionHeld()
@@ -39,7 +39,11 @@ export function createHeldDagTaskPort() {
     return new Promise((resolve, reject) => { waiting.add({ resolve, reject }) })
   }
   const port: DagTaskPort = Object.freeze({
-    async startOwned(spec, owner) { return (await admitted()).startOwned(spec, owner) },
+    async startOwned(spec, owner) {
+      const call = await admitted()
+      starting++
+      try { return await call.startOwned(spec, owner) } finally { starting-- }
+    },
     findOwnedTask: key => live().findOwnedTask(key),
     get: id => live().get(id),
     subscribeChild: (id, listener) => live().subscribeChild(id, listener),
@@ -61,6 +65,8 @@ export function createHeldDagTaskPort() {
     },
     /** Number of node starts currently held for a call. */
     held: () => waiting.size,
+    /** Number of node starts a bound call is performing right now. */
+    starting: () => starting,
     /** Ends every held start once its scheduler is retiring; nothing reaches the host. */
     dropHeld(): void {
       for (const waiter of waiting) waiter.reject(new NativeDagAdmissionHeld())

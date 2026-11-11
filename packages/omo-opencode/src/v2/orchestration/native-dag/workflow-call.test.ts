@@ -36,7 +36,8 @@ function harness() {
   const drives: string[] = []
   const fake = createFakeDagOperation(PARENT)
   const call = { port: nativeDagCallPort(fake.operation), signal: new AbortController().signal }
-  const spied = { manager: runtime.manager, drive: (runId: DagRunId, borrowed: typeof call) => { drives.push(runId); return runtime.drive(runId, borrowed) } }
+  const spied = { manager: runtime.manager, drive: (runId: DagRunId, borrowed: typeof call) => { drives.push(runId); return runtime.drive(runId, borrowed) },
+    admit: (runId: DagRunId, borrowed: typeof call) => { drives.push(runId); return runtime.admit(runId, borrowed) } }
   const run = (params: DagToolInput) => runNativeWorkflow({ runtime: spied, parentSessionID: PARENT, call, executionMode }, params)
   return { runtime, drives, fake, run }
 }
@@ -60,31 +61,6 @@ describe("OpenCode 2 workflow refusals", () => {
     // then
     expect(refused.code).toBe("invalid_arguments")
     expect(refused.text).toBe(`workflow action=${action} is not available on OpenCode 2 yet; it arrives with the workflow controls (S6e). Use action=snapshot to inspect the run.`)
-    expect(drives).toEqual([])
-  })
-
-  test("#given a detached start #when called #then it is refused until S6d and no run is created", async () => {
-    // given
-    const { run, runtime } = harness()
-
-    // when
-    const refused = errorOf(await run({ action: "start", detach: true, definition: definition([{ id: "a", prompt: "p", category: "quick" }]) }))
-
-    // then
-    expect(refused.text).toBe("A detached workflow start is not available on OpenCode 2 yet (S6d). action=start blocks until the run settles; omit detach.")
-    expect(runtime.manager.list(PARENT)).toEqual([])
-  })
-
-  test("#given a live run #when waited on without detach=false #then the detached wait is refused and nothing is driven", async () => {
-    // given
-    const { run, runtime, drives } = harness()
-    const started = await runtime.manager.start({ definition: oneNodeRun, parentSessionId: PARENT, rootSessionId: PARENT })
-
-    // when
-    const refused = errorOf(await run({ action: "wait", run_id: started.snapshot.runId }))
-
-    // then
-    expect(refused.text).toBe("Dag run is pending. A detached wait is not available on OpenCode 2 yet (S6d): pass detach=false to block until the run settles, or use action=snapshot.")
     expect(drives).toEqual([])
   })
 
