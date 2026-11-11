@@ -113,6 +113,24 @@ describe("facts extractor child", () => {
     child.finish()
   })
 
+  test("#given a live facts child #when the root and the child compact #then the root request loses record_fact and the child keeps only it", async () => {
+    // given
+    const f = fixture()
+    f.addSession("root")
+    const { ports } = await register(f)
+    await settle(f, "root")
+    const child = await ports.started(1)
+    const childTools = { read: { description: "", input: {} }, [FACTS_RECORD_TOOL_NAME]: { description: "", input: {} } }
+    const rootTools = { read: { description: "", input: {} }, [FACTS_RECORD_TOOL_NAME]: { description: "", input: {} } }
+    // when
+    await f.compaction(child.sessionID, [], childTools)
+    await f.compaction("root", [], rootTools)
+    // then
+    expect(Object.keys(childTools)).toEqual([FACTS_RECORD_TOOL_NAME])
+    expect(Object.keys(rootTools)).toEqual(["read"])
+    child.finish()
+  })
+
   test("#given the child records a fact and settles #then the parent applies it to the memory repo and consumes the batch", async () => {
     // given
     const f = fixture()

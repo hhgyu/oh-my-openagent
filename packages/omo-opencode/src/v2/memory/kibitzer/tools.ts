@@ -13,6 +13,8 @@ import { applyNudge, KIBITZER_NUDGE_DESCRIPTION, KIBITZER_NUDGE_HINT_DESCRIPTION
 import type { KibitzerSidecar } from "./sidecar"
 
 const KIBITZER_SESSION_ENTRIES_TOOL_NAME = "session_entries"
+/** The tools only a Kibitzer child may see; `memory` is shared with the parent and stays out of this list. */
+export const KIBITZER_PRIVATE_TOOL_NAMES: readonly string[] = Object.freeze([KIBITZER_SESSION_ENTRIES_TOOL_NAME, KIBITZER_NUDGE_TOOL_NAME])
 export const KIBITZER_MEMORY_TOOL_NAME = "memory"
 const KIBITZER_FOREIGN_SESSION_MESSAGE = "this tool is available only to a live Kibitzer judge session issued by the memory component"
 

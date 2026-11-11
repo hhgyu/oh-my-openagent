@@ -6,6 +6,9 @@ import type { FactsPortRequest } from "./facts-child"
 import type { ReflectionPortRequest } from "./reflection-child"
 import type { MemoryReflectionSeams } from "./reflection-component"
 import { createMemoryFixture } from "./test-support"
+import { FACTS_RECORD_TOOL_NAME } from "./facts-record-tool"
+import { createCountingSlot, createManualTimers, createScriptedPort } from "./kibitzer/test-support"
+import { REFLECTION_TOOL_NAMES } from "./reflection-tools"
 
 setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
 
@@ -73,5 +76,32 @@ describe("memory reflection wiring", () => {
     await cleanup()
     // then
     expect(ports.children[0]?.start.model).toMatchObject({ providerID: "acme", id: "writer" })
+  })
+
+  test("#given reflection, facts and Kibitzer hostings #when the root and a live reflection child compact #then the root request loses every child-only tool and the child keeps only its own", async () => {
+    // given
+    const { f, ports, options } = setup()
+    const factsPorts = createScriptedFactsPorts()
+    f.addSession("root", { messages: conversation("use tabs", "noted, tabs it is") })
+    const cleanup = await registerMemoryComponent(f.host, {
+      ...options,
+      facts: { createPort: request => factsPorts.createPort(request), catalog: async () => [catalogModel("test", "model")], loadConfig: () => OmoConfigSchema.parse({}) },
+      kibitzer: { createPort: request => createScriptedPort(request), createWakeSlot: () => createCountingSlot(), timers: createManualTimers() },
+    })
+    await f.prompt("root", "use tabs")
+    await f.idle("root")
+    await until(() => ports.children.length === 1)
+    const child = ports.children[0]
+    if (child === undefined) throw new Error("no reflection child")
+    const offered = () => Object.fromEntries(["read", "edit", ...REFLECTION_TOOL_NAMES, FACTS_RECORD_TOOL_NAME, "session_entries", "nudge"].map(name => [name, { description: name, input: {} }]))
+    const rootTools = offered()
+    const childTools = offered()
+    // when
+    await f.compaction("root", [], rootTools)
+    await f.compaction(child.sessionID, [], childTools)
+    await cleanup()
+    // then
+    expect(Object.keys(rootTools).sort()).toEqual(["edit", "read"])
+    expect(Object.keys(childTools).sort()).toEqual([...REFLECTION_TOOL_NAMES].sort())
   })
 })

@@ -1,12 +1,11 @@
-import { join } from "node:path"
 import {
-  GitMemoryRepo, MemoryToolError, createLockRecord, initMemoryWithSeeds, memoryWriterLockPath, runMemoryTool, withLock,
-  type MemoryToolLock, type MemoryToolParams,
+  MemoryToolError, runMemoryTool, type GitMemoryRepo, type MemoryToolLock, type MemoryToolParams,
 } from "@oh-my-opencode/memory-core"
-import { existsSync, mkdir } from "@oh-my-opencode/memory-core/fs"
+import { mkdir } from "@oh-my-opencode/memory-core/fs"
 import { Error as ToolError, type Info, type Result, type ToolContext } from "@opencode/plugin/promise/tool"
 import { z } from "zod"
 import type { BoundMemorySession, MemoryBinder } from "./binding"
+import { memoryWriterLock, openMemoryRepo } from "./memory-repo-open"
 
 export const MEMORY_TOOL_NAME = "memory"
 export const MEMORY_APPLY_PATCH_TOOL_NAME = "memory_apply_patch"
@@ -77,24 +76,20 @@ export function createMemoryTools(deps: MemoryToolsDeps): readonly [Info<typeof 
 }
 
 /**
- * First-write seam: the locks directory and, under the cross-process writer lock, the seeded repository
- * are created here and nowhere else. Reads never reach this function.
+ * The memory tool's first-write seam: the locks directory and, under the cross-process writer lock, the
+ * seeded repository are created here. Reads never reach this function. The repo is opened through the
+ * shared HEAD-aware opener, so a `.git` another seeder has created but not yet committed is waited for
+ * under the lock instead of being written into.
  */
 async function prepareWrite(bound: BoundMemorySession, sessionID: string, deps: MemoryToolsDeps): Promise<{ repo: GitMemoryRepo; lock: MemoryToolLock }> {
   await mkdir(bound.paths.locks, { recursive: true, mode: 0o700 })
-  const repo = new GitMemoryRepo({ dir: bound.paths.repo, agentId: bound.identity })
+  const writerLock = memoryWriterLock(bound, `memory tool (${bound.identity}) oc2-${sessionID}`, {
+    ...(deps.lockWaitTimeoutMs === undefined ? {} : { waitTimeoutMs: deps.lockWaitTimeoutMs }),
+    ...(deps.lockRetryDelayMs === undefined ? {} : { retryDelayMs: deps.lockRetryDelayMs }),
+  })
   const lock: MemoryToolLock = async (domain, operation) => {
     if (domain !== "memory-write") throw new MemoryToolError(`unsupported lock domain '${domain}'`)
-    const record = await createLockRecord(`memory tool (${bound.identity}) oc2-${sessionID}`)
-    return withLock(memoryWriterLockPath(bound.paths.locks), record, operation, {
-      waitTimeoutMs: deps.lockWaitTimeoutMs ?? 5_000,
-      ...(deps.lockRetryDelayMs === undefined ? {} : { retryDelayMs: deps.lockRetryDelayMs }),
-    })
+    return writerLock(operation)
   }
-  if (!existsSync(join(bound.paths.repo, ".git"))) {
-    await lock("memory-write", async () => {
-      if (!existsSync(join(bound.paths.repo, ".git"))) await initMemoryWithSeeds(repo, { authorName: bound.identity })
-    })
-  }
-  return { repo, lock }
+  return { repo: await openMemoryRepo(bound, writerLock), lock }
 }

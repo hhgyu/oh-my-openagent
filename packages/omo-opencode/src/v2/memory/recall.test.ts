@@ -137,6 +137,27 @@ describe("memory recall through the resident Kibitzer judge", () => {
     await s.cleanup()
   })
 
+  test("#given a live judge child #when the parent's requests and compactions run #then the parent never sees session_entries or nudge while the child compaction keeps the contract tools", async () => {
+    // given
+    const s = await seeded()
+    await s.f.prompt("root", "which coffee do I usually order")
+    const child = await s.child()
+    const offered = () => Object.fromEntries(["read", "grep", "session_entries", "memory", "nudge", "edit"].map(name => [name, { description: name, input: {} }]))
+    const parentContext = offered()
+    const parentCompaction = offered()
+    const childCompaction = offered()
+    // when
+    await s.f.context("root", [], { tools: parentContext })
+    await s.f.compaction("root", [], parentCompaction)
+    await s.f.compaction(child.sessionID, [], childCompaction)
+    // then
+    expect(Object.keys(parentContext).sort()).toEqual(["edit", "grep", "memory", "read"])
+    expect(Object.keys(parentCompaction).sort()).toEqual(["edit", "grep", "memory", "read"])
+    expect(Object.keys(childCompaction).sort()).toEqual(["grep", "memory", "nudge", "read", "session_entries"])
+    expect(childCompaction.memory?.description).toContain("Read-only")
+    await s.cleanup()
+  })
+
   test("#given a running judge child #when the component unloads #then the wake is cancelled, the child is closed and the lease is released", async () => {
     // given
     const s = await seeded()

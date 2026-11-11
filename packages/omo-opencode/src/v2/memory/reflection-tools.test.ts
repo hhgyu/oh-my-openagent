@@ -3,7 +3,8 @@ import { existsSync, symlinkSync } from "node:fs"
 import { join } from "node:path"
 import { createNodeGitExec, validateCompletion } from "@oh-my-opencode/memory-core"
 import type { AgentEditor } from "@opencode/plugin/promise/agent"
-import { REFLECTION_AGENT_ID, REFLECTION_PERMISSIONS, registerReflectionAgent } from "./reflection-agent"
+import { DREAM_PERSONA } from "./dream-persona"
+import { DREAM_AGENT_ID, REFLECTION_AGENT_ID, REFLECTION_PERMISSIONS, registerReflectionAgent } from "./reflection-agent"
 import { REFLECTION_PERSONA } from "./reflection-persona"
 import { createReflectionRunScope } from "./reflection-run-scope"
 import { createReflectionTools, REFLECTION_FOREIGN_SESSION_MESSAGE, REFLECTION_TOOL_NAMES } from "./reflection-tools"
@@ -136,7 +137,7 @@ describe("omo-reflection agent", () => {
     expect(REFLECTION_PERMISSIONS.filter(rule => rule.effect === "deny")).toHaveLength(1)
   })
 
-  test("#given the agent domain #when the agent is registered #then it is a hidden subagent with the persona and the confined permissions", async () => {
+  test("#given the agent domain #when the agents are registered #then reflection and dream are hidden subagents with their personas and the confined permissions", async () => {
     // given
     const agents = new Map<string, Record<string, unknown>>()
     const editor = { update: (id: string, apply: (agent: Record<string, unknown>) => void) => { const agent = agents.get(id) ?? {}; apply(agent); agents.set(id, agent) } }
@@ -151,6 +152,9 @@ describe("omo-reflection agent", () => {
     expect(agent?.hidden).toBe(true)
     expect(agent?.system).toBe(REFLECTION_PERSONA)
     expect(agent?.permissions).toEqual(REFLECTION_PERMISSIONS.map(rule => ({ ...rule })))
+    const dream = agents.get(DREAM_AGENT_ID)
+    expect(dream).toMatchObject({ mode: "subagent", hidden: true, system: DREAM_PERSONA })
+    expect(dream?.permissions).toEqual(REFLECTION_PERMISSIONS.map(rule => ({ ...rule })))
   })
 })
 

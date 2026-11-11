@@ -6,17 +6,19 @@
 //   `create-run-worktree.ts` does, so a launcher that dies mid-run leaves the worktree identity behind;
 // - `<identity reflection>/runs/<runId>/transcript-payload.json` = `{schemaVersion: 1, runId, request}`
 //   (Senpi `spawn-payload.ts`), made read-only after writing;
-// - the seeded memory repo and the cross-process writer lock (`memory-write`), shared with the memory tool.
+// - the seeded memory repo and the cross-process writer lock (`memory-write`), opened through
+//   `memory-repo-open.ts` like the memory tool and the facts runner.
 // V2 never writes Senpi's `ledger.json` / `outcome.json`: the child is in-process and dies with its host.
 
 import {
-  createLockRecord, createReflectionWorktree, GitMemoryRepo, initMemoryWithSeeds, memoryWriterLockPath, ReflectionReservationStore,
-  sanitizeToSlug, TranscriptJournal, withLock, type ReflectionLauncherIdentity, type ReflectionWorktree, type ReservedRun,
+  createReflectionWorktree, type GitMemoryRepo, REFLECTION_PARK_DETAIL_MAX_CHARS, ReflectionReservationStore,
+  sanitizeToSlug, TranscriptJournal, type ReflectionLauncherIdentity, type ReflectionWorktree, type ReservedRun,
 } from "@oh-my-opencode/memory-core"
-import { chmod, existsSync, mkdir, readFile, rm, writeFile } from "@oh-my-opencode/memory-core/fs"
+import { chmod, mkdir, readFile, rm, writeFile } from "@oh-my-opencode/memory-core/fs"
 import type { OmoMemoryReflection } from "@oh-my-opencode/omo-config-core"
 import { join } from "node:path"
 import type { BoundMemorySession } from "./binding"
+import { memoryWriterLock as sharedWriterLock, type WriterLock } from "./memory-repo-open"
 
 export interface ReflectionStoreSeams {
   readonly createRunId?: () => string | Promise<string>
@@ -48,26 +50,11 @@ export function reflectionRunDir(bound: Pick<BoundMemorySession, "paths">, runId
   return join(bound.paths.reflection, "runs", runId)
 }
 
-export type WriterLock = <T>(operation: () => Promise<T>) => Promise<T>
+export { openMemoryRepo, type WriterLock } from "./memory-repo-open"
 
 /** The cross-process memory writer lock every parent-repo write takes. */
 export function memoryWriterLock(bound: BoundMemorySession, waitTimeoutMs = 5_000): WriterLock {
-  return async operation => {
-    await mkdir(bound.paths.locks, { recursive: true, mode: 0o700 })
-    const record = await createLockRecord(`memory reflection (${bound.identity})`)
-    return withLock(memoryWriterLockPath(bound.paths.locks), record, operation, { waitTimeoutMs })
-  }
-}
-
-/** The parent repo, seeded under the writer lock when it does not exist yet (as the memory tool does). */
-export async function openMemoryRepo(bound: BoundMemorySession, lock: WriterLock): Promise<GitMemoryRepo> {
-  const repo = new GitMemoryRepo({ dir: bound.paths.repo, agentId: bound.identity })
-  if (!existsSync(join(bound.paths.repo, ".git"))) {
-    await lock(async () => {
-      if (!existsSync(join(bound.paths.repo, ".git"))) await initMemoryWithSeeds(repo, { authorName: bound.identity })
-    })
-  }
-  return repo
+  return sharedWriterLock(bound, `memory reflection (${bound.identity})`, { waitTimeoutMs })
 }
 
 interface ReflectionPrelaunch {
@@ -109,9 +96,11 @@ export async function readPrelaunch(bound: BoundMemorySession, runId: string): P
  * The run's terminal sentinel, in Senpi's shapes: `final.json` once the reservation settled,
  * `abandoned.json` when recovery released a run whose launcher died. Senpi's orphan sweep treats a
  * run dir holding `prelaunch.json` and no sentinel as live, so every settled V2 run writes one.
+ * `final.json` also keeps the failure `detail` (bounded like the park record's): V2 writes no Senpi
+ * `outcome.json`, and a manual run never reaches the park file, so this is where a `spawn_failed` cause lands.
  */
 export async function writeRunTerminal(bound: BoundMemorySession, run: ReservedRun, terminal:
-  | { readonly kind: "final"; readonly outcome: string; readonly reason?: string; readonly integrationSha?: string; readonly at: string }
+  | { readonly kind: "final"; readonly outcome: string; readonly reason?: string; readonly detail?: string; readonly integrationSha?: string; readonly at: string }
   | { readonly kind: "abandoned"; readonly reason: string; readonly at: string },
 ): Promise<void> {
   const runDir = reflectionRunDir(bound, run.runId)
@@ -121,6 +110,7 @@ export async function writeRunTerminal(bound: BoundMemorySession, run: ReservedR
       version: 1, runId: run.runId, outcome: terminal.outcome, finishedAt: terminal.at, generation,
       ...(terminal.integrationSha === undefined ? {} : { integrationSha: terminal.integrationSha }),
       ...(terminal.reason === undefined ? {} : { reason: terminal.reason }),
+      ...(terminal.detail === undefined ? {} : { detail: terminal.detail.slice(0, REFLECTION_PARK_DETAIL_MAX_CHARS) }),
     }
     : {
       version: 1, runId: run.runId, abandonedAt: terminal.at, reason: terminal.reason, generation,

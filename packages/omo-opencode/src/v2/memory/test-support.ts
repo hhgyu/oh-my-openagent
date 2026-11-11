@@ -39,7 +39,8 @@ export interface MemoryFixture {
   prompt(sessionID: string, text: string): Promise<void>
   toolBefore(sessionID: string, tool: string, input: unknown, id?: string): Promise<void>
   toolAfter(sessionID: string, tool: string, input: unknown, output: string, id?: string): Promise<void>
-  compaction(sessionID: string, messages?: { id?: string }[]): Promise<void>
+  /** Runs the `compaction` hook; `tools` is the request's tool map, narrowed in place. */
+  compaction(sessionID: string, messages?: { id?: string }[], tools?: Record<string, { description: string; input: Record<string, unknown> }>): Promise<void>
   /** Runs the `context` hook over these model-request messages and returns them as the hook left them. */
   requestMessages(sessionID: string, messages: { id?: string }[]): Promise<{ id?: string }[]>
   idle(sessionID: string): Promise<void>
@@ -133,7 +134,8 @@ export function createMemoryFixture(settings: Record<string, unknown> = {}): Mem
     toolBefore: (sessionID: string, tool: string, input: unknown, id = "c1") => call("tool:execute.before", { tool, sessionID, agent: "build", messageID: "m1", id, input }),
     toolAfter: (sessionID: string, tool: string, input: unknown, output: string, id = "c1") =>
       call("tool:execute.after", { tool, sessionID, agent: "build", messageID: "m1", id, input, status: "completed", result: { content: output } }),
-    compaction: (sessionID: string, messages: { id?: string }[] = []) => call("session:compaction", { sessionID, system: [], tools: {}, messages }),
+    compaction: (sessionID: string, messages: { id?: string }[] = [], tools: Record<string, { description: string; input: Record<string, unknown> }> = {}) =>
+      call("session:compaction", { sessionID, system: [], tools, messages }),
     async requestMessages(sessionID: string, messages: { id?: string }[]) {
       await call("session:context", { sessionID, system: [], tools: {}, messages })
       return messages
