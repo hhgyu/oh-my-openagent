@@ -26,6 +26,7 @@ The public API is the barrel at `src/index.ts`.
 | `src/recall/sidecar/` | Host-neutral Kibitzer sidecar kernel, exported as `@oh-my-opencode/memory-core/recall-sidecar`: wake policy and cooldown/backoff, the machine-wide wake slot over the `recall-wake` lease, the seed/wake/reseed prompt envelopes, bounded event text, the sensitive-output redaction mirror, and the sidecar directory naming plus seven-day prune. The Senpi adapter re-exports these from `packages/omo-senpi/src/components/memory/kibitzer/`. |
 | `src/search/` | Query parsing, transcript providers, and ranked memory/session search. |
 | `src/sync/` | Remote mirror synchronization and secret redaction. |
+| `src/sync/runner/` | Host-neutral E2EE sync orchestration, exported as `@oh-my-opencode/memory-core/sync-runner`: the per-repo engine refcount (`sync-runner.ts`), the device-session resolver, the device account types a host source answers with, the `SyncConfigError` / `SyncSessionDeferredError` codes, and the `omo.memory.sync.*` RPC coordinator, operation, contract and ports. Engine imports are type-only: the host injects its lazily loaded engine sidecar (`loadRuntime`), its account source, its RPC claims and its logger, so the Loro runtime never reaches a host's eager bundle. |
 | `src/reminders/` | Reflection and memory-maintenance reminder generation. |
 | `src/seeds/` | Default memory blocks and first-run repository seeding. |
 | `src/concurrency/` | Subprocess fixtures for lock and multi-writer tests; not a public runtime module. |

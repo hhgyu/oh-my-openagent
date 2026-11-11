@@ -6,13 +6,13 @@
 // memory tools, reflection merges, a person's git commit - reach the engine through a watch on the
 // repository's HEAD reflog.
 
-import { watch } from "@oh-my-opencode/memory-core/fs"
+import { watch } from "../../fs/resilient"
 import { join } from "node:path"
 
-import type { MemoryIdentityPaths } from "@oh-my-opencode/memory-core"
-import type { DeviceSync, EngineStatus, OpenDeviceSyncOptions, SyncSession } from "@oh-my-opencode/memory-core/sync-engine"
+import type { MemoryIdentityPaths } from "../../identity/layout"
+import type { DeviceSync, EngineStatus, OpenDeviceSyncOptions, SyncSession } from "../engine"
 
-import type { ComponentLogger } from "../../extension/types"
+import type { SyncRunnerLogger, SyncRuntime } from "./sync-runner-ports"
 import { isSyncConfigError, SYNC_CONFIG_INVALID } from "./sync-config-error"
 import { isSyncSessionDeferred, SYNC_SESSION_DEFERRED } from "./sync-session-deferred"
 
@@ -52,8 +52,6 @@ export class SyncSidecarUnavailableError extends Error {
     this.name = "SyncSidecarUnavailableError"
   }
 }
-
-export type SyncRuntime = Pick<typeof import("#omo-memory-sync-runtime"), "openDeviceSync">
 
 /**
  * A device's account session. `deviceName` maps a sync principal to the name the account's device
@@ -111,11 +109,11 @@ export function watchHeadLog(
 }
 
 export interface SyncRunnerOptions {
-  readonly logger: Pick<ComponentLogger, "info" | "warn" | "error">
+  readonly logger: SyncRunnerLogger
   readonly resolveSession?: SyncSessionResolver
   readonly open?: (options: OpenDeviceSyncOptions) => Promise<DeviceSync | null>
-  /** Loads the engine sidecar; the default is the packaged `#omo-memory-sync-runtime` import. */
-  readonly loadRuntime?: () => Promise<SyncRuntime>
+  /** Loads the engine sidecar, such as the Senpi adapter's packaged `#omo-memory-sync-runtime` import. */
+  readonly loadRuntime: () => Promise<SyncRuntime>
   readonly watchHead?: HeadWatch
   /** Called with the repo whose sync failure status appeared, changed kind or cleared. */
   readonly onStatusChange?: (repo: string) => void
@@ -146,7 +144,7 @@ export interface SyncRunner {
 export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
   const resolveSession = options.resolveSession ?? noAccountSession
   // The engine (and the Loro wasm under it) loads only once a device has an account session.
-  const loadRuntime = options.loadRuntime ?? (() => import("#omo-memory-sync-runtime"))
+  const { loadRuntime } = options
   const open = options.open ?? (async (o: OpenDeviceSyncOptions) => (await loadRuntime()).openDeviceSync(o))
   const watchHead = options.watchHead ?? watchHeadLog
   const { logger } = options

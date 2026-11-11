@@ -15,9 +15,8 @@ import type { SyncSession } from "@oh-my-opencode/memory-core/sync-engine"
 import type { CredentialStore, Credentials } from "@oh-my-opencode/omo-opencode/service-auth"
 
 import * as syncRuntime from "../sync-runtime"
-import { createSyncRunner } from "../sync-runner"
+import { createDeviceSessionResolver, createSyncRunner } from "@oh-my-opencode/memory-core/sync-runner"
 import { createCliAccountSource } from "./account-source"
-import { createDeviceSessionResolver } from "./resolver"
 
 const ACCOUNT = "acct_revoked"
 
@@ -67,6 +66,7 @@ async function revokedDevice(code: string, options: { readonly onContract?: bool
   const closed = Promise.withResolvers<void>()
   const runner = createSyncRunner({
     logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
+    loadRuntime: async () => syncRuntime,
     resolveSession: createDeviceSessionResolver({
       source, pinDir,
       loadRuntime: async () => ({ ...syncRuntime, openAccountSession: async (o) => ({ ok: true, session: { token: o.token } as unknown as SyncSession }) }),

@@ -11,7 +11,7 @@ import { resolveMemoryIdentity } from "@oh-my-opencode/memory-core"
 import { createMemoryBinding } from "./binding"
 import { MEMORY_BINDING_CUSTOM_TYPE, createMemoryComponent, memoryModuleSupervisor } from "./index"
 import { componentContext, loadedMemoryConfig, memorySettings, MemoryFakeExtensionAPI, sessionContext } from "./memory.test-support"
-import type { SyncRunner } from "./sync-runner"
+import type { SyncRunner } from "@oh-my-opencode/memory-core/sync-runner"
 import { rmSyncEfaultTolerant } from "./teardown.test-support"
 
 const roots: string[] = []

@@ -14,7 +14,7 @@ import { createMemoryIdentityContext, type MemoryIdentityContext } from "./conte
 import { adoptSessionIdentity } from "./identity-adoption"
 import { revokeProjectMemoryReads } from "./project-memory-grants"
 import { memoryModuleSupervisor } from "./supervisor"
-import type { SyncRunner } from "./sync-runner"
+import type { SyncRunner } from "@oh-my-opencode/memory-core/sync-runner"
 import { isOneShotSurface, resolveIdentityRunPaths, type IdentityRunPaths } from "./transient-identity"
 import type { createMemoryWiring } from "./wiring"
 

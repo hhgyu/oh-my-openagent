@@ -1,5 +1,5 @@
-import type { DeviceKeyring } from "@oh-my-opencode/memory-core/keyring"
-import type { AccountHttp, PairingHttp, CeremonyClock, ApproveOutcome, JoinOutcome, EnableOutcome, DesktopSyncAccount, DesktopSyncDescriptor, DesktopSyncOperation } from "@oh-my-opencode/memory-core/sync-engine"
+import type { DeviceKeyring } from "../keyring-port"
+import type { AccountHttp, PairingHttp, CeremonyClock, ApproveOutcome, JoinOutcome, EnableOutcome, DesktopSyncAccount, DesktopSyncDescriptor, DesktopSyncOperation } from "../engine"
 import type { MemoryRpcSync } from "./memory-rpc-sync"
 
 /** The permanent upstream interface, including undefined on internal calls. */

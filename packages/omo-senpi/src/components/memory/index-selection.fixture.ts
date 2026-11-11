@@ -4,7 +4,7 @@ import { provideSessionWorkerData, sessionWorkerDataRegistry } from "@code-yeong
 import { mock } from "bun:test"
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads"
 import type { DeviceAccountSource } from "./device-session/account-source"
-import { createDeviceSessionResolver } from "./device-session/resolver"
+import { createDeviceSessionResolver } from "@oh-my-opencode/memory-core/sync-runner"
 import { wireSyncRpc } from "./sync-rpc-wiring"
 import { MEMORY_SYNC_WORKER_DATA } from "./desktop-sync/hostSelection"
 import { MemoryFakeExtensionAPI, componentContext, loadedMemoryConfig, memorySettings } from "./memory.test-support"
@@ -33,7 +33,9 @@ mock.module("./device-session/account-source", () => ({
     return async () => null
   },
 }))
-mock.module("./device-session/resolver", () => ({
+const syncRunner = await import("@oh-my-opencode/memory-core/sync-runner")
+mock.module("@oh-my-opencode/memory-core/sync-runner", () => ({
+  ...syncRunner,
   createDeviceSessionResolver: (options: Parameters<typeof createDeviceSessionResolver>[0]) => {
     resolverSource = options.source
     return resolveSession(options)

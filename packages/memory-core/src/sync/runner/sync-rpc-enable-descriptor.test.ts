@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import type { DesktopSyncOperation } from "@oh-my-opencode/memory-core/sync-engine"
+import type { DesktopSyncOperation } from "../engine"
 import { disposeSyncRpcFixtures, owner, setup } from "./sync-rpc-test-support"
 
 afterEach(disposeSyncRpcFixtures)

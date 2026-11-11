@@ -1,4 +1,4 @@
-import type { ApproveOutcome } from "@oh-my-opencode/memory-core/sync-engine"
+import type { ApproveOutcome } from "../engine"
 import type { SyncEnableResponse, SyncRpcProblem } from "./sync-rpc-contract"
 import type { SyncRpcAccount, SyncRpcAuthority, SyncRpcClaim, SyncRpcContext, SyncRpcOperation, SyncRpcOptions } from "./sync-rpc-ports"
 

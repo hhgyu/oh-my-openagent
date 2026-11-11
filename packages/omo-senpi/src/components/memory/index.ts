@@ -16,9 +16,8 @@ import { createSessionBinder, readSessionSurface, releaseSession, type SessionSt
 import { finalizeIdentityRun } from "./transient-identity"
 import type { DeviceAccountSource } from "./device-session/account-source"
 import { selectedDeviceAccountSource } from "./device-session/account-runtime-loader"
-import { createDeviceSessionResolver } from "./device-session/resolver"
 import { trackMemoryHooks } from "./hook-work"
-import { createSyncRunner, type SyncRunner } from "./sync-runner"
+import { createDeviceSessionResolver, createSyncRunner, type SyncRunner } from "@oh-my-opencode/memory-core/sync-runner"
 import { readMemoryRpcSync } from "./memory-rpc-sync"
 import { wireSyncRpc } from "./sync-rpc-wiring"
 import { sweepTransientMemoryRuns, type TransientSweep } from "./transient-sweep"
@@ -84,6 +83,7 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
       const deviceAccount = options.deviceAccount ?? selectedDeviceAccountSource({ env, pinDir, logger: ctx.logger })
       const syncRunner = options.syncRunner ?? createSyncRunner({
         logger: ctx.logger,
+        loadRuntime: () => import("#omo-memory-sync-runtime"),
         onStatusChange: (repo) => syncStatusChanged.current?.(repo),
         resolveSession: createDeviceSessionResolver({
           source: deviceAccount,

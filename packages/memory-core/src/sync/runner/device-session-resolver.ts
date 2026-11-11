@@ -4,11 +4,11 @@
 // session that later loses its sign-in (sign-out, revoked device) tells the runner, which closes
 // the engine and goes idle.
 
-import type { AccountSessionOutcome, AccountSessionOptions, GitSpaceConfig, listRemotes, resolveSpace } from "@oh-my-opencode/memory-core/sync-engine"
-import type { DeviceKeyMaterial, DeviceKeyring } from "@oh-my-opencode/memory-core/keyring"
+import type { AccountSessionOutcome, AccountSessionOptions, GitSpaceConfig, listRemotes, resolveSpace } from "../engine"
+import type { DeviceKeyMaterial, DeviceKeyring } from "../keyring-port"
 
-import type { SyncSessionRequest, SyncSessionResolution } from "../sync-runner"
-import type { DeviceAccountSource } from "./account-source"
+import type { SyncSessionRequest, SyncSessionResolution } from "./sync-runner"
+import type { DeviceAccountSource } from "./device-account"
 
 export interface DeviceSessionRuntime {
   readonly openAccountSession: (options: AccountSessionOptions) => Promise<AccountSessionOutcome>

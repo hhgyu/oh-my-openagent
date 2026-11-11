@@ -2157,8 +2157,6 @@
         "src/components/memory/skills-usage.test-support.ts": ["exports"],
         // pre-existing at origin dev 4686e425b5: unused export(s) MEMORY_STATUS_MAX_WIDTH
         "src/components/memory/status.ts": ["exports"],
-        // pre-existing at origin dev 4686e425b5: unused export(s) noAccountSession
-        "src/components/memory/sync-runner.ts": ["exports"],
         // pre-existing at origin dev 4686e425b5: unused export(s) parseNumstat
         "src/components/memory/tools.ts": ["exports"],
         // pre-existing at origin dev 4686e425b5: unused export(s) MAX_AGE_DEPTH, nodeAgeProbeFs

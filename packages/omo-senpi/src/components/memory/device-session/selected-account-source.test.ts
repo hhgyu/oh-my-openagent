@@ -4,7 +4,7 @@ import type { DesktopSyncEngineWire } from "../desktop-sync/desktopSyncAccount"
 import { DesktopSyncRefused } from "../desktop-sync/desktopSyncProtocol"
 import type { MemorySyncSelection } from "../desktop-sync/hostSelection"
 import type { DesktopSyncAccount, DeviceAccountSource } from "./account-source"
-import { createDeviceSessionResolver } from "./resolver"
+import { createDeviceSessionResolver } from "@oh-my-opencode/memory-core/sync-runner"
 import { accountSourceFromSelection } from "./selected-account-source"
 
 // Security contract (account-transport-api v9 section 7): a desktop host never constructs the CLI credential source,

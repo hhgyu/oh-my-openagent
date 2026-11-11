@@ -337,6 +337,8 @@
       "packages/memory-core/src/sync/recovery/recovery-handles.ts": ["RECOVERY_HANDLE_TTL_MS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) WRITE_HOLD_NEXT_STEP
       "packages/memory-core/src/sync/recovery/write-hold.ts": ["WRITE_HOLD_NEXT_STEP"],
+      // pre-existing at origin dev 4686e425b5 (moved from omo-senpi's memory component): unused export(s) noAccountSession
+      "packages/memory-core/src/sync/runner/sync-runner.ts": ["noAccountSession"],
       // pre-existing at origin dev 4686e425b5: unused export(s) toLf, linesOf
       "packages/memory-core/src/sync/space/read-back.ts": ["toLf", "linesOf"],
       // pre-existing at origin dev 4686e425b5: unused export(s) MemoryApplyPatchError
@@ -1206,8 +1208,6 @@
       "packages/omo-senpi/src/components/memory/skills-usage.test-support.ts": ["IDENTITY"],
       // pre-existing at origin dev 4686e425b5: unused export(s) MEMORY_STATUS_MAX_WIDTH
       "packages/omo-senpi/src/components/memory/status.ts": ["MEMORY_STATUS_MAX_WIDTH"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) noAccountSession
-      "packages/omo-senpi/src/components/memory/sync-runner.ts": ["noAccountSession"],
       // pre-existing at origin dev 4686e425b5: unused export(s) parseNumstat
       "packages/omo-senpi/src/components/memory/tools.ts": ["parseNumstat"],
       // pre-existing at origin dev 4686e425b5: unused export(s) MAX_AGE_DEPTH, nodeAgeProbeFs
