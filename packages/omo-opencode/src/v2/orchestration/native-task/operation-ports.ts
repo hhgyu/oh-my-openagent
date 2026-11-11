@@ -2,6 +2,7 @@ import type { ReattachingTaskManager, ManagerStartSpec, TaskRecord } from "@oh-m
 import type { TaskOperationManager, SendManager, CancelManager, OutputManager } from "@oh-my-opencode/senpi-task/task-operations"
 import { runTaskSend, type TaskSendInput, type TaskSendRunOptions, type TaskSendTeamRouting } from "@oh-my-opencode/senpi-task/task-operations"
 import type { TeamServiceDeps } from "@oh-my-opencode/senpi-task/team-operations"
+import type { DagTaskOwner, DagTaskOwnerKey, OwnedStartResult } from "@oh-my-opencode/senpi-task/dag"
 import type { NativeOperationLifetime } from "./accepted-operation"
 
 export interface AcceptedTaskProof { readonly taskID: string; readonly epoch: number; read(): TaskRecord }
@@ -19,6 +20,8 @@ export interface NativeOperationAccess {
   captureSendFormattingScope(): () => ReturnType<SendManager["list"]>
   assertParentPark(id: string, epoch: number, continuation?: boolean): void
   start(spec: ManagerStartSpec): ReturnType<TaskOperationManager["start"]>
+  /** A DAG node start under THIS call: the same ancestry check as `start`, keyed by its node owner. */
+  startOwned(spec: ManagerStartSpec, owner: DagTaskOwner): Promise<OwnedStartResult>
   send(input: Parameters<SendManager["sendToTask"]>[0]): ReturnType<SendManager["sendToTask"]>
   cancel(...args: Parameters<CancelManager["cancelTask"]>): ReturnType<CancelManager["cancelTask"]>
   waitFor(...args: Parameters<TaskOperationManager["waitFor"]>): ReturnType<TaskOperationManager["waitFor"]>
@@ -210,6 +213,27 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
       return lifetime.track(access.destroyResidentTask(id, cause))
     },
   }
+  /** The DAG engine's owned-start slice, only inside this operation and only in its original parent.
+   * A reused or conflicting owner gets no receipt here; a later read captures it through `get`. */
+  const dag = {
+    startOwned(spec: ManagerStartSpec, owner: DagTaskOwner): Promise<OwnedStartResult> {
+      current()
+      return lifetime.track(access.startOwned(spec, owner).then(result => {
+        if (result.kind === "started" && !result.reused) accept(result.task_id)
+        return result
+      }))
+    },
+    findOwnedTask(key: DagTaskOwnerKey): TaskRecord | undefined {
+      current()
+      const record = manager.findOwnedTask(key)
+      return record && record.parent_session_id === access.parentSessionID ? record : undefined
+    },
+    residencyChanged(parentSessionID: string): Promise<void> {
+      current()
+      if (parentSessionID !== access.parentSessionID) throw Error("Residency wait outside the original parent")
+      return manager.residencyChanged(parentSessionID)
+    },
+  }
   /** Lazy restore of a team member parked by a reload, before the lead's call acts on its team. */
   const recovery = {
     restoreAfterReload(id: string): Promise<boolean> {
@@ -217,7 +241,7 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
       return lifetime.track(access.restoreAfterReload(id))
     },
   }
-  return Object.freeze({ task, send, cancel, output, destruction, recovery,
+  return Object.freeze({ task, send, cancel, output, destruction, recovery, dag,
     /** Full canonical send lifetime. The low-level send port alone does not own
      * Native's mapped/late chain; the mandatory observer cannot be overridden. */
     runSend(params: TaskSendInput, options: Omit<TaskSendRunOptions, "retainWork"> & { readonly teamRouting?: TaskSendTeamRouting } = {}) {

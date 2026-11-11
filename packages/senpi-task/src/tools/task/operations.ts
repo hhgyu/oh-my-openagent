@@ -22,6 +22,7 @@ export type {
   CuratedReadonlyBashInput, CuratedReadonlyBashTool, CuratedReadonlyChildObserver, CuratedReadonlyCommand, CuratedReadonlyExecutor, CuratedReadonlyRequest,
 } from "../../runners/in-process/curated-readonly-bash"
 export { buildTaskExecute } from "./execute"
+export { evaluateSpawnPolicy } from "./spawn-policy"
 export { TaskToolParams } from "./params"
 export type { TaskToolParamsStatic } from "./params"
 export { normalizeTaskToolArguments } from "./argument-normalization"

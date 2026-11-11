@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { createHash, randomUUID } from "node:crypto"
 import { getPidLiveness } from "@oh-my-opencode/memory-core/process-identity"
 import { OmoTaskSettingsSchema, type OmoConfig } from "@oh-my-opencode/omo-config-core"
-import type { AgentDefinition } from "@oh-my-opencode/senpi-task"
+import type { AgentDefinition, StartResult } from "@oh-my-opencode/senpi-task"
 import { createTaskManagerImplementation, createTaskRecordStore, createTaskLifecycle, AdmissionBarrier, NO_HOST_ENDPOINT, ChildObservationUncertain,
   type ReattachingTaskManager, type TaskLifecycle, type TaskRecoveryRuntime, type ManagerStartSpec, type ManagedStartSpec, type TaskRecord, type ResidencyRegistry, type ChildCreationPort, type HostStartAuthority } from "@oh-my-opencode/senpi-task/manager-kernel"
 import { createTaskTerminalObservers, type CompletionDeliverySource } from "@oh-my-opencode/senpi-task/task-operations"
@@ -765,8 +765,11 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       if (candidate && pendingNotificationReattachments.get(handle) === candidate) pendingNotificationReattachments.delete(handle)
     }
   }
-  const nativeStart = manager.start.bind(manager)
-  manager.start = async spec => {
+  const nativeStart = manager.start.bind(manager), nativeStartOwned = manager.startOwned.bind(manager)
+  // Ordinary and DAG-owned starts share ONE notification origin: the original request witness, its
+  // provisional grant and the accepted-without-child binding. A reused or conflicting owned start
+  // creates no child, so it binds nothing new.
+  async function notifiedStart<R extends { readonly kind: string }>(spec: ManagerStartSpec, run: () => Promise<R>, accepted: (result: R) => StartResult | undefined): Promise<R> {
     let origin: NotificationStartOrigin | undefined
     if (options.notification) {
       const identity = Object.freeze({}), births = new Map<string, Readonly<TaskBirth>>()
@@ -777,28 +780,29 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       origin = { identity, original: new WeakRef(spec), binding: currentParent(), births, creation, closeCreation() { creation.open = false } }
     }
     try {
-      const result = await (origin ? notificationOrigins.run(origin, () => nativeStart(spec)) : nativeStart(spec))
-      if ("task_id" in result && result.task_id) {
+      const result = await (origin ? notificationOrigins.run(origin, run) : run())
+      if ("task_id" in result && typeof result.task_id === "string" && result.task_id) {
         const record = store.load(result.task_id)
         if (record) {
           remember(record)
           const authority = origin?.authority ?? startAuthorities.get(spec)
           if (authority && !record.child_session_id) acceptedStarts.set(record.task_id, { authority, epoch: record.notification.run_epoch })
-          if (origin?.provisional) {
+          const started = accepted(result)
+          if (origin?.provisional && started) {
             const entry = notificationOwner(origin.binding)
-            if (result.kind === "started" || result.kind === "start_failed") {
+            if (started.kind === "started" || started.kind === "start_failed") {
               if (!record.child_session_id && !record.owned_session) {
                 const birth = acceptedBirth(origin, record)
-                notificationReturned.set(spec, Object.freeze({ result, identity: origin.identity }))
+                notificationReturned.set(spec, Object.freeze({ result: started, identity: origin.identity }))
                 notificationAccepted.set(record.task_id, Object.freeze({ identity: origin.identity, birth,
                   epoch: record.notification.run_epoch, claim: record.residency_claim }))
-                origin.task = entry.issuer.bindAcceptedWithoutChild(origin.provisional, result)
+                origin.task = entry.issuer.bindAcceptedWithoutChild(origin.provisional, started)
                 notificationTasks.set(record.task_id, { binding: origin.binding, task: origin.task })
-              } else if (result.kind === "start_failed" && origin.installed?.control && !origin.installed.beginInvoked) {
+              } else if (started.kind === "start_failed" && origin.installed?.control && !origin.installed.beginInvoked) {
                 const stage = origin.installed, control = stage.control
                 if (!control) throw Error("Failed notification start has no owned control")
                 notificationFailedStarts.set(control, Object.freeze({ identity: origin.identity, control,
-                  stageIdentity: stage.identity, nativeEpoch: stage.epoch, result, beginInvoked: false }))
+                  stageIdentity: stage.identity, nativeEpoch: stage.epoch, result: started, beginInvoked: false }))
               }
               entry.owner.requestReconcile()
             }
@@ -808,6 +812,9 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       return result
     } finally { origin?.closeCreation() }
   }
+  manager.start = spec => notifiedStart(spec, () => nativeStart(spec), result => result)
+  manager.startOwned = (spec, owner) => notifiedStart(spec, () => nativeStartOwned(spec, owner),
+    result => result.kind === "owner_conflict" || result.kind === "started" && result.reused ? undefined : result)
   initializers.push({ close: () => manager.workpools.dispose(), done: false })
   async function detach(id: string) {
     const record = store.load(id)
@@ -981,6 +988,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         },
         assertParentPark(id, epoch, continuation) { bindings.info(binding, !continuation); const row = manager.findTaskByChildSession?.(parent.lease.sessionID), control = controls.get(id); if (!row || row.task_id !== id || row.notification.run_epoch !== epoch || !control || control.child.lease !== parent.lease || !control.handle.assertOwned) throw Error("Foreign parent lane"); control.handle.assertOwned() },
         start: spec => { const current = bindings.info(binding, true); if (spec.parent_session_id !== current.lease.sessionID || (spec.root_session_id ?? spec.parent_session_id) !== current.rootSessionId || spec.depth !== current.depth + 1) throw Error("Operation start ancestry differs"); return manager.start(spec) },
+        startOwned: (spec, owner) => { const current = bindings.info(binding, true); if (spec.parent_session_id !== current.lease.sessionID || (spec.root_session_id ?? spec.parent_session_id) !== current.rootSessionId || spec.depth !== current.depth + 1) throw Error("Operation start ancestry differs"); return manager.startOwned(spec, owner) },
         // This invocation enters controlled's private queue synchronously. Reporting
         // cancellation is deliberately not the accepted transport's abort signal.
         send: input => { if (input.allScope || input.callerSessionId !== undefined && input.callerSessionId !== parent.lease.sessionID) throw Error("Cross-parent operation send is not issued"); const resolved = resolve(input.idOrName); if (resolved.kind !== "found") throw Error("Accepted send target proof unavailable"); return runtime.send({ ...input, idOrName: resolved.taskID, callerSessionId: parent.lease.sessionID }, { signal: AbortSignal.any([acceptedSignal, parent.lease.signal, parent.stop.signal]) }) },
