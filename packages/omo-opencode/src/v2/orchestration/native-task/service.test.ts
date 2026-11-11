@@ -46,7 +46,7 @@ async function fixture(run: (f: Awaited<ReturnType<typeof host>>) => Promise<voi
   }
 }
 async function host(dir:string,closers:(()=>Promise<void>|void)[]) {
-  const scopes=createSessionScopes();closers.push(()=>scopes.dispose())
+  let scopes=createSessionScopes();closers.push(()=>scopes.dispose())
   const calls:string[]=[],blocked=new Set<string>(),sequence=new Map<string,number>(),sessions=new Map<string,unknown>()
   const createdChildren = new Set<string>(), idleParents = new Set<string>()
   const activeAssistants = new Map<string, string>()
@@ -141,7 +141,7 @@ async function host(dir:string,closers:(()=>Promise<void>|void)[]) {
   const secondInitialization=Promise.withResolvers<void>()
   const handlers=new Map<string,(facade:Facade,caller:ToolContext)=>Promise<unknown>>();let next=0
   const tool:Info&{id:string}={id:"native_probe",name:"native_probe",description:"Unit callback",input:z.object({key:z.string()}),async execute(input,caller){const handler=handlers.get(String(input.key));if(!handler)throw Error("Unknown unit action");const pending=service.forCall(caller);initializationWaits.push(pending);if(initializationWaits.length===2)secondInitialization.resolve();const facade=await pending;return {content:JSON.stringify(await handler(facade,caller)??null)}}}
-  const registry=createToolRegistry([tool],{native_probe:()=>[{action:"native_probe",resources:["controlled-parent"]}]}),kernel=createToolKernel({registry,scopes,pipeline:createPolicyPipeline({}),permission:{async assert(){}}})
+  const registry=createToolRegistry([tool],{native_probe:()=>[{action:"native_probe",resources:["controlled-parent"]}]});let kernel=createToolKernel({registry,scopes,pipeline:createPolicyPipeline({}),permission:{async assert(){}}})
   let configuredConcurrency:number|undefined, configuredMaxDepth=2
   const agents:Record<string,AgentDefinition>={}
   const policy={tools:["native_probe"],authorize(){}}
@@ -155,7 +155,10 @@ async function host(dir:string,closers:(()=>Promise<void>|void)[]) {
     const lease=await service.parent(origin.caller);leases.push(lease);const key=String(++next);handlers.set(key,action);const binding=kernel.bind(origin.caller,lease)
     try{const result=await binding.invoke("native_probe",{key});return JSON.parse(result.content as string)}finally{binding.dispose();handlers.delete(key)}
   }
-  return {options,get service(){return service},emit,async reopen(){await service.close();service=createNativeTaskService(ctx,options);return service},scopes,registry,tool,raw,invoke,leases,calls,blocked,dir,ctx,synthetics,
+  return {options,get service(){return service},emit,async reopen(){await service.close();service=createNativeTaskService(ctx,options);return service},
+    /** A plugin reload: the old service closes and a new one starts over the same state with FRESH session scopes. */
+    async reload(){await service.close();scopes.dispose();scopes=createSessionScopes();kernel=createToolKernel({registry,scopes,pipeline:createPolicyPipeline({}),permission:{async assert(){}}});Object.assign(options,{scopes,callAuthority:kernel.callAuthority});service=createNativeTaskService(ctx,options);return service},
+    get scopes(){return scopes},registry,tool,raw,invoke,leases,calls,blocked,dir,ctx,synthetics,
     async useHostGrant(hostGrant: NonNullable<Parameters<typeof createNativeTaskService>[1]["hostGrant"]>) {
       await service.close(); Object.assign(options, { hostGrant }); service = createNativeTaskService(ctx, options)
     },

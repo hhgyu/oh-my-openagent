@@ -294,3 +294,114 @@ describe("lead delivery owner journal cleanup", () => {
     expect(rows(f, "lead", sent.messageId)).toBeUndefined()
   })
 })
+
+describe("lead delivery owner reload recovery", () => {
+  const namespace = "opencode2-team:" + createHash("sha256").update(JSON.stringify([DIRECTORY, LEAD])).digest("hex")
+  const ALPHA_RESTORED = "ses_alpha_restored"
+  function row(f: Fixture, recipient: string, messageId: string) {
+    const journal = openTeamDeliveryJournal({ path: f.journalPath, namespace })
+    try { return journal.read({ teamRunId: RUN, recipient, messageId }) } finally { journal.close() }
+  }
+  function strand(f: Fixture, recipient: string, receiver: string, messageId: string) {
+    const journal = openTeamDeliveryJournal({ path: f.journalPath, namespace })
+    try { journal.recordIntent({ teamRunId: RUN, recipient, messageId }, receiver, teamDeliveryInputId(RUN, recipient, messageId)) } finally { journal.close() }
+  }
+
+  test("#given a stranded un-ACKed lead intent and no member bound #when a fresh owner resumes the lead #then the same id is posted once and committed", async () => {
+    // given
+    const f = fixture()
+    await save(f)
+    const sent = await seedToLead(f, "22222222-2222-4222-8222-000000000013")
+    expect(await reserveMessageForDelivery(RUN, "lead", sent.messageId, f.config)).not.toBeNull()
+    strand(f, "lead", LEAD, sent.messageId)
+    const delivery = owner(f)
+
+    // when
+    await delivery.resumeLead(LEAD)
+    await delivery.resumeLead(LEAD)
+    await delivery.refresh(RUN)
+
+    // then
+    expect(f.calls.map(call => [call.sessionID, call.id])).toEqual([[LEAD, teamDeliveryInputId(RUN, "lead", sent.messageId)]])
+    expect(processed(f, "lead", sent)).toBe(true)
+    expect(reservations(f, "lead")).toEqual([])
+    expect(row(f, "lead", sent.messageId)?.phase).toBe("acked")
+  })
+
+  test("#given the lead session is gone #when the lead resumes #then nothing is posted and the mail stays unread", async () => {
+    // given
+    const f = fixture()
+    await save(f)
+    const sent = await seedToLead(f, "22222222-2222-4222-8222-000000000014")
+    f.gone.add(LEAD)
+    const delivery = owner(f)
+
+    // when
+    await delivery.resumeLead(LEAD)
+
+    // then
+    expect(f.calls).toEqual([])
+    expect((await listUnreadMessages(RUN, "lead", f.config)).map(value => value.messageId)).toEqual([sent.messageId])
+  })
+
+  test("#given an un-ACKed intent held for a member's old session #when the member binds with its restored session #then the intent moves there and is delivered once with the same id", async () => {
+    // given
+    const f = fixture()
+    await save(f)
+    const sent = await seedToAlpha(f, "22222222-2222-4222-8222-000000000015")
+    const first = owner(f, { session: { ...f.session, async synthetic() { throw Error("host crashed before ACK") } } })
+    bindAlpha(first)
+    await first.refresh(RUN)
+    await first.close()
+    expect(row(f, "alpha", sent.messageId)).toMatchObject({ phase: "intent", receiverSessionID: ALPHA })
+    const restarted = owner(f, { isMemberBound: sessionID => sessionID === ALPHA_RESTORED })
+
+    // when
+    restarted.memberBound({ leadSessionID: LEAD, teamRunId: RUN, memberName: "alpha", sessionID: ALPHA_RESTORED })
+    await restarted.refresh(RUN)
+    await restarted.refresh(RUN)
+
+    // then
+    expect(f.calls.map(call => [call.sessionID, call.id])).toEqual([[ALPHA_RESTORED, teamDeliveryInputId(RUN, "alpha", sent.messageId)]])
+    expect(processed(f, "alpha", sent)).toBe(true)
+    expect(row(f, "alpha", sent.messageId)).toMatchObject({ phase: "acked", receiverSessionID: ALPHA_RESTORED, previousReceivers: [ALPHA] })
+  })
+
+  test("#given a moved intent the host had already accepted in the old session #when it is re-posted #then the earlier row is accepted as its ACK", async () => {
+    // given
+    const f = fixture()
+    await save(f)
+    const sent = await seedToAlpha(f, "22222222-2222-4222-8222-000000000016")
+    const lossy: TeamDeliverySession = { ...f.session, async synthetic(input) { await f.session.synthetic(input); throw Error("crash before the ACK was recorded") } }
+    const first = owner(f, { session: lossy })
+    bindAlpha(first)
+    await first.refresh(RUN)
+    await first.close()
+    const restarted = owner(f, { isMemberBound: sessionID => sessionID === ALPHA_RESTORED })
+
+    // when
+    restarted.memberBound({ leadSessionID: LEAD, teamRunId: RUN, memberName: "alpha", sessionID: ALPHA_RESTORED })
+    await restarted.refresh(RUN)
+    await restarted.refresh(RUN)
+
+    // then
+    expect(f.accepted.size).toBe(1)
+    expect(processed(f, "alpha", sent)).toBe(true)
+    expect(row(f, "alpha", sent.messageId)).toMatchObject({ phase: "acked", ack: { sessionID: ALPHA } })
+  })
+
+  test("#given an un-ACKed intent of a member that left the team #when the lead resumes #then the intent is dropped and never posted", async () => {
+    // given
+    const f = fixture()
+    await save(f)
+    strand(f, "gamma", "ses_gamma", "22222222-2222-4222-8222-000000000017")
+    const delivery = owner(f)
+
+    // when
+    await delivery.resumeLead(LEAD)
+
+    // then
+    expect(f.calls).toEqual([])
+    expect(row(f, "gamma", "22222222-2222-4222-8222-000000000017")).toBeUndefined()
+  })
+})

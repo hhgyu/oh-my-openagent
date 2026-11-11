@@ -60,4 +60,33 @@ describe("#given a finished resident child released by task_cancel", () => {
       expect(read).toContain("Accepted Native custody unavailable")
     })
   })
+
+  test("#when the plugin reloads (a new runtime over the same state dir) #then the released read still succeeds", async () => {
+    await withNativeOperationService(async f => {
+      // given
+      const released = await finished(f.invoke, "released before reload")
+      await f.invoke(api => api.operation(async (_manager, _ancestry, _signal, operation) => operation.cancel.cancelTask(released)))
+      await f.reopen()
+      // when
+      const read = await f.invoke(api => api.operation(async (_manager, _ancestry, _signal, operation) => operation.output.get(released)))
+      // then
+      expect(read).toMatchObject({ task_id: released, status: "completed", residency_state: "persisted_only", final_response: "result:released before reload" })
+    })
+  })
+
+  test("#when the stored row changes identity across a reload #then the read is still refused", async () => {
+    await withNativeOperationService(async f => {
+      // given
+      const released = await finished(f.invoke, "released then changed")
+      await f.invoke(api => api.operation(async (_manager, _ancestry, _signal, operation) => operation.cancel.cancelTask(released)))
+      await f.reopen()
+      const file = join(f.dir, "parent", "tasks", `${released}.json`)
+      const row = JSON.parse(readFileSync(file, "utf8"))
+      writeFileSync(file, JSON.stringify({ ...row, residency_claim: "foreign-claim", owned_session: { ...row.owned_session, residencyClaim: "foreign-claim" } }))
+      // when
+      const read = await f.invoke(api => api.operation(async (_manager, _ancestry, _signal, operation) => operation.output.get(released))).then(() => "read", (error: unknown) => String(error))
+      // then
+      expect(read).not.toBe("read")
+    })
+  })
 })

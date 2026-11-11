@@ -84,6 +84,32 @@ export function resolveTrustedChildStatePath(path: string) {
   return absolute
 }
 
+/** The highest locator generation stored in a child journal, or 0 when there is none yet. A session
+ * scope opened after a reload restarts its lease generations from 1, while a journal never lets a
+ * locator's generation go down; the caller raises its scope above this floor before the first lease.
+ * Read-only: no owner row is registered and nothing is created. */
+export function readStoredLocatorGenerationFloor(path: string): number {
+  if (!isAbsolute(path)) fail("Child journal requires an absolute trusted state path")
+  if (!existsSync(path)) return 0
+  const absolute = resolveTrustedChildStatePath(path)
+  if (typeof constants.SQLITE_OPEN_NOFOLLOW !== "number") fail("SQLite no-follow open support is unavailable")
+  const db = new Database(absolute, constants.SQLITE_OPEN_READWRITE | constants.SQLITE_OPEN_NOFOLLOW)
+  try {
+    db.exec("PRAGMA busy_timeout=2000")
+    const app = (db.query("PRAGMA application_id").get() as { application_id: number }).application_id
+    if (app !== applicationID) fail("Foreign child journal database")
+    let floor = 0
+    for (const row of db.query<Row, []>("SELECT body FROM children").all()) {
+      // A corrupt row stays for inspection; it cannot lower the floor of the readable ones.
+      let body: unknown
+      try { body = JSON.parse(row.body) } catch { continue }
+      const parsed = recordSchema.safeParse(body)
+      if (parsed.success && parsed.data.locator.generation > floor) floor = parsed.data.locator.generation
+    }
+    return floor
+  } finally { db.close() }
+}
+
 export interface DurableChildJournal extends ChildJournal {
   readonly owner: string
   assertCurrent(expected: ChildRecord): undefined

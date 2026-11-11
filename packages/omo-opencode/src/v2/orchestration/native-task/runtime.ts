@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { createHash, randomUUID } from "node:crypto"
+import { getPidLiveness } from "@oh-my-opencode/memory-core/process-identity"
 import { OmoTaskSettingsSchema, type OmoConfig } from "@oh-my-opencode/omo-config-core"
 import type { AgentDefinition } from "@oh-my-opencode/senpi-task"
 import { createTaskManagerImplementation, createTaskRecordStore, createTaskLifecycle, AdmissionBarrier, NO_HOST_ENDPOINT, ChildObservationUncertain,
@@ -10,6 +11,7 @@ import { createTaskTerminalObservers, type CompletionDeliverySource } from "@oh-
 import { createModelCatalog } from "../../host/model-catalog"
 import { openChildJournal } from "../../host/child-journal"
 import { openCompletionIntentJournal } from "../../host/completion-intent-journal"
+import { openReleasedControlJournal, type ReleasedControlReceipt } from "../../host/released-control-journal"
 import { openOwnedChildObservationStore } from "../../host/owned-child-observation-store"
 import type { SessionLease, SessionScopes, SessionToolPolicy } from "../../host/session-state"
 import type { OwnedToolMetadataSource } from "../../host/effect-tool-metadata-source"
@@ -118,8 +120,11 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
   const closedControls = new Map<string, { identity: string; revision: number } & NotificationClosedSource>()
   // Custody receipts for children THIS runtime released itself (detached to persisted_only, or a
   // retained session it closed): the exact identity and journal revision at release. A later read
-  // proves the stored row is still that same released child, never a foreign or changed one.
-  const releasedControls = new Map<string, { readonly identity: string; readonly revision: number }>()
+  // proves the stored row is still that same released child, never a foreign or changed one. Each
+  // receipt is also journaled durably, so a reloaded runtime over the same state keeps the proof.
+  const releasedControls = new Map<string, ReleasedControlReceipt>()
+  // Set while this runtime parks its own children for a reload/dispose, so their receipts say so.
+  const suspendingForShutdown = new AsyncLocalStorage<true>()
   if (ctx.app.version !== "2.2.6" || !hasJoinedSessionCancellation(ctx.session)) throw new Error("Native task binding requires pinned joined Effect host")
   if (typeof options.captureStartAuthority !== "function") throw new Error("Native task runtime requires a start authority producer")
   if (options.childToolGuard && (!options.authorizePlannedStart || !options.childGuardBinding) || options.childGuardBinding && !options.childToolGuard) throw Error("Child tool guard requires original planned authorization and live binding producer")
@@ -158,6 +163,12 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     namespace: "opencode2:" + createHash("sha256").update(JSON.stringify([ctx.location.directory, parentID, ctx.app.version])).digest("hex"),
   }) : undefined
   if (completionJournal) initializers.push({ close: () => completionJournal.close(), done: false })
+  const releaseJournal = openReleasedControlJournal({ path: join(options.stateDir, "owned-releases.sqlite"),
+    namespace: "opencode2-released:" + createHash("sha256").update(JSON.stringify([ctx.location.directory, parentID])).digest("hex") })
+  initializers.push({ close: () => releaseJournal.close(), done: false })
+  /** This runtime's own release receipt for a task: in memory, else the durable one of a previous runtime. */
+  function releaseReceipt(id: string): ReleasedControlReceipt | undefined { return releasedControls.get(id) ?? releaseJournal.read(id) }
+  function forgetRelease(id: string): void { releasedControls.delete(id); releaseJournal.forget(id) }
   options.scopes.assert(options.parent); options.initializationSignal?.throwIfAborted()
   const barrier = new AdmissionBarrier(), controls = new Map<string, OwnedTaskControl>()
   let manager!: ReattachingTaskManager, lifecycle!: TaskLifecycle, closing = false
@@ -384,7 +395,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
           }
         } else {
           const owner = records.find(row => row.child_session_id === parent)
-          const summary = await lifecycle.suspendOnSessionShutdown({ parentSessionId: parent, ...(owner ? { ownTaskId: owner.task_id } : {}), reason: "reload" })
+          const summary = await suspendingForShutdown.run(true, () => lifecycle.suspendOnSessionShutdown({ parentSessionId: parent, ...(owner ? { ownTaskId: owner.task_id } : {}), reason: "reload" }))
           if (summary.failures.length) throw new AggregateError(summary.failures, "Owned descendant suspension incomplete")
         }
       }
@@ -401,11 +412,19 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
   const inputAdmissions = new Map<string, Set<AbortController>>()
   let closeAttempt: Promise<void> | undefined, closed = false
   const cleanup = { controls: false, workpools: false, launches: false, suspended: false, notifications: false,
-    lifecycle: false, runner: false, observations: false, journal: false, completionJournal: false, store: false }
+    lifecycle: false, runner: false, observations: false, journal: false, releases: false, completionJournal: false, store: false }
   const controlFailures: unknown[] = []
   function active() { if (closing) throw new Error("Native task runtime closing"); options.scopes.assert(options.parent); options.initializationSignal?.throwIfAborted() }
   const freshRecoveries = options.childToolGuard && createFreshRecoveryApprovals({ guard: options.childToolGuard, stateDir: options.stateDir,
     ...(options.authorizeRecovery && { authorize: options.authorizeRecovery }), capture: () => options.captureStartAuthority() })
+  /** Team identity of a recovered member: the persisted record's own team fields, written from the
+   * ORIGINAL approved spec at its start. The member producer re-fences every send against live
+   * team-core state (team live, led by this parent, member listed), so a stale identity sends nothing. */
+  function recoveredTeam(spec: ManagedStartSpec): ApprovedTeam | undefined {
+    const record = store.load(spec.taskId)
+    if (!record || record.team_role !== "member" || !record.team_run_id || !record.team_member_name || record.parent_session_id !== spec.parentSessionId) return undefined
+    return Object.freeze({ runId: record.team_run_id, memberName: record.team_member_name })
+  }
   /** Guarded child bindings from ONE original producer: planned admission or fresh recovery. */
   function guardFor(spec: ManagedStartSpec, approval: ChildGuardApproval, prepared: Planned, assertLifetime: () => void, assertStageAdmission?: () => void, team?: ApprovedTeam) {
     if (!options.childGuardBinding) throw Error("Child tool guard requires original planned authorization and live binding producer")
@@ -420,7 +439,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     policy: options.policy, planner, metadataSource: options.metadataSource, assertAdmission: active,
     ...(options.childToolGuard && { childGuard: { owner: options.childToolGuard, forSpec(spec: ManagedStartSpec) {
       const recovery = freshRecoveries?.forSpec(spec)
-      if (recovery) return guardFor(spec, recovery.guardApproval, recovery.prepared, () => recovery.authority.assertLifetime(), () => recovery.authority.assertAdmission())
+      if (recovery) return guardFor(spec, recovery.guardApproval, recovery.prepared, () => recovery.authority.assertLifetime(), () => recovery.authority.assertAdmission(), recoveredTeam(spec))
       const admission = spec.admission, grant = admission && plannedGrants.get(admission)
       if (!admission || !grant?.guardApproval || admission.hostAuthority !== grant.authority) throw Error("Child stage has no original approved guard admission")
       grant.assertLifetime()
@@ -449,7 +468,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     },
     async parentForRecord(record) { assertCandidate(record, true); const parent = await cleanupParent(record); return { parent: parent.lease, policy: parent.policy } },
     beforeLeaseRetire: (child, intent) => retireChildren(child.locator.sessionID, intent),
-    installed(control) { controls.set(control.handle.task_id, control); const record = store.load(control.handle.task_id); if (!record || record.child_session_id !== control.child.locator.sessionID || record.parent_session_id !== control.child.locator.parentID) throw Error("Installed control tree identity differs"); remember(record); registerInstalledNotification(control, record) } })
+    installed(control) { forgetRelease(control.handle.task_id); controls.set(control.handle.task_id, control); const record = store.load(control.handle.task_id); if (!record || record.child_session_id !== control.child.locator.sessionID || record.parent_session_id !== control.child.locator.parentID) throw Error("Installed control tree identity differs"); remember(record); registerInstalledNotification(control, record) } })
   function captureNotificationRecovery(record: TaskRecord): NotificationRecoveryOrigin {
     if (!record.owned_session) throw Error("Actual recovery request has no owned journal reference")
     return Object.freeze({ identity: Object.freeze({}), taskId: record.task_id, beforeEpoch: record.notification.run_epoch,
@@ -550,6 +569,27 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     if (state === "conflict") throw Error("Parked child is in permission conflict; host rules were preserved. Resolve it explicitly (END) before sending")
     if (state === "parked" || state === "restoring") await recoverControl(record)
   }
+  /** Revives, inside a genuine current call, a child a previous runtime left behind:
+   * - parked by that runtime's shutdown: its receipt must say `suspended` and still match the row
+   *   exactly; a child the parent RELEASED stays released;
+   * - stranded resident by a host that died without parking it: the dead host is proven by its pid,
+   *   and the journal claim itself refuses any owner that is still live or unverified.
+   * Anything else is left to the ordinary send path. */
+  async function restoreAfterReload(id: string): Promise<boolean> {
+    if (controls.has(id) || manager.getResidentHandle(id)) return false
+    const record = store.load(id)
+    if (!record || !record.owned_session) return false
+    if (record.residency_state === "resident" && record.host_pid !== undefined && record.host_pid !== process.pid && getPidLiveness(record.host_pid) === "dead") {
+      await recoverControl(record)
+      return controls.has(id)
+    }
+    if (record.residency_state !== "persisted_only") return false
+    const receipt = releaseReceipt(id)
+    if (receipt?.kind !== "suspended") return false
+    if (receipt.identity !== operationIdentity(record) || receipt.revision !== record.owned_session.journalRevision) throw Error("Suspended child changed since its runtime parked it")
+    await reviveParkedBeforeSend(id)
+    return controls.has(id)
+  }
   /** Record our own release only when the durable journal row is this record's exact child. */
   async function recordRelease(id: string): Promise<void> {
     const fresh = store.load(id), ref = fresh?.owned_session
@@ -558,7 +598,10 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     if (!row || row.locator.sessionID !== ref.sessionID || row.locator.parentID !== ref.parentID || row.locator.backendID !== ref.backendID || row.locator.location !== ref.location) return
     const current = store.load(id)
     if (!current?.owned_session || operationIdentity(current) !== operationIdentity(fresh) || current.owned_session.journalRevision !== ref.journalRevision) return
-    releasedControls.set(id, Object.freeze({ identity: operationIdentity(current), revision: ref.journalRevision }))
+    const receipt: ReleasedControlReceipt = Object.freeze({ taskID: id, identity: operationIdentity(current), revision: ref.journalRevision,
+      kind: suspendingForShutdown.getStore() ? "suspended" : "released" })
+    releasedControls.set(id, receipt)
+    releaseJournal.record(receipt)
   }
   const ownedSessions = createOwnedTaskLifecyclePort({ controls, recover: recoverControl, closeRetained: async record => { await runner.closeRetained(record); await recordRelease(record.task_id) },
     beforeRetire: async (record, intent) => { if (record.child_session_id) await retireChildren(record.child_session_id, intent) },
@@ -576,7 +619,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         journal.assertCurrent(row)
         closedControls.set(record.task_id, Object.freeze({ identity: operationIdentity(current), revision: current.owned_session.journalRevision,
           control, row, referenceRevision: current.owned_session.journalRevision }))
-        releasedControls.delete(record.task_id)
+        forgetRelease(record.task_id)
       } else await recordRelease(record.task_id)
     },
     async isClosed(record) {
@@ -797,7 +840,16 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     const parent = bindings.info(binding)
     const initial = manager.get(id)
     if (!initial || initial.root_session_id !== parentID || initial.parent_session_id !== parent.lease.sessionID && initial.root_session_id !== parent.lease.sessionID) throw Error("Operation task outside original parent")
-    if (!owns(initial)) throw Error("Operation task has no original owned membership")
+    if (!owns(initial)) {
+      // A reloaded runtime re-admits ONLY a row its previous runtime RELEASED itself, while that row
+      // is still exactly the released child. A row merely parked by that runtime's shutdown stays a
+      // stored row (restored only through restoreAfterReload); anything else stays outside.
+      const receipt = initial.child_session_id && !controls.has(id) && !manager.getResidentHandle(id) ? releaseReceipt(id) : undefined
+      if (!receipt || receipt.kind !== "released" || receipt.identity !== operationIdentity(initial) || receipt.revision !== initial.owned_session?.journalRevision) throw Error("Operation task has no original owned membership")
+      assertCandidate(initial, true)
+      remember(initial)
+      if (!owns(initial)) throw Error("Operation task has no original owned membership")
+    }
     if (initial.child_session_id) assertCandidate(initial, true)
     const epoch = initial.notification.run_epoch
     const queuedClaim = initial.residency_claim
@@ -821,7 +873,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
           control.handle.assertOwned()
         } else {
           // No live control: only our own closed or released receipt for this exact row is custody.
-          const closed = closedControls.get(id) ?? (manager.getResidentHandle(id) ? undefined : releasedControls.get(id))
+          const closed = closedControls.get(id) ?? (manager.getResidentHandle(id) ? undefined : releaseReceipt(id))
           if (!closed || closed.identity !== operationIdentity(row) || closed.revision !== row.owned_session?.journalRevision) throw Error("Accepted Native custody unavailable")
         }
         const next = operationIdentity(row)
@@ -936,6 +988,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         waitFor: (id, extra) => { const current = bindings.info(binding); return manager.waitFor(id, { signal: AbortSignal.any([current.stop.signal, ...(extra?.signal ? [extra.signal] : [])]) }) },
         // The lifecycle single-writer port, serialized with this task's other controls like END.
         destroyResidentTask: (id, cause) => controlled(id, () => lifecycle.destroyResidentTask(id, cause), true, true, true),
+        restoreAfterReload: id => controlled(id, () => restoreAfterReload(id), false, true, true),
       })
     },
     capabilities: Object.freeze({ activeRunPause: false, processMode: false, continuousOldTurnRecovery: false, nativeSteerOrdering: false, nativeTaskRecursion: true }),
@@ -1032,6 +1085,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
           await acceptedOperations.join()
           if (!cleanup.observations) { try { observationStore.close(); cleanup.observations = true } catch (error) { errors.push(error) } }
           if (!cleanup.journal) { try { journal.close(); cleanup.journal = true } catch (error) { errors.push(error) } }
+          if (!cleanup.releases) { try { releaseJournal.close(); cleanup.releases = true } catch (error) { errors.push(error) } }
           if (!cleanup.completionJournal) { try { await completionJournal?.close(); cleanup.completionJournal = true } catch (error) { errors.push(error) } }
           if (!cleanup.store) {
             try {
