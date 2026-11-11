@@ -251,3 +251,21 @@ test("fresh recovery approval issues THIS call's real subagent request and refus
   expect(result?.buildAgentID).toBe("build"); expect(result?.selection).toEqual(prepareRecoveryHostGrant(recovery())); await f.close()
 })
 function defined<T>(value: T | null | undefined): T { if (value === undefined || value === null) throw new Error("expected a defined value"); return value }
+
+test("the CodeMode ls counterpart is accepted as a custom grant and a stock name still cannot claim it", () => {
+  // given the Native `ls` custom name and the dedicated codemode:true registration in the actual catalog
+  const base = selection()
+  const listing = { id: "omo_native_ls", name: "omo_native_ls", options: { codemode: true, permission: "omo_native_ls" } }
+  const input = selection({ nativeTools: [...base.nativeTools, { name: "ls" }], catalog: [...base.catalog, listing],
+    customCounterparts: [{ nativeName: "ls", hostID: "omo_native_ls" }], plan: { model: "x", agentType: "explore" } })
+  // when
+  const result = prepareHostTaskGrant(input)
+  // then the explore floor selects it, CodeMode transport is required and only the network guard covers it
+  expect(result.selected).toContainEqual({ nativeName: "ls", hostID: "omo_native_ls" })
+  expect(result.allowsCodeModeTransport).toBe(true)
+  expect(result.requirements).toEqual(["curated-readonly-broker", "codemode-network-guard"])
+  expect(checkHostGrantTarget(result, "omo_native_ls", { boundRequirements: ["curated-readonly-broker"], targets: [{ requirement: "curated-readonly-broker", nativeName: "bash", hostID: "broker" }] })).toBe("requires-bindings")
+  expect(checkHostGrantTarget(result, "omo_native_ls", { boundRequirements: ["curated-readonly-broker", "codemode-network-guard"], targets: [{ requirement: "curated-readonly-broker", nativeName: "bash", hostID: "broker" }] })).toBe("selected")
+  expect(() => prepareHostTaskGrant({ ...input, customCounterparts: [{ nativeName: "read", hostID: "omo_native_ls" }] })).toThrow("overriding")
+  expect(() => prepareHostTaskGrant({ ...input, customCounterparts: [{ nativeName: "find", hostID: "omo_native_ls" }] })).toThrow("overriding")
+})
