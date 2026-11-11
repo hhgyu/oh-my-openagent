@@ -120,7 +120,6 @@ export type {
 
 export type { DagTaskOwner, DagTaskOwnerKey, OwnedStartResult } from "./owner"
 
-export { processDagLease, resolveDagLease } from "./ports"
 export type { DagLeasePort, DagLeaseSources, DagTaskPort } from "./ports"
 export { createDagRecovery } from "./recovery"
 export type { DagRecovery, DagRecoveryOptions, DagRecoveryOutcome, InstalledDagRun } from "./recovery"
