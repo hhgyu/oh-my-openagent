@@ -2,6 +2,7 @@ import { describe, expect, test, mock, beforeEach, afterEach, spyOn } from "bun:
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { resolveUserOmoConfigPath } from "@oh-my-opencode/omo-config-core"
 import { install } from "./install"
 import * as astGrepInstall from "./install-ast-grep-sg"
 import * as configManager from "./config-manager"
@@ -18,8 +19,17 @@ describe("install CLI - binary check behavior", () => {
   let originalFetch: typeof globalThis.fetch
   let isOpenCodeInstalledSpy: ReturnType<typeof spyOn>
   let getOpenCodeVersionSpy: ReturnType<typeof spyOn>
+  let originalConsoleLog: typeof console.log
+  let userOmoConfigPath: string
+  let originalUserOmoConfig: string | undefined
 
   beforeEach(() => {
+    // The installer writes the real user config layer under the run's shared hermetic HOME; a later
+    // test in the same process would otherwise read the install's categories as its own config.
+    userOmoConfigPath = resolveUserOmoConfigPath()
+    originalUserOmoConfig = existsSync(userOmoConfigPath) ? readFileSync(userOmoConfigPath, "utf8") : undefined
+    originalConsoleLog = console.log
+
     // given temporary config directory
     tempDir = join(tmpdir(), `omo-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
     mkdirSync(tempDir, { recursive: true })
@@ -53,6 +63,9 @@ describe("install CLI - binary check behavior", () => {
     isOpenCodeInstalledSpy?.mockRestore()
     getOpenCodeVersionSpy?.mockRestore()
     globalThis.fetch = originalFetch
+    console.log = originalConsoleLog
+    if (originalUserOmoConfig === undefined) rmSync(userOmoConfigPath, { force: true })
+    else writeFileSync(userOmoConfigPath, originalUserOmoConfig)
     mock.restore()
   })
 

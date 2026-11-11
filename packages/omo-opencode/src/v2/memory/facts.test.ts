@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { FactsFailureStore, FactsQueue, GitMemoryRepo, resolveAutoIdentity, type MemoryIdentityPaths } from "@oh-my-opencode/memory-core"
-import { OmoMemorySettingsSchema } from "@oh-my-opencode/omo-config-core"
+import { OmoConfigSchema, OmoMemorySettingsSchema } from "@oh-my-opencode/omo-config-core"
 import { FACTS_AGENT_ID, FACTS_PERMISSIONS } from "./facts-agent"
 import { retireFactsOwner } from "./facts-owners"
 import { FACTS_RECORD_TOOL_NAME } from "./facts-record-tool"
@@ -26,7 +26,8 @@ function fixture(settings: Record<string, unknown> = { facts: { debounce_settles
 
 async function register(f: MemoryFixture, ports = createScriptedFactsPorts(), extra: { timers?: ReturnType<typeof createManualTimers> } = {}) {
   const cleanup = await registerMemoryComponent(f.host, f.options({
-    facts: { createPort: request => ports.createPort(request), catalog: async () => [catalogModel("test", "model")], ...(extra.timers === undefined ? {} : { timers: extra.timers }) },
+    // The config is explicit: the run's shared hermetic HOME may hold a user layer another test wrote.
+    facts: { createPort: request => ports.createPort(request), catalog: async () => [catalogModel("test", "model")], loadConfig: () => OmoConfigSchema.parse({}), ...(extra.timers === undefined ? {} : { timers: extra.timers }) },
   }))
   cleanups.push(cleanup)
   return { ports, cleanup }

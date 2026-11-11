@@ -6,7 +6,7 @@
 // read here, BEFORE any host transform runs: a throw inside a transform disables the whole plugin.
 
 import { loadFactsPersona } from "@oh-my-opencode/memory-core"
-import type { OmoMemorySettings } from "@oh-my-opencode/omo-config-core"
+import type { OmoConfig, OmoMemorySettings } from "@oh-my-opencode/omo-config-core"
 import { createModelCatalog, type CatalogModel } from "../host/model-catalog"
 import { describeError, type MemoryBinder } from "./binding"
 import type { MemoryLogger } from "./config"
@@ -16,8 +16,10 @@ import { kibitzerHostCapable } from "./kibitzer"
 import type { MemoryChildPort, MemoryChildTimers } from "./memory-child-port"
 import type { MemoryHost } from "./index"
 
-/** Facts extractor test seams: the child port, the model catalog, the deadline timers and length. */
+/** Facts extractor test seams: the child port, the model catalog, the config, the deadline timers and length. */
 export interface MemoryFactsSeams {
+  /** Unified config for model and people routing; defaults to the runtime config of the bound directory. */
+  readonly loadConfig?: (cwd: string) => OmoConfig
   readonly createPort?: (request: FactsPortRequest) => MemoryChildPort
   readonly catalog?: () => Promise<readonly CatalogModel[]>
   readonly timers?: MemoryChildTimers
@@ -62,6 +64,7 @@ export function createFactsComponent(context: MemoryHost, deps: {
     binder: deps.binder, session: context.session, logger: deps.logger, now: deps.now, loadSettings: deps.loadSettings, hosting,
     ...(catalog === undefined ? {} : { catalog }),
     ...(seams?.deadlineMs === undefined ? {} : { deadlineMs: seams.deadlineMs }),
+    ...(seams?.loadConfig === undefined ? {} : { loadConfig: seams.loadConfig }),
   })
   return { facts, hosting, ...(persona === undefined ? {} : { persona }) }
 }
