@@ -1,4 +1,6 @@
-import { assertCanonicalNativeTaskTarget } from "../../tools/native-task"
+import { assertCanonicalNativeTaskTarget, NATIVE_TASK_TOOL_NAMES } from "../../tools/native-task"
+import { assertCanonicalNativeTeamTarget } from "../../tools/native-team"
+import { isNativeTeamToolName } from "../../tools/native-team-codecs"
 import { AsyncLocalStorage } from "node:async_hooks"
 import type { ToolContext } from "@opencode/plugin/promise/tool"
 import type { ListedTool } from "../../host/tool-registry"
@@ -219,8 +221,11 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
   const service = Object.freeze({
     targetPermission(target: ListedTool): NativeTaskTargetPermission {
       targetState.assertCurrent()
-      assertCanonicalNativeTaskTarget(target)
-      if (!Object.isFrozen(target) || !["task", "task_output", "task_send", "task_cancel"].includes(target.name) || target.id !== `omo.native.${target.name}` || target.options !== undefined || typeof target.execute !== "function") throw Error("Noncanonical Native task permission target")
+      // The 4 task targets and the 6 lead team targets each prove their own bridge origin.
+      const team = isNativeTeamToolName(target.name)
+      if (team) assertCanonicalNativeTeamTarget(target)
+      else assertCanonicalNativeTaskTarget(target)
+      if (!Object.isFrozen(target) || !(team || (NATIVE_TASK_TOOL_NAMES as readonly string[]).includes(target.name)) || target.id !== `omo.native.${target.name}` || target.options !== undefined || typeof target.execute !== "function") throw Error("Noncanonical Native task permission target")
       if (issuedTargets.has(target)) throw Error("Duplicate Native task permission target")
       const permission = Object.freeze({}) as NativeTaskTargetPermission
       targetPermissions.set(permission, { owner: service, state: targetState, tool: target, execute: target.execute, id: target.id, name: target.name })

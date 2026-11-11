@@ -1,6 +1,7 @@
 import type { ReattachingTaskManager, ManagerStartSpec, TaskRecord } from "@oh-my-opencode/senpi-task/manager-kernel"
 import type { TaskOperationManager, SendManager, CancelManager, OutputManager } from "@oh-my-opencode/senpi-task/task-operations"
-import { runTaskSend, type TaskSendInput, type TaskSendRunOptions } from "@oh-my-opencode/senpi-task/task-operations"
+import { runTaskSend, type TaskSendInput, type TaskSendRunOptions, type TaskSendTeamRouting } from "@oh-my-opencode/senpi-task/task-operations"
+import type { TeamServiceDeps } from "@oh-my-opencode/senpi-task/team-operations"
 import type { NativeOperationLifetime } from "./accepted-operation"
 
 export interface AcceptedTaskProof { readonly taskID: string; readonly epoch: number; read(): TaskRecord }
@@ -21,6 +22,7 @@ export interface NativeOperationAccess {
   send(input: Parameters<SendManager["sendToTask"]>[0]): ReturnType<SendManager["sendToTask"]>
   cancel(...args: Parameters<CancelManager["cancelTask"]>): ReturnType<CancelManager["cancelTask"]>
   waitFor(...args: Parameters<TaskOperationManager["waitFor"]>): ReturnType<TaskOperationManager["waitFor"]>
+  destroyResidentTask(...args: Parameters<TeamServiceDeps["destruction"]["destroyResidentTask"]>): ReturnType<TeamServiceDeps["destruction"]["destroyResidentTask"]>
 }
 
 /** A view of the SAME Native manager/allocator. No Native algorithms or new scheduler. */
@@ -195,14 +197,25 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
     get,
   }
   const output: OutputManager = { get, list, ...(concurrency ? { concurrency } : {}) }
-  return Object.freeze({ task, send, cancel, output,
+  /** Lifecycle single-writer destruction, only for a task in this operation's original scope. */
+  const destruction: TeamServiceDeps["destruction"] = {
+    destroyResidentTask(id, cause) {
+      current()
+      const resolved = access.resolve(id)
+      if (resolved.kind !== "found" || resolved.taskID !== id) throw Error("Destruction outside the original parent scope")
+      accept(id)
+      return lifetime.track(access.destroyResidentTask(id, cause))
+    },
+  }
+  return Object.freeze({ task, send, cancel, output, destruction,
     /** Full canonical send lifetime. The low-level send port alone does not own
      * Native's mapped/late chain; the mandatory observer cannot be overridden. */
-    runSend(params: TaskSendInput, options: Omit<TaskSendRunOptions, "retainWork"> = {}) {
+    runSend(params: TaskSendInput, options: Omit<TaskSendRunOptions, "retainWork"> & { readonly teamRouting?: TaskSendTeamRouting } = {}) {
       current()
       const deliver = options.deliverLateOutcome, signal = options.signal ?? lifetime.reportingSignal
       let originalOutcomeJSON: string | undefined
-      return runTaskSend(send, params, lifetime.source.sessionID, undefined, {
+      // Team routing is supplied per call by the component, over the SAME operation's team service.
+      return runTaskSend(send, params, lifetime.source.sessionID, options.teamRouting, {
         signal,
         ...(deliver ? { deliverLateOutcome(result, delivery) {
           try { originalOutcomeJSON = JSON.stringify({ result, delivery }) } catch { /* No invented substitute outcome. */ }

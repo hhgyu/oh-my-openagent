@@ -116,6 +116,10 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
   const grantFootprint = (value: { parent: string; root: string; depth: number; instructions?: string; agentType?: string; allow?: readonly string[]; deny?: readonly string[]; includeTaskTools: boolean }) => JSON.stringify(value)
   const acceptedStarts = new Map<string, { authority: HostStartAuthority; epoch: number }>()
   const closedControls = new Map<string, { identity: string; revision: number } & NotificationClosedSource>()
+  // Custody receipts for children THIS runtime released itself (detached to persisted_only, or a
+  // retained session it closed): the exact identity and journal revision at release. A later read
+  // proves the stored row is still that same released child, never a foreign or changed one.
+  const releasedControls = new Map<string, { readonly identity: string; readonly revision: number }>()
   if (ctx.app.version !== "2.2.6" || !hasJoinedSessionCancellation(ctx.session)) throw new Error("Native task binding requires pinned joined Effect host")
   if (typeof options.captureStartAuthority !== "function") throw new Error("Native task runtime requires a start authority producer")
   if (options.childToolGuard && (!options.authorizePlannedStart || !options.childGuardBinding) || options.childGuardBinding && !options.childToolGuard) throw Error("Child tool guard requires original planned authorization and live binding producer")
@@ -546,7 +550,17 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     if (state === "conflict") throw Error("Parked child is in permission conflict; host rules were preserved. Resolve it explicitly (END) before sending")
     if (state === "parked" || state === "restoring") await recoverControl(record)
   }
-  const ownedSessions = createOwnedTaskLifecyclePort({ controls, recover: recoverControl, closeRetained: record => runner.closeRetained(record),
+  /** Record our own release only when the durable journal row is this record's exact child. */
+  async function recordRelease(id: string): Promise<void> {
+    const fresh = store.load(id), ref = fresh?.owned_session
+    if (!fresh || !ref) return
+    const row = await journal.read(ref.journalKey)
+    if (!row || row.locator.sessionID !== ref.sessionID || row.locator.parentID !== ref.parentID || row.locator.backendID !== ref.backendID || row.locator.location !== ref.location) return
+    const current = store.load(id)
+    if (!current?.owned_session || operationIdentity(current) !== operationIdentity(fresh) || current.owned_session.journalRevision !== ref.journalRevision) return
+    releasedControls.set(id, Object.freeze({ identity: operationIdentity(current), revision: ref.journalRevision }))
+  }
+  const ownedSessions = createOwnedTaskLifecyclePort({ controls, recover: recoverControl, closeRetained: async record => { await runner.closeRetained(record); await recordRelease(record.task_id) },
     beforeRetire: async (record, intent) => { if (record.child_session_id) await retireChildren(record.child_session_id, intent) },
     async releaseControl(record, control) {
       const managed = manager?.getResidentHandle(record.task_id)
@@ -562,7 +576,8 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         journal.assertCurrent(row)
         closedControls.set(record.task_id, Object.freeze({ identity: operationIdentity(current), revision: current.owned_session.journalRevision,
           control, row, referenceRevision: current.owned_session.journalRevision }))
-      }
+        releasedControls.delete(record.task_id)
+      } else await recordRelease(record.task_id)
     },
     async isClosed(record) {
       const ref = record.owned_session
@@ -804,7 +819,11 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
           if (control.child.locator.sessionID !== row.child_session_id || control.child.locator.parentID !== row.parent_session_id) throw Error("Accepted control child differs")
           if (!control.handle.assertOwned) throw Error("Accepted control has no private custody proof")
           control.handle.assertOwned()
-        } else { const closed = closedControls.get(id); if (!closed || closed.identity !== operationIdentity(row) || closed.revision !== row.owned_session?.journalRevision) throw Error("Accepted Native custody unavailable") }
+        } else {
+          // No live control: only our own closed or released receipt for this exact row is custody.
+          const closed = closedControls.get(id) ?? (manager.getResidentHandle(id) ? undefined : releasedControls.get(id))
+          if (!closed || closed.identity !== operationIdentity(row) || closed.revision !== row.owned_session?.journalRevision) throw Error("Accepted Native custody unavailable")
+        }
         const next = operationIdentity(row)
         if (identity !== undefined && next !== identity) throw Error("Accepted Native epoch or owner changed")
         const nextRevision = row.owned_session?.journalRevision
@@ -915,6 +934,8 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         send: input => { if (input.allScope || input.callerSessionId !== undefined && input.callerSessionId !== parent.lease.sessionID) throw Error("Cross-parent operation send is not issued"); const resolved = resolve(input.idOrName); if (resolved.kind !== "found") throw Error("Accepted send target proof unavailable"); return runtime.send({ ...input, idOrName: resolved.taskID, callerSessionId: parent.lease.sessionID }, { signal: AbortSignal.any([acceptedSignal, parent.lease.signal, parent.stop.signal]) }) },
         cancel: (id, reason, extra) => controlled(id, () => manager.cancelTask(id, reason, extra), true, true, true, true),
         waitFor: (id, extra) => { const current = bindings.info(binding); return manager.waitFor(id, { signal: AbortSignal.any([current.stop.signal, ...(extra?.signal ? [extra.signal] : [])]) }) },
+        // The lifecycle single-writer port, serialized with this task's other controls like END.
+        destroyResidentTask: (id, cause) => controlled(id, () => lifecycle.destroyResidentTask(id, cause), true, true, true),
       })
     },
     capabilities: Object.freeze({ activeRunPause: false, processMode: false, continuousOldTurnRecovery: false, nativeSteerOrdering: false, nativeTaskRecursion: true }),

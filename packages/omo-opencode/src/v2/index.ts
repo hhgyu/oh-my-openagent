@@ -73,6 +73,11 @@ export function nativeTaskEnabled(options: Plugin.Context["options"] | undefined
   return options?.["omo-native-task-enabled"] !== false
 }
 
+/** The lead team tools ride on the Native task component and default the same way. */
+export function nativeTeamEnabled(options: Plugin.Context["options"] | undefined): boolean {
+  return options?.["omo-native-team-enabled"] !== false
+}
+
 export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners = {}): Promise<Cleanup> {
   const cleanups: Cleanup[] = []
   try {
@@ -96,7 +101,9 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
     }
     if (owners.nativeTask) {
       const { registerNativeTaskComponent } = await import("./orchestration/native-task/component")
-      cleanups.push(await registerNativeTaskComponent(context, owners.nativeTask))
+      // The lead team tools share the Native task component's registry, kernel and service.
+      const team = nativeTeamEnabled(context.options) ? (await import("./orchestration/native-team/component")).registerNativeTeamComponent : undefined
+      cleanups.push(await registerNativeTaskComponent(context, owners.nativeTask, team ? { team } : {}))
     }
     cleanups.push(await registerBootstrap(context.rpc))
   } catch (error) {

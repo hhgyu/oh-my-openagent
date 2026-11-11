@@ -1,12 +1,13 @@
 import { Schema } from "effect"
 import { Compile } from "typebox/compile"
+import type { TSchema } from "typebox"
 import type { Info, ToolContext, ToolDomain } from "@opencode/plugin/promise/tool"
 import type { Registration } from "@opencode/plugin/promise/registration"
 import {
   buildTaskExecute, buildTaskToolDescription, normalizeTaskToolArguments, runTaskOutput, runTaskCancel,
   forgetTaskOutputSessionReads, TASK_CANCEL_TOOL_DESCRIPTION, TASK_SEND_TOOL_DESCRIPTION,
   type TaskToolContext, type TaskToolDeps, type TaskToolParamsStatic, type TaskOutputInput, type TaskOutputDeps,
-  type TaskSendInput, type TaskCancelInput,
+  type TaskSendInput, type TaskCancelInput, type TaskSendTeamRouting,
 } from "@oh-my-opencode/senpi-task/task-operations"
 import type { createToolKernel } from "../host/tool-kernel"
 import type { ListedTool, ToolRegistry } from "../host/tool-registry"
@@ -25,13 +26,28 @@ export function assertCanonicalNativeTaskTarget(target: ListedTool): void {
 }
 
 type Name = "task" | "task_output" | "task_send" | "task_cancel"
+/** The 4 Native task tool names this bridge publishes. */
+export const NATIVE_TASK_TOOL_NAMES: readonly Name[] = Object.freeze(["task", "task_output", "task_send", "task_cancel"])
 const OUTPUT_DESCRIPTION = "Read a current-session child by task_id or name; status, tail or full. Read-only; never revives or steers a child."
 type Service = ReturnType<typeof createNativeTaskService>
+type OperationRun = Parameters<Awaited<ReturnType<Service["forCall"]>>["operation"]>[0]
+/** The arguments of ONE call's Native operation, passed on unchanged and never retained. */
+export interface NativeTaskOperationCall {
+  readonly manager: Parameters<OperationRun>[0]
+  readonly resolveAncestry: Parameters<OperationRun>[1]
+  readonly signal: AbortSignal
+  readonly operation: Parameters<OperationRun>[3]
+}
 
 /** A strict public boundary: Check never converts false or replaces the input.
  * Publication is the exact canonical constraint, not a permissive annotation. */
 export function nativeTaskPublicInput(name: Name) {
-  const canonical = nativeTaskInputSchemas[name], compiled = Compile(canonical)
+  return strictPublicInput(nativeTaskInputSchemas[name])
+}
+
+/** The same strict public boundary for any canonical Native TypeBox input schema. */
+export function strictPublicInput(canonical: TSchema) {
+  const compiled = Compile(canonical)
   const json = JSON.parse(JSON.stringify(canonical))
   // Effect's JSON codec derivation replaces Unknown with a JSON encoding and
   // drops its source checks from publication. Any keeps this exact runtime
@@ -61,6 +77,9 @@ export interface NativeTaskBridgeOwner {
   context(caller: ToolContext, signal: AbortSignal): TaskToolContext | Promise<TaskToolContext>
   taskDependencies(caller: ToolContext): Pick<TaskToolDeps, "resolveSkillInvocations" | "resolveChildToolNames" | "executionModeGate">
   outputDependencies(caller: ToolContext): Omit<TaskOutputDeps, "manager" | "resolveCallerSessionId">
+  /** Team routing for THIS call's `task_send`, built inside its operation over the same manager.
+   * Absent, or returning undefined, keeps the Native no-team send. */
+  teamRouting?(caller: ToolContext, call: NativeTaskOperationCall): TaskSendTeamRouting | undefined
   /** Registry/scopes/metadata remain live until service and callbacks are joined.
    * Must retain failed cleanup for retry; successful repeat release is harmless. */
   release(): Promise<void>
@@ -110,7 +129,7 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
   const description = buildTaskToolDescription({ omoConfig: options.prepared.config, agents: options.prepared.agents })
   const descriptions: Record<Name, string> = { task: description, task_output: OUTPUT_DESCRIPTION,
     task_send: TASK_SEND_TOOL_DESCRIPTION, task_cancel: TASK_CANCEL_TOOL_DESCRIPTION }
-  const targets = (["task", "task_output", "task_send", "task_cancel"] as const).map((name): ListedTool => Object.freeze({
+  const targets = NATIVE_TASK_TOOL_NAMES.map((name): ListedTool => Object.freeze({
     id: `omo.native.${name}`, name,
     description: descriptions[name],
     input: nativeTaskInputSchemas[name] as unknown as Info["input"],
@@ -119,13 +138,16 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
       const resources = owner
       if (!resources) throw Error("Native task bridge has no acquired owner")
       const call = await resources.service.forCall(caller)
-      return call.operation(async (_manager, resolveAncestry, signal, operation) => {
+      return call.operation(async (manager, resolveAncestry, signal, operation) => {
         if (name === "task_output") {
           const result = await runTaskOutput({ ...resources.outputDependencies(caller), manager: operation.output }, input as TaskOutputInput, caller.sessionID, statusReads)
           return adaptNativeTaskResult(result)
         }
         // The SAME canonical send lifetime (mapped/late outcome chain) and cancel port of this operation.
-        if (name === "task_send") return adaptNativeTaskResult(await operation.runSend(input as TaskSendInput, { signal }))
+        if (name === "task_send") {
+          const teamRouting = resources.teamRouting?.(caller, { manager, resolveAncestry, signal, operation })
+          return adaptNativeTaskResult(await operation.runSend(input as TaskSendInput, { signal, ...(teamRouting && { teamRouting }) }))
+        }
         if (name === "task_cancel") return adaptNativeTaskResult(await runTaskCancel(operation.cancel, input as TaskCancelInput))
         const context = await resources.context(caller, signal)
         signal.throwIfAborted(); current()
