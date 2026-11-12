@@ -119,7 +119,7 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
       // The lead team tools share the Native task component's registry, kernel and service.
       const team = nativeTeamEnabled(context.options) ? (await import("./orchestration/native-team/component")).registerNativeTeamComponent : undefined
       const dag = nativeDagEnabled(context.options) ? (await import("./orchestration/native-dag/component")).registerNativeDagComponent : undefined
-      cleanups.push(await registerNativeTaskComponent(context, owners.nativeTask, { ...(team && { team }), ...(dag && { dag }), ...(evalTask && { evalTask: evalTask.port }) }))
+      cleanups.push(await registerNativeTaskComponent(context, owners.nativeTask, { ...(team && { team }), ...(dag && { dag: host => dag(host, context.rpc) }), ...(evalTask && { evalTask: evalTask.port }) }))
     }
     cleanups.push(await registerBootstrap(context.rpc))
   } catch (error) {
@@ -166,4 +166,3 @@ const omoV2Plugin = {
 }
 
 export default omoV2Plugin
-
