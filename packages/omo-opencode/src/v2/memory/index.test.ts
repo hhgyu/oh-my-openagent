@@ -102,6 +102,21 @@ describe("registerMemoryComponent", () => {
     await second()
   })
 
+  test("#given a prompt hook invocation without acceptance #when a later accepted turn saves #then the rejected prompt is not counted", async () => {
+    const f = fixture()
+    f.addSession("accepted-only")
+    const cleanup = await registerMemoryComponent(f.host, f.options())
+    const prompt = f.hooks.get("session:prompt")
+    if (prompt === undefined) throw new Error("Missing prompt hook")
+    await Reflect.apply(prompt, undefined, [{ sessionID: "accepted-only", messageID: "not-enqueued", prompt: { text: "rejected" } }])
+    await f.prompt("accepted-only", "accepted")
+    await f.runTool("memory", "accepted-only", create("reference/accepted.md", "Accepted turn provenance", "one accepted turn"))
+    const binding = f.sessions.get("accepted-only")?.metadata?.[MEMORY_BINDING_KEY] as { identity: string }
+    const repo = join(f.env.OMO_MEMORY_HOME ?? "", "agents", binding.identity, "repo")
+    expect(execFileSync("git", ["-C", repo, "log", "-1", "--format=%B"], { encoding: "utf8" })).toContain("Omo-Turn: 1")
+    await cleanup()
+  })
+
   test("#given a root session #when it writes memory #then the seeded repo is created and one pinned block is projected per request", async () => {
     // given
     const f = fixture()
