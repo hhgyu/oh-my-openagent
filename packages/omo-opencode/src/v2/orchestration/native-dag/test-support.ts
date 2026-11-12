@@ -4,6 +4,7 @@ import type { DagToolInput } from "@oh-my-opencode/senpi-task/dag-operations"
 import type { ManagerStartSpec, TaskRecord } from "@oh-my-opencode/senpi-task/manager-kernel"
 import type { NativeOperationOwner } from "../native-task/operation-ports"
 import { createNativeDagRuntime } from "./runtime"
+import type { NativeDagSkillAuthority } from "./skills"
 import { nativeDagCallPort } from "./task-port"
 import { createNativeDagWakeOwner } from "./wake"
 import { runNativeWorkflow } from "./workflow-call"
@@ -155,8 +156,10 @@ export function createFakeDagOperation(parentSessionID: string) {
 /** A root session's DAG runtime, wake owner and per-call operations, for workflow tests. Each
  * `begin` is one `workflow` call over a fresh operation sharing the earlier calls' children; the
  * operation is revoked when the call returns, like a returned host call. A harness built with an
- * earlier harness's `fakes` is the next plugin generation over the same project and children. */
-export function createWorkflowHarness(directory: string, lease: DagLeasePort, parentSessionID: string, inherited: readonly ReturnType<typeof createFakeDagOperation>[] = []) {
+ * earlier harness's `fakes` is the next plugin generation over the same project and children.
+ * `skills` is each call's skill authority (the component binds S2 `authorizeSkills` per call). */
+export function createWorkflowHarness(directory: string, lease: DagLeasePort, parentSessionID: string, inherited: readonly ReturnType<typeof createFakeDagOperation>[] = [],
+  skills?: (runtime: ReturnType<typeof createNativeDagRuntime>) => NativeDagSkillAuthority) {
   const posts: string[] = [], fakes: ReturnType<typeof createFakeDagOperation>[] = [...inherited], state = { failSynthetic: false }
   const runtime = createNativeDagRuntime({ directory, parentSessionID, executionMode: { agents: {}, config: {} }, lease,
     onDriveEnded: runId => wake.arm(parentSessionID, runId) })
@@ -176,7 +179,7 @@ export function createWorkflowHarness(directory: string, lease: DagLeasePort, pa
     for (const earlier of fakes) fake.adopt(earlier)
     fakes.push(fake)
     if (options.revoked) fake.revoke()
-    const pending = runNativeWorkflow({ runtime, parentSessionID, executionMode: { agents: {}, config: {} },
+    const pending = runNativeWorkflow({ runtime, parentSessionID, executionMode: { agents: {}, config: {} }, ...(skills && { skills: skills(runtime) }),
       call: { port: nativeDagCallPort(fake.operation), signal: options.signal ?? new AbortController().signal } }, params).finally(() => fake.revoke())
     return { fake, pending }
   }

@@ -23,14 +23,10 @@ function nodeRoute(node: DagToolDefinitionInput["nodes"][number]): DagRoute | un
 
 function quoted(ids: readonly string[]): string { return ids.map(id => `"${id}"`).join(", ") }
 
-/** Definition features this host cannot run, refused before any engine work for `start` and
- * `amend`: named skills (S6g) and process execution mode (P-02). */
+/** Definition features this host cannot run, refused before any engine work (and before any skill
+ * authorization) for `start` and `amend`: process execution mode (P-02). */
 export function refuseDefinition(definition: DagToolDefinitionInput | undefined, sources: NativeDagExecutionSources): NativeDagRefusal | undefined {
   if (definition === undefined) return undefined
-  const skilled = definition.nodes.filter(node => (node.load_skills?.length ?? 0) > 0).map(node => node.id)
-  if (skilled.length > 0) {
-    return new NativeDagRefusal("invalid_definition", `Node(s) ${quoted(skilled)} name skills in load_skills. DAG skill loading is not available on OpenCode 2 yet (S6g); remove load_skills.`, skilled)
-  }
   const processNodes = definition.nodes.filter(node => {
     const route = nodeRoute(node)
     return route !== undefined && resolveDagNodeExecutionMode({ ...sources, route }) === "process"

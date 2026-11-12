@@ -1,6 +1,6 @@
 import {
   createDagScheduler,
-  type DagFileStore, type DagLeasePort, type DagManager, type DagNodeId, type DagNodeSpawnPolicy, type DagRunId, type DagRunRecordV1, type DagScheduler, type DagSchedulerOptions,
+  type DagFileStore, type DagLeasePort, type DagManager, type DagMaterializeSkills, type DagNodeId, type DagNodeSpawnPolicy, type DagRunId, type DagRunRecordV1, type DagScheduler, type DagSchedulerOptions,
 } from "@oh-my-opencode/senpi-task/dag"
 import { claimDagRunLease } from "./lease"
 import { prepareRunRecovery, recoverDagRun, restoreRunChildren } from "./recovery"
@@ -22,6 +22,8 @@ export interface NativeDagDriveInput {
   readonly lease: DagLeasePort
   /** The same spawn restrictions (plan gate, prompt contracts) the call's `task` tool applies. */
   readonly spawnPolicy?: DagNodeSpawnPolicy
+  /** Native skill materialization for a retry prompt override (the amend path) inside this call. */
+  readonly materializeSkills: DagMaterializeSkills
   /** Detached: return once the call admitted every ready node and folded every settled child,
    * instead of blocking until the run is terminal. */
   readonly detach?: boolean
@@ -146,7 +148,7 @@ export async function driveDagRun(input: NativeDagDriveInput): Promise<DagRunRec
   let retire: (() => Promise<void>) | undefined
   try {
     const options: NativeDagSchedulerOptions = { store: input.store, taskManager: held.port, executionMode: input.executionMode,
-      ancestry: { depth: 0 }, lease: input.lease, ...(input.spawnPolicy && { nodeSpawnPolicy: input.spawnPolicy }) }
+      ancestry: { depth: 0 }, lease: input.lease, materializeSkills: input.materializeSkills, ...(input.spawnPolicy && { nodeSpawnPolicy: input.spawnPolicy }) }
     const entered = input.enter ? await enterControl(options, input, input.enter) : await enterRun(options, input)
     const drive = entered ?? foldAfterControl(options, input)
     if (drive === undefined) return input.manager.record(input.runId, input.parentSessionID)

@@ -3,13 +3,16 @@ import { runDagTool, type DagToolDeps, type DagToolInput, type DagToolResult } f
 import { nativeDagControls } from "./controls"
 import { NativeDagRefusal, refuseDefinition, refusalResult, type NativeDagExecutionSources } from "./refusals"
 import type { NativeDagCall, NativeDagRuntime } from "./runtime"
+import { authorizeCallSkills, type NativeDagSkillAuthority } from "./skills"
 
 export interface NativeWorkflowCall {
-  readonly runtime: Pick<NativeDagRuntime, "manager" | "drive" | "admit" | "control">
+  readonly runtime: Pick<NativeDagRuntime, "manager" | "managerFor" | "drive" | "admit" | "control">
   /** The calling root session: parent and root of every run it starts. */
   readonly parentSessionID: string
   readonly call: NativeDagCall
   readonly executionMode: NativeDagExecutionSources
+  /** This call's skill authority (S6g). Without it a node that names skills is refused. */
+  readonly skills?: NativeDagSkillAuthority
 }
 
 const TERMINAL: ReadonlySet<string> = new Set<DagRunStatus>(["completed", "failed", "cancelled"])
@@ -78,9 +81,13 @@ async function resumeAfterReload(input: NativeWorkflowCall, runId: string): Prom
 export async function runNativeWorkflow(input: NativeWorkflowCall, params: DagToolInput): Promise<DagToolResult> {
   const refused = params.action === "start" || params.action === "amend" ? refuseDefinition(params.definition, input.executionMode) : undefined
   if (refused) return refusalResult(refused)
-  const { runtime, parentSessionID, call } = input
+  const { runtime, parentSessionID } = input
   const detachedStart = params.action === "start" && params.detach === true
   try {
+    // Skills are authorized for this caller before any engine work; a denial creates nothing.
+    const authorizing = authorizeCallSkills(input.call, input.skills, params, id => runtime.manager.record(id as DagRunId, parentSessionID))
+    const call = authorizing ? await authorizing : input.call
+    const manager = runtime.managerFor(call)
     const runId = params.run_id?.trim()
     const resumed = params.action === "resume" && runId ? await resumeAfterReload(input, runId) : undefined
     if (resumed) return resumed
@@ -90,9 +97,9 @@ export async function runNativeWorkflow(input: NativeWorkflowCall, params: DagTo
     const before = params.action === "send" ? activeNodes(input, runId) : undefined
     const deps: DagToolDeps = {
       manager: {
-        ...runtime.manager,
+        ...manager,
         async start(startParams) {
-          const started = await runtime.manager.start(startParams)
+          const started = await manager.start(startParams)
           const id = started.snapshot.runId
           if (detachedStart) await runtime.admit(id, call)
           else await runtime.drive(id, call)
@@ -102,7 +109,7 @@ export async function runNativeWorkflow(input: NativeWorkflowCall, params: DagTo
       parentSessionId: () => parentSessionID,
       rootSessionId: () => parentSessionID,
       wait: id => runtime.drive(id, call),
-      ...nativeDagControls({ runtime, parentSessionID, call, detach: params.detach !== false }),
+      ...nativeDagControls({ runtime: { manager, control: runtime.control }, parentSessionID, call, detach: params.detach !== false }),
     }
     const result = await runDagTool(deps, params)
     if (result.details.kind === "detached") {

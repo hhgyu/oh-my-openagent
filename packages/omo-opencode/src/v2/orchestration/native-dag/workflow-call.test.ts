@@ -36,7 +36,7 @@ function harness() {
   const drives: string[] = []
   const fake = createFakeDagOperation(PARENT)
   const call = { port: nativeDagCallPort(fake.operation), signal: new AbortController().signal }
-  const spied = { manager: runtime.manager, drive: (runId: DagRunId, borrowed: typeof call) => { drives.push(runId); return runtime.drive(runId, borrowed) },
+  const spied = { manager: runtime.manager, managerFor: runtime.managerFor, drive: (runId: DagRunId, borrowed: typeof call) => { drives.push(runId); return runtime.drive(runId, borrowed) },
     admit: (runId: DagRunId, borrowed: typeof call) => { drives.push(runId); return runtime.admit(runId, borrowed) },
     control: runtime.control }
   const run = (params: DagToolInput) => runNativeWorkflow({ runtime: spied, parentSessionID: PARENT, call, executionMode }, params)
@@ -52,7 +52,7 @@ const definition = (nodes: NonNullable<DagToolInput["definition"]>["nodes"]) => 
 const oneNodeRun = { key: "s6c", name: "s6c", nodes: [{ id: "a", prompt: "p", category: "quick" }] }
 
 describe("OpenCode 2 workflow refusals", () => {
-  test("#given a node that names skills #when started #then it is refused until S6g and no run is created", async () => {
+  test("#given a node that names skills and a call with no skill authority #when started #then it is refused and no run is created", async () => {
     // given
     const { run, runtime } = harness()
 
@@ -62,7 +62,7 @@ describe("OpenCode 2 workflow refusals", () => {
     // then
     expect(refused.code).toBe("invalid_definition")
     expect(refused.node_ids).toEqual(["a"])
-    expect(refused.text).toBe(`Node(s) "a" name skills in load_skills. DAG skill loading is not available on OpenCode 2 yet (S6g); remove load_skills.`)
+    expect(refused.text).toContain(`Node(s) "a" name skills in load_skills, but this workflow call holds no skill authorization`)
     expect(runtime.manager.list(PARENT)).toEqual([])
   })
 
