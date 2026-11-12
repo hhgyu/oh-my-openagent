@@ -10,12 +10,13 @@ const capabilities = `Use only tools exposed in this session. Native file readin
 const readOnly = ["edit", "write", "apply_patch", "bash", "shell", "task", "agent", "subagent", "call_omo_agent"].map((action): PermissionRule => ({ action, resource: "*", effect: "deny" }))
 
 export type AgentDefinition = {
-  id: AgentId
+  id: string
   name: string
   description: string
   mode: "primary" | "subagent" | "all"
   system: string
   restrictions: PermissionRule[]
+  hidden?: boolean
 }
 
 function role(id: AgentId, name: string, description: string, mode: AgentDefinition["mode"], directive: string, restrictions: PermissionRule[] = []): AgentDefinition {
@@ -39,3 +40,5 @@ export const AGENT_DEFINITIONS: readonly AgentDefinition[] = [
   role("explore", "Explore", "repository search specialist", "subagent", `Map the repository to answer a precise code question. Search for definitions and usages, follow callers and configuration flows, and return relevant paths with concrete evidence and a concise explanation of how they connect. Use native read, glob and grep tools; do not edit, run shell commands or delegate.`, readOnly),
   role("multimodal-looker", "Multimodal Looker", "visual evidence analyst", "subagent", `Analyze images, diagrams and documents actually supplied to the session or readable by available tools. Extract requested information, describe relevant visual evidence, and distinguish observation from interpretation. If the active model or tools cannot access an image, state that limitation and do not invent its contents. Do not modify files, run shell commands or delegate.`, readOnly),
 ]
+
+export { readOnly as CURATED_ROLE_RESTRICTIONS }

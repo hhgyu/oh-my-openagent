@@ -7,7 +7,7 @@ const fixtureProjectConfig = join(fixtureProject, ".omo", "omo.jsonc")
 
 import type { AgentEditor } from "@opencode/plugin/promise/agent"
 import { AGENT_DEFINITIONS, AGENT_IDS, applyAgents, loadAgentsConfig, registerAgents } from "./index"
-import type { AgentsConfig } from "./config"
+import type { AgentOverride, AgentsConfig } from "./config"
 
 import { recordingEditor } from "./test-support"
 const emptyConfig: AgentsConfig = { agents: {}, disabled_agents: [] }
@@ -61,7 +61,7 @@ describe("native v2 agents", () => {
     expect(editor.get("plan")?.hidden).toBe(false)
     expect(editor.get("build")?.mode).toBe("primary")
     expect(editor.get("plan")?.mode).toBe("primary")
-    expect(editor.list()).toHaveLength(2)
+    expect(editor.list().filter(agent => !agent.hidden)).toHaveLength(2)
   })
 
   it("uses only selectable enabled replacements to decide builtin visibility", () => {
@@ -102,7 +102,7 @@ describe("native v2 agents", () => {
     const { editor } = recordingEditor()
     applyAgents(editor, { agents: { oracle: { model: "not-provider-qualified" } }, disabled_agents: [] })
     expect(editor.get("oracle")?.model).toBeUndefined()
-    expect(editor.list()).toHaveLength(12)
+    for (const id of AGENT_IDS) expect(editor.get(id)).toBeDefined()
   })
   it("removes disabled OmO agents but preserves an unrelated host id in the denylist", () => {
     const { editor } = recordingEditor()
@@ -133,6 +133,37 @@ describe("native v2 agents", () => {
     expect(effective(editor, "prometheus", "edit", "**/.omo/plans/*.md")).toBe("allow")
   })
 
+  it("exposes only curated broker defaults before user rules, never overriding a user deny", () => {
+    // given a host wildcard deny for each Native curated identity
+    for (const id of ["explore", "librarian", "plan-consultant", "plan-reviewer"]) for (const userDeny of [false, true]) {
+      const { editor } = recordingEditor()
+      editor.update(id, agent => { agent.permissions = [{ action: "*", resource: "*", effect: "deny" }] })
+      // when OmO registers the real child agent with or without an explicit user restriction
+      applyAgents(editor, { agents: { [id]: userDeny ? { permission: { omo_native_readonly: "deny", omo_native_ls: "deny" } } : {} }, disabled_agents: [] })
+      // then stock mutation remains denied and user broker denies win over plugin defaults
+      expect(effective(editor, id, "omo_native_readonly")).toBe(userDeny ? "deny" : "allow")
+      expect(effective(editor, id, "omo_native_ls")).toBe(userDeny ? "deny" : "allow")
+      expect(effective(editor, id, "shell")).toBe("deny")
+      expect(effective(editor, id, "edit")).toBe("deny")
+    }
+  })
+
+  it("keeps Native-only builtins and custom identities out of the primary picker while preserving custom denies", () => {
+    // given an enabled custom Native persona with a host-only primary-mode override
+    const { editor } = recordingEditor()
+    applyAgents(editor, { agents: { "custom-auditor": { mode: "primary", permission: { read: "deny" } } }, disabled_agents: [],
+      nativeAgents: { "custom-auditor": { tools: { read: true } }, "disabled-custom": { disable: true } } })
+    // then the actual registrar creates callable subagent identities, not new primary choices
+    for (const id of ["plan-consultant", "plan-reviewer", "omo-native-code-reviewer", "omo-native-qa-executor", "omo-native-gate-reviewer", "custom-auditor"]) {
+      expect(editor.get(id)?.mode).toBe("subagent")
+      expect(editor.get(id)?.hidden).toBe(true)
+    }
+    expect(editor.get("disabled-custom")).toBeUndefined()
+    expect(effective(editor, "custom-auditor", "read")).toBe("deny")
+    expect(editor.get("sisyphus")?.mode).toBe("primary")
+    expect(editor.get("sisyphus")?.hidden).toBe(false)
+  })
+
   it("projects legacy tool permissions onto native shell, edit and subagent actions", () => {
     const overrides = [
       { permission: { bash: "deny" as const } },
@@ -153,6 +184,29 @@ describe("native v2 agents", () => {
     const { editor } = recordingEditor()
     applyAgents(editor, { agents: { sisyphus: { permission: { task: "deny" } } }, disabled_agents: [] })
     expect(effective(editor, "sisyphus", "subagent")).toBe("deny")
+  })
+
+  const toggleCases: { name: string; override: AgentOverride; effect: "allow" | "deny"; resource?: string }[] = [
+    { name: "false toggle defeats wildcard allow", override: { tools: { edit: false }, permission: { "*": "allow" } }, effect: "deny" },
+    { name: "false toggle defeats specific allow", override: { tools: { edit: false }, permission: { edit: "allow" } }, effect: "deny" },
+    { name: "true toggle preserves permission deny", override: { tools: { edit: true }, permission: { edit: "deny" } }, effect: "deny" },
+    { name: "true toggle alone allows", override: { tools: { edit: true } }, effect: "allow" },
+    { name: "permission allow alone allows", override: { permission: { edit: "allow" } }, effect: "allow" },
+    { name: "false toggle defeats permission-array allow", override: { tools: { edit: false }, permissions: [{ action: "*", resource: "*", effect: "allow" }] }, effect: "deny" },
+    { name: "true toggle preserves permission-array deny", override: { tools: { edit: true }, permissions: [{ action: "edit", resource: "*", effect: "deny" }] }, effect: "deny" },
+    { name: "specific map allow stays after broad deny", override: { permission: { edit: { "*": "deny", file: "allow" } } }, resource: "file", effect: "allow" },
+    { name: "broad map deny stays after specific allow", override: { permission: { edit: { file: "allow", "*": "deny" } } }, resource: "file", effect: "deny" },
+    { name: "specific array allow stays after broad deny", override: { permissions: [{ action: "edit", resource: "*", effect: "deny" }, { action: "edit", resource: "file", effect: "allow" }] }, resource: "file", effect: "allow" },
+    { name: "broad array deny stays after specific allow", override: { permissions: [{ action: "edit", resource: "file", effect: "allow" }, { action: "edit", resource: "*", effect: "deny" }] }, resource: "file", effect: "deny" },
+  ]
+  for (const id of ["sisyphus", "native-permission-case"]) for (const row of toggleCases) it(`${id}: ${row.name}`, () => {
+    // given a stock role or a real canonical Native custom identity
+    const { editor } = recordingEditor()
+    // when the registrar combines toggles with authored permission rules
+    applyAgents(editor, { agents: { [id]: row.override }, disabled_agents: [], nativeAgents: { "native-permission-case": {} } })
+    // then source denies hold and authored resource ordering remains intact
+    expect(editor.get(id)).toBeDefined()
+    expect(effective(editor, id, "edit", row.resource)).toBe(row.effect)
   })
 
   it("rereads config on host replay and disposes its registration", async () => {

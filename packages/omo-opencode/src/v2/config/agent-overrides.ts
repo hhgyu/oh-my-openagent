@@ -1,4 +1,5 @@
 import { z } from "zod"
+import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
 
 const effect = z.enum(["allow", "deny", "ask"])
 const modelEntry = z.union([z.string(), z.object({ model: z.string(), reasoning: z.string().optional() })])
@@ -16,4 +17,4 @@ export const agentOverrideSchema = z.object({
   disallowed_tools: z.array(z.string()).optional(),
 })
 export type AgentOverride = z.infer<typeof agentOverrideSchema>
-export type AgentsConfig = { agents: Record<string, AgentOverride>; disabled_agents: string[] }
+export type AgentsConfig = { agents: Record<string, AgentOverride>; disabled_agents: string[]; nativeAgents?: OmoConfig["agents"] }

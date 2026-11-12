@@ -167,14 +167,14 @@ export function createHostBuildAuthorizer(options: {
       options.callAuthority.assert(token, lease); options.callAuthority.assertCall(token); token.assertAdmission()
     }
     /** The genuine joined subagent permission request of THIS call, then an unchanged recheck. */
-    async function approve(select: () => PreparedHostTaskGrant, fingerprint: (selection: PreparedHostTaskGrant) => string, unchanged: () => boolean, operationSignal: AbortSignal) {
+    async function approve(agentID: string, select: () => PreparedHostTaskGrant, fingerprint: (selection: PreparedHostTaskGrant) => string, unchanged: () => boolean, operationSignal: AbortSignal) {
       const before = select(), footprint = fingerprint(before)
       const roster = await options.agents.list()
       current(); operationSignal.throwIfAborted()
-      const builds = roster.data.filter(agent => agent.id === "build")
-      const [build] = builds
-      if (builds.length !== 1 || !build) throw Error("Actual build agent is unavailable or ambiguous")
-      const buildAgentID = build.id
+      const matches = roster.data.filter(agent => agent.id === agentID)
+      const [agent] = matches
+      if (matches.length !== 1 || !agent) throw Error(`Actual child agent ${agentID} is unavailable or ambiguous. Check agents.${agentID} configuration diagnostics and reload OmO, or register that exact agent ID in OpenCode.`)
+      const buildAgentID = agent.id
       const signal = AbortSignal.any([callerSignal, operationSignal, token.admissionSignal])
       await options.permission.assert({ sessionID: source.sessionID, agent: source.agent, action: "subagent", resources: [buildAgentID],
         source: { type: "tool", messageID: source.messageID, id: source.id } }, { signal })
@@ -190,7 +190,7 @@ export function createHostBuildAuthorizer(options: {
         if (input.spec.parent_session_id !== source.sessionID) throw Error("Native plan has a foreign actual parent")
         const originalSpec = input.spec, originalPlan = input.plan
         const originalKernel = input.spec.kernelTools, originalMembers = input.spec.memberScopedTools
-        return approve(() => prepareHostTaskGrant(input), selection => JSON.stringify({ selection,
+        return approve(input.plan.agentType ?? "build", () => prepareHostTaskGrant(input), selection => JSON.stringify({ selection,
           parent: input.spec.parent_session_id, root: input.spec.root_session_id, depth: input.spec.depth,
           agent: input.plan.agentType, instructions: input.plan.instructions, allow: input.plan.toolAllowlist,
           deny: input.plan.toolDenylist, subagents: input.plan.allowedSubagents, maxDepth: input.plan.maxDepth,
@@ -202,7 +202,7 @@ export function createHostBuildAuthorizer(options: {
         current(); operationSignal.throwIfAborted()
         if (input.spec.parentSessionId !== source.sessionID) throw Error("Native recovery has a foreign actual parent")
         const originalSpec = input.spec
-        return approve(() => prepareRecoveryHostGrant(input), selection => JSON.stringify({ selection, task: input.spec.taskId,
+        return approve(input.spec.agentType ?? "build", () => prepareRecoveryHostGrant(input), selection => JSON.stringify({ selection, task: input.spec.taskId,
           parent: input.spec.parentSessionId, root: input.spec.rootSessionId, depth: input.spec.depth, agent: input.spec.agentType,
           instructions: input.spec.instructions, allow: input.spec.toolAllowlist, deny: input.spec.toolDenylist,
           members: input.spec.memberScopedToolNames, includeTaskTools: input.includeTaskTools }), () => input.spec === originalSpec, operationSignal)
