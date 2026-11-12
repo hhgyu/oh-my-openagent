@@ -50,6 +50,20 @@ function setup(options: { readonly deadlineMs?: number; readonly model?: Reflect
 const createInput = { command: "create", reason: "feat(reflection): tabs", file_path: "reference/tabs.md", description: "Indentation preference", file_text: "Tabs.\n" }
 
 describe("reflection runner", () => {
+  test.each(["manual", "dream"] as const)("#given %s model fallback #then variants reach launch and attempted models persist on the final record", async trigger => {
+    const { bound, ports, run } = setup({ model: { kind: "resolved", category: "custom", model: "test/first", variant: "high", fallbacks: [{ model: "test/second", variant: "low" }] } })
+    const running = run({ trigger, ...(trigger === "dream" ? { origin: "manual" } : {}) })
+    const first = await ports.started(1)
+    expect(first.start.model).toMatchObject({ id: "first", variant: "high" })
+    first.finish({ status: "error", error: { name: "APIError", data: { statusCode: 429, message: "limit reached" } } })
+    const second = await ports.started(2)
+    expect(first.disposed).toBe(true)
+    expect(second.start.model).toMatchObject({ id: "second", variant: "low" })
+    second.finish()
+    const result = await running
+    expect(result.status === "finished" ? result.runs[0] : undefined).toMatchObject({ outcome: "no_changes", detail: "attempted models: test/first -> test/second" })
+    expect(JSON.parse(readFileSync(join(reflectionRunDir(bound, "run-a"), "final.json"), "utf8"))).toMatchObject({ outcome: "no_changes", detail: "attempted models: test/first -> test/second" })
+  })
   test("#given a child that edits through reflection_memory #when the run finishes #then the branch is merged into the memory repo, the worktree is removed and the reservation completes", async () => {
     // given
     const { bound, ports, tool, run, prelaunch } = setup()
@@ -80,7 +94,7 @@ describe("reflection runner", () => {
 
   test("#given a child that committed and then failed #when the run finishes #then nothing merges, the worktree is removed and the failure is parked like Senpi's", async () => {
     // given
-    const { bound, ports, tool, run, prelaunch } = setup()
+    const { bound, ports, tool, run, prelaunch } = setup({ model: { kind: "resolved", category: "custom", model: "test/first", fallbacks: [{ model: "test/second" }] } })
     const running = run({ trigger: "step-count" })
     const child = await ports.started(1)
     const { worktreeDir } = prelaunch()
@@ -92,6 +106,7 @@ describe("reflection runner", () => {
 
     // then
     expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({ outcome: "failed", reason: "child_exit", cleanedUp: true })
+    expect(ports.children).toHaveLength(1)
     expect(existsSync(join(bound.paths.repo, "reference", "tabs.md"))).toBe(false)
     expect(existsSync(worktreeDir)).toBe(false)
     const store = reflectionStore(bound)

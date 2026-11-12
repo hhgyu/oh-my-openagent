@@ -18,7 +18,7 @@ import type { BoundMemorySession } from "./binding"
 import { fireDream, type DreamFireOutcome, type DreamRequest, type V2DreamOrigin } from "./dream-fire"
 import { resolveDreamTriggerSettings, type DreamTriggerSettings } from "@oh-my-opencode/memory-core/dream-gates"
 import type { MemoryLogger } from "./config"
-import { latestSessionModel } from "./facts"
+import { turnReport } from "./memory-child-port"
 import { kibitzerHostCapable } from "./kibitzer"
 import type { MemoryChildPort, MemoryChildTimers } from "./memory-child-port"
 import { createReflectionChildHosting, type ReflectionChildHosting, type ReflectionPortRequest } from "./reflection-child"
@@ -75,6 +75,8 @@ export function createReflectionComponent(context: MemoryHost, deps: { readonly 
     ...(seams.createPort === undefined ? {} : { createPort: seams.createPort }),
     ...(seams.timers === undefined ? {} : { timers: seams.timers }),
   })
+  const retryRegistration = context.session.hook("retry", event => { hosting.onRetry(event) })
+    .then(registration => ({ registration }), (error: unknown) => ({ error }))
   const loadConfig = seams.loadConfig ?? ((cwd: string) => loadRuntimeConfig({ cwd }).config)
   const { model, provider } = context
   const catalog = seams.catalog ?? (model === undefined || provider === undefined ? undefined : () => createModelCatalog({ model, provider }).list())
@@ -83,10 +85,17 @@ export function createReflectionComponent(context: MemoryHost, deps: { readonly 
   const resolveModel = async (bound: BoundMemorySession, parentSessionId: string) => {
     const config = loadConfig(bound.directory)
     const category = reflectionSettings(config.memory === undefined ? bound : { settings: config.memory, identity: bound.identity }).category
-    const [models, sessionModel, consented] = await Promise.all([catalog?.(), latestSessionModel(context.session, parentSessionId), consent()])
-    return resolveReflectionModel(category, config, models, sessionModel, consented)
+    const [models, session, consented] = await Promise.all([catalog?.(), context.session.context({ sessionID: parentSessionId }).then(messages => turnReport(messages, 0)).catch(() => undefined), consent()])
+    return resolveReflectionModel(category, config, models, session?.model, consented, session?.variant)
   }
-  const runner = createReflectionRunner({ launch: hosting.launch, warn, resolveModel, ...store, ...(seams.deadlineMs === undefined ? {} : { deadlineMs: seams.deadlineMs }) })
+  const runner = createReflectionRunner({
+    launch: async (bound, input) => {
+      const retry = await retryRegistration
+      if ("error" in retry) throw retry.error
+      return hosting.launch(bound, input)
+    },
+    warn, resolveModel, ...store, ...(seams.deadlineMs === undefined ? {} : { deadlineMs: seams.deadlineMs }),
+  })
   const work = new Set<Promise<unknown>>()
   const cancels = new Set<() => void>()
   let closed = false
@@ -144,6 +153,8 @@ export function createReflectionComponent(context: MemoryHost, deps: { readonly 
       cancels.clear()
       hosting.close()
       while (work.size > 0) await Promise.allSettled([...work])
+      const retry = await retryRegistration
+      if ("registration" in retry) await retry.registration.dispose()
     },
   }
 }

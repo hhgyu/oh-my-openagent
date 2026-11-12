@@ -8,7 +8,8 @@ function model(providerID: string): ModelOutput["data"][number] {
     id: "shared", modelID: "underlying", providerID, name: "Current", enabled: true, status: "active",
     capabilities: { tools: true, input: ["text", "image"], output: ["text"], temperature: false },
     variants: [{ id: "high", headers: { authorization: "SECRET_VARIANT" } }],
-    limit: { context: 120000, input: 100000, output: 20000 }, time: { released: 0 }, cost: [],
+    limit: { context: 120000, input: 100000, output: 20000 }, time: { released: 0 },
+    cost: [{ input: 0.2, output: 0.8, cache: { read: 0.02, write: 0.2 } }, { tier: { type: "context", size: 200000 }, input: 0.4, output: 1.6, cache: { read: 0.04, write: 0.4 } }],
     headers: { authorization: "SECRET_MODEL" }, body: { secret: "SECRET_BODY" },
   }
 }
@@ -27,6 +28,7 @@ it("reads current actual provider/model domains lazily and returns only whitelis
   expect([modelCalls, providerCalls]).toEqual([1, 1])
   expect(first.map((entry) => [entry.providerID, entry.id])).toEqual([["custom", "shared"], ["__proto__", "shared"], ["missing", "shared"]])
   expect(first[0]).toMatchObject({ modelID: "underlying", reasoning: { source: "opencode.model.variants", variants: ["high"] }, availability: { enabled: true, providerListed: true, providerActivation: "enabled", authentication: "unknown" } })
+  expect(first[0].cost).toEqual(models.data[0].cost)
   expect(first[1].availability.providerActivation).toBe("disabled")
   expect(first[2].availability.providerListed).toBe(false)
   expect(first[2].availability).not.toHaveProperty("providerActivation")

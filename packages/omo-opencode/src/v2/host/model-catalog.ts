@@ -17,6 +17,13 @@ export type CatalogModel = {
   readonly reasoning: { readonly source: "opencode.model.variants"; readonly variants: readonly string[] }
   readonly capabilities: { readonly tools: boolean; readonly input: readonly string[]; readonly output: readonly string[]; readonly temperature?: boolean }
   readonly limit: { readonly context: number; readonly input?: number; readonly output: number }
+  /** Public USD-per-million price tiers only, never provider settings or headers. */
+  readonly cost?: readonly {
+    readonly tier?: { readonly type: "context"; readonly size: number }
+    readonly input: number
+    readonly output: number
+    readonly cache: { readonly read: number; readonly write: number }
+  }[]
   readonly availability: {
     readonly source: "opencode.model.list+provider.list"
     readonly listed: true
@@ -45,6 +52,10 @@ export function createModelCatalog(domains: ModelCatalogDomains) {
             ...(model.capabilities.temperature === undefined ? {} : { temperature: model.capabilities.temperature }),
           },
           limit: { context: model.limit.context, output: model.limit.output, ...(model.limit.input === undefined ? {} : { input: model.limit.input }) },
+          cost: model.cost.map(price => ({
+            ...(price.tier === undefined ? {} : { tier: { type: price.tier.type, size: price.tier.size } }),
+            input: price.input, output: price.output, cache: { read: price.cache.read, write: price.cache.write },
+          })),
           availability: {
             source: "opencode.model.list+provider.list", listed: true, enabled: model.enabled,
             providerListed: provider !== undefined,

@@ -22,8 +22,11 @@ type MemoryChildModel = StageInput["model"]
 export interface MemoryChildTurnReport {
   readonly status: "completed" | "error" | "cancelled"
   readonly message?: string
+  /** Structured host error retained for the model-attempt classifier, never persisted verbatim. */
+  readonly error?: unknown
   /** `provider/model` of the newest assistant message. */
   readonly model?: string
+  readonly variant?: string
   /** Provider usage summed over the turn's assistant messages. */
   readonly usage?: { readonly input: number; readonly output: number; readonly cacheRead: number; readonly cacheWrite: number }
   /** `input + cacheRead` of the newest assistant message. */
@@ -250,14 +253,16 @@ export function turnReport(messages: readonly unknown[], turnStartedAt: number):
   }
   const model = last !== undefined && isRecord(last.model) && typeof last.model.providerID === "string" && typeof last.model.id === "string"
     ? `${last.model.providerID}/${last.model.id}` : undefined
+  const variant = last !== undefined && isRecord(last.model) && typeof last.model.variant === "string" ? last.model.variant : undefined
   const tokens = last !== undefined && isRecord(last.tokens) ? last.tokens : undefined
   const contextTokens = tokens === undefined ? undefined : numberOf(tokens.input) + numberOf(isRecord(tokens.cache) ? tokens.cache.read : 0)
   const error = last?.error
   const failed = error !== undefined && error !== null
   return {
     status: failed ? "error" : "completed",
-    ...(failed ? { message: errorMessage(error) } : {}),
+    ...(failed ? { message: errorMessage(error), error } : {}),
     ...(model === undefined ? {} : { model }),
+    ...(variant === undefined ? {} : { variant }),
     ...(usage === undefined ? {} : { usage }),
     ...(contextTokens === undefined ? {} : { contextTokens }),
     userTexts,
