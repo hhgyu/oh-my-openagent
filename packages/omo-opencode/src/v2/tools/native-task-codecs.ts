@@ -1,6 +1,5 @@
-import { Compile } from "typebox/compile"
 import {
-  TaskToolParams, TaskSendParams, TaskCancelParams, TaskOutputParams, normalizeTaskToolArguments,
+  TaskToolParams, TaskSendParams, TaskCancelParams, TaskOutputParams, normalizeTaskToolArguments, createToolArgumentValidator,
 } from "@oh-my-opencode/senpi-task/task-operations"
 import type { ListedTool } from "../host/tool-registry"
 import { issueToolValueCodec, type ToolCodecAssociation } from "../host/tool-value-codec"
@@ -19,11 +18,7 @@ export function issueNativeTaskCodecs(tool: ListedTool, name: NativeTaskToolName
 } {
   const schema = nativeTaskInputSchemas[name]
   if (!schema || (tool.input as unknown) !== schema) throw Error("Native input schema does not match tool definition")
-  const compiled = Compile(schema)
-  const input = issueToolValueCodec(tool, "input", { schema, decodeUnknown: value => {
-    if (!compiled.Check(value)) throw Error("Invalid Native tool input")
-    return value
-  } })
+  const input = issueToolValueCodec(tool, "input", { schema, decodeUnknown: createToolArgumentValidator(schema) })
   const normalizer = name === "task" ? {
     tool, input: issueToolArgumentNormalizer(tool, { schema, normalizeUnknown: normalizeTaskToolArguments }),
   } : undefined

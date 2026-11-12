@@ -1,4 +1,5 @@
 import type { ListedTool } from "./tool-registry"
+import { ToolArgumentValidationError } from "@oh-my-opencode/senpi-task/task-operations"
 
 const brand: unique symbol = Symbol("issued tool value codec")
 export type ToolValueCodec = { readonly [brand]: true }
@@ -30,7 +31,7 @@ function watch(value: unknown, seen = new Set<object>()): () => void {
   return () => {
     const current = Reflect.ownKeys(value)
     if (current.length !== keys.length || current.some((key, index) => key !== keys[index])) throw Error("Changed codec definition")
-    fields.forEach(assert => assert())
+    fields.forEach(assert => { assert() })
   }
 }
 function freezeJSON(value: unknown): unknown {
@@ -67,7 +68,10 @@ export function issueToolValueCodec(tool: ListedTool, direction: Direction, prov
     try {
       const decoded = await decodeUnknown(value)
       if (decoded !== value) throw Error("Invalid tool value")
-    } catch { throw Error("Invalid tool value") }
+    } catch (error) {
+      if (direction === "input" && error instanceof ToolArgumentValidationError) throw error
+      throw Error("Invalid tool value")
+    }
     assert()
     return value
   }

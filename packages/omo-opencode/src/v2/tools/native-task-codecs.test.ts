@@ -3,6 +3,9 @@ import { TaskToolParams, TaskSendParams, TaskCancelParams, TaskOutputParams, nor
 import { issueNativeTaskCodecs, nativeTaskInputSchemas, type NativeTaskToolName } from "./native-task-codecs"
 import { createToolRegistry, type ListedTool } from "../host/tool-registry"
 import { decodeToolValue } from "../host/tool-value-codec"
+import { Schema } from "effect"
+import { nativeTaskPublicInput } from "./native-task"
+import { issueNativeTeamCodec, nativeTeamInputSchemas, type NativeTeamToolName } from "./native-team-codecs"
 
 function fixture(name: NativeTaskToolName = "task") {
   // TypeBox's JSON object lacks the SDK JsonSchema string index signature;
@@ -69,6 +72,44 @@ test("other inputs validate their own schemas and never borrow task preparation"
     expect(f.issued.normalizer).toBeUndefined()
     await expect(defined(f.entry.inputDecoder)({ task_id: 42 })).rejects.toThrow("Invalid")
     expect(() => issueNativeTaskCodecs({ ...f.tool, input: TaskToolParams as unknown as ListedTool["input"] }, name)).toThrow("schema")
+  }
+})
+
+test("#given invalid task_send fields #when decoded on both issued paths #then safe field diagnostics survive", async () => {
+  const f = fixture("task_send")
+  for (const [input, fields] of [
+    [{ to: "child", message: "hello", task_id: "private-value" }, ["task_id"]],
+    [{ message: "hello" }, ["to"]],
+    [{ to: 42, message: "hello" }, ["to"]],
+  ] as const) {
+    for (const decode of [defined(f.entry.inputDecoder), (value: unknown) => decodeToolValue(defined(f.issued.codec.input), f.tool, "input", value)]) {
+      let diagnostic: unknown
+      try { await decode(input) }
+      catch (error) { diagnostic = JSON.parse((error as Error).message) }
+      expect(diagnostic).toMatchObject({ code: "invalid_arguments", fields, expected_fields: ["to", "message", "team_run_id", "summary", "all_scope", "redispatch"] })
+      expect(JSON.stringify(diagnostic)).not.toContain("private-value")
+    }
+    const standard = Schema.toStandardSchemaV1(nativeTaskPublicInput("task_send"))
+    const result = await standard["~standard"].validate(input)
+    expect(result.issues?.map(issue => JSON.parse(issue.message))).toContainEqual(expect.objectContaining({ code: "invalid_arguments", fields }))
+  }
+  const correct = { to: "child", message: "hello" }
+  expect(await defined(f.entry.inputDecoder)(correct)).toBe(correct)
+  await expect(defined(f.entry.inputDecoder)({ to: "child", message: { type: "shutdown_response", aprove: true } })).rejects.toMatchObject({
+    diagnostic: { fields: expect.arrayContaining(["message/aprove", "message/approve"]) },
+  })
+})
+
+test("#given sibling Native schemas #when a field is unknown #then each codec reports its own expected names", async () => {
+  for (const name of ["task_output", "task_cancel"] as const) {
+    const f = fixture(name)
+    await expect(defined(f.entry.inputDecoder)({ misspelled: "private-value" })).rejects.toMatchObject({ diagnostic: { code: "invalid_arguments", fields: ["misspelled"], expected_fields: Object.keys(nativeTaskInputSchemas[name].properties) } })
+  }
+  for (const name of Object.keys(nativeTeamInputSchemas) as NativeTeamToolName[]) {
+    const schema = nativeTeamInputSchemas[name]
+    const tool: ListedTool = { id: name, name, description: name, input: schema as unknown as ListedTool["input"], execute: async () => ({}) }
+    const codec = defined(issueNativeTeamCodec(tool, name).input)
+    await expect(decodeToolValue(codec, tool, "input", { misspelled: "private-value" })).rejects.toMatchObject({ diagnostic: { code: "invalid_arguments", fields: expect.arrayContaining(["misspelled"]), expected_fields: Object.keys(schema.properties) } })
   }
 })
 

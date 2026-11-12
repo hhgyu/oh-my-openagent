@@ -5,6 +5,7 @@ import {
   type TeamToolsService,
 } from "@oh-my-opencode/senpi-task/team-operations"
 import { Compile } from "typebox/compile"
+import { createToolArgumentValidator } from "@oh-my-opencode/senpi-task/task-operations"
 import type { createToolKernel } from "../host/tool-kernel"
 import type { ListedTool, ToolRegistry } from "../host/tool-registry"
 import { bindToolValueCodec, type ToolCodecAssociation } from "../host/tool-value-codec"
@@ -88,6 +89,7 @@ function description(name: NativeTeamToolName): string {
 export function createNativeTeamBridge(options: NativeTeamBridgeOptions) {
   const stop = new AbortController(), callbacks = new Set<Promise<void>>(), setups = new Set<Promise<void>>()
   const registrations: Registration[] = []
+  const inputValidators = new Map<string, (value: unknown) => unknown>()
   let closing = false, closed = false, owner: NativeTeamBridgeOwner | undefined, closeAttempt: Promise<void> | undefined
   const current = () => { if (closing) throw Error("Native team bridge is closing"); stop.signal.throwIfAborted() }
   function ticket(set: Set<Promise<void>>) {
@@ -154,11 +156,16 @@ export function createNativeTeamBridge(options: NativeTeamBridgeOptions) {
       if (entry.tool.execute !== target.execute || entry.inputDecoder !== decoder.decode ||
         JSON.stringify(entry.tool.input) !== JSON.stringify(decoder.schema) || entry.tool.output !== undefined) throw Error("Native team registry does not own exact canonical targets")
     }
+    registrations.push(await options.tool.hook("execute.before", event => {
+      const validate = inputValidators.get(event.tool)
+      if (validate) { current(); validate(event.input) }
+    }))
     registrations.push(await options.tool.transform(editor => {
       current()
       // Validate ALL collisions before touching any definition.
       const matches = publicDefinitions.map(tool => editor.list().filter(entry => entry.name === tool.name))
       if (matches.some(entries => entries.length > 1)) throw Error("Ambiguous public Native team tool")
+      inputValidators.clear()
       for (const [index, tool] of publicDefinitions.entries()) {
         const previous = matches[index]?.[0]
         if (previous) editor.update(previous.id, entry => {
@@ -169,6 +176,7 @@ export function createNativeTeamBridge(options: NativeTeamBridgeOptions) {
         const effective = editor.list().filter(entry => entry.name === tool.name), replaced = effective[0]
         if (effective.length !== 1 || !replaced || replaced.input !== tool.input || replaced.description !== tool.description ||
           replaced.output !== undefined || replaced.options !== undefined) throw Error("Public Native team tool replacement failed")
+        inputValidators.set(replaced.id, createToolArgumentValidator(nativeTeamInputSchemas[tool.name as NativeTeamToolName]))
       }
     }))
     current()
@@ -203,7 +211,7 @@ export function createNativeTeamBridge(options: NativeTeamBridgeOptions) {
           try { await owner.release() } catch (error) { failures.push(error) }
         }
         if (failures.length) throw new AggregateError(failures, "Native team bridge cleanup incomplete")
-        closed = true
+        inputValidators.clear(); closed = true
       })()
       closeAttempt = work
       void work.finally(() => { if (!closed && closeAttempt === work) closeAttempt = undefined }).catch(() => {})
