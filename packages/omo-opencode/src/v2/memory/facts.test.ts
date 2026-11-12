@@ -255,8 +255,13 @@ describe("facts reload recovery", () => {
     const f = fixture({ facts: { debounce_settles: 10 } })
     f.addSession("root")
     const warnings: string[] = []
+    let readAborted: () => void = () => undefined
+    const abortedRead = new Promise<void>(resolve => { readAborted = resolve })
     const ports = createScriptedFactsPorts()
-    const cleanup = await registerMemoryComponent(f.host, f.options({ logger: { warn: message => { warnings.push(message) } }, facts: { createPort: request => ports.createPort(request) } }))
+    const cleanup = await registerMemoryComponent(f.host, f.options({ logger: { warn: message => {
+      warnings.push(message)
+      if (message === "memory transcript journal reconcile skipped") readAborted()
+    } }, facts: { createPort: request => ports.createPort(request) } }))
     cleanups.push(cleanup)
     await f.context("root")
     await f.idle("root")
@@ -270,6 +275,8 @@ describe("facts reload recovery", () => {
     try { await cleanup() } finally { release(); read.mockRestore() }
     // then
     expect(warnings).toContain("facts shutdown drain hit its budget")
+    // Shutdown is bounded, but the test still owns the read it deliberately held past that bound.
+    await abortedRead
     const queue = new FactsQueue({ identityPaths: identityPaths(f) })
     expect(await queue.listPending()).toHaveLength(0)
     const next = await register(f)
