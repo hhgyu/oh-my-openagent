@@ -1,6 +1,6 @@
-import type { ApprovalProgress, SyncApproveRequest, SyncApproveResponse, SyncEnableResponse, SyncRpcProblem, SyncStatusResponse } from "./sync-rpc-contract"
+import type { ApprovalProgress, SyncApproveRequest, SyncApproveResponse, SyncEnableResponse, SyncRpcProblem, SyncRpcDisabled, SyncStatusResponse } from "./sync-rpc-contract"
 import type { SyncRpcAccount, SyncRpcAuthority, SyncRpcContext, SyncRpcOperation, SyncRpcOptions } from "./sync-rpc-ports"
-import { identityOf, refused, RetiredSyncOperation, runSyncRpcOperation, serviceProblem, unavailable, type CeremonyOperation, type Operation } from "./sync-rpc-operation"
+import { disabled, identityOf, refused, RetiredSyncOperation, runSyncRpcOperation, serviceProblem, syncDisabled, unavailable, type CeremonyOperation, type Operation } from "./sync-rpc-operation"
 
 export function createSyncRpcCoordinator(options: SyncRpcOptions) {
   let lifetime = new AbortController()
@@ -60,7 +60,7 @@ export function createSyncRpcCoordinator(options: SyncRpcOptions) {
   const newRecord = <K extends Operation["kind"]>(owner: SyncRpcContext, kind: K, pendingId?: string): Operation & { readonly kind: K } => {
     const record: Operation & { readonly kind: K } = {
       kind, owner, pendingId, controller: new AbortController(),
-      ready: Promise.withResolvers<void>(), confirmation: Promise.withResolvers<boolean>(),
+      ready: Promise.withResolvers(), confirmation: Promise.withResolvers<boolean>(),
       disposeListeners: [], account: undefined, identity: undefined, active: true,
       expired: false, expiresAt: undefined, code: null, confirmed: false,
       enable: null, approval: null, problem: undefined, timer: undefined, done: Promise.resolve(),
@@ -106,6 +106,7 @@ export function createSyncRpcCoordinator(options: SyncRpcOptions) {
       try { check(context); return true } catch { return false }
     },
     async enable(owner: SyncRpcContext): Promise<SyncEnableResponse> {
+      if (options.enabled?.() === false) return syncDisabled()
       if (enable?.active) {
         if (!ensureOwned(enable, owner)) return refused()
         const record = enable
@@ -120,6 +121,7 @@ export function createSyncRpcCoordinator(options: SyncRpcOptions) {
       return readEnable(record)
     },
     async approve(owner: SyncRpcContext, request: SyncApproveRequest): Promise<SyncApproveResponse> {
+      if (options.enabled?.() === false) return syncDisabled()
       const previous = approvals.get(request.pendingId)
       const wasActive = previous?.active === true
       if (previous !== undefined && !ensureOwned(previous, owner)) return refused()
@@ -144,6 +146,7 @@ export function createSyncRpcCoordinator(options: SyncRpcOptions) {
       return progress(previous)
     },
     async status(owner: SyncRpcContext): Promise<SyncStatusResponse> {
+      if (options.enabled?.() === false) return disabled()
       const binding = lifetime.signal
       try {
         const account = await current(owner)
@@ -163,7 +166,8 @@ export function createSyncRpcCoordinator(options: SyncRpcOptions) {
         }
       } catch { return unavailable() }
     },
-    async read<T>(owner: SyncRpcContext, use: (ports: SyncRpcOperation) => Promise<T>): Promise<T | SyncRpcProblem> {
+    async read<T>(owner: SyncRpcContext, use: (ports: SyncRpcOperation) => Promise<T>, verb: "pending" | "devices" = "pending"): Promise<T | SyncRpcProblem | SyncRpcDisabled> {
+      if (options.enabled?.() === false) return verb === "devices" ? disabled() : syncDisabled()
       const record = newRecord(owner, "read")
       const task = (async () => {
         let ports: SyncRpcOperation | undefined

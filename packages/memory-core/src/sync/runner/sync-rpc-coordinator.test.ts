@@ -1,8 +1,21 @@
 import { afterEach, expect, test } from "bun:test"
 import { disposeSyncRpcFixtures, owner, setup } from "./sync-rpc-test-support"
 import { AccountHttpError } from "../account/http"
-const deferred = <T>() => Promise.withResolvers<T>()
+const deferred = <T = void>() => Promise.withResolvers<T>()
 afterEach(disposeSyncRpcFixtures)
+
+test("#given sync is disabled #when every valid verb runs #then reads are local and ceremonies refuse without credential or HTTP reads", async () => {
+  const f = await setup(() => false)
+  const a = owner("a")
+  for (const verb of ["status", "devices"]) {
+    expect(await f.call(verb, a.context)).toMatchObject({ kind: "disabled", reason: expect.any(String) })
+  }
+  for (const [verb, data] of [["enable", {}], ["pending", {}], ["approve", { action: "begin", pendingId: "p" }]] as const) {
+    expect(await f.call(verb, a.context, data)).toMatchObject({ kind: "refused", code: "sync_disabled", reason: expect.any(String) })
+  }
+  expect(f.effects()).toEqual({ credentials: 0, httpCalls: 0 })
+  expect(f.counts()).toEqual({ begins: 0, closes: 0, joins: 0, approvals: 0 })
+})
 
 test("#given source resolution is held #when two enables race #then only one join opens", async () => {
   const f = await setup()
@@ -106,8 +119,8 @@ test("#given an expired pending result #when status is read #then expiry remains
 test("#given an operation begin held in the selected source #when pending owner disconnects #then listPending never dispatches", async () => {
   const f = await setup()
   const a = owner("a")
-  const entered = deferred<void>()
-  const release = deferred<void>()
+  const entered = deferred()
+  const release = deferred()
   const original = f.account.forOperation
   let lists = 0
   f.account.forOperation = async (authority) => {

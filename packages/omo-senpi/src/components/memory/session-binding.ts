@@ -42,6 +42,7 @@ export type SessionState = {
   memoryStatusAttempted: boolean
   /** The repository this session holds the sync runner for; released with the binding. */
   syncRepo?: string
+  syncEnabled?: boolean
   restartNotified: boolean
   conflictNotified: boolean
 }
@@ -117,6 +118,7 @@ export function createSessionBinder(deps: SessionBinderDeps): SessionBinder {
       return
     }
     const identity = adoption.identity
+    state.syncEnabled = sessionConfig.agents[identity.id]?.sync?.enabled ?? sessionConfig.sync.enabled
     if (adoption.kind === "rebound") {
       ctx.logger.info("omo-senpi memory identity rebound to the session binding", {
         sessionId: surface.id,
@@ -144,7 +146,7 @@ export function createSessionBinder(deps: SessionBinderDeps): SessionBinder {
     memoryModuleSupervisor.acquire()
     if (!oneShot) {
       state.syncRepo = identity.paths.repo
-      void syncRunner.acquire(identity.id, identity.paths, sessionConfig.sync, { profile: sessionConfig.agent, projectDir: sessionCwd })
+      void syncRunner.acquire(identity.id, identity.paths, { ...sessionConfig.sync, enabled: state.syncEnabled }, { profile: sessionConfig.agent, projectDir: sessionCwd })
     }
     // Disposable bookkeeping: a session closed without a conversation leaves no file (senpi#3263).
     pi.appendEntry(MEMORY_BINDING_CUSTOM_TYPE, binding, { startupBookkeeping: true })
