@@ -242,7 +242,7 @@ function markerExists(w: World, id: string): boolean {
 }
 
 async function deadIdentity(): Promise<ProcessIdentity> {
-  const child = Bun.spawn(["cat"], { stdin: "pipe", stdout: "ignore", stderr: "ignore" })
+  const child = Bun.spawn([process.execPath, "-e", "process.stdin.resume()"], { stdin: "pipe", stdout: "ignore", stderr: "ignore" })
   const startTime = await processStartTime(child.pid)
   child.stdin.end()
   await child.exited

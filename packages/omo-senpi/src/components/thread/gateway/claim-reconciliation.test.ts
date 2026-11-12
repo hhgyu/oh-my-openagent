@@ -17,7 +17,7 @@ afterEach(async () => {
 })
 
 async function spawnHolder(runtimeInstance: string | null = null): Promise<{ readonly identity: ProcessIdentity; readonly stop: () => Promise<void> }> {
-  const child = Bun.spawn(["cat"], { stdin: "pipe", stdout: "ignore", stderr: "ignore" })
+  const child = Bun.spawn([process.execPath, "-e", "process.stdin.resume()"], { stdin: "pipe", stdout: "ignore", stderr: "ignore" })
   const startTime = await processStartTime(child.pid)
   // win32 has no `ps`: the store records no start time there and judges a claimant by its pid alone (process-identity.ts)
   if (startTime === null && process.platform !== "win32") throw new Error("could not read the start time of the holder process")

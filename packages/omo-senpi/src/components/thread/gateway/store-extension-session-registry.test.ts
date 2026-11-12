@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test"
-import { existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { pathToFileURL } from "node:url"
 import type { Worker } from "node:worker_threads"
 
 import { gatewayDatabasePath } from "./paths"
@@ -145,8 +146,8 @@ test("#given a persisted moduleUrl that no longer exists #when a session lists o
   const h = (harness = createGatewayHarness())
   const gone = join(h.agentDir, "gone-extension.mjs")
   writeFileSync(gone, (await Bun.file(new URL(moduleUrl)).text()))
-  await h.store().registerStoreExtension(registration({ moduleUrl: `file://${gone}` }))
-  Bun.spawnSync(["rm", "-f", gone])
+  await h.store().registerStoreExtension(registration({ moduleUrl: pathToFileURL(gone).href }))
+  rmSync(gone, { force: true })
   const session = h.store()
   expect((await session.sessionCallableOps()).map((entry) => entry.registeredName).sort()).toEqual(["ext_gw_open", "ext_gw_work_item_status"])
   expect(await session.extensionSessionAwait("gw", "openThread", { target_session_durable_id: "child" }, { callerDurableId: "caller" })).toMatchObject({ kind: "refused", code: "extension_import_failed" })
