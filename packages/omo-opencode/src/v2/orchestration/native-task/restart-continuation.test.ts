@@ -86,3 +86,31 @@ describe("#given an owned child whose turn was still running when a reload parke
     }) })
   })
 })
+
+describe("#given two finished owned children of one lead, one of which the host already removed", () => {
+  test("#when the plugin closes and reloads #then close completes, the removed child retires as closed and the live child parks and restores", async () => {
+    await withGuard(async before => { await withGuard(async after => {
+      await withOwnedRuntimeUnit(async (runtime, state) => {
+        // given: both children finished, then the host removes one (OpenCode removes a removed lead's children)
+        const removed = await runtime.start({ category: "qa", prompt: "removed child" })
+        const live = await runtime.start({ category: "qa", prompt: "live child" })
+        if (removed.kind !== "started" || live.kind !== "started") throw Error(JSON.stringify([removed, live]))
+        const removedRecord = await runtime.wait(removed.task_id, AbortSignal.timeout(5000))
+        await runtime.wait(live.task_id, AbortSignal.timeout(5000))
+        state.removeByHost(String(removedRecord.child_session_id))
+        const removesBefore = state.calls.filter(call => call === "remove").length
+
+        // when
+        const reloaded = await state.reopen({ childToolGuard: after, authorizeRecovery: async spec => recoveryApproved(spec) })
+
+        // then
+        expect(state.calls.filter(call => call === "remove")).toHaveLength(removesBefore)
+        expect(reloaded.get(removed.task_id)?.residency_state).toBe("persisted_only")
+        expect(reloaded.get(live.task_id)?.residency_state).toBe("persisted_only")
+        expect(await restoreThroughOperation(reloaded, removed.task_id)).toBe(false)
+        expect(await restoreThroughOperation(reloaded, live.task_id)).toBe(true)
+        expect(reloaded.get(live.task_id)?.status).toBe("completed")
+      }, guarded(before))
+    }) })
+  })
+})

@@ -3,6 +3,7 @@ import type { SessionLease, SessionScopes, SessionToolPolicy } from "./session-s
 import { hasJoinedSessionCancellation } from "./session-cancellation"
 import type { ParkingDescriptor, ParkingObservedInfo } from "./child-parking"
 import { createChildParking } from "./child-parking-custody"
+import { isHostSessionAbsent } from "./session-absence"
 
 type Domain = Context["session"]
 type Input<K extends "create" | "prompt" | "synthetic"> = NonNullable<Parameters<Domain[K]>[0]>
@@ -217,6 +218,13 @@ export function createSessionBackend(host: { app: Context["app"]; location: { di
       await host.session.remove({ sessionID: info.id })
       await checkpoint(entry, { phase: "closed" })
     } catch (cause) {
+      if (isHostSessionAbsent(cause, entry.record.locator.sessionID)) {
+        // The host already removed this exact child (OpenCode removes a removed parent's children
+        // with it). Removal is the outcome cleanup exists to reach, so this closed receipt is genuine.
+        if (entry.handle && !entry.handle.lease.signal.aborted) scopes.retire(entry.handle.lease)
+        await checkpoint(entry, { phase: "closed" })
+        return
+      }
       await checkpoint(entry, { phase: "uncertain" })
       throw new SessionBackendError("uncertain", "Child cleanup uncertain; custody retained", entry.record.locator, { cause })
     }
@@ -558,6 +566,15 @@ export function createSessionBackend(host: { app: Context["app"]; location: { di
       })
     },
     close(child: ChildHandle) { return track(() => exclusive(child, cleanup)) },
+    /** Read-only probe: true only when the host answers that this exact child session no longer
+     * exists. It grants nothing; a caller still closes custody through `close`. */
+    hostRemoved(child: ChildHandle): Promise<boolean> {
+      return track(async () => {
+        lookup(child); scopes.assert(parent)
+        try { await host.session.get({ sessionID: child.locator.sessionID }, { signal: requestSignal() }); return false }
+        catch (cause) { if (isHostSessionAbsent(cause, child.locator.sessionID)) return true; throw cause }
+      })
+    },
     /** Adopt only a real durable CLOSED receipt after independent cleanup reacquired this exact child. */
     confirmClosed(child: ChildHandle): Promise<void> {
       return track(async () => {
