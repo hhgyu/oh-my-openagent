@@ -6,7 +6,7 @@
 // memory tools, reflection merges, a person's git commit - reach the engine through a watch on the
 // repository's HEAD reflog.
 
-import { watch } from "../../fs/resilient"
+import { existsSync, watch } from "../../fs/resilient"
 import { join } from "node:path"
 
 import type { MemoryIdentityPaths } from "../../identity/layout"
@@ -83,6 +83,9 @@ export type SyncSessionResolver = (request: SyncSessionRequest) => Promise<SyncS
 /** The line a runner logs when the device is signed in but has not joined the account's memory. */
 export const SYNC_IDLE_NOT_JOINED = "sync idle: this device has not joined the account's memory"
 
+/** The line a runner logs when it binds a memory whose repository the first memory write has not created yet. */
+export const SYNC_WAITING_FOR_REPOSITORY = "sync waiting: the memory repository does not exist yet"
+
 /** A resolver for a client with no device sign-in at all. */
 export const noAccountSession: SyncSessionResolver = async () => null
 
@@ -121,6 +124,8 @@ export interface SyncRunnerOptions {
   readonly closeWaitMs?: number
   /** Initial retry delay for a deferred credential read; default 15 s, doubling to a five-minute cap. */
   readonly deferredRetryMs?: number
+  /** Whether the repo exists for space resolution to write its git config; default: its `.git` directory exists. */
+  readonly repoSeeded?: (repo: string) => boolean
 }
 
 interface Running {
@@ -128,13 +133,23 @@ interface Running {
   readonly unwatch: () => void
 }
 
+type StartRetry = "unseeded" | "failed"
+
 interface Held {
   users: number
   readonly ready: Promise<Running | SyncUnavailableStatus | SyncConfigInvalidStatus | null>
+  retry?: StartRetry
+  settled?: true
+  readonly relaunch: (users: number) => Held
 }
 
 export interface SyncRunner {
   acquire(identity: string, paths: MemoryIdentityPaths, settings: { readonly enabled: boolean }, space?: SyncSpaceInputs): Promise<void>
+  /**
+   * Starts a held repo again once the repository its start waited for exists (a fresh device's first
+   * memory write seeds it). Changes no refcount; a no-op for any other held state.
+   */
+  resume(repo: string): Promise<void>
   release(repo: string): Promise<void>
   status(repo: string): Promise<EngineStatus | SyncUnavailableStatus | SyncConfigInvalidStatus | null>
   /** A sync principal's device name, from the account sessions this runner resolved; undefined when unknown. */
@@ -147,6 +162,7 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
   const { loadRuntime } = options
   const open = options.open ?? (async (o: OpenDeviceSyncOptions) => (await loadRuntime()).openDeviceSync(o))
   const watchHead = options.watchHead ?? watchHeadLog
+  const repoSeeded = options.repoSeeded ?? ((repo: string) => existsSync(join(repo, ".git")))
   const { logger } = options
   const repos = new Map<string, Held>()
   // Device-name lookups of the sessions resolved so far, by identity (principals are per account).
@@ -161,7 +177,7 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
     if (held === undefined) return
     const running = await held.ready
     if (running === null || !("device" in running) || repos.get(repo) !== held) return
-    repos.set(repo, { users: held.users, ready: Promise.resolve(null) })
+    repos.set(repo, { users: held.users, ready: Promise.resolve(null), settled: true, relaunch: held.relaunch })
     nameLookups.delete(identity)
     running.unwatch()
     await running.device.close()
@@ -243,7 +259,15 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
   ): Held => {
     let deferred = false
     let nextQuietMs = 0
-    const ready = start(identity, paths, space, message => {
+    let retry: StartRetry | undefined
+    // A fresh device binds before its first memory write creates the repo; space resolution would
+    // then fail on the missing repo. Wait for resume() instead of failing.
+    const unseeded = !repoSeeded(paths.repo)
+    if (unseeded) {
+      retry = "unseeded"
+      logger.info(SYNC_WAITING_FOR_REPOSITORY, { identity })
+    }
+    const ready = unseeded ? Promise.resolve(null) : start(identity, paths, space, message => {
       deferred = true
       if (retryMs !== previousRetryMs) {
         logger.warn(`memory sync is waiting: ${message} Sync retries on its own.`, { identity, code: SYNC_SESSION_DEFERRED, retryMs })
@@ -256,16 +280,19 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
         logger.warn("memory sync is still waiting for keychain approval.", { identity, code: SYNC_SESSION_DEFERRED, retryMs })
       }
     }).catch((error: unknown) => {
+      retry = "failed"
       logger.error("memory sync failed to start", { identity, error: String(error) })
       return null
     })
-    const held: Held = { users, ready }
+    const held: Held = { users, ready, relaunch: next => launch(identity, paths, space, next) }
     void ready.then(() => {
+      held.settled = true
+      if (retry !== undefined) held.retry = retry
       if (!deferred) return
-      const retry = setTimeout(() => {
+      const timer = setTimeout(() => {
         if (repos.get(paths.repo) === held) repos.set(paths.repo, launch(identity, paths, space, held.users, Math.min(retryMs * 2, DEFERRED_RETRY_MAX_MS), retryMs, nextQuietMs))
       }, retryMs)
-      retry.unref?.()
+      timer.unref?.()
     })
     return held
   }
@@ -291,12 +318,20 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
         }
       }
       const held = repos.get(paths.repo)
-      if (held !== undefined) {
+      if (held !== undefined && !(held.settled === true && held.retry !== undefined)) {
         held.users += 1
         return
       }
-      const launched = launch(identity, paths, space ?? { profile: null, projectDir: paths.repo }, 1)
+      // A new session is the retry edge for a start that failed or waited for the repo.
+      const launched = held === undefined ? launch(identity, paths, space ?? { profile: null, projectDir: paths.repo }, 1) : held.relaunch(held.users + 1)
       repos.set(paths.repo, launched)
+      await launched.ready
+    },
+    async resume(repo) {
+      const held = repos.get(repo)
+      if (held?.settled !== true || held.retry !== "unseeded" || !repoSeeded(repo)) return
+      const launched = held.relaunch(held.users)
+      repos.set(repo, launched)
       await launched.ready
     },
     async release(repo) {

@@ -39,6 +39,7 @@ function sessionEventContext(turn: number): unknown {
 function runnerKnowing(names: Readonly<Record<string, string>>): SyncRunner {
   return {
     acquire: async () => {},
+    resume: async () => {},
     release: async () => {},
     status: async () => null,
     deviceName: (principal) => names[principal],
