@@ -11,7 +11,7 @@ import { provideSessionWorkerData } from "@code-yeongyu/senpi/session-worker-dat
 import { type HostMemorySync, type MemorySyncSelection, MEMORY_SYNC_WORKER_DATA, selectHostMemorySyncSource } from "../desktop-sync/hostSelection"
 import { launchCarriedPrivateTable } from "../desktop-sync/launchClassification"
 import { SyncSidecarUnavailableError } from "@oh-my-opencode/memory-core/sync-runner"
-import type { DeviceAccountSource } from "./account-source"
+import type { DeviceAccountSource } from "@oh-my-opencode/memory-core/sync-runner"
 import type * as AccountRuntime from "./account-runtime"
 
 export type DeviceAccountRuntimeModule = Pick<typeof AccountRuntime, "claimInheritedDesktopSync" | "selectedAccountSource" | "serveWorkerPort" | "workerMemorySyncSelection">

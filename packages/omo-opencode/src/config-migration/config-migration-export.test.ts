@@ -9,6 +9,7 @@ const ENTRY_POINT = join(import.meta.dir, "index.ts")
 const BINARY_DOWNLOADER_ENTRY_POINT = join(import.meta.dir, "..", "shared", "binary-downloader.ts")
 // omo#10630: the Senpi memory sync resolver reads the CLI sign-in through this third public subpath.
 const SERVICE_AUTH_ENTRY_POINT = join(import.meta.dir, "..", "cli", "service-auth", "index.ts")
+const SYNC_ACCOUNT_ENTRY_POINT = join(import.meta.dir, "..", "cli", "service-auth", "sync-account", "index.ts")
 const PACKAGES_PATH = join(import.meta.dir, "..", "..", "..", "..", "packages")
 const CONFIG_CORE_ENTRY_POINT = join(PACKAGES_PATH, "omo-config-core", "src", "index.ts")
 const NEGATIVE_FIXTURE_ENTRY_POINT = join(import.meta.dir, "..", "..", "test", "fixtures", "config-migration", "opencode-side-effect-import.ts")
@@ -176,6 +177,10 @@ describe("config-migration public subpath", () => {
         import: "./src/cli/service-auth/index.ts",
         types: "./src/cli/service-auth/index.ts",
       },
+      "./service-auth/sync-account": {
+        import: "./src/cli/service-auth/sync-account/index.ts",
+        types: "./src/cli/service-auth/sync-account/index.ts",
+      },
       "./v2": {
         import: "./src/v2/index.ts",
         types: "./src/v2/index.ts",
@@ -186,6 +191,7 @@ describe("config-migration public subpath", () => {
   test.each([
     ["binary-downloader", BINARY_DOWNLOADER_ENTRY_POINT],
     ["service-auth", SERVICE_AUTH_ENTRY_POINT],
+    ["service-auth/sync-account", SYNC_ACCOUNT_ENTRY_POINT],
   ])("#given the %s entry point #when its local module graph is audited #then it imports neither OpenCode SDK modules nor plugin runtime code", (_name, entryPoint) => {
     // given
     const modules = moduleGraph(entryPoint)

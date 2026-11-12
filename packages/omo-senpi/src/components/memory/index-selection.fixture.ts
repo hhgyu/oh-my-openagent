@@ -3,7 +3,7 @@ import * as privateFds from "@code-yeongyu/senpi/private-fds"
 import { provideSessionWorkerData, sessionWorkerDataRegistry } from "@code-yeongyu/senpi/session-worker-data"
 import { mock } from "bun:test"
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads"
-import type { DeviceAccountSource } from "./device-session/account-source"
+import type { DeviceAccountSource } from "@oh-my-opencode/memory-core/sync-runner"
 import { createDeviceSessionResolver } from "@oh-my-opencode/memory-core/sync-runner"
 import { wireSyncRpc } from "./sync-rpc-wiring"
 import { MEMORY_SYNC_WORKER_DATA } from "./desktop-sync/hostSelection"
@@ -24,8 +24,8 @@ let resolverSource: DeviceAccountSource | undefined
 let rpcSource: Parameters<typeof wireSyncRpc>[0]["source"] | undefined
 const resolveSession = createDeviceSessionResolver
 const registerRpc = wireSyncRpc
-const accountSource = await import("./device-session/account-source")
-mock.module("./device-session/account-source", () => ({
+const accountSource = await import("@oh-my-opencode/omo-opencode/service-auth/sync-account")
+mock.module("@oh-my-opencode/omo-opencode/service-auth/sync-account", () => ({
   ...accountSource,
   createCliAccountSource: () => {
     cliBuilt += 1

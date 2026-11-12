@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import type { CliDeviceAccount, DeviceAccount, DeviceAccountSource } from "./account-source"
+import type { CliDeviceAccount, DeviceAccount, DeviceAccountSource } from "@oh-my-opencode/memory-core/sync-runner"
 import { SyncSidecarUnavailableError } from "@oh-my-opencode/memory-core/sync-runner"
 import { type DeviceAccountRuntimeModule, selectedDeviceAccountSource } from "./account-runtime-loader"
 import type { MemorySyncSelection } from "../desktop-sync/hostSelection"

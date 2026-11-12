@@ -120,14 +120,16 @@ describe("registerMemoryComponent", () => {
     await cleanup()
   })
 
-  test("#given cleanup ran #then every hook, the tool and command transforms and the output RPC are disposed", async () => {
+  test("#given cleanup ran #then every hook, the tool and command transforms and the output, status and sync RPCs are disposed", async () => {
     // given
     const f = fixture()
     const cleanup = await registerMemoryComponent(f.host, f.options())
+    const registered = [...f.rpcs.keys()].sort()
     // when
     await cleanup()
     await cleanup()
     // then
-    expect([f.hooks.size, f.tools.size, f.commands.size, f.disposals()]).toEqual([0, 0, 0, 8])
+    expect(registered).toEqual(["omo-memory", "omo.memory", "omo.memory.sync"])
+    expect([f.hooks.size, f.tools.size, f.commands.size, f.rpcs.size, f.disposals()]).toEqual([0, 0, 0, 0, 10])
   })
 })

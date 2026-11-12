@@ -4,6 +4,8 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "declaration": true,
+    "emitDeclarationOnly": true,
+    "allowImportingTsExtensions": true,
     "declarationDir": "dist",
     "outDir": "dist",
     "rootDir": "packages/omo-opencode/src",

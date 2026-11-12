@@ -16,7 +16,7 @@ import type { CredentialStore, Credentials } from "@oh-my-opencode/omo-opencode/
 
 import * as syncRuntime from "../sync-runtime"
 import { createDeviceSessionResolver, createSyncRunner } from "@oh-my-opencode/memory-core/sync-runner"
-import { createCliAccountSource } from "./account-source"
+import { createCliAccountSource } from "@oh-my-opencode/omo-opencode/service-auth/sync-account"
 
 const ACCOUNT = "acct_revoked"
 

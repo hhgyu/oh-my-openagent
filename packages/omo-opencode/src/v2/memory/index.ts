@@ -7,7 +7,7 @@ import { createMemoryBinder, describeError, type BoundMemorySession } from "./bi
 import { createMemoryCommands } from "./commands"
 import { memoryCommandRpc, stripMemoryCommandOutputs } from "./command-output"
 import { MEMORY_COMMAND_OUTPUT_EVENT } from "./command-output-event"
-import { consoleMemoryLogger, loadMemorySettings, memoryComponentEnabled, type MemoryEnv, type MemoryLogger } from "./config"
+import { consoleMemoryLogger, loadMemorySettings, memoryComponentEnabled, resolveSafeMemoryRoot, type MemoryEnv, type MemoryLogger } from "./config"
 import { createMemoryJournal } from "./journal"
 import { createMemoryProjection } from "./projection"
 import { createRecallCollector, fileRecallStores, type RecallStores } from "./recall"
@@ -32,6 +32,10 @@ import { createDoctorCommand } from "./doctor-command"
 import { createSleeptimeCommand } from "./sleeptime-command"
 import { createPeopleCommand } from "./people-command"
 import { createPalaceCommand } from "./palace-command"
+import { createMemoryStatusRpc } from "./status-rpc"
+import { createMemorySyncRuntime } from "./sync/runtime"
+import { registerMemorySyncRpc } from "./sync/rpc"
+import type { MemorySyncSeams } from "./sync/ports"
 
 export { MEMORY_BINDING_KEY } from "./binding"
 export { MEMORY_PART_MARKER, PROJECTION_PIN_KEY } from "./projection"
@@ -63,6 +67,8 @@ export interface MemoryComponentOptions {
   readonly reflection?: MemoryReflectionSeams
   /** Repo maintenance seams (delay, interval, packing threshold, clock). */
   readonly maintenance?: MemoryMaintenanceSeams
+  /** Memory sync seams (the lazily loaded sync host). */
+  readonly sync?: MemorySyncSeams
 }
 
 /**
@@ -91,6 +97,9 @@ export interface MemoryComponentOptions {
  *   doctor and palace (see `./insight-commands`).
  * - session_start memory maintenance -> the memory-core scheduler (unref'd delayed timer) scheduled at bind and
  *   disposed on close (see `./maintenance`).
+ * - per-session sync runner acquire -> one acquire per distinct bound repo, released in cleanup, with the
+ *   runner, account source and Loro engine loaded lazily (see `./sync/runtime`); the `omo.memory.sync` RPC
+ *   (see `./sync/rpc`) and the `omo.memory` status method plus `updated` event (see `./status-rpc`).
  * Nothing calls `session.prompt`; subagent children never bind; Kibitzer input goes through the owned
  * session backend's gated admission paths.
  */
@@ -103,8 +112,9 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
   let closed = false
   // The journal is created after the binder it reads; a bind before that has nothing to catch up.
   let onBound: ((bound: BoundMemorySession) => void) | undefined
+  const env = options.env ?? process.env
   const binder = createMemoryBinder({
-    session: context.session, metadata, env: options.env ?? process.env, now, loadSettings, logger,
+    session: context.session, metadata, env, now, loadSettings, logger,
     ...(options.home === undefined ? {} : { home: options.home }),
     onBound: bound => { if (!closed) onBound?.(bound) },
   })
@@ -149,8 +159,18 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
     request: (bound, origin) => reflection.requestDream(bound, origin), settings: bound => reflection.dreamSettings(bound), pressure: underSystemTokenPressure,
   })
   const maintenance = createV2MemoryMaintenance(logger, options.maintenance)
+  // Sync acquires once per distinct bound repo and loads its runtime lazily (see `./sync/runtime`); an
+  // unsafe memory root binds nothing, so it gets no sync and no `omo.memory.sync` RPC either.
+  const memoryRoot = resolveSafeMemoryRoot(env, context.location.directory, options.home)
+  const statusRpc = createMemoryStatusRpc({ syncStatus: async repo => sync?.status(repo), logger })
+  const sync = !memoryRoot.ok ? undefined : createMemorySyncRuntime({
+    env, memoryRoot: memoryRoot.root, logger, onRepoChanged: repo => statusRpc.refreshRepo(repo),
+    ...(options.sync === undefined ? {} : { seams: options.sync }),
+  })
   onBound = bound => {
     maintenance.onBound(bound)
+    statusRpc.onBound(bound)
+    sync?.onBound(bound)
     void journal.onBound(bound).then(() => facts?.onBound(bound)).then(() => reflection?.onBound(bound)).then(() => dreams?.onBound(bound))
   }
   let outputEvents: RpcRegistration<typeof memoryCommandRpc>["events"] | undefined
@@ -188,6 +208,10 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       if (reflection !== undefined) results.push(...await Promise.allSettled([reflection.close()]))
       if (kibitzer !== undefined) results.push(...await Promise.allSettled([kibitzer.close()]))
       results.push(...await Promise.allSettled([maintenance.close()]))
+      statusRpc.close()
+      await statusRpc.settled()
+      // Every acquired repo is released before the binder forgets the sessions that bound it.
+      if (sync !== undefined) results.push(...await Promise.allSettled([sync.close()]))
       await metadata.settled()
       binder.clear()
       projection.clear()
@@ -254,6 +278,9 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
     registrations.push(await context.session.hook("experimental.idle", async value => {
       if (closed) return
       await journal.onIdle(value.sessionID)
+      statusRpc.refreshSession(value.sessionID)
+      // A write during this turn may have seeded a repo that was bound before it existed.
+      sync?.onSettled()
       // Detached: evaluates after this reconcile counted the turn's steps, never blocks the idle edge.
       if (!closed) triggers?.onIdle(value.sessionID)
       if (!closed) dreams?.onIdle(value.sessionID)
@@ -263,6 +290,10 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       registrations.push(await registerFactsAgent(context.agent, factsPersona))
     }
     if (reflection !== undefined && context.agent !== undefined) registrations.push(await registerReflectionAgent(context.agent))
+    if (context.rpc !== undefined) {
+      registrations.push(await statusRpc.register(context.rpc))
+      if (sync !== undefined) registrations.push(await registerMemorySyncRpc(context.rpc, sync))
+    }
     if (commands !== undefined && context.command !== undefined) {
       if (context.rpc !== undefined) {
         const registration = await context.rpc.register(memoryCommandRpc, {})
