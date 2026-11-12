@@ -133,6 +133,21 @@ describe("native v2 agents", () => {
     expect(effective(editor, "prometheus", "edit", "**/.omo/plans/*.md")).toBe("allow")
   })
 
+  it("exposes only curated broker defaults before user rules, never overriding a user deny", () => {
+    // given the host's builtin Explore wildcard deny
+    for (const userDeny of [false, true]) {
+      const { editor } = recordingEditor()
+      editor.update("explore", agent => { agent.permissions = [{ action: "*", resource: "*", effect: "deny" }] })
+      // when OmO registers the real child agent with or without an explicit user restriction
+      applyAgents(editor, { agents: { explore: userDeny ? { permission: { omo_native_readonly: "deny", omo_native_ls: "deny" } } : {} }, disabled_agents: [] })
+      // then stock mutation remains denied and user broker denies win over plugin defaults
+      expect(effective(editor, "explore", "omo_native_readonly")).toBe(userDeny ? "deny" : "allow")
+      expect(effective(editor, "explore", "omo_native_ls")).toBe(userDeny ? "deny" : "allow")
+      expect(effective(editor, "explore", "shell")).toBe("deny")
+      expect(effective(editor, "explore", "edit")).toBe("deny")
+    }
+  })
+
   it("projects legacy tool permissions onto native shell, edit and subagent actions", () => {
     const overrides = [
       { permission: { bash: "deny" as const } },

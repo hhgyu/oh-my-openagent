@@ -1,6 +1,7 @@
 import { Agent, Model } from "@opencode/plugin"
 import type { AgentEditor, AgentDomain } from "@opencode/plugin/promise/agent"
 import type { LoadOmoConfigOptions } from "@oh-my-opencode/omo-config-core"
+import { CURATED_READONLY_AGENT_NAMES } from "@oh-my-opencode/senpi-task/agents-builtin"
 import { AGENT_DEFINITIONS } from "./definitions"
 import { loadAgentsConfig, type AgentsConfig, type AgentOverride } from "./config"
 
@@ -56,7 +57,9 @@ export function applyAgents(editor: AgentEditor, config: AgentsConfig): void {
       if (reasoning !== undefined && agent.model !== undefined) agent.model.variant = Model.VariantID.make(reasoning)
       if (override.temperature !== undefined) agent.request.body.temperature = override.temperature
       // Host replay starts from a fresh draft. Deduplication also makes reapplication safe.
-      const combined = [...agent.permissions, ...permissions(override), ...definition.restrictions]
+      const curatedDefaults: Rule[] = CURATED_READONLY_AGENT_NAMES.has(definition.id)
+        ? ["omo_native_readonly", "omo_native_ls"].map(action => ({ action, resource: "*", effect: "allow" })) : []
+      const combined = [...agent.permissions, ...curatedDefaults, ...permissions(override), ...definition.restrictions]
       agent.permissions = combined.filter((rule, index) => combined.findLastIndex((other) => other.action === rule.action && other.resource === rule.resource) === index)
     })
   }
