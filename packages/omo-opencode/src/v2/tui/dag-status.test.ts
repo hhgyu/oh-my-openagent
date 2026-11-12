@@ -7,6 +7,32 @@ const running: DagStatus = { sessionID: "a", runs: [{ runId: "dag_1", runKey: "b
   nodes: [{ id: "compile", state: "running" }, { id: "test", state: "failed", error: { code: "tool_error", message: "Bad\ninput" } }] }] }
 
 describe("DAG panel data", () => {
+  test("#given terminal history and live runs #when projected #then only live runs and the session's latest failure remain visible", () => {
+    const run = running.runs[0]
+    if (run === undefined) throw Error("fixture run missing")
+    const completed = { ...run, runId: "dag_completed", name: "Old success", status: "completed" as const,
+      counts: { ...run.counts, running: 0, completed: 2, failed: 0 }, nodes: run.nodes.map(node => ({ ...node, state: "completed" as const })) }
+    const cancelled = { ...completed, runId: "dag_cancelled", name: "Old cancellation", status: "cancelled" as const,
+      counts: { ...run.counts, running: 0, cancelled: 2, failed: 0 }, nodes: run.nodes.map(node => ({ ...node, state: "cancelled" as const })) }
+    const failed = { ...run, runId: "dag_failed", name: "Latest failure", status: "failed" as const,
+      counts: { ...run.counts, running: 0, completed: 1 }, nodes: run.nodes.map(node => node.state === "running" ? { ...node, state: "completed" as const } : node) }
+    // when: the RPC orders runs newest first, and still includes terminal history.
+    const terminalOnly = dagStatusLines({ sessionID: "a", runs: [completed, cancelled] })
+    const active = dagStatusLines({ sessionID: "a", runs: [run, completed] }).join("\n")
+    const latestFailure = dagStatusLines({ sessionID: "a", runs: [failed, completed] }).join("\n")
+    const supersededFailure = dagStatusLines({ sessionID: "a", runs: [completed, failed] })
+    const held = dagStatusLines({ sessionID: "a", runs: [completed, { ...run, status: "paused" }, { ...run, runId: "dag_pending", status: "pending" }] }).join("\n")
+    // then
+    expect(terminalOnly).toEqual([])
+    expect(active).toContain("Build [dag_1]")
+    expect(active).not.toContain("Old success")
+    expect(latestFailure).toContain("Latest failure [dag_failed]")
+    expect(supersededFailure).toEqual([])
+    expect(held).toContain("paused")
+    expect(held).toContain("[dag_pending]")
+    expect(held).not.toContain("Old success")
+  })
+
   test("#given an in-flight hydration #when a newer event and session switch arrive #then stale responses cannot replace the visible session", async () => {
     const requests = new Map<string, PromiseWithResolvers<unknown>>()
     let listener: ((data: unknown) => void) | undefined

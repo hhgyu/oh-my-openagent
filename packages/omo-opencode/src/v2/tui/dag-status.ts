@@ -42,8 +42,12 @@ const bounded = (value: string) => { const text = compact(value); return text.le
 
 export function dagStatusLines(status: DagStatus | undefined): string[] {
   if (!status?.runs.length) return []
+  // RPC preserves the Native manager's newest-updated-first order.
+  const visible = status.runs.filter((run, index) =>
+    run.status === "pending" || run.status === "running" || run.status === "paused" || (index === 0 && run.status === "failed"))
+  if (visible.length === 0) return []
   const lines = ["Workflows"]
-  const runs = [...status.runs].sort((a, b) => Number(b.status === "running") - Number(a.status === "running"))
+  const runs = visible.sort((a, b) => Number(b.status === "running") - Number(a.status === "running"))
   for (const run of runs.slice(0, 3)) {
     lines.push(`${compact(run.name).slice(0, 32)} [${run.runId}] ${run.status}`)
     const counts = Object.entries(run.counts).filter(([state, count]) => state !== "total" && count > 0).map(([state, count]) => `${state}:${count}`)
