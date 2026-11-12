@@ -2,7 +2,7 @@ import { withNativeTargetPermissionService } from "../orchestration/native-task/
 import { describe, expect, test } from "bun:test"
 import { Effect, Exit, Schema, Scope } from "effect"
 import { join, resolve } from "node:path"
-import type { ToolContext, ToolDomain, ToolEditor, Info } from "@opencode/plugin/promise/tool"
+import type { ToolContext, ToolDomain, ToolEditor } from "@opencode/plugin/promise/tool"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import type { NativeOperationOwner } from "../orchestration/native-task/operation-ports"
 import { createToolRegistry, type ListedTool } from "../host/tool-registry"
@@ -32,7 +32,7 @@ function unitFixture(initial: ListedTool[] = [], sessionID = "unit-parent") {
   let rollbackFailures = 0, contextCwd = "C:/unit/project"
   const callerController = new AbortController()
   let waitGate: ReturnType<typeof deferred<unknown>> | undefined, closeRejectsWait = false
-  const waitEntered = deferred<void>()
+  const waitEntered = deferred<undefined>()
   let startedResult: unknown = { kind: "started", task_id: "unit-child", status: "running", name: "unit-child", run_epoch: 1 }
   const editor: ToolEditor = {
     list: () => entries,
@@ -89,7 +89,7 @@ function unitFixture(initial: ListedTool[] = [], sessionID = "unit-parent") {
             task: {
               async start(spec: unknown) { starts.push(spec); return startedResult },
               get: () => undefined, subscribeChild: () => () => { events.push("unsubscribe") },
-              waitFor: () => { waitEntered.resolve(); return defined(waitGate).promise },
+              waitFor: () => { waitEntered.resolve(undefined); return defined(waitGate).promise },
             },
             output: { list: () => [], get: () => undefined },
             reportProgress: (update: Record<string, unknown>) => { void reporting.progress(update) },
@@ -126,16 +126,20 @@ function unitFixture(initial: ListedTool[] = [], sessionID = "unit-parent") {
   }
 }
 
-test("strict public schema publishes SAME constraints and preserves original false and object identity", async () => {
+test("strict public validation preserves unknown fields in transport, original false and object identity", async () => {
   for (const name of ["task", "task_output", "task_send", "task_cancel"] as const) {
     const schema = nativeTaskPublicInput(name)
-    expect(Schema.toJsonSchemaDocument(schema).schema).toEqual(JSON.parse(JSON.stringify(nativeTaskInputSchemas[name])))
+    const published = Schema.toJsonSchemaDocument(schema).schema
+    const constraints = (value: unknown) => JSON.parse(JSON.stringify(value, (key, item) => key === "additionalProperties" ? undefined : item))
+    expect(published.additionalProperties).toBe(true)
+    expect(constraints(published)).toEqual(constraints(nativeTaskInputSchemas[name]))
   }
   for (const input of [{ prompt: "x", run_in_background: false }, { prompt: "x", run_in_background: true }, { tasks: [{ prompt: "x", run_in_background: false }] }]) {
     expect(await Schema.decodeUnknownPromise(nativeTaskPublicInput("task"))(input)).toBe(input)
   }
   await expect(Schema.decodeUnknownPromise(nativeTaskPublicInput("task"))({ isolated: "true" })).rejects.toThrow()
   await expect(Schema.decodeUnknownPromise(nativeTaskPublicInput("task"))({ run_in_background: "false" })).rejects.toThrow()
+  await expect(Schema.decodeUnknownPromise(nativeTaskPublicInput("task_send"))({ to: "child", message: "hello", task_id: "typo" })).rejects.toThrow()
 })
 
 test("unit public callback uses real kernel issuance, canonical Native start and owner.output", async () => {
@@ -162,6 +166,15 @@ test("canonical normalization precedes strict public validation; malformed isola
   expect(f.starts).toHaveLength(0); await component.close()
 })
 
+test("#given unknown task_send fields #when the raw host callback runs #then it rejects before SDK decoding can discard them", async () => {
+  const f = unitFixture(), component = createNativeTaskBridge(f.options); await component.ready
+  await expect(f.call("task_send", { to: "child", message: "hello", task_id: "private-value" })).rejects.toMatchObject({
+    diagnostic: { code: "invalid_arguments", fields: ["task_id"], expected_fields: ["to", "message", "team_run_id", "summary", "all_scope", "redispatch"] },
+  })
+  expect(f.events).not.toContain("operation")
+  await component.close()
+})
+
 test("collision update uses actual ID and clears inherited output/options; close owns registrations", async () => {
   const initial = { id: "builtin-opaque-47", name: "task", description: "old", input: Schema.Unknown, output: Schema.String, options: { permission: "old" }, execute: async () => ({}) } satisfies ListedTool
   const f = unitFixture([initial]), component = createNativeTaskBridge(f.options); await component.ready
@@ -182,23 +195,23 @@ test("ambiguous collision rejects before editor mutation and acquired hook rolls
 })
 
 test("close joins original pre-bind parent lookup before closing service and refuses new callbacks", async () => {
-  const f = unitFixture(), gate = deferred<void>(), component = createNativeTaskBridge(f.options)
+  const f = unitFixture(), gate = deferred<undefined>(), component = createNativeTaskBridge(f.options)
   await component.ready; f.setParentGate(gate.promise)
   const action = f.call("task", { prompt: "work", subagent_type: "worker", run_in_background: true })
   await tick(); const closing = component.close(); await tick()
   expect(f.events).toContain("parent:begin"); expect(f.events).not.toContain("service:close")
-  gate.resolve(); await expect(action).rejects.toThrow("closing"); await closing
+  gate.resolve(undefined); await expect(action).rejects.toThrow("closing"); await closing
   expect(f.starts).toHaveLength(0)
   expect(f.events.indexOf("parent:end")).toBeLessThan(f.events.indexOf("service:close"))
   await expect(f.call("task_output", {})).rejects.toThrow("closing")
 })
 
 test("close joins original acquisition and disposes a late owner without registration", async () => {
-  const f = unitFixture(), gate = deferred<void>(); f.setAcquisitionGate(gate.promise)
+  const f = unitFixture(), gate = deferred<undefined>(); f.setAcquisitionGate(gate.promise)
   const component = createNativeTaskBridge(f.options); await tick()
   let done = false; const closing = component.close().then(() => { done = true }); await tick()
   expect(done).toBe(false); expect(f.events).not.toContain("release")
-  gate.resolve(); await expect(component.ready).rejects.toThrow("closing"); await closing
+  gate.resolve(undefined); await expect(component.ready).rejects.toThrow("closing"); await closing
   expect(f.events).not.toContain("hook"); expect(f.events).toContain("service:close"); expect(f.events).toContain("release")
 })
 
@@ -247,7 +260,7 @@ test("close stops service before joining a foreground callback that requires ser
 })
 
 test("falsey failed acquisition retains rollback custody and failed rollback remains retryable", async () => {
-  const f = unitFixture(), acquisition = deferred<void>(); f.setAcquisitionGate(acquisition.promise)
+  const f = unitFixture(), acquisition = deferred<undefined>(); f.setAcquisitionGate(acquisition.promise)
   const component = createNativeTaskBridge(f.options); f.failRollback()
   acquisition.reject(0); await expect(component.ready).rejects.toBe(0)
   await expect(component.close()).rejects.toBeInstanceOf(AggregateError)

@@ -2188,6 +2188,7 @@
     "packages/senpi-task/src/team/spawn-members.ts",
     "packages/senpi-task/src/team/storage.ts",
     "packages/senpi-task/src/team/tasks.ts",
+    "packages/senpi-task/src/tools/argument-validation.ts",
     "packages/senpi-task/src/tools/control/caller-session.ts",
     "packages/senpi-task/src/tools/control/cancel.ts",
     "packages/senpi-task/src/tools/control/index.ts",

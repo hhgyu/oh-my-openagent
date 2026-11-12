@@ -1,11 +1,11 @@
 import { Schema } from "effect"
-import { Compile } from "typebox/compile"
 import type { TSchema } from "typebox"
 import type { Info, Result, ToolContext, ToolDomain } from "@opencode/plugin/promise/tool"
 import type { Registration } from "@opencode/plugin/promise/registration"
 import {
   buildTaskExecute, buildTaskToolDescription, normalizeTaskToolArguments, runTaskOutput, runTaskCancel,
   forgetTaskOutputSessionReads, TASK_CANCEL_TOOL_DESCRIPTION, TASK_SEND_TOOL_DESCRIPTION,
+  createToolArgumentValidator, ToolArgumentValidationError,
   type TaskToolContext, type TaskToolDeps, type TaskToolParamsStatic, type TaskOutputInput, type TaskOutputDeps,
   type TaskSendInput, type TaskCancelInput, type TaskSendTeamRouting,
 } from "@oh-my-opencode/senpi-task/task-operations"
@@ -39,22 +39,34 @@ export interface NativeTaskOperationCall {
   readonly operation: Parameters<OperationRun>[3]
 }
 
-/** A strict public boundary: Check never converts false or replaces the input.
- * Publication is the exact canonical constraint, not a permissive annotation. */
+/** A strict public boundary: validation never converts or replaces the input. */
 export function nativeTaskPublicInput(name: Name) {
   return strictPublicInput(nativeTaskInputSchemas[name])
 }
 
 /** The same strict public boundary for any canonical Native TypeBox input schema. */
 export function strictPublicInput(canonical: TSchema) {
-  const compiled = Compile(canonical)
+  const validate = createToolArgumentValidator(canonical)
   const json = JSON.parse(JSON.stringify(canonical))
-  // Effect's JSON codec derivation replaces Unknown with a JSON encoding and
-  // drops its source checks from publication. Any keeps this exact runtime
-  // filter on the published side too; no value passes without canonical Check.
-  return Schema.Any.check(Schema.makeFilter<unknown>(value => compiled.Check(value), {
+  // Code Mode otherwise drops unknown keys before invoking the SDK callback.
+  // Preserve them in transport so canonical validation can name and reject them.
+  preserveUnknownFields(json)
+  return Schema.Any.check(Schema.makeFilter<unknown>(value => {
+    try { validate(value); return true }
+    catch (error) {
+      if (error instanceof ToolArgumentValidationError) return error.message
+      throw error
+    }
+  }, {
     toJsonSchema: () => structuredClone(json),
   }))
+}
+
+function preserveUnknownFields(schema: unknown): void {
+  if (schema === null || typeof schema !== "object") return
+  const value = schema as Record<string, unknown>
+  if (value.type === "object") value.additionalProperties = true
+  Object.values(value).forEach(preserveUnknownFields)
 }
 
 export interface NativeTaskTargets {
@@ -102,6 +114,7 @@ export interface NativeTaskBridgeOptions {
 export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
   const stop = new AbortController(), callbacks = new Set<Promise<void>>(), setups = new Set<Promise<void>>()
   const registrations: Registration[] = [], taskIDs = new Set<string>(), statusReads = new Map<string, string>()
+  const inputValidators = new Map<string, (value: unknown) => unknown>()
   let closing = false, closed = false, owner: NativeTaskBridgeOwner | undefined, closeAttempt: Promise<void> | undefined
   const current = () => { if (closing) throw Error("Native task bridge is closing"); stop.signal.throwIfAborted() }
   function ticket(set: Set<Promise<void>>) {
@@ -207,6 +220,8 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
     }
     registrations.push(await options.tool.hook("execute.before", event => {
       if (taskIDs.has(event.tool)) { current(); event.input = normalizeTaskToolArguments(event.input) }
+      const validate = inputValidators.get(event.tool)
+      if (validate) { current(); validate(event.input) }
     }))
     current()
     registrations.push(await options.tool.transform(editor => {
@@ -215,6 +230,7 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
       const matches = publicDefinitions.map(tool => editor.list().filter(entry => entry.name === tool.name))
       if (matches.some(entries => entries.length > 1)) throw Error("Ambiguous public Native task tool")
       taskIDs.clear()
+      inputValidators.clear()
       for (const [index, tool] of publicDefinitions.entries()) {
         const previous = matches[index]?.[0]
         if (previous) editor.update(previous.id, entry => {
@@ -227,6 +243,7 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
           replaced.description !== tool.description || replaced.output !== undefined ||
           replaced.options !== undefined) throw Error("Public Native task tool replacement failed")
         if (tool.name === "task") taskIDs.add(replaced.id)
+        inputValidators.set(replaced.id, createToolArgumentValidator(nativeTaskInputSchemas[tool.name as Name]))
       }
     }))
     current()
@@ -271,7 +288,7 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
           try { await owner.release() } catch (error) { failures.push(error) }
         }
         if (failures.length) throw new AggregateError(failures, "Native task bridge cleanup incomplete")
-        statusReads.clear(); taskIDs.clear(); closed = true
+        statusReads.clear(); taskIDs.clear(); inputValidators.clear(); closed = true
       })()
       closeAttempt = work
       void work.finally(() => { if (!closed && closeAttempt === work) closeAttempt = undefined }).catch(() => {})

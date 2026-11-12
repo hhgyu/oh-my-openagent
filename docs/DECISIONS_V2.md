@@ -56,6 +56,12 @@ The V1 source continues to live in `packages/omo-opencode/src/` and is bundled t
 
 ## Decision log
 
+### Task tool field diagnostics (2026-11-12)
+
+Native task and team inputs use the shared senpi-task validator. Invalid input reports `invalid_arguments`, offending `fields`, `expected_fields`, and schema issue paths without copying argument values. Senpi validates in `prepareArguments` before host coercion. V2 validates in the raw `execute.before` hook and in its public and kernel decoders.
+
+The V2 public transport schema preserves additional properties recursively. OpenCode 2.2.6 Code Mode otherwise discards unknown fields before plugin hooks, preventing a diagnostic from naming them. This transport allowance is not execution permission: the canonical schema rejects unknown fields before any Native operation. The public runtime filter still enforces every canonical constraint. Shared task argument normalization remains intentional and runs before validation.
+
 ### D-001: additive dual host
 
 Decision: keep V1 untouched and add a separate V2 host.
@@ -443,4 +449,3 @@ The public update has no expected revision, so conflict detection is optimistic,
 A parked guarded child is revived only inside a genuine CURRENT parent action (public `task_send`, or explicit recover). Before any residency admission, claim or reattach, the runtime rebuilds the persisted spec once and obtains a fresh approval from that call's own G2 authorizer (`authorizeRecovery`: the same pure host-grant selection over the rebuilt `ManagedStartSpec`, no fabricated plan, no rerun of Native model distribution, and the call's real joined `subagent` permission request). Stale pre-reload custody, persisted names or the recorded rule snapshot never authorize; autonomous recovery has no current call and refuses. Owned recovery passes the SAME rebuilt spec object to verification before `beforeLaunch` and the runner claim, and a persona/tool/ancestry/model drift refuses.
 
 The runner reacquires the child under a new guard generation (`renewStage` replaces this guard's joined parked tombstone with a new Scope; a fresh guard after reload begins one), binds the original producer, installs the context policy and observer, and only then restores. The restore checks that the host still shows exactly our deny-last rule and marker, checkpoints `restoring`, writes the recorded original rules (absent restores as `[]`) with metadata minus our marker, reads back, and checkpoints `restored`. If the host keeps an omitted metadata key (merge-patch semantics), only our key is set to `null`. Any other observed difference is a conflict: no write, host rules preserved, durable `conflict`, explicit refusal, and the guard claim stays unretired until explicit END. A failed restore re-parks rather than ending the preserved SDK child. Tool calls capture the guard generation when created, so a lazy Effect of the parked generation stays denied after renewal. Native revive semantics then deliver the new input (`Revived ... (run epoch N)`) through the existing gated prompt path; the original prompt is never replayed.
-
