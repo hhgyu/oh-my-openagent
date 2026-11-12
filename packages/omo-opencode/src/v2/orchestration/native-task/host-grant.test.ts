@@ -113,7 +113,7 @@ async function authorization(work: () => Effect.Effect<void, unknown, Scope.Scop
   let run: (caller: ToolContext) => Promise<unknown> = async () => ({})
   const registry = createToolRegistry([{ id: "entry", name: "entry", input: Schema.Unknown, description: "unit entry", execute: async (_value, caller) => { await run(caller); return {} } }], { entry: () => [{ action: "unit-entry", resources: ["unit"] }] })
   const kernel = createToolKernel({ scopes, registry, pipeline: createPolicyPipeline(), permission: { assert: async () => {} } })
-  const agents = { async list() { rosters++; return { data: [{ id: "build" }] } } } as unknown as Parameters<typeof createHostBuildAuthorizer>[0]["agents"]
+  const agents = { async list() { rosters++; return { data: ["build", "explore", "librarian", "first", "worker"].map(id => ({ id })) } } } as unknown as Parameters<typeof createHostBuildAuthorizer>[0]["agents"]
   const authorizer = createHostBuildAuthorizer({ callAuthority: kernel.callAuthority, permission, agents, assertCurrent() { if (!current) throw Error("catalog retired") } })
   const bound = kernel.bind(context, lease)
   return { permission, authorizer, requests, controller, context, bound, kernel,
@@ -142,6 +142,42 @@ test("category/batch-like separate plans each authorize actual build, no raw cat
   await f.bound.invoke("entry", {}); expect(f.requests).toHaveLength(2)
   expect(f.requests.every((request: unknown) => typeof request === "object" && request !== null && "resources" in request && Array.isArray(request.resources) && request.resources[0] === "build")).toBe(true)
   await f.close()
+})
+
+test("named personas authorize their actual host agent on spawn and fresh recovery, never build", async () => {
+  // given a genuine current call and distinct registered host identities
+  const f = await authorization()
+  const approved: string[] = []
+  try {
+    f.setRun(async caller => {
+      const call = f.authorizer.forCall(caller)
+      // when each Native persona is admitted initially and restored from its persisted spec
+      for (const agentType of ["explore", "librarian"]) {
+        approved.push((await call.authorize(selection({ plan: { model: "unit/model", agentType } }), caller.signal)).buildAgentID)
+        approved.push((await call.authorizeRecovery(recovery({ agentType }), caller.signal)).buildAgentID)
+      }
+    })
+    await f.bound.invoke("entry", {})
+    // then the real permission resources and carried child identity agree in both paths
+    expect(approved).toEqual(["explore", "explore", "librarian", "librarian"])
+    expect(f.requests.map(request => (request as { resources: string[] }).resources)).toEqual([["explore"], ["explore"], ["librarian"], ["librarian"]])
+  } finally { await f.close() }
+})
+
+test("an unavailable named persona fails closed before any build delegation approval", async () => {
+  // given a Native persona without a matching registered host agent
+  const f = await authorization()
+  try {
+    f.setRun(async caller => {
+      const call = f.authorizer.forCall(caller)
+      // when spawning or recovering it, build is not a permission substitute
+      await expect(call.authorize(selection({ plan: { model: "unit/model", agentType: "missing-persona" } }), caller.signal)).rejects.toThrow("unavailable")
+      await expect(call.authorizeRecovery(recovery({ agentType: "missing-persona" }), caller.signal)).rejects.toThrow("unavailable")
+    })
+    await f.bound.invoke("entry", {})
+    // then no approval can silently bypass a rule keyed to the missing persona
+    expect(f.requests).toEqual([])
+  } finally { await f.close() }
 })
 
 test("retained closure, fake joined owner and foreign parent cannot authorize", async () => {
