@@ -14,12 +14,15 @@ type Rule = ReturnType<AgentEditor["list"]>[number]["permissions"][number]
 function permissions(override: AgentOverride): Rule[] {
   const rules: Rule[] = []
   for (const [action, enabled] of Object.entries(override.tools ?? {})) {
-    rules.push({ action, resource: "*", effect: enabled ? "allow" : "deny" })
+    if (enabled === true) rules.push({ action, resource: "*", effect: "allow" })
   }
   rules.push(...(override.permissions ?? []))
   for (const [action, value] of Object.entries(override.permission ?? {})) {
     if (typeof value === "string") rules.push({ action, resource: "*", effect: value })
     else for (const [resource, effect] of Object.entries(value)) rules.push({ action, resource, effect })
+  }
+  for (const [action, enabled] of Object.entries(override.tools ?? {})) {
+    if (enabled === false) rules.push({ action, resource: "*", effect: "deny" })
   }
   for (const action of override.disallowed_tools ?? []) rules.push({ action, resource: "*", effect: "deny" })
   // Unified config keeps historical tool names, while OpenCode 2.2 uses

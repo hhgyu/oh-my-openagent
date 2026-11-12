@@ -7,7 +7,7 @@ const fixtureProjectConfig = join(fixtureProject, ".omo", "omo.jsonc")
 
 import type { AgentEditor } from "@opencode/plugin/promise/agent"
 import { AGENT_DEFINITIONS, AGENT_IDS, applyAgents, loadAgentsConfig, registerAgents } from "./index"
-import type { AgentsConfig } from "./config"
+import type { AgentOverride, AgentsConfig } from "./config"
 
 import { recordingEditor } from "./test-support"
 const emptyConfig: AgentsConfig = { agents: {}, disabled_agents: [] }
@@ -184,6 +184,29 @@ describe("native v2 agents", () => {
     const { editor } = recordingEditor()
     applyAgents(editor, { agents: { sisyphus: { permission: { task: "deny" } } }, disabled_agents: [] })
     expect(effective(editor, "sisyphus", "subagent")).toBe("deny")
+  })
+
+  const toggleCases: { name: string; override: AgentOverride; effect: "allow" | "deny"; resource?: string }[] = [
+    { name: "false toggle defeats wildcard allow", override: { tools: { edit: false }, permission: { "*": "allow" } }, effect: "deny" },
+    { name: "false toggle defeats specific allow", override: { tools: { edit: false }, permission: { edit: "allow" } }, effect: "deny" },
+    { name: "true toggle preserves permission deny", override: { tools: { edit: true }, permission: { edit: "deny" } }, effect: "deny" },
+    { name: "true toggle alone allows", override: { tools: { edit: true } }, effect: "allow" },
+    { name: "permission allow alone allows", override: { permission: { edit: "allow" } }, effect: "allow" },
+    { name: "false toggle defeats permission-array allow", override: { tools: { edit: false }, permissions: [{ action: "*", resource: "*", effect: "allow" }] }, effect: "deny" },
+    { name: "true toggle preserves permission-array deny", override: { tools: { edit: true }, permissions: [{ action: "edit", resource: "*", effect: "deny" }] }, effect: "deny" },
+    { name: "specific map allow stays after broad deny", override: { permission: { edit: { "*": "deny", file: "allow" } } }, resource: "file", effect: "allow" },
+    { name: "broad map deny stays after specific allow", override: { permission: { edit: { file: "allow", "*": "deny" } } }, resource: "file", effect: "deny" },
+    { name: "specific array allow stays after broad deny", override: { permissions: [{ action: "edit", resource: "*", effect: "deny" }, { action: "edit", resource: "file", effect: "allow" }] }, resource: "file", effect: "allow" },
+    { name: "broad array deny stays after specific allow", override: { permissions: [{ action: "edit", resource: "file", effect: "allow" }, { action: "edit", resource: "*", effect: "deny" }] }, resource: "file", effect: "deny" },
+  ]
+  for (const id of ["sisyphus", "native-permission-case"]) for (const row of toggleCases) it(`${id}: ${row.name}`, () => {
+    // given a stock role or a real canonical Native custom identity
+    const { editor } = recordingEditor()
+    // when the registrar combines toggles with authored permission rules
+    applyAgents(editor, { agents: { [id]: row.override }, disabled_agents: [], nativeAgents: { "native-permission-case": {} } })
+    // then source denies hold and authored resource ordering remains intact
+    expect(editor.get(id)).toBeDefined()
+    expect(effective(editor, id, "edit", row.resource)).toBe(row.effect)
   })
 
   it("rereads config on host replay and disposes its registration", async () => {
