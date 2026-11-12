@@ -7,6 +7,7 @@ import {
   FactsFailureStore,
   FactsFailuresCorruptError,
   factsQueuePaths,
+  LockContentionError,
   type MemoryIdentity,
 } from "@oh-my-opencode/memory-core"
 
@@ -49,6 +50,32 @@ function warnCollector() {
 }
 
 describe("facts launch gating on failure state", () => {
+  test("#given a busy failure ledger #when launch defers and a later edge retries #then it logs busy, reserves nothing and later consumes the same queue", async () => {
+    // given
+    const { root, identity, queue } = await fixture()
+    const collector = warnCollector()
+    const store = new FactsFailureStore({ identityPaths: identity.paths })
+    let busy = true
+    const failures = {
+      readFailures: () => busy ? Promise.reject(new LockContentionError("facts-queue.lock", null)) : store.readFailures(),
+      recordFailure: store.recordFailure.bind(store),
+      clearOnSuccess: store.clearOnSuccess.bind(store),
+    }
+    const runner = new FactsExtractorRunner(runnerOptions(root, identity, queue, "fact", { failures, logger: collector.logger }))
+    const before = await queue.listPending()
+    // when
+    const deferred = await runner.launchPending()
+    // then
+    expect(deferred.status).toBe("skipped")
+    expect(collector.warnings.map(row => row.message)).toEqual(["facts failure ledger is busy; launch deferred"])
+    expect(await runDirNames(identity)).toEqual([])
+    expect(await queue.listPending()).toEqual(before)
+    // when / then
+    busy = false
+    expect((await runner.launchPending()).status).toBe("committed")
+    expect(await queue.listPending()).toEqual([])
+  }, 30_000)
+
   test("#given every pending endpoint is parked #when a launch is attempted #then nothing launches and no run dir is reserved", async () => {
     // given
     const { root, identity, queue } = await fixture()
