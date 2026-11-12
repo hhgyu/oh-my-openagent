@@ -6,6 +6,7 @@
 import {
   FactsFailuresCorruptError,
   FactsFailureStore,
+  LockContentionError,
   factsQueuePaths,
   type FactsFailureRecord,
   type MemoryIdentityPaths,
@@ -29,6 +30,8 @@ export interface FactsOverview {
   readonly factsDir?: string
   /** Present only when the ledger could not be parsed; counts are meaningless then. */
   readonly corrupt?: string
+  /** Counts are unavailable while the queue lock is held; this is not corruption. */
+  readonly busy?: boolean
 }
 
 function parked(state: FactsOverview): readonly FactsFailureRecord[] {
@@ -57,6 +60,7 @@ function formatWait(deltaMs: number): string {
 
 /** One bounded advisory line, or nothing when the ledger is clean. */
 export function formatFactsAdvisory(state: FactsOverview): string | undefined {
+  if (state.busy === true) return "facts: failure ledger busy (launch deferred)"
   if (state.corrupt !== undefined) return "facts: failure ledger unreadable (run /facts for detail)"
   const parkedCount = parked(state).length
   const backoffCount = backoff(state).length
@@ -73,6 +77,7 @@ export function formatFactsAdvisory(state: FactsOverview): string | undefined {
  * along separately via `factsParkedCauseSummary`, never inside the to-do.
  */
 export function factsRemediationHint(state: FactsOverview): string | undefined {
+  if (state.busy === true) return "facts failure ledger is busy; launch deferred until a later facts trigger; try /facts again shortly"
   if (state.corrupt !== undefined) {
     return `facts failure ledger is unreadable (${state.corrupt}); repair or delete failures.json to resume launches`
   }
@@ -94,6 +99,10 @@ export function factsRemediationHint(state: FactsOverview): string | undefined {
 /** The full read-only `/facts` view. Never enters model context; callers notify + return it. */
 export function formatFactsStatus(identity: string, state: FactsOverview): string {
   const lines = [`# Facts pipeline: ${identity}`, "", `queued: ${state.pending} pending`]
+  if (state.busy === true) {
+    lines.push("", "failure ledger is busy; counts are temporarily unavailable", "launch deferred until a later facts trigger; try /facts again shortly")
+    return lines.join("\n")
+  }
   if (state.corrupt !== undefined) {
     lines.push(
       "",
@@ -157,6 +166,7 @@ export async function readFactsOverview(input: ReadFactsOverviewInput): Promise<
     const failures = await store.readFailures()
     return { pending, records: failures.entries, now: input.now, factsDir: input.identityPaths.facts }
   } catch (error) {
+    if (error instanceof LockContentionError) return { pending, records: [], now: input.now, factsDir: input.identityPaths.facts, busy: true }
     const corrupt = error instanceof FactsFailuresCorruptError
       ? error.message
       : `failure ledger unreadable: ${error instanceof Error ? error.message : String(error)}`
