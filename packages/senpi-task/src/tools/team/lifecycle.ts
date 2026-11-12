@@ -82,7 +82,7 @@ export type TeamCreateDetails =
   | { readonly kind: "runtime_error"; readonly code: string; readonly reason: string }
 
 export type TeamDeleteDetails =
-  | { readonly kind: "deleted"; readonly team_run_id: string; readonly cancelled_task_ids: readonly string[] }
+  | { readonly kind: "deleted"; readonly team_run_id: string; readonly cancelled_task_ids: readonly string[]; readonly released_task_ids: readonly string[] }
   | { readonly kind: "invalid_state"; readonly team_run_id: string; readonly code: string; readonly reason: string }
 
 const CREATE_DESCRIPTION = [
@@ -156,9 +156,11 @@ export async function runTeamDelete(service: TeamToolsService, params: TeamDelet
     const result = await service.deleteTeam({ teamRunId: params.team_run_id, force: params.force })
     const cancelled = result.cancelledTaskIds
     const suffix = cancelled.length === 0 ? "" : `: ${cancelled.join(", ")}`
+    const released = result.releasedTaskIds
+    const releasedSuffix = released.length === 0 ? "" : `: ${released.join(", ")}`
     return toolResult(
-      `Deleted team ${result.teamRunId}; cancelled ${cancelled.length} member task(s)${suffix}.`,
-      { kind: "deleted", team_run_id: result.teamRunId, cancelled_task_ids: result.cancelledTaskIds },
+      `Deleted team ${result.teamRunId}; cancelled ${cancelled.length} member task(s)${suffix}; released ${released.length} finished member(s)${releasedSuffix}.`,
+      { kind: "deleted", team_run_id: result.teamRunId, cancelled_task_ids: cancelled, released_task_ids: released },
     )
   } catch (error) {
     if (error instanceof SenpiTeamRuntimeError) {
