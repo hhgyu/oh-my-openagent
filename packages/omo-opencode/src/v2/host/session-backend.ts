@@ -105,6 +105,11 @@ export interface SessionBackendOptions {
   readonly beforeLeaseRetire?: (child: ChildHandle, intent: "end" | "detach" | "dispose") => Promise<void>
   /** Detach parks this child durably: join() must revoke and JOIN original guard/producer work. */
   readonly parking?: { join(child: ChildHandle): Promise<void> }
+  /** Aborted once OpenCode closes this plugin's location. It closes it only after every step that
+   * borrowed the location has ended, and it does so inside the last step's own teardown: a host
+   * `wait` on that step's session then cannot return before this plugin's close does. The cleanup
+   * idle barrier treats the release as the quiescence it was waiting for. */
+  readonly locationReleased?: AbortSignal
 }
 interface Entry { record: ChildRecord; handle?: ChildHandle; busy: boolean; detached?: boolean; cleanupRecovery?: boolean; readers?: Set<Promise<unknown>>; borrowingClosed?: boolean; retirement?: Promise<void>; retirementComplete?: boolean }
 
@@ -201,6 +206,15 @@ export function createSessionBackend(host: { app: Context["app"]; location: { di
     void work.catch(() => { if (entry.retirement === work) entry.retirement = undefined })
     return work
   }
+  /** Cleanup idle barrier: the host's wait for the session, or OpenCode's release of this plugin's
+   * location, which proves every step that borrowed it has ended (see `locationReleased`). */
+  async function waitQuiescent(sessionID: string, signals: readonly AbortSignal[]): Promise<void> {
+    const released = options.locationReleased
+    if (released?.aborted) return
+    const all = released ? [...signals, released] : [...signals]
+    try { await host.session.wait({ sessionID }, all.length ? { signal: AbortSignal.any(all) } : undefined) }
+    catch (error) { if (!released?.aborted) throw error }
+  }
   async function cleanup(entry: Entry) {
     if (entry.detached || entry.record.phase === "closed") return
     await beforeRetire(entry, "end")
@@ -213,7 +227,7 @@ export function createSessionBackend(host: { app: Context["app"]; location: { di
       await fence(entry)
       await host.session.interrupt({ sessionID: info.id, resume: false })
       await fence(entry)
-      await host.session.wait({ sessionID: info.id })
+      await waitQuiescent(info.id, [])
       await fence(entry)
       await host.session.remove({ sessionID: info.id })
       await checkpoint(entry, { phase: "closed" })
@@ -360,7 +374,8 @@ export function createSessionBackend(host: { app: Context["app"]; location: { di
   const parking = createChildParking<Entry>({ session: host.session, journal, signal: requestSignal, identity,
     join: child => options.parking ? options.parking.join(child) : Promise.reject(new SessionBackendError("unavailable", "Parking join custody not configured", child.locator)),
     async live(child, entry) { controlLive(child, entry); await fence(entry); controlLive(child, entry) },
-    checkpoint: (entry, value) => checkpoint(entry, { parking: value }) })
+    checkpoint: (entry, value) => checkpoint(entry, { parking: value }),
+    ...(options.locationReleased && { released: options.locationReleased }) })
   const backend = {
     /** Observations must remain possible after the run gate stops, until custody retires. */
     observationGuard(child: ChildHandle): () => void {
@@ -506,7 +521,7 @@ export function createSessionBackend(host: { app: Context["app"]; location: { di
         cancellable()
         return readOnly(child, async entry => {
           controlLive(child, entry); await fence(entry); controlLive(child, entry)
-          await host.session.wait({ sessionID: child.locator.sessionID }, { signal: AbortSignal.any([requestSignal(child), ...(signal ? [signal] : [])]) })
+          await waitQuiescent(child.locator.sessionID, [requestSignal(child), ...(signal ? [signal] : [])])
           controlLive(child, entry); await fence(entry); controlLive(child, entry)
         })
       })

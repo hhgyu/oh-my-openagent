@@ -56,6 +56,9 @@ type Options = Omit<NativeOwnedTaskRuntimeOptions, "stateDir" | "parent" | "capt
     /** Current actual catalog facts. Recovery passes its rebuilt ManagedStartSpec and no plan. */
     preparationFor(spec: HostGrantPreparationInput["spec"] | ManagedStartSpec, plan: HostGrantPreparationInput["plan"] | undefined, signal: AbortSignal): Promise<Omit<HostGrantPreparationInput, "spec" | "plan" | "includeTaskTools" | "canonical">>
   }
+  /** The previous plugin generations of this project still closing in this process (an in-process
+   * reload or evict): every call waits for their park before it reads a task row. */
+  readonly predecessors?: { predecessorsSettled(signal?: AbortSignal): Promise<void> }
 }
 interface Entry {
   readonly lease: SessionLease
@@ -125,6 +128,7 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
       stateDir: options.stateDirFor(entry.lease.sessionID), scopes: options.scopes, parent: entry.lease, policy: options.policy,
       metadataSource: options.metadataSource, config: options.config, agents: options.agents,
       initializationSignal: entry.stop.signal,
+      ...(options.locationReleased && { locationReleased: options.locationReleased }),
       ...(options.childToolGuard && { childToolGuard: options.childToolGuard }),
       ...(options.childGuardBinding && { childGuardBinding: options.childGuardBinding }),
       notification: { callAuthority: options.callAuthority, rootToken, captureCall: () => currentInvocation().token },
@@ -239,6 +243,10 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
     },
     /** Trusted outer genuine SDK callback only. This allocates no manager, planner or store. */
     async parent(caller: ToolContext): Promise<SessionLease> {
+      caller.signal.throwIfAborted()
+      if (closing) throw new Error("Task service is closing")
+      // A row a retiring generation still holds would read as a live child of this pid; wait for its park.
+      await options.predecessors?.predecessorsSettled(caller.signal)
       caller.signal.throwIfAborted()
       if (closing) throw new Error("Task service is closing")
       const actual = await ctx.session.get({ sessionID: caller.sessionID }, { signal: caller.signal })

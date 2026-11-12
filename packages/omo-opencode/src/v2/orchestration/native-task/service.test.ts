@@ -690,6 +690,24 @@ test("parent replacement joins actual old quiescence before two callers share on
  })
 })
 
+test("a call of the next plugin generation waits for the previous generation's park before it reads any task row",async()=>{
+ await fixture(async f=>{
+  // given: a previous generation of this project still closing in this process
+  const previous=Promise.withResolvers<undefined>();let settledWaits=0
+  Object.assign(f.options,{predecessors:{async predecessorsSettled(signal?:AbortSignal){signal?.throwIfAborted();await previous.promise;settledWaits++}}})
+  await f.reopen()
+  const reads=f.calls.length,waiting=f.raw(),aborted=f.raw()
+  // when
+  let lease:unknown;const parent=f.service.parent(waiting.caller).then(value=>{lease=value})
+  const refused=f.service.parent(aborted.caller);aborted.controller.abort(Error("caller gone"))
+  await Bun.sleep(20)
+  // then
+  expect(lease).toBeUndefined();expect(f.calls.length).toBe(reads)
+  previous.resolve(undefined);await parent;await expect(refused).rejects.toThrow("caller gone")
+  expect(settledWaits).toBeGreaterThanOrEqual(1);expect(lease).toBeDefined()
+ })
+})
+
 test("failed retirement retains old lease and rejects replacement until actual cleanup retry succeeds",async()=>{
  await fixture(async f=>{
   await f.invoke(async api=>api.start({category:"qa",prompt:"block active",run_in_background:true}))

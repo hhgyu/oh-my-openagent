@@ -25,6 +25,8 @@ export interface OwnedRunnerOptions {
   beforeLeaseRetire?: Parameters<typeof createSessionBackend>[1]["beforeLeaseRetire"]
   assertAdmission(): void
   installed(control: OwnedTaskControl): void
+  /** Aborted once OpenCode closes this plugin's location (see `SessionBackendOptions.locationReleased`). */
+  readonly locationReleased?: AbortSignal
   readonly childGuard?: { readonly owner: OwnedChildToolGuard; forSpec(spec: ManagedStartSpec): {
     readonly approval: ChildGuardApproval; readonly buildAgentID: string; assertLifetime(): void
     /** Stage admission of the SAME approval: original Native admission, or a fresh recovery action. */
@@ -64,6 +66,7 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
       const backend = createSessionBackend({ app: options.ctx.app, location: { directory: reference.location }, session: options.ctx.session }, {
         backendID: reference.backendID, owner: options.journal.owner, parent, scopes: options.scopes,
         policy: selectedParent.policy, journal: options.journal, beforeLeaseRetire: options.beforeLeaseRetire, gate: { assertActive() { options.scopes.assert(parent) } },
+        ...(options.locationReleased && { locationReleased: options.locationReleased }),
       })
       backends.add(backend)
       retained = { backend }
@@ -135,7 +138,7 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
     const backend = createSessionBackend(host, { backendID: "omo-native-task-opencode", owner: options.journal.owner, parent,
       scopes: options.scopes, policy, journal: options.journal, beforeLeaseRetire: options.childGuard ? async (child, intent) => { await stopGuard(guardClaim); await options.beforeLeaseRetire?.(child, intent) } : options.beforeLeaseRetire,
       // Guarded detach PARKS durably (Native suspend semantics), never ends the child.
-      ...(guarded && { parking: { join: () => stopGuard(guardClaim) } }), gate: { assertActive() { if (recoveringKey) options.scopes.assert(parent); else { options.assertAdmission(); firstInput() } } } })
+      ...(guarded && { parking: { join: () => stopGuard(guardClaim) } }), ...(options.locationReleased && { locationReleased: options.locationReleased }), gate: { assertActive() { if (recoveringKey) options.scopes.assert(parent); else { options.assertAdmission(); firstInput() } } } })
     backends.add(backend)
     const record = options.store.load(spec.taskId)
     if (!record) throw new Error("Task record missing before owned child stage")

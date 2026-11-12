@@ -21,6 +21,8 @@ import { createToolRegistry, type ListedTool } from "../../host/tool-registry"
 import { createNativeTaskBridge } from "../../tools/native-task"
 import { prepareNativeTaskRuntime } from "../../tools/native-task-preparation"
 import { createNativeChildGuardBinding } from "./child-guard-binding"
+import { enterNativeGeneration } from "./generation-handover"
+import { watchLocationShutdown } from "./location-shutdown"
 import { acquireTeamMemberOwner, type TeamMemberOwner } from "./live-member-owner"
 import { acquireReadonlyBroker, type ReadonlyBrokerOwner } from "./live-readonly-producer"
 import { acquireCodemodeReadonly, type CodemodeReadonlyOwner } from "./live-codemode-readonly"
@@ -183,7 +185,9 @@ export interface NativeTaskComponentOptions {
 
 export async function registerNativeTaskComponent(control: PromisePlugin.Context, owners: NativeTaskEffectOwners, options: NativeTaskComponentOptions = {}): Promise<() => Promise<void>> {
   const directory = control.location.directory
-  const lifetime = new AbortController(), scopes = createSessionScopes()
+  const lifetime = new AbortController(), scopes = createSessionScopes(), handover = enterNativeGeneration(directory)
+  // Aborted when the HOST closes this component: OpenCode does that only once no step borrows the location.
+  const locationReleased = new AbortController()
   let accepting = true, generation = 1
   const current = () => { if (!accepting) throw Error("Native task component is closing"); lifetime.signal.throwIfAborted() }
   const closers: (() => Promise<void> | void)[] = []
@@ -244,7 +248,7 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
         const customCounterparts = catalog.some(tool => tool.id === listing) ? [{ nativeName: CODEMODE_READONLY_NATIVE_NAME, hostID: listing }] : []
         return { nativeTools: childStructuralToolNames(CUSTOM_CANDIDATES).map(name => ({ name })), catalog, customCounterparts }
       } },
-      childToolGuard: owners.guard,
+      childToolGuard: owners.guard, predecessors: handover, locationReleased: locationReleased.signal,
       // The read-only broker, member task_send, CodeMode `ls` and parent kernel-tool producers are
       // installed; CodeMode fetch GET is bound only for a child granted Native `webfetch`, deny-all
       // otherwise. Other member slots stay unbound, so a selection needing one is refused by the runner.
@@ -328,8 +332,13 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     throw error
   }
   let closing: Promise<void> | undefined
-  return () => {
-    closing ??= close().catch(error => { closing = undefined; throw error })
+  const closeOnce = () => {
+    closing ??= handover.retire(close).catch(error => { closing = undefined; throw error })
     return closing
   }
+  // Park on the host's shutdown signal: OpenCode runs this close only once no step borrows the location.
+  closers.push(watchLocationShutdown(control, closeOnce))
+  // The host's own close runs inside the teardown of the last step that borrowed the location, so a
+  // park still waiting for that step's session to go idle could never finish: release it here.
+  return () => { locationReleased.abort(Error("OpenCode closed the plugin location")); return closeOnce() }
 }

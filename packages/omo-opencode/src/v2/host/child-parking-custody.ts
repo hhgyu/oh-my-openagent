@@ -15,6 +15,9 @@ export function createChildParking<E extends ParkingEntry>(deps: {
   live(child: ChildHandle, entry: E): Promise<void>
   identity(info: SessionReference, locator: ChildHandle["locator"]): void
   checkpoint(entry: E, parking: ParkingDescriptor): Promise<void>
+  /** Aborted once OpenCode closes the plugin's location: a park's idle wait is then met (see
+   * `SessionBackendOptions.locationReleased`). */
+  readonly released?: AbortSignal
 }) {
   const receipts = new WeakMap<object, Issued<E>>(), byChild = new WeakMap<ChildHandle, object>()
   function port(entry: E, child: ChildHandle): ParkingPort {
@@ -33,7 +36,12 @@ export function createChildParking<E extends ParkingEntry>(deps: {
         const reply = await deps.session.interrupt({ sessionID, resume: false }, { signal: signal() })
         if (!reply || typeof reply.interrupted !== "boolean") throw new SessionBackendError("uncertain", "Parking interruption acknowledgement unknown", child.locator)
       },
-      async wait() { await deps.session.wait({ sessionID }, { signal: signal() }) },
+      async wait() {
+        const released = deps.released
+        if (released?.aborted) return
+        try { await deps.session.wait({ sessionID }, { signal: released ? AbortSignal.any([signal(), released]) : signal() }) }
+        catch (error) { if (!released?.aborted) throw error }
+      },
       join: () => deps.join(child),
     }
   }
