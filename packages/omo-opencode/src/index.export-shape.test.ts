@@ -23,7 +23,7 @@ describe("oh-my-openagent plugin export shape", () => {
     const registered: string[] = []
     const disposed: string[] = []
     const context = {
-      options: { "omo-senpi-lsp-tools-enabled": false, "omo-senpi-ultrawork-disabled": true, "omo-senpi-todo-fanout-reminder-disabled": true, "omo-senpi-question-gates-disabled": true, "omo-senpi-comment-checker-disabled": true, "omo-memory-enabled": false },
+      options: { "omo-senpi-lsp-tools-enabled": false, "omo-senpi-ultrawork-disabled": true, "omo-senpi-todo-fanout-reminder-disabled": true, "omo-senpi-question-gates-disabled": true, "omo-senpi-comment-checker-disabled": true, "omo-memory-enabled": false, "omo-native-eval-enabled": false },
       location: { directory: process.cwd() as Plugin.Context["location"]["directory"] },
       agent: {
         transform: async (callback) => {

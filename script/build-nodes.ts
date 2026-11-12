@@ -5,8 +5,13 @@ export type BuildNode = {
 	deps: string[]
 }
 
-const V2_EXTERNALS = ["@opencode/plugin", "@opencode/plugin/*", "effect", "effect/*"]
+// senpi-codemode resolves its worker entries and preludes next to its own modules: never bundle it.
+const V2_EXTERNALS = ["@opencode/plugin", "@opencode/plugin/*", "effect", "effect/*", "@code-yeongyu/senpi-codemode", "@code-yeongyu/senpi-codemode/*"]
 const V2_BUILD_ARGS = ["--splitting", "--chunk-naming", "opencode-[hash].js", ...V2_EXTERNALS.flatMap((name) => ["--external", name])]
+// The Native eval Worker entry is emitted as its own file next to each bundle's chunks (dist/ and
+// dist/v2/, because the root bundle also carries the V2 graph lazily). The client locates it by this
+// name relative to its chunk, so `[name].[ext]` keeps it flat: dist/codemode-worker.js, dist/v2/codemode-worker.js.
+const CODEMODE_WORKER_ENTRY = ["packages/omo-opencode/src/v2/tools/codemode-worker.ts", "--entry-naming", "[name].[ext]"]
 
 const OPENTUI_EXTERNALS = ["@opentui/core", "@opentui/keymap", "@opentui/solid"]
 
@@ -19,8 +24,8 @@ export const BUILD_NODES: BuildNode[] = [
 	{ id: "lsp-daemon", command: "bun", args: ["run", "build:lsp-daemon"], deps: [] },
 	{ id: "codex-plugin", command: "bun", args: ["run", "build:codex-plugin"], deps: ["git-bash-mcp", "lsp-tools-mcp", "lsp-daemon"] },
 	{ id: "senpi-plugin", command: "bun", args: ["run", "build:senpi-plugin:stage"], deps: ["ast-grep-mcp", "lsp-daemon", "codex-plugin"] },
-	{ id: "index", command: "bun", args: ["build", "packages/omo-opencode/src/index.ts", "--outdir", "dist", "--target", "bun", "--format", "esm", "--external", "zod", ...V2_BUILD_ARGS], deps: [] },
-	{ id: "v2-index", command: "bun", args: ["build", "packages/omo-opencode/src/v2/index.ts", "--outdir", "dist/v2", "--target", "bun", "--format", "esm", "--external", "zod", ...V2_BUILD_ARGS], deps: [] },
+	{ id: "index", command: "bun", args: ["build", "packages/omo-opencode/src/index.ts", ...CODEMODE_WORKER_ENTRY, "--outdir", "dist", "--target", "bun", "--format", "esm", "--external", "zod", ...V2_BUILD_ARGS], deps: [] },
+	{ id: "v2-index", command: "bun", args: ["build", "packages/omo-opencode/src/v2/index.ts", ...CODEMODE_WORKER_ENTRY, "--outdir", "dist/v2", "--target", "bun", "--format", "esm", "--external", "zod", ...V2_BUILD_ARGS], deps: [] },
 	{ id: "tui", command: "bun", args: ["build", "packages/omo-opencode/src/tui.ts", "--outdir", "dist", "--target", "bun", "--format", "esm", ...OPENTUI_EXTERNALS.flatMap((name) => ["--external", name])], deps: [] },
 	{ id: "shared-skills-assets", command: "bun", args: ["run", "build:shared-skills-assets"], deps: ["index"] },
 	{ id: "node-require-shim", command: "bun", args: ["run", "build:node-require-shim"], deps: ["index", "v2-index"] },

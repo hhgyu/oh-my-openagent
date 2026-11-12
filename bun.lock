@@ -5,6 +5,7 @@
     "": {
       "name": "oh-my-opencode",
       "dependencies": {
+        "@code-yeongyu/senpi-codemode": "2026.11.5-1",
         "@opentui/solid": "^0.5.11",
         "detect-libc": "^2.1.2",
         "zod": "^4.6.5",
