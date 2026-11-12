@@ -30,7 +30,7 @@ describe("registerMemoryComponent", () => {
     await first(); await second()
   })
 
-  test("#given a root session without memory storage #when a model request is built #then nothing is projected and no storage is created", async () => {
+  test("#given a root session without a memory repo #when a user turn is accepted #then only runtime bookkeeping is created and nothing is projected", async () => {
     // given
     const f = fixture()
     f.addSession("root")
@@ -40,7 +40,10 @@ describe("registerMemoryComponent", () => {
     const system = await f.context("root")
     // then
     expect(system).toEqual([])
-    expect(existsSync(f.env.OMO_MEMORY_HOME ?? "")).toBe(false)
+    const binding = f.sessions.get("root")?.metadata?.[MEMORY_BINDING_KEY] as { identity: string }
+    const identity = join(f.env.OMO_MEMORY_HOME ?? "", "agents", binding.identity)
+    expect(existsSync(join(identity, "runtime", "accepted-turns"))).toBe(true)
+    expect(existsSync(join(identity, "repo"))).toBe(false)
     await cleanup()
   })
 
@@ -73,6 +76,44 @@ describe("registerMemoryComponent", () => {
     const message = execFileSync("git", ["-C", repo, "log", "-1", "--format=%B"], { encoding: "utf8" })
     expect(message).toContain("Omo-Session: root")
     expect(message).toContain("Omo-Turn: 2")
+    await cleanup()
+  })
+
+  test("#given accepted turns before a generation handover #when the next generation saves #then provenance and the save threshold retain those turns", async () => {
+    // given
+    const f = fixture({ nudge: { enabled: true, every_user_turns: 3 } })
+    f.addSession("reload")
+    const first = await registerMemoryComponent(f.host, f.options())
+    await f.prompt("reload", "first")
+    await f.prompt("reload", "second")
+    expect(partsWith(await f.context("reload"), "omo.memory.save-nudge")).toHaveLength(0)
+    await first()
+    // when
+    const second = await registerMemoryComponent(f.host, f.options())
+    await f.prompt("reload", "third")
+    const nudged = await f.context("reload")
+    await f.runTool("memory", "reload", create("reference/reload.md", "Reload provenance", "saved after reload"))
+    const metadata = f.sessions.get("reload")?.metadata ?? {}
+    const repo = join(f.env.OMO_MEMORY_HOME ?? "", "agents", String((metadata[MEMORY_BINDING_KEY] as { identity: string }).identity), "repo")
+    // then
+    expect(partsWith(nudged, "omo.memory.save-nudge")).toHaveLength(1)
+    expect(execFileSync("git", ["-C", repo, "log", "-1", "--format=%B"], { encoding: "utf8" })).toContain("Omo-Turn: 3")
+    expect(partsWith(await f.context("reload"), "omo.memory.save-nudge")).toHaveLength(0)
+    await second()
+  })
+
+  test("#given a prompt hook invocation without acceptance #when a later accepted turn saves #then the rejected prompt is not counted", async () => {
+    const f = fixture()
+    f.addSession("accepted-only")
+    const cleanup = await registerMemoryComponent(f.host, f.options())
+    const prompt = f.hooks.get("session:prompt")
+    if (prompt === undefined) throw new Error("Missing prompt hook")
+    await Reflect.apply(prompt, undefined, [{ sessionID: "accepted-only", messageID: "not-enqueued", prompt: { text: "rejected" } }])
+    await f.prompt("accepted-only", "accepted")
+    await f.runTool("memory", "accepted-only", create("reference/accepted.md", "Accepted turn provenance", "one accepted turn"))
+    const binding = f.sessions.get("accepted-only")?.metadata?.[MEMORY_BINDING_KEY] as { identity: string }
+    const repo = join(f.env.OMO_MEMORY_HOME ?? "", "agents", binding.identity, "repo")
+    expect(execFileSync("git", ["-C", repo, "log", "-1", "--format=%B"], { encoding: "utf8" })).toContain("Omo-Turn: 1")
     await cleanup()
   })
 

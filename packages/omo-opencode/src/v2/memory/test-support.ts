@@ -74,7 +74,8 @@ export function createMemoryFixture(settings: Record<string, unknown> = {}): Mem
   const rpcs = new Map<string, RegisteredRpc>()
   const sync: SyncRecord = { loads: 0, acquired: [], released: [], disposed: 0 }
   const failures: { synthetic: ((input: SyntheticPost) => Error | undefined) | undefined } = { synthetic: undefined }
-  const subscribers = new Set<(event: { type: string; data: { sessionID: string } }) => Promise<void>>()
+  type FixtureEvent = { type: string; data: { sessionID: string; inboxID?: string; item?: { type: string } } }
+  const subscribers = new Set<(event: FixtureEvent) => Promise<void>>()
   let disposed = 0
   const registration = (key: string) => ({ dispose: async () => { disposed++; hooks.delete(key) } })
   const host = {
@@ -83,9 +84,9 @@ export function createMemoryFixture(settings: Record<string, unknown> = {}): Mem
     event: {
       subscribe({ signal }: { signal: AbortSignal }) {
         return (async function* () {
-          const queued: { event: { type: string; data: { sessionID: string } }; done: () => void }[] = []
+          const queued: { event: FixtureEvent; done: () => void }[] = []
           let wake: (() => void) | undefined
-          const send = (event: { type: string; data: { sessionID: string } }) => new Promise<void>(done => {
+          const send = (event: FixtureEvent) => new Promise<void>(done => {
             queued.push({ event, done })
             wake?.()
           })
@@ -172,7 +173,11 @@ export function createMemoryFixture(settings: Record<string, unknown> = {}): Mem
     addSession(id: string, extra: Partial<FakeSession> = {}) {
       sessions.set(id, { id, directory: project, ...extra })
     },
-    prompt: (sessionID: string, text: string) => call("session:prompt", { sessionID, messageID: "m1", prompt: { text }, delivery: "immediate" }),
+    async prompt(sessionID: string, text: string) {
+      const messageID = crypto.randomUUID()
+      await call("session:prompt", { sessionID, messageID, prompt: { text }, delivery: "immediate" })
+      await Promise.all([...subscribers].map(send => send({ type: "session.inbox.enqueued", data: { sessionID, inboxID: messageID, item: { type: "user" } } })))
+    },
     toolBefore: (sessionID: string, tool: string, input: unknown, id = "c1") => call("tool:execute.before", { tool, sessionID, agent: "build", messageID: "m1", id, input }),
     toolAfter: (sessionID: string, tool: string, input: unknown, output: string, id = "c1") =>
       call("tool:execute.after", { tool, sessionID, agent: "build", messageID: "m1", id, input, status: "completed", result: { content: output } }),
