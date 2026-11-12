@@ -160,6 +160,7 @@ describe("deleteTeam", () => {
     expect(manager.cancelled).toEqual([{ taskId, reason: `delete team ${created.runtimeState.teamRunId}` }])
     expect(result.cancelledTaskIds).toEqual([])
     expect(destruction.calls).toEqual([{ taskId, cause: "cancel" }])
+    expect(result).toMatchObject({ releasedTaskIds: [taskId] })
     expect(manager.get(taskId)?.status).toBe("completed")
     expect(existsSync(runtimeDir)).toBe(false)
   })
@@ -210,6 +211,7 @@ describe("deleteTeam", () => {
     // then
     expect(result.cancelledTaskIds).toEqual([])
     expect(destruction.calls).toEqual([{ taskId, cause: "cancel" }])
+    expect(result).toMatchObject({ releasedTaskIds: [taskId] })
   })
 
   test("#given a completed resident member revives between residency checks #when deleted #then destruction is skipped", async () => {
@@ -230,9 +232,9 @@ describe("deleteTeam", () => {
 
   test("#given a resident member cancellation is in flight #when deleted #then deletion does not race its destruction", async () => {
     // given
-    const cancellationStarted = Promise.withResolvers<void>()
-    const releaseCancellation = Promise.withResolvers<void>()
-    const duplicateDestructionStarted = Promise.withResolvers<void>()
+    const cancellationStarted: PromiseWithResolvers<void> = Promise.withResolvers()
+    const releaseCancellation: PromiseWithResolvers<void> = Promise.withResolvers()
+    const duplicateDestructionStarted: PromiseWithResolvers<void> = Promise.withResolvers()
     let destructionAttempts = 0
     const harness = await completedResidentTeam("running", async (taskId, destruction) => {
       destructionAttempts += 1

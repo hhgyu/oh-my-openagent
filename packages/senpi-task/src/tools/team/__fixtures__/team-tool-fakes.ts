@@ -19,25 +19,25 @@ export function createFakeTeamService(overrides: Partial<TeamToolsService> = {})
   }
   return {
     calls,
-    createTeam: (input) => record("createTeam", [input], overrides.createTeam && (() => overrides.createTeam!(input))),
-    deleteTeam: (input) => record("deleteTeam", [input], overrides.deleteTeam && (() => overrides.deleteTeam!(input))),
+    createTeam: (input) => record("createTeam", [input], overrides.createTeam?.bind(overrides, input)),
+    deleteTeam: (input) => record("deleteTeam", [input], overrides.deleteTeam?.bind(overrides, input)),
     sendMessage: (teamRunId, input) =>
-      record("sendMessage", [teamRunId, input], overrides.sendMessage && (() => overrides.sendMessage!(teamRunId, input))),
-    status: (teamRunId) => record("status", [teamRunId], overrides.status && (() => overrides.status!(teamRunId))),
-    listTeams: () => record("listTeams", [], overrides.listTeams && (() => overrides.listTeams!())),
+      record("sendMessage", [teamRunId, input], overrides.sendMessage?.bind(overrides, teamRunId, input)),
+    status: (teamRunId) => record("status", [teamRunId], overrides.status?.bind(overrides, teamRunId)),
+    listTeams: () => record("listTeams", [], overrides.listTeams?.bind(overrides)),
     createTask: (teamRunId, input) =>
-      record("createTask", [teamRunId, input], overrides.createTask && (() => overrides.createTask!(teamRunId, input))),
+      record("createTask", [teamRunId, input], overrides.createTask?.bind(overrides, teamRunId, input)),
     listTasks: (teamRunId, filter) =>
-      record("listTasks", [teamRunId, filter], overrides.listTasks && (() => overrides.listTasks!(teamRunId, filter))),
-    updateTask: (input) => record("updateTask", [input], overrides.updateTask && (() => overrides.updateTask!(input))),
+      record("listTasks", [teamRunId, filter], overrides.listTasks?.bind(overrides, teamRunId, filter)),
+    updateTask: (input) => record("updateTask", [input], overrides.updateTask?.bind(overrides, input)),
     getTask: (teamRunId, taskId) =>
-      record("getTask", [teamRunId, taskId], overrides.getTask && (() => overrides.getTask!(teamRunId, taskId))),
+      record("getTask", [teamRunId, taskId], overrides.getTask?.bind(overrides, teamRunId, taskId)),
     requestShutdown: (teamRunId, member) =>
-      record("requestShutdown", [teamRunId, member], overrides.requestShutdown && (() => overrides.requestShutdown!(teamRunId, member))),
+      record("requestShutdown", [teamRunId, member], overrides.requestShutdown?.bind(overrides, teamRunId, member)),
     approveShutdown: (teamRunId, member) =>
-      record("approveShutdown", [teamRunId, member], overrides.approveShutdown && (() => overrides.approveShutdown!(teamRunId, member))),
+      record("approveShutdown", [teamRunId, member], overrides.approveShutdown?.bind(overrides, teamRunId, member)),
     rejectShutdown: (teamRunId, member, reason) =>
-      record("rejectShutdown", [teamRunId, member, reason], overrides.rejectShutdown && (() => overrides.rejectShutdown!(teamRunId, member, reason))),
+      record("rejectShutdown", [teamRunId, member, reason], overrides.rejectShutdown?.bind(overrides, teamRunId, member, reason)),
   }
 }
 
@@ -97,7 +97,7 @@ export function fakeCreateResult(overrides: Partial<CreateTeamResult> = {}): Cre
 }
 
 export function fakeDeleteResult(overrides: Partial<DeleteTeamResult> = {}): DeleteTeamResult {
-  return { teamRunId: "00000000-0000-4000-8000-000000000000", cancelledTaskIds: ["st_a"], ...overrides }
+  return { teamRunId: "00000000-0000-4000-8000-000000000000", cancelledTaskIds: ["st_a"], releasedTaskIds: [], ...overrides }
 }
 
 export function fakeSummary(overrides: Partial<ActiveTeamSummary> = {}): ActiveTeamSummary {
