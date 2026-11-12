@@ -18,6 +18,7 @@ import type { NativeDagExecutionSources } from "./refusals"
 import { createNativeDagRuntime, type NativeDagRuntime } from "./runtime"
 import { nativeDagSkillAuthority } from "./skills"
 import { nativeDagCallPort } from "./task-port"
+import { createDagStatusRpc, type DagStatusRpcPort } from "./status-rpc"
 import { createNativeDagWakeOwner, type DagWakeOptions } from "./wake"
 import { runNativeWorkflow } from "./workflow-call"
 
@@ -54,11 +55,16 @@ export function assertRootWorkflowCaller(sessionID: string, call: Pick<NativeTas
 /** Publishes the Native `workflow` tool over the Native task component's SAME registry, kernel and
  * service. Every call runs inside that service's per-call operation, so node starts use THAT call's
  * host authority; no authority is stored for later admissions. */
-export function registerNativeDagComponent(host: NativeDagHost): NativeDagComponent {
+export function registerNativeDagComponent(host: NativeDagHost, rpc?: DagStatusRpcPort): NativeDagComponent {
   const lease = createNativeDagGenerationLease()
   const settings = OmoTaskSettingsSchema.parse(host.prepared.config.task ?? {}).dag
   const executionMode: NativeDagExecutionSources = { agents: host.prepared.agents, config: host.prepared.config }
   const runtimes = new Map<string, NativeDagRuntime>()
+  const status = createDagStatusRpc({ snapshots: sessionID => {
+    const runtime = runtimes.get(sessionID) ?? (discoverDagRoots(host.directory).includes(sessionID) ? runtimeFor(sessionID) : undefined)
+    return runtime?.manager.list(sessionID, { limit: 256 }).map(run => runtime.manager.snapshot(run.runId, sessionID)) ?? []
+  } })
+  const statusRegistration = rpc ? status.register(rpc) : Promise.resolve(undefined)
   // Read-only views of each root's persisted task records: the wake reads child status with no call.
   const taskRecords = new Map<string, ReturnType<typeof createTaskRecordStore>>()
   function taskRecordsFor(root: string) {
@@ -80,7 +86,7 @@ export function registerNativeDagComponent(host: NativeDagHost): NativeDagCompon
     const existing = runtimes.get(sessionID)
     if (existing) return existing
     const created = createNativeDagRuntime({ directory: host.directory, parentSessionID: sessionID, executionMode, lease, ...(settings && { settings }),
-      onDriveEnded: runId => wake.arm(sessionID, runId) })
+      onDriveEnded: runId => wake.arm(sessionID, runId), onChanged: () => status.refreshSession(sessionID) })
     runtimes.set(sessionID, created)
     return created
   }
@@ -125,13 +131,19 @@ export function registerNativeDagComponent(host: NativeDagHost): NativeDagCompon
     if (failures.length > 0) throw new AggregateError(failures, "Native workflow shutdown pause incomplete")
   }
   return Object.freeze({
-    ready: bridge.ready,
+    ready: Promise.all([bridge.ready, statusRegistration]).then(() => undefined),
     async close() {
-      try { await bridge.close() } finally {
-        try { await startup; await pauseRuns() } finally {
-          try { await wake.close() } finally {
-            for (const store of taskRecords.values()) store.close()
-            taskRecords.clear(); lease.dispose(); runtimes.clear()
+      try {
+        status.close()
+        await status.settled()
+        await (await statusRegistration)?.dispose()
+      } finally {
+        try { await bridge.close() } finally {
+          try { await startup; await pauseRuns() } finally {
+            try { await wake.close() } finally {
+              for (const store of taskRecords.values()) store.close()
+              taskRecords.clear(); lease.dispose(); runtimes.clear()
+            }
           }
         }
       }

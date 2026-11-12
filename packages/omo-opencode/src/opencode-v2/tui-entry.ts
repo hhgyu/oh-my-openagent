@@ -61,7 +61,14 @@ export const opencodeV2Tui = Plugin.define({
   setup: (context) => {
     showOpenCodeV2Notice(context)
     // A context without the dialog surface (the notice-only test double) shows no command output.
-    if ("dialog" in context.ui) return showMemoryCommandOutput(context)
+    if ("dialog" in context.ui) {
+      const closeMemory = showMemoryCommandOutput(context)
+      if (!("slot" in context.ui)) return closeMemory
+      return import("../v2/tui/dag-panel").then(({ registerDagStatusPanel }) => {
+        const closeDag = registerDagStatusPanel(context)
+        return () => { try { closeDag() } finally { closeMemory() } }
+      }).catch((error: unknown) => { closeMemory(); throw error })
+    }
     return undefined
   },
 })

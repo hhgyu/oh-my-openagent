@@ -19,6 +19,7 @@ export interface NativeDagRuntimeOptions {
   readonly lease: DagLeasePort
   /** A call stopped driving `runId` (it returned, detached or was interrupted): arms its wake. */
   readonly onDriveEnded?: (runId: DagRunId) => void
+  readonly onChanged?: () => void
 }
 
 /** One call's authority over the runtime: its operation port, its abort signal, its spawn policy
@@ -57,10 +58,14 @@ export interface NativeDagRuntime {
 export function createNativeDagRuntime(options: NativeDagRuntimeOptions): NativeDagRuntime {
   // One fenced store for the manager, every drive and every control: the engine keys its commit
   // notifications on the store object, and no writer here overwrites another holder's terminal run.
-  const store = fenceForeignTerminalRuns(createDagFileStore({
+  const fenced = fenceForeignTerminalRuns(createDagFileStore({
     project_dir: options.directory,
     task: { state_dir: nativeTaskStateDir(options.directory, options.parentSessionID), ...(options.settings && { dag: options.settings }) },
   }), options.lease)
+  const store: DagFileStore = { ...fenced, writeCheckpoint(runId, checkpoint) {
+    fenced.writeCheckpoint(runId, checkpoint)
+    options.onChanged?.()
+  } }
   // A manager outside a call never loads a skill; without a materializer an `amend` would keep each
   // changed node's PREVIOUS effective prompt and the re-run would dispatch the stale prompt.
   const managerWith = (materializeSkills: DagMaterializeSkills) => createDagManager({ store, materializeSkills, ...(options.settings && { settings: options.settings }) })
