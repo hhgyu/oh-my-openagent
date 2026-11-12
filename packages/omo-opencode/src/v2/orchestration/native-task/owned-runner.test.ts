@@ -215,7 +215,7 @@ test("G3 member-scoped tools start when the binding covers member live bindings 
       try {
         await runtime.wait(started.task_id)
         expect(state.calls).toContain("create")
-        expect(origins).toEqual([{ team: MEMBER_TEAM }])
+        expect(origins).toEqual([{ team: MEMBER_TEAM, appendTaskEvent: expect.any(Function) }])
         expect(Object.keys((state.contexts[0] as { tools: Record<string, unknown> }).tools).sort()).toEqual(["execute", "omo_team_send", "opaque-read"])
       } finally { await runtime.end(started.task_id) }
     }, { childToolGuard: g.owner, authorizePlannedStart: async (spec, plan) => approved(spec, plan),

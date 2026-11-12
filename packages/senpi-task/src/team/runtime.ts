@@ -210,7 +210,7 @@ async function performDeleteTeam(teamRunId: string, deps: DeleteTeamDeps): Promi
   const runtimeDir = resolveTeamRuntimeDirs(deps.stateDir, teamRunId).runtimeDir
 
   const runtimeState = await loadRuntimeStateOrNull(teamRunId, config)
-  if (runtimeState === null) return { teamRunId, cancelledTaskIds: [] }
+  if (runtimeState === null) return { teamRunId, cancelledTaskIds: [], releasedTaskIds: [] }
 
   if (runtimeState.status === "active" || runtimeState.status === "shutdown_requested") {
     await transitionRuntimeState(teamRunId, (state) => ({ ...state, status: "deleting" }), config)
@@ -222,18 +222,19 @@ async function performDeleteTeam(teamRunId: string, deps: DeleteTeamDeps): Promi
     )
   }
 
-  const cancelledTaskIds = await cancelMemberTasks(teamRunId, runtimeDir, deps)
+  const cleanup = await cancelMemberTasks(teamRunId, runtimeDir, deps)
 
   if (runtimeState.status !== "deleted") {
     await transitionRuntimeState(teamRunId, (state) => (state.status === "deleted" ? state : { ...state, status: "deleted" }), config)
   }
   await rm(runtimeDir, { recursive: true, force: true })
-  return { teamRunId, cancelledTaskIds }
+  return { teamRunId, ...cleanup }
 }
 
-async function cancelMemberTasks(teamRunId: string, runtimeDir: string, deps: DeleteTeamDeps): Promise<string[]> {
+async function cancelMemberTasks(teamRunId: string, runtimeDir: string, deps: DeleteTeamDeps): Promise<Pick<DeleteTeamResult, "cancelledTaskIds" | "releasedTaskIds">> {
   const map = await readMemberTaskMap(runtimeDir)
   const cancelled: string[] = []
+  const released: string[] = []
   for (const [memberName, taskId] of Object.entries(map)) {
     if (deps.manager.get(taskId)?.name !== memberTaskName(teamRunId, memberName)) continue
     const outcome = await deps.manager.cancelTask(taskId, `delete team ${teamRunId}`)
@@ -244,6 +245,7 @@ async function cancelMemberTasks(teamRunId: string, runtimeDir: string, deps: De
     // Cancel parked a finished resident member (omo#9785); team deletion still ends it for good.
     if (outcome.kind === "released") {
       await deps.destruction.destroyResidentTask(taskId, "cancel")
+      released.push(taskId)
       continue
     }
     // Terminal cancellation is an intentional noop (completed residents stay revivable), but team
@@ -262,10 +264,11 @@ async function cancelMemberTasks(teamRunId: string, runtimeDir: string, deps: De
         && current.residency_state === "resident"
       ) {
         await deps.destruction.destroyResidentTask(taskId, "cancel")
+        released.push(taskId)
       }
     }
   }
-  return cancelled
+  return { cancelledTaskIds: cancelled, releasedTaskIds: released }
 }
 
 async function loadRuntimeStateOrNull(teamRunId: string, config: TeamCoreConfig): Promise<RuntimeState | null> {
