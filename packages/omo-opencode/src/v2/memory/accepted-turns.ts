@@ -21,6 +21,14 @@ export function createAcceptedTurns(binder: MemoryBinder, logger: MemoryLogger) 
   const chains = new Map<string, Promise<void>>()
   const scans = new Map<string, { head: string; saved: number }>()
 
+  function serialized<T>(sessionID: string, run: () => Promise<T>): Promise<T> {
+    const result = (chains.get(sessionID) ?? Promise.resolve()).then(run)
+    const pending = result.then(() => undefined, () => undefined)
+    chains.set(sessionID, pending)
+    void pending.then(() => { if (chains.get(sessionID) === pending) chains.delete(sessionID) })
+    return result
+  }
+
   function pathFor(bound: BoundMemorySession): string {
     const key = createHash("sha256").update(bound.sessionID).digest("hex")
     return join(bound.paths.runtime, "accepted-turns", `${key}.json`)
@@ -40,7 +48,6 @@ export function createAcceptedTurns(binder: MemoryBinder, logger: MemoryLogger) 
   }
 
   async function turns(sessionID: string): Promise<number> {
-    await chains.get(sessionID)
     if (!states.has(sessionID)) {
       const bound = await binder.resolve(sessionID)
       if (bound !== undefined) states.set(sessionID, await load(bound))
@@ -49,10 +56,10 @@ export function createAcceptedTurns(binder: MemoryBinder, logger: MemoryLogger) 
   }
 
   const counter = {
-    turns,
+    turns: (sessionID: string) => serialized(sessionID, () => turns(sessionID)),
     hasActivity: (sessionID: string) => (states.get(sessionID)?.turns ?? 0) > 0,
     async onPrompt(sessionID: string, messageID: string): Promise<void> {
-      const next = (chains.get(sessionID) ?? Promise.resolve()).then(async () => {
+      await serialized(sessionID, async () => {
         const bound = await binder.resolve(sessionID)
         if (bound === undefined) return
         const file = pathFor(bound)
@@ -72,55 +79,63 @@ export function createAcceptedTurns(binder: MemoryBinder, logger: MemoryLogger) 
       }).catch((error: unknown) => {
         logger.warn("memory accepted-turn bookkeeping skipped", { sessionID, error: describeError(error) })
       })
-      chains.set(sessionID, next)
-      await next
     },
-    async onContext(context: Pick<SessionContext, "sessionID" | "system">): Promise<void> {
-      if (context.system.some(part => part.metadata?.["omo.memory.save-nudge"] === true)) return
-      const bound = await binder.resolve(context.sessionID)
-      if (bound === undefined) return
-      const settings = { ...bound.settings.nudge, ...bound.settings.agents[bound.identity]?.nudge }
-      if (!settings.enabled) return
-      try {
-        const count = await turns(context.sessionID)
-        if (count < settings.every_user_turns) return
-        const repo = new GitMemoryRepo({ dir: bound.paths.repo, agentId: bound.identity })
-        const head = await repo.head()
-        let saved = 0
-        if (head !== null) {
-          const previous = scans.get(context.sessionID)
-          saved = previous?.saved ?? 0
-          if (previous?.head !== head) {
-            const commits = await repo.log({ grep: ["Omo-Writer: memory-tool", `Omo-Session: ${context.sessionID}`], limit: 20, timeoutMs: 5_000,
-              ...(previous === undefined ? {} : { range: `${previous.head}..${head}` }) })
-            const latest = commits.find(commit => commit.trailers["Omo-Writer"] === "memory-tool" &&
-              commit.trailers["Omo-Session"] === context.sessionID && /^\d+$/.test(commit.trailers["Omo-Turn"] ?? ""))
-            const candidate = Number(latest?.trailers["Omo-Turn"])
-            if (Number.isSafeInteger(candidate) && candidate >= 0) saved = candidate
-            scans.set(context.sessionID, { head, saved })
+    onContext(context: Pick<SessionContext, "sessionID" | "system">): Promise<void> {
+      return serialized(context.sessionID, async () => {
+        if (context.system.some(part => part.metadata?.["omo.memory.save-nudge"] === true)) return
+        const bound = await binder.resolve(context.sessionID)
+        if (bound === undefined) return
+        const settings = { ...bound.settings.nudge, ...bound.settings.agents[bound.identity]?.nudge }
+        if (!settings.enabled) return
+        try {
+          const count = await turns(context.sessionID)
+          if (count < settings.every_user_turns) return
+          const repo = new GitMemoryRepo({ dir: bound.paths.repo, agentId: bound.identity })
+          const head = await repo.head()
+          let saved = 0
+          if (head !== null) {
+            const previous = scans.get(context.sessionID)
+            saved = previous?.saved ?? 0
+            if (previous?.head !== head) {
+              const commits = await repo.log({ grep: ["Omo-Writer: memory-tool", `Omo-Session: ${context.sessionID}`], limit: 20, timeoutMs: 5_000,
+                ...(previous === undefined ? {} : { range: `${previous.head}..${head}` }) })
+              const latest = commits.find(commit => commit.trailers["Omo-Writer"] === "memory-tool" &&
+                commit.trailers["Omo-Session"] === context.sessionID && /^\d+$/.test(commit.trailers["Omo-Turn"] ?? ""))
+              const candidate = Number(latest?.trailers["Omo-Turn"])
+              if (Number.isSafeInteger(candidate) && candidate >= 0) saved = candidate
+              scans.set(context.sessionID, { head, saved })
+            }
           }
+          const pending = count - saved
+          if (pending >= settings.every_user_turns) context.system.push({ type: "text",
+            text: `${pending} accepted user turns since your last memory save. Save durable facts now, or decide nothing qualifies.`,
+            metadata: { "omo.memory.save-nudge": true, turns: pending } })
+        } catch (error) {
+          logger.warn("memory save reminder skipped", { sessionID: context.sessionID, error: describeError(error) })
         }
-        const pending = count - saved
-        if (pending >= settings.every_user_turns) context.system.push({ type: "text",
-          text: `${pending} accepted user turns since your last memory save. Save durable facts now, or decide nothing qualifies.`,
-          metadata: { "omo.memory.save-nudge": true, turns: pending } })
-      } catch (error) {
-        logger.warn("memory save reminder skipped", { sessionID: context.sessionID, error: describeError(error) })
-      }
+      })
     },
-    async settled(): Promise<void> { await Promise.all(chains.values()) },
+    onDeleted(sessionID: string): Promise<void> {
+      return serialized(sessionID, async () => { states.delete(sessionID); scans.delete(sessionID) })
+    },
+    async settled(): Promise<void> { while (chains.size > 0) await Promise.all(chains.values()) },
   }
   return {
     turns: counter.turns,
     hasActivity: counter.hasActivity,
     onContext: counter.onContext,
     settled: counter.settled,
-    register(events: Context["event"]): Registration {
+    register(events: Context["event"], forget: (sessionID: string) => void): Registration {
       const stop = new AbortController()
       const work = (async () => {
         try {
-          for await (const event of events.subscribe({ types: ["session.inbox.enqueued"], signal: stop.signal })) {
+          for await (const event of events.subscribe({ types: ["session.inbox.enqueued", "session.deleted"], signal: stop.signal })) {
             if (stop.signal.aborted) break
+            if (event.type === "session.deleted") {
+              await counter.onDeleted(event.data.sessionID)
+              forget(event.data.sessionID)
+              continue
+            }
             if (event.type !== "session.inbox.enqueued" || event.data.item.type !== "user") continue
             await counter.onPrompt(event.data.sessionID, event.data.inboxID)
           }

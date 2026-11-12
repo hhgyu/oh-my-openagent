@@ -56,6 +56,7 @@ export interface MemoryFacts {
   onPrompt(sessionID: string): void
   onIdle(sessionID: string): Promise<void>
   onBound(bound: BoundMemorySession): Promise<void>
+  onDeleted(sessionID: string): void
   /** `/facts retry`: one launch attempt for the session's identity. */
   retry(sessionID: string): Promise<void>
   settled(): Promise<void>
@@ -118,14 +119,15 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
 
   async function settle(sessionID: string): Promise<void> {
     const bound = await deps.binder.resolve(sessionID)
-    if (bound === undefined || closed || !factsSettings(bound).enabled) return
+    if (bound === undefined || closed || sessions.get(sessionID) !== bound || !factsSettings(bound).enabled) return
     const state = stateFor(bound)
     state.lastSession = sessionID
     const model = await latestSessionModel(deps.session, sessionID)
+    if (closed || sessions.get(sessionID) !== bound) return
     if (model !== undefined) state.lastSessionModel = model
     const leftovers = state.settled.has(sessionID) ? [] : await state.runner.queue.listPending().catch(() => [])
     await enqueue(bound, state)
-    if (closed) return
+    if (closed || sessions.get(sessionID) !== bound) return
     state.settled.add(sessionID)
     state.settles += 1
     if (leftovers.length > 0 || state.settles >= factsSettings(bound).debounce) {
@@ -158,6 +160,11 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
       })()
       track(run, "bind reconcile")
       await run.catch(() => undefined)
+    },
+    onDeleted(sessionID) {
+      sessions.delete(sessionID)
+      userInput.delete(sessionID)
+      for (const state of states.values()) state.settled.delete(sessionID)
     },
     async retry(sessionID) {
       const bound = await deps.binder.resolve(sessionID)

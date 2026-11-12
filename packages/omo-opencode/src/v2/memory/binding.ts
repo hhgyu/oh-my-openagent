@@ -78,7 +78,6 @@ export function createMemoryBinder(deps: MemoryBinderDeps): MemoryBinder {
       await deps.metadata.write(sessionID, MEMORY_BINDING_KEY, { ...binding })
     }
     const bound: BoundMemorySession = { sessionID, identity: adopted.id, paths: adopted.paths, settings, directory, metadata }
-    deps.onBound?.(bound)
     return bound
   }
 
@@ -86,8 +85,12 @@ export function createMemoryBinder(deps: MemoryBinderDeps): MemoryBinder {
     resolve(sessionID) {
       let pending = bound.get(sessionID)
       if (pending === undefined) {
-        pending = bind(sessionID).catch((error: unknown) => {
-          bound.delete(sessionID)
+        pending = bind(sessionID).then(value => {
+          if (bound.get(sessionID) !== pending) return undefined
+          if (value !== undefined) deps.onBound?.(value)
+          return value
+        }).catch((error: unknown) => {
+          if (bound.get(sessionID) === pending) bound.delete(sessionID)
           deps.logger.warn("memory session bind skipped", { sessionID, error: describeError(error) })
           return undefined
         })
@@ -130,4 +133,3 @@ function hashRepoPath(repoPath: string): string {
 export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
-

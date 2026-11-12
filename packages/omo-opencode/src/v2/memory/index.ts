@@ -238,7 +238,10 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       const stopShutdownWatch = watchLocationShutdown(context, cleanup)
       registrations.push({ dispose: async () => { stopShutdownWatch() } })
     }
-    if (context.event !== undefined) registrations.push(userTurns.register(context.event))
+    if (context.event !== undefined) registrations.push(userTurns.register(context.event, sessionID => {
+      facts?.onDeleted(sessionID)
+      binder.forget(sessionID)
+    }))
     registrations.push(observeAcceptedCompactions(context.event, async sessionID => {
       if (closed || isOwnedSession(sessionID)) return
       triggers?.onCompaction(sessionID)
