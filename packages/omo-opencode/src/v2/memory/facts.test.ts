@@ -215,6 +215,36 @@ describe("facts reload recovery", () => {
     } finally { read.mockRestore() }
   })
 
+  test("#given a prior binding is being resumed #when deletion overtakes its host read #then the late binding cannot restore facts shutdown bookkeeping", async () => {
+    const f = fixture({ facts: { debounce_settles: 10 } })
+    f.addSession("deleted")
+    const first = await register(f)
+    await f.prompt("deleted", "persist the binding")
+    await first.cleanup()
+    const next = await register(f)
+    const entered = Promise.withResolvers<undefined>()
+    const held = Promise.withResolvers<undefined>()
+    const original = f.host.session.get.bind(f.host.session)
+    const get = spyOn(f.host.session, "get").mockImplementation(async input => {
+      const captured = await original(input)
+      entered.resolve(undefined)
+      await held.promise
+      return captured
+    })
+    const read = spyOn(f.host.session, "context")
+    try {
+      const pending = f.context("deleted")
+      await entered.promise
+      await f.emitEvent("session.deleted", "deleted")
+      f.sessions.delete("deleted")
+      held.resolve(undefined)
+      await pending
+      read.mockClear()
+      await next.cleanup()
+      expect(read.mock.calls.map(([input]) => input.sessionID)).not.toContain("deleted")
+    } finally { held.resolve(undefined); get.mockRestore(); read.mockRestore() }
+  })
+
   test("#given a settle awaiting its session model #when the session is deleted #then the late settle cannot launch an extractor", async () => {
     const f = fixture()
     f.addSession("deleted", { messages: conversation("queued fact", "Noted.") })
