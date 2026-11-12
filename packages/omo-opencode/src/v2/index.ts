@@ -104,6 +104,12 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
       })
       cleanups.push(await runtime.register(context))
     }
+    if (context.options?.["omo-native-eval-enabled"] !== false) {
+      // Native `eval`, on by default like Native. Registers the tool only; senpi-codemode itself
+      // is imported on the first call.
+      const { registerNativeEval } = await import("./tools/native-eval")
+      cleanups.push(await registerNativeEval(context))
+    }
     if (owners.nativeTask) {
       const { registerNativeTaskComponent } = await import("./orchestration/native-task/component")
       // The lead team tools share the Native task component's registry, kernel and service.

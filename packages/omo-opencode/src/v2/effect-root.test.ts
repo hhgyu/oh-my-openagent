@@ -54,7 +54,7 @@ function fixture(options: { version?: string; failRpc?: boolean; mutation?: bool
   const host = {
     app: { version: options.version ?? "2.2.6" }, location: { directory },
     // This fixture does not model the tool/permission domains the Native task component acquires.
-    options: { "omo-senpi-lsp-tools-enabled": options.mutation === true, "omo-senpi-lsp-post-edit-diagnostics-enabled": false, "omo-native-task-enabled": false, "omo-senpi-ultrawork-disabled": true, "omo-senpi-todo-fanout-reminder-disabled": true, "omo-senpi-question-gates-disabled": true, "omo-senpi-comment-checker-disabled": true, "omo-memory-enabled": false },
+    options: { "omo-senpi-lsp-tools-enabled": options.mutation === true, "omo-senpi-lsp-post-edit-diagnostics-enabled": false, "omo-native-task-enabled": false, "omo-senpi-ultrawork-disabled": true, "omo-senpi-todo-fanout-reminder-disabled": true, "omo-senpi-question-gates-disabled": true, "omo-senpi-comment-checker-disabled": true, "omo-memory-enabled": false, "omo-native-eval-enabled": false },
     agent: { get: unused, list: unused, reload: unused, transform: () => registration("agents") },
     session: new Proxy(unused, { get: (_target, key) => key === "get" ? get : unused }),
     tool: new Proxy(unused, { get: (_target, key) => key === "transform"

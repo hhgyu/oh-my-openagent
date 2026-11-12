@@ -2270,6 +2270,9 @@
         "test-support/held-test-root.d.mts",
       ],
       "ignoreDependencies": [
+        // The Native eval runtime: imported at run time from the installed package through a computed file URL
+        // inside the codemode worker (packages/omo-opencode/src/v2/tools/codemode-loader.ts), never statically.
+        "@code-yeongyu/senpi-codemode",
         // pre-existing at origin dev 4686e425b5: a declared devDependency nothing imports
         "@clack/prompts",
         // pre-existing at origin dev 4686e425b5: a declared devDependency nothing imports
@@ -3565,6 +3568,9 @@
         "src/v2/memory/test-support.ts",
         "src/v2/memory/kibitzer/test-support.ts",
         "src/v2/orchestration/native-dag/test-support.ts",
+        "src/v2/tools/test-support.ts",
+        // The Native eval Worker entry: started by file name (`new Worker(...)` in codemode-worker-client.ts), never imported.
+        "src/v2/tools/codemode-worker.ts",
         "test/fixtures/config-migration/opencode-side-effect-import.ts",
         // Test fixtures run as their own process by path (`bun run <dir>/fixtures/<name>.ts`), so nothing imports them.
         "src/hooks/prometheus-md-only/fixtures/*.ts",
