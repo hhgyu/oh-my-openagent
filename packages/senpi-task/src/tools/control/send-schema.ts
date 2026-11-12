@@ -5,13 +5,13 @@ const StructuredMessage = Type.Union([
   Type.Object({
     type: Type.Literal("shutdown_request"),
     reason: Type.Optional(Type.String({ description: "Optional shutdown request reason." })),
-  }),
+  }, { additionalProperties: false }),
   Type.Object({
     type: Type.Literal("shutdown_response"),
     request_id: Type.Optional(Type.String({ description: "Accepted for protocol shape; ignored by senpi-task." })),
     approve: Type.Boolean({ description: "Approve or reject the shutdown request." }),
     reason: Type.Optional(Type.String({ description: "Required when approve is false." })),
-  }),
+  }, { additionalProperties: false }),
 ])
 
 const Recipient = Type.String({ description: "Child task id/name or team member name." })
@@ -31,13 +31,13 @@ export const TaskSendParams = Type.Object({
       description: "Re-dispatch a flagged 'resumed, waiting for input' task onto a fresh live session, replaying its persisted prompt. Off by default; message is forbidden with it.",
     }),
   ),
-})
+}, { additionalProperties: false })
 
 export const MemberScopedTaskSendParams = Type.Object({
   to: Recipient,
   message: PlainMessage,
   summary: Summary,
-})
+}, { additionalProperties: false })
 
 export type TaskSendInput = Static<typeof TaskSendParams>
 export type MemberScopedTaskSendInput = Static<typeof MemberScopedTaskSendParams>

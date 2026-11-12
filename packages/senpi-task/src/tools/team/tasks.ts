@@ -1,7 +1,8 @@
-import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
+import type { ToolDefinition } from "@code-yeongyu/senpi"
 import type { Task } from "@oh-my-opencode/team-core/types"
 import { Type } from "typebox"
 import type { Static } from "typebox"
+import { createToolArgumentValidator } from "../argument-validation"
 
 import {
   TeamTaskAlreadyClaimedError,
@@ -25,25 +26,25 @@ export const TeamTaskCreateParams = Type.Object({
   subject: Type.String({ description: "Short task subject." }),
   description: Type.String({ description: "Full task description." }),
   blocked_by: Type.Optional(Type.Array(Type.String(), { description: "Task ids that must complete first." })),
-})
+}, { additionalProperties: false })
 
 export const TeamTaskListParams = Type.Object({
   team_run_id: Type.String({ description: "Team run id." }),
   status: Type.Optional(TaskStatusSchema),
   owner: Type.Optional(Type.String({ description: "Filter by owning member." })),
-})
+}, { additionalProperties: false })
 
 export const TeamTaskGetParams = Type.Object({
   team_run_id: Type.String({ description: "Team run id (returned by team_create)." }),
   task_id: Type.String({ description: "Team tasklist task id (not a child st_... id)." }),
-})
+}, { additionalProperties: false })
 
 export const TeamTaskUpdateParams = Type.Object({
   team_run_id: Type.String({ description: "Team run id (returned by team_create)." }),
   task_id: Type.String({ description: "Team tasklist task id (not a child st_... id)." }),
   status: TaskStatusSchema,
   owner: Type.Optional(Type.String({ description: "Owning member (defaults to the lead)." })),
-})
+}, { additionalProperties: false })
 
 export type TeamTaskCreateInput = Static<typeof TeamTaskCreateParams>
 export type TeamTaskListInput = Static<typeof TeamTaskListParams>
@@ -149,6 +150,7 @@ export function createTeamTaskCreateTool(deps: TeamToolDeps): ToolDefinition<typ
     label: "Task Create",
     description: "Adds a pending entry to a running team's shared tasklist so members can claim it, for when the user wants to break work into claimable items without spawning an agent yet. Spawning child work itself goes through task.",
     parameters: TeamTaskCreateParams,
+    prepareArguments: createToolArgumentValidator(TeamTaskCreateParams),
     execute: (_toolCallId: string, params: TeamTaskCreateInput) => runTeamTaskCreate(deps.service, params),
     renderCall: (args, theme) => renderTeamTaskCall("create", args, theme),
     renderResult: (result, options, theme) => renderTeamTaskResult("create", result, options, theme),
@@ -162,6 +164,7 @@ export function createTeamTaskListTool(deps: TeamToolDeps): ToolDefinition<typeo
     label: "Task List",
     description: "Lists the entries on a running team's shared tasklist, optionally filtered by status or owner, for when the user wants to see what work items exist and who holds them. Child-agent run state is read through task_output, not here.",
     parameters: TeamTaskListParams,
+    prepareArguments: createToolArgumentValidator(TeamTaskListParams),
     execute: (_toolCallId: string, params: TeamTaskListInput) => runTeamTaskList(deps.service, params),
     renderCall: (args, theme) => renderTeamTaskCall("list", args, theme),
     renderResult: (result, options, theme) => renderTeamTaskResult("list", result, options, theme),
@@ -175,6 +178,7 @@ export function createTeamTaskGetTool(deps: TeamToolDeps): ToolDefinition<typeof
     label: "Task Get",
     description: "Reads one entry from a running team's shared tasklist by its tasklist id, for when the user needs a single item's details or status. A child agent's output is read through task_output with its st_... id, not here.",
     parameters: TeamTaskGetParams,
+    prepareArguments: createToolArgumentValidator(TeamTaskGetParams),
     execute: (_toolCallId: string, params: TeamTaskGetInput) => runTeamTaskGet(deps.service, params),
     renderCall: (args, theme) => renderTeamTaskCall("get", args, theme),
     renderResult: (result, options, theme) => renderTeamTaskResult("get", result, options, theme),
@@ -188,6 +192,7 @@ export function createTeamTaskUpdateTool(deps: TeamToolDeps): ToolDefinition<typ
     label: "Task Update",
     description: "Moves one entry on a running team's shared tasklist between pending, claimed, in_progress, completed, and deleted, for when the user or a member marks work started, finished, or abandoned. The transition rules and claim owner are enforced by the service.",
     parameters: TeamTaskUpdateParams,
+    prepareArguments: createToolArgumentValidator(TeamTaskUpdateParams),
     execute: (_toolCallId: string, params: TeamTaskUpdateInput) => runTeamTaskUpdate(deps.service, params),
     renderCall: (args, theme) => renderTeamTaskCall("update", args, theme),
     renderResult: (result, options, theme) => renderTeamTaskResult("update", result, options, theme),

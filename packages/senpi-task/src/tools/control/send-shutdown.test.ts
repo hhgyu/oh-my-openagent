@@ -91,14 +91,12 @@ describe("runTaskSend shutdown routing", () => {
       { service, from: TEAM_LEAD_SENTINEL },
     )
 
-    expect(missing.details).toEqual({
-      kind: "invalid_arguments",
-      reason: "reason is required when rejecting a shutdown",
-    })
-    expect(empty.details).toEqual({
-      kind: "invalid_arguments",
-      reason: "reason is required when rejecting a shutdown",
-    })
+    for (const result of [missing, empty]) {
+      expect(result.details).toMatchObject({ kind: "invalid_arguments", diagnostic: {
+        code: "invalid_arguments", fields: ["message.reason"], expected_fields: ["to", "message", "team_run_id", "summary", "all_scope", "redispatch"],
+      } })
+      expect(result.isError).toBe(true)
+    }
     expect(service.calls).toEqual([])
   })
 

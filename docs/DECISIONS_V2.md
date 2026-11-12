@@ -56,6 +56,12 @@ The V1 source continues to live in `packages/omo-opencode/src/` and is bundled t
 
 ## Decision log
 
+### Task tool field diagnostics (2026-11-12)
+
+Native task and team inputs use the shared senpi-task validator. Invalid input reports `invalid_arguments`, offending `fields`, `expected_fields`, and schema issue paths without copying argument values. Senpi validates in `prepareArguments` before host coercion. V2 validates in the raw `execute.before` hook and in its public and kernel decoders.
+
+The V2 public transport schema preserves additional properties recursively. OpenCode 2.2.6 Code Mode otherwise discards unknown fields before plugin hooks, preventing a diagnostic from naming them. This transport allowance is not execution permission: the canonical schema rejects unknown fields before any Native operation. The public runtime filter still enforces every canonical constraint. Shared task argument normalization remains intentional and runs before validation.
+
 ### D-001: additive dual host
 
 Decision: keep V1 untouched and add a separate V2 host.

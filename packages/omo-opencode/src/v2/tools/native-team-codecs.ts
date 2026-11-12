@@ -1,4 +1,4 @@
-import { Compile } from "typebox/compile"
+import { createToolArgumentValidator } from "@oh-my-opencode/senpi-task/task-operations"
 import {
   TeamCreateParams, TeamDeleteParams, TeamTaskCreateParams, TeamTaskGetParams, TeamTaskListParams, TeamTaskUpdateParams,
 } from "@oh-my-opencode/senpi-task/team-operations"
@@ -23,10 +23,6 @@ export function isNativeTeamToolName(name: string): name is NativeTeamToolName {
 export function issueNativeTeamCodec(tool: ListedTool, name: NativeTeamToolName): ToolCodecAssociation {
   const schema = nativeTeamInputSchemas[name]
   if (!schema || (tool.input as unknown) !== schema) throw Error("Native team input schema does not match tool definition")
-  const compiled = Compile(schema)
-  const input = issueToolValueCodec(tool, "input", { schema, decodeUnknown: value => {
-    if (!compiled.Check(value)) throw Error("Invalid Native team tool input")
-    return value
-  } })
+  const input = issueToolValueCodec(tool, "input", { schema, decodeUnknown: createToolArgumentValidator(schema) })
   return Object.freeze({ tool, input })
 }

@@ -7,6 +7,7 @@ import type { TaskStatus } from "../../state"
 import type { ColdRevivalFailureCode } from "../../lifecycle/port"
 import type { SenpiShutdownErrorCode } from "../../team"
 import type { TeamSendDetails } from "../team/messaging"
+import type { ToolArgumentDiagnostic } from "../argument-validation"
 
 // The minimal read of the harness context the control tools need to name the calling session. The
 // W1-V scope guard is fail-open without a caller id, so the tool layer resolves and passes it on
@@ -46,7 +47,7 @@ export type SendResultDetails =
   | { readonly kind: "one_shot_agent"; readonly task_id: string; readonly agent: string; readonly message: string }
   | { readonly kind: "scope_denied"; readonly task_id: string; readonly owning_session_id: string; readonly reason: string }
   | { readonly kind: "not_found"; readonly reason: string; readonly known_tasks: readonly string[] }
-  | { readonly kind: "invalid_arguments"; readonly reason: string }
+  | { readonly kind: "invalid_arguments"; readonly reason: string; readonly diagnostic?: ToolArgumentDiagnostic }
   | { readonly kind: "delivering"; readonly to: string; readonly reason: "host_slow" | "aborted" }
   | { readonly kind: "aborted"; readonly to: string }
   | { readonly kind: "send_failed"; readonly to: string; readonly reason: string }

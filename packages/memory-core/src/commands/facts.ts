@@ -4,8 +4,9 @@
 // changes either watermark. The store restores parked files to the hot queue under its
 // lock before clearing their records. There is no automatic unparking.
 
-import { FactsFailureStore, type FactsFailureFilter } from "../facts"
+import { FactsFailureStore, type FactsFailureFilter, type FactsFailuresFile } from "../facts"
 import type { MemoryIdentityPaths } from "../identity"
+import { LockContentionError } from "../locks"
 import { parseCommandArgs } from "./args"
 import { formatFactsStatus, readFactsOverview } from "./facts-status"
 import { requireIdentity, respond, type MemoryCommandContext, type MemoryCommandDeps } from "./types"
@@ -21,10 +22,11 @@ async function runRetry(
   conversationId: string | undefined,
 ): Promise<string> {
   const store = new FactsFailureStore({ identityPaths })
-  let before
+  let before: FactsFailuresFile
   try {
     before = await store.readFailures()
   } catch (error) {
+    if (error instanceof LockContentionError) return respond(ctx, "cannot retry: the failure ledger is busy; try /facts retry again shortly", "info")
     return respond(
       ctx,
       `cannot retry: the failure ledger is unreadable (${error instanceof Error ? error.message : String(error)}); repair or remove failures.json first`,
@@ -41,7 +43,13 @@ async function runRetry(
   }
 
   const filter: FactsFailureFilter = conversationId === undefined ? {} : { conversationId }
-  const removed = await store.clearForRetry(filter)
+  let removed: number
+  try {
+    removed = await store.clearForRetry(filter)
+  } catch (error) {
+    if (error instanceof LockContentionError) return respond(ctx, "cannot retry: the failure ledger is busy; try /facts retry again shortly", "info")
+    throw error
+  }
   // ONE attempt: the extractor owns its own re-entrancy latch, so the command never loops.
   // A host's reconcile only launches the extractor and does not wait for its outcome, so the
   // report must not claim anything about the outcome: it says the retry started and leaves

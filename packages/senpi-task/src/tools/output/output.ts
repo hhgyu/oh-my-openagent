@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import type { ToolDefinition } from "@code-yeongyu/senpi"
 import { Type } from "typebox"
 import type { Static } from "typebox"
+import { createToolArgumentValidator } from "../argument-validation"
 
 import { shouldNotifyStatus } from "../../completion/routing"
 import type { ListScope, ListedTask } from "../../manager"
@@ -27,7 +28,7 @@ export const TaskOutputParams = Type.Object({
   tail_lines: Type.Optional(
     Type.Integer({ minimum: 1, description: "Lines to keep in tail mode. Defaults to 60." }),
   ),
-})
+}, { additionalProperties: false })
 
 export type TaskOutputInput = Static<typeof TaskOutputParams>
 
@@ -219,6 +220,7 @@ export function createTaskOutputTool(deps: TaskOutputDeps): TaskOutputTool {
     label: "Task Output",
     description: DESCRIPTION,
     parameters: TaskOutputParams,
+    prepareArguments: createToolArgumentValidator(TaskOutputParams),
     execute: (_toolCallId, params, _signal, _onUpdate, ctx) =>
       runTaskOutput(deps, params, resolveCaller(ctx), statusReads),
     renderCall: (args, theme) => renderTaskOutputCall(args, theme),

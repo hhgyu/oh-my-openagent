@@ -7,12 +7,14 @@ import type { Static, TSchema } from "typebox"
 
 import type { PersistedTaskEvent } from "../../store"
 import { toolResult } from "../../tools/control/tool-result"
+import { createToolArgumentValidator } from "../../tools/argument-validation"
 import { buildTeamMessage } from "../messaging/message"
 import { TEAM_LEAD_SENTINEL } from "../normalize"
 
 // Static JSON Schema keeps a second schema-builder runtime off every cold RPC member boot.
 export const MemberTaskSendParams = {
   type: "object",
+  additionalProperties: false,
   required: ["to", "message"],
   properties: {
     to: { type: "string", description: "Recipient member name or lead." },
@@ -101,6 +103,7 @@ export function createMemberTaskSendTool(
     label: "Task Send",
     description: "Send a durable message to another team member or the team lead.",
     parameters: MemberTaskSendParams,
+    prepareArguments: createToolArgumentValidator(MemberTaskSendParams),
     execute: (_toolCallId, params) => runMemberTaskSend(deps, params),
   }
 }

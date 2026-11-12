@@ -50,7 +50,7 @@ function errorCode(error: unknown): string | undefined {
 }
 
 async function syncPath(path: string): Promise<void> {
-  let handle
+  let handle: Awaited<ReturnType<typeof open>>
   try {
     handle = await open(path, "r")
   } catch (error) {
@@ -79,7 +79,7 @@ export class FactsFailureStore {
     this.now = options.now ?? (() => new Date())
   }
 
-  /** FAIL-CLOSED: a corrupt or unsupported file throws instead of reporting no failures. */
+  /** Throws LockContentionError on a busy queue, FactsFailuresCorruptError on invalid data. Neither reports an empty ledger. */
   async readFailures(): Promise<FactsFailuresFile> {
     return this.locked(() => this.readUnlocked())
   }
