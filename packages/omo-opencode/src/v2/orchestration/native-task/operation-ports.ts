@@ -73,7 +73,10 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
     // An original late not-found formatter may read only its captured bounded scope.
     if (!lifetime.diagnostics().live) return [...receipts.values()].map(proof => ({ record: proof.read() }))
     current()
-    return manager.list(scope).map(item => { accept(item.record.task_id); return item })
+    // Only rows this call can capture are listed. A sibling the previous generation parked (or a dead
+    // host stranded) is a stored row this runtime does not own until restoreAfterReload or a revive
+    // re-admits it; capturing it here failed every listing verb (task_output by name) of the parent.
+    return manager.list(scope).filter(item => access.owned(item.record.task_id)).map(item => { accept(item.record.task_id); return item })
   }
   const sendList: SendManager["list"] = scope => {
     lifetime.assertLifetime()

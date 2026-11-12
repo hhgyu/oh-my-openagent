@@ -103,6 +103,8 @@ export interface NativeOwnedTaskRuntimeOptions {
     bind(child: ChildHandle, assertBackendCurrent: () => void): ChildGuardBinding
   }
   initializationSignal?: AbortSignal;
+  /** Aborted once OpenCode closes this plugin's location: a shutdown park's idle barrier is then met. */
+  readonly locationReleased?: AbortSignal
   /** Genuine CURRENT-call G2 approval over a rebuilt persisted spec (service-owned). Required for
    * any guarded recovery; without a current call it must throw, so autonomous recovery refuses. */
   readonly authorizeRecovery?: (spec: ManagedStartSpec) => Promise<RecoveryAuthorization>
@@ -446,6 +448,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
   }
   const runner = createOwnedManagedRunner({ ctx, journal, observationStore, store, stateDir: options.stateDir, parent: options.parent, scopes: options.scopes,
     policy: options.policy, planner, metadataSource: options.metadataSource, assertAdmission: active,
+    ...(options.locationReleased && { locationReleased: options.locationReleased }),
     ...(options.childToolGuard && { childGuard: { owner: options.childToolGuard, forSpec(spec: ManagedStartSpec) {
       const recovery = freshRecoveries?.forSpec(spec)
       if (recovery) return guardFor(spec, recovery.guardApproval, recovery.prepared, () => recovery.authority.assertLifetime(), () => recovery.authority.assertAdmission(), recoveredTeam(spec))
@@ -954,9 +957,17 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       if (lifetimeOptions.source.sessionID !== parent.lease.sessionID) throw Error("Foreign operation source")
       const acceptedSignal = lifetimeOptions.acceptedSignal
       const assertOperationLifetime = lifetimeOptions.assertLifetime
+      /** A child its previous runtime parked mid-turn for a reload (still `running`, its receipt says
+       * `suspended` for exactly this row): a send revives it the way restoreAfterReload does, so the
+       * cut-off turn continues once as a new observed turn, and the sent message then steers it. */
+      function parkedMidTurn(record: TaskRecord): boolean {
+        if (!["running", "pending", "paused"].includes(record.status) || !record.owned_session) return false
+        const receipt = releaseReceipt(record.task_id)
+        return receipt?.kind === "suspended" && receipt.identity === operationIdentity(record) && receipt.revision === record.owned_session.journalRevision
+      }
       function storedSendRefusal(record: TaskRecord): NativeOperationResolution | undefined {
         if (owns(record) || record.runner_kind !== "owned-session" || record.residency_state !== "persisted_only"
-          || !["completed", "error", "interrupted"].includes(record.status) || record.host_session
+          || !(["completed", "error", "interrupted"].includes(record.status) || parkedMidTurn(record)) || record.host_session
           || !record.child_session_id || !record.owned_session || controls.has(record.task_id) || manager.getResidentHandle(record.task_id)) return
         assertCandidate(record, true)
         const snapshot = JSON.stringify(record), id = record.task_id, epoch = record.notification.run_epoch
@@ -971,9 +982,12 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
             const fresh = manager.get(id)
             if (!fresh || JSON.stringify(fresh) !== snapshot || owns(fresh) || controls.has(id) || manager.getResidentHandle(id)) throw Error("Stored send refusal identity changed")
             assertCandidate(fresh, true)
-            await reviveParkedBeforeSend(id)
+            if (parkedMidTurn(fresh)) await afterRestart(id, () => reviveParkedBeforeSend(id))
+            else await reviveParkedBeforeSend(id)
             lifetime.assertAction(); issuedAdmission.assertAdmission()
-            return manager.sendToTask({ ...originalInput, idOrName: id, callerSessionId: parent.lease.sessionID, allScope: false, expectedRunEpoch: originalInput.expectedRunEpoch ?? epoch })
+            // Reattaching a child parked mid-turn publishes a new run epoch; a settled child keeps its own.
+            const revivedEpoch = manager.get(id)?.notification.run_epoch ?? epoch
+            return manager.sendToTask({ ...originalInput, idOrName: id, callerSessionId: parent.lease.sessionID, allScope: false, expectedRunEpoch: originalInput.expectedRunEpoch ?? revivedEpoch })
           }, false, true, true))
         } })
       }
