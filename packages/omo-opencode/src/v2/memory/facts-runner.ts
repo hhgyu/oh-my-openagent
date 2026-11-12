@@ -10,9 +10,9 @@
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import {
-  FactsFailureStore, FactsQueue, getProcessStartIdentity, GitMemoryRepo, readFactsPeoplePayload,
+  FactsFailureStore, FactsQueue, getProcessStartIdentity, GitMemoryRepo, LockContentionError, readFactsPeoplePayload,
   selectCappedFactsBatch, selectLaunchable, serializeFactsPayload,
-  type ConsentExchange, type FactsPayload, type FactsPeopleRouting, type FactsQueueEntry, type MemoryIdentityPaths,
+  type ConsentExchange, type FactsFailuresFile, type FactsPayload, type FactsPeopleRouting, type FactsQueueEntry, type MemoryIdentityPaths,
 } from "@oh-my-opencode/memory-core"
 import { pruneTerminalFactsRuns, sweepFactsRunTombstones } from "@oh-my-opencode/memory-core/facts-run-prune"
 import { writeFile } from "@oh-my-opencode/memory-core/fs"
@@ -125,11 +125,13 @@ export function createFactsRunner(deps: FactsRunnerDeps) {
     if (await reconcile()) return { status: "active" }
     const pending = await queue.listPending()
     if (pending.length === 0) return { status: "empty" }
-    let ledgerFile
+    let ledgerFile: FactsFailuresFile
     try {
       ledgerFile = await failures.readFailures()
     } catch (error) {
-      warn("facts failure ledger is unreadable; refusing to launch", { error: describeError(error) })
+      warn(error instanceof LockContentionError
+        ? "facts failure ledger is busy; launch deferred"
+        : "facts failure ledger is unreadable; refusing to launch", { error: describeError(error) })
       return { status: "skipped" }
     }
     const selection = selectLaunchable(pending, ledgerFile, deps.now())

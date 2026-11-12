@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { existsSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { FactsFailureStore, FactsQueue, GitMemoryRepo, resolveAutoIdentity, type MemoryIdentityPaths } from "@oh-my-opencode/memory-core"
+import { FactsFailureStore, FactsFailuresCorruptError, FactsQueue, GitMemoryRepo, LockContentionError, resolveAutoIdentity, type MemoryIdentityPaths } from "@oh-my-opencode/memory-core"
 import { OmoConfigSchema, OmoMemorySettingsSchema } from "@oh-my-opencode/omo-config-core"
 import { FACTS_AGENT_ID, FACTS_PERMISSIONS } from "./facts-agent"
 import { retireFactsOwner } from "./facts-owners"
@@ -10,6 +10,7 @@ import { catalogModel, conversation, createScriptedFactsPorts, filesContaining, 
 import { registerMemoryComponent } from "./index"
 import { createManualTimers } from "./kibitzer/test-support"
 import { createMemoryFixture, type MemoryFixture } from "./test-support"
+import { createFactsRunner } from "./facts-runner"
 
 const fixtures: MemoryFixture[] = []
 const cleanups: (() => Promise<void>)[] = []
@@ -241,6 +242,42 @@ describe("facts reload recovery", () => {
 })
 
 describe("facts skips", () => {
+  test.each([
+    [new LockContentionError("facts-queue.lock", null), "facts failure ledger is busy; launch deferred"],
+    [new FactsFailuresCorruptError("bad JSON"), "facts failure ledger is unreadable; refusing to launch"],
+  ] as const)("#given %s #when launch reads the ledger #then it refuses without consuming and a later attempt can launch", async (error, message) => {
+    // given
+    const f = fixture()
+    const paths = identityPaths(f)
+    const warnings: string[] = []
+    let launched = 0
+    const runner = createFactsRunner({
+      identity: "agent", paths, owner: "owner", now: () => new Date(), deadlineMs: 10_000,
+      logger: { warn: message => { warnings.push(message) } }, ownerAlive: () => false,
+      people: () => ({ enabled: true, maxEntries: 40, maxEntryChars: 200 }),
+      resolveModel: async () => ({ kind: "resolved", model: "test/model", fallbacks: [] }),
+      launchChild: async () => { launched += 1; return { status: "completed" } },
+    })
+    await runner.queue.enqueue({ identity: "agent", sessionId: "root", conversationId: "root", entries: [
+      { kind: "user", text: "fact", source_message_id: "msg1", source_line_id: "msg1:user", captured_at: new Date().toISOString() },
+    ] })
+    const before = await runner.queue.listPending()
+    const read = spyOn(FactsFailureStore.prototype, "readFailures").mockRejectedValue(error)
+    // when / then
+    try {
+      expect((await runner.launchPending({ parentSessionId: "root" })).status).toBe("skipped")
+      expect(warnings).toEqual([message])
+      expect(launched).toBe(0)
+      expect(runDirs(paths)).toEqual([])
+      expect(await runner.queue.listPending()).toEqual(before)
+    } finally {
+      read.mockRestore()
+    }
+    expect((await runner.launchPending({ parentSessionId: "root" })).status).toBe("no_facts")
+    expect(launched).toBe(1)
+    expect(await runner.queue.listPending()).toEqual([])
+  })
+
   test("#given a subagent child session and a facts child session #when they settle after input #then nothing is enqueued", async () => {
     // given
     const f = fixture()
