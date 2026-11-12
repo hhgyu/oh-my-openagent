@@ -10,7 +10,7 @@ export async function disposeSyncRpcFixtures(): Promise<void> {
   for (const cleanup of cleanups.splice(0)) await cleanup()
   removeWorldStateDirs()
 }
-const deferred = <T>() => Promise.withResolvers<T>()
+const deferred = <T = void>() => Promise.withResolvers<T>()
 
 export function owner(id: string) {
   const abort = new AbortController()
@@ -23,20 +23,22 @@ export function owner(id: string) {
   return { context, retireGate: () => { retired = true }, retire: () => { retired = true; abort.abort() } }
 }
 
-export async function setup() {
+export async function setup(enabled: () => boolean = () => true) {
   const device = await newDevice()
   const accountAbort = new AbortController()
   const hostAbort = new AbortController()
-  const sourceBarrier = deferred<void>()
+  const sourceBarrier = deferred()
   let holdSource = false
   let begins = 0
   let closes = 0
   let joins = 0
   let approvals = 0
+  let credentials = 0
+  let httpCalls = 0
   const joinDone = deferred<{ readonly kind: "joined" }>()
-  const approvalCode = deferred<void>()
-  const approvalDisplayed = deferred<void>()
-  const joinCode = deferred<void>()
+  const approvalCode = deferred()
+  const approvalDisplayed = deferred()
+  const joinCode = deferred()
   let claimHeld = false
   const runtime: SyncRpcRuntime = {
     enableSync: async () => ({ kind: "join_required" }),
@@ -56,7 +58,7 @@ export async function setup() {
       return await confirmation ? { kind: "approved", seq: 2 } : { kind: "declined" }
     },
   }
-  const http = { baseUrl: "https://unused.invalid", token: () => { throw new Error("unexpected HTTP request") } }
+  const http = { baseUrl: "https://unused.invalid", token: () => { httpCalls += 1; throw new Error("unexpected HTTP request") } }
   const account: SyncRpcAccount = {
     descriptor: { genesis: "unsupported", rpId: null, userName: null, serviceOrigin: http.baseUrl, accountId: "account", serviceDeviceId: "service-device", syncPrincipalId: device.keyring.principal().id, publicKeys: device.keyring.publicKeys(), generation: "generation-1", incarnation: "main-1" },
     signal: accountAbort.signal,
@@ -75,7 +77,8 @@ export async function setup() {
   }
   const handlers = new Map<string, Handler>()
   const options: SyncRpcOptions = {
-    source: async () => { if (holdSource) await sourceBarrier.promise; return account },
+    source: async () => { credentials += 1; if (holdSource) await sourceBarrier.promise; return account },
+    enabled,
     runtime,
     claims: { acquire: async () => {
       if (claimHeld) return null
@@ -106,5 +109,6 @@ export async function setup() {
     showApprovalCode: async () => { approvalCode.resolve(); await approvalDisplayed.promise },
     finishJoin: () => joinDone.resolve({ kind: "joined" }),
     counts: () => ({ begins, closes, joins, approvals }),
+    effects: () => ({ credentials, httpCalls }),
   }
 }

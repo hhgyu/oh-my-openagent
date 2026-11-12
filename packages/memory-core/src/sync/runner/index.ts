@@ -50,5 +50,6 @@ export type {
   SyncEnableResponse,
   SyncPendingResponse,
   SyncRpcProblem,
+  SyncRpcDisabled,
   SyncStatusResponse,
 } from "./sync-rpc-contract"

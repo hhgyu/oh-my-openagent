@@ -67,6 +67,7 @@ export interface SyncRpcClaims {
 }
 
 export interface SyncRpcOptions {
+  readonly enabled?: () => boolean
   readonly source: () => Promise<SyncRpcAccount | null>
   readonly runtime: SyncRpcRuntime
   readonly claims: SyncRpcClaims

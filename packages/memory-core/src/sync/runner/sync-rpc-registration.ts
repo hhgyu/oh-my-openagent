@@ -36,7 +36,7 @@ export function registerSyncRpc(rpc: SyncRpcRegistration, options: SyncRpcOption
               id: row.id, expiresAt: row.expires_at, answered: row.answer !== null, revealed: row.reveal !== null,
             })),
           }))
-          case "devices": return await coordinator.read(context, async (ports) => ({ devices: z.array(device).parse(await ports.devices()) }))
+          case "devices": return await coordinator.read(context, async (ports) => ({ devices: z.array(device).parse(await ports.devices()) }), "devices")
         }
       } catch {
         return { kind: "unavailable", reason: "The sync operation could not complete." }
