@@ -41,6 +41,7 @@ import { NATIVE_DAG_TOOL_NAME } from "../../tools/native-dag-codecs"
 import type { NativeDagTargets } from "../../tools/native-dag"
 import type { NativeDagComponent, NativeDagHost } from "../native-dag/component"
 import type { NativeTaskTargetPermissionAssociation } from "./service"
+import { registerSkillInvocations } from "./skill-invocations"
 
 type MetadataSource = Parameters<typeof createNativeTaskService>[1]["metadataSource"]
 type JoinedSession = Effect.Success<ReturnType<typeof acquireEffectSessionBackendApi>>
@@ -204,6 +205,8 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     if (errors.length > 1) throw new AggregateError(errors, "Native task component cleanup incomplete")
   }
   try {
+    const invocations = await registerSkillInvocations(control)
+    closers.push(invocations.close)
     seedTaskIdFloor(directory)
     const prepared = await prepareNativeTaskRuntime({ cwd: directory, models: control, skills: control.skill,
       canonical: { resolveTaskAgents, buildSkillPrepend }, signal: lifetime.signal, assertCurrent: current, permission: owners.permission })
@@ -276,6 +279,7 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     const dagRegistered = Promise.withResolvers<readonly NativeTaskTargetPermissionAssociation[]>()
     void dagRegistered.promise.catch(() => {})
     const dag = options.dag?.({ tool: control.tool, directory, prepared, registry, kernel, service, assertCurrent: current,
+      resolveSkillInvocations: invocations.stateFor,
       delivery: { session: owners.session, assertGeneration },
       register(targets) { dagTargets.resolve(targets); return dagRegistered.promise } })
     if (!dag) dagTargets.resolve(undefined)
@@ -310,7 +314,7 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
           const kernelTools = kernelCalls.read(caller)
           return { cwd: actual.location.directory, sessionManager: { getSessionId: () => actual.id }, ...(kernelTools !== undefined && { kernelTools }) }
         },
-        taskDependencies: () => ({ resolveChildToolNames: () => childStructuralToolNames(CUSTOM_CANDIDATES) }),
+        taskDependencies: () => ({ resolveChildToolNames: () => childStructuralToolNames(CUSTOM_CANDIDATES), resolveSkillInvocations: invocations.stateFor }),
         outputDependencies: caller => ({ stateDir: nativeTaskStateDir(directory, caller.sessionID), transcriptReader: ({ stateDir, taskId }) => readEventLogTranscriptResult(stateDir, taskId) }),
         async release() { scopes.dispose() } }
     } })
