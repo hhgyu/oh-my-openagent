@@ -16,6 +16,8 @@ export interface NativeOperationAccess {
   readonly parentSessionID: string
   assertCurrent(): void
   capture(id: string): AcceptedTaskProof
+  /** Whether `capture` would admit `id` for this call, read without capturing it (no receipt). */
+  owned(id: string): boolean
   resolve(input: string, options?: { readonly storedSendRefusal: true }): NativeOperationResolution
   captureSendFormattingScope(): () => ReturnType<SendManager["list"]>
   assertParentPark(id: string, epoch: number, continuation?: boolean): void
@@ -240,6 +242,11 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
       current()
       return lifetime.track(access.restoreAfterReload(id))
     },
+    /** A child's live handle when THIS host holds it, only in the original parent (Native DAG recovery's orphan check). */
+    residentHandle(id: string) { current(); return manager.get(id)?.parent_session_id === access.parentSessionID ? manager.getResidentHandle(id) : undefined },
+    /** Whether THIS runtime owns a child of the original parent, without capturing it: a row a reload
+     * parked or a dead host stranded answers false (Native DAG recovery then folds or restores it). */
+    owned(id: string): boolean { current(); return receipts.has(id) || manager.get(id)?.parent_session_id === access.parentSessionID && access.owned(id) },
   }
   return Object.freeze({ task, send, cancel, output, destruction, recovery, dag,
     /** Full canonical send lifetime. The low-level send port alone does not own

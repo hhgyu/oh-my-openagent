@@ -2,18 +2,28 @@ import type { DagRunId, DagTaskPort } from "@oh-my-opencode/senpi-task/dag"
 import type { NativeOperationOwner } from "../native-task/operation-ports"
 import { NativeDagRefusal } from "./refusals"
 
-/** The DAG engine slice ONE `workflow` call lends to a run's scheduler and its control verbs, over
- * that call's Native per-call operation. Never retained past the call: the held port drops it when
- * the call ends. */
-export type NativeDagCallPort = Omit<DagTaskPort, "getResidentHandle">
+/** The DAG engine slice ONE `workflow` call lends to a run's scheduler, its control verbs and its
+ * recovery, over that call's Native per-call operation. Never retained past the call: the held port
+ * drops it when the call ends. */
+export type NativeDagCallPort = DagTaskPort & {
+  /** Native task's lazy restore of a child its previous runtime parked (or a dead host stranded),
+   * under THIS call's fresh approval (S5e). True once a live control is installed. */
+  restoreAfterReload(id: string): Promise<boolean>
+  /** Whether THIS call's runtime owns the child, read without capturing it (D-1): a row a reload
+   * parked or a dead host stranded answers false, and the call's `get` would refuse it. */
+  isOwned(id: string): boolean
+}
 
 /** Every node start goes through THIS call's operation, so it uses this call's host authority.
  * Nodes run attached (`run_in_background:false`), exactly as the Native DAG runtime admits them. */
-export function nativeDagCallPort(operation: Pick<NativeOperationOwner, "task" | "dag" | "send">): NativeDagCallPort {
+export function nativeDagCallPort(operation: Pick<NativeOperationOwner, "task" | "dag" | "send" | "recovery">): NativeDagCallPort {
   return Object.freeze({
     startOwned: (spec, owner) => operation.dag.startOwned({ ...spec, run_in_background: false }, owner),
     findOwnedTask: key => operation.dag.findOwnedTask(key),
     residencyChanged: parentSessionID => operation.dag.residencyChanged(parentSessionID),
+    getResidentHandle: id => operation.recovery.residentHandle(id),
+    restoreAfterReload: id => operation.recovery.restoreAfterReload(id),
+    isOwned: id => operation.recovery.owned(id),
     get: id => operation.task.get(id),
     subscribeChild: (id, listener) => operation.task.subscribeChild(id, listener),
     waitFor: (id, options) => operation.task.waitFor(id, options),
@@ -74,7 +84,7 @@ export function createHeldDagTaskPort(runId: DagRunId) {
     waitFor: (id, options) => live().waitFor(id, options),
     cancelTask: (id, reason, extra) => live().cancelTask(id, reason, extra),
     residencyChanged: parentSessionID => live().residencyChanged(parentSessionID),
-    getResidentHandle() { throw Error("Resident DAG node handles arrive with workflow recovery (S6f)") },
+    getResidentHandle: id => live().getResidentHandle(id),
     sendToTask: input => {
       const call = live(), owner = call.get(input.idOrName)?.owner
       if (owner?.kind !== "dag" || owner.runId !== runId) refuseForeignSend(input.idOrName, `workflow run ${runId}`)
