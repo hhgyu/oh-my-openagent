@@ -1,4 +1,4 @@
-import type { ManagedStartSpec } from "@oh-my-opencode/senpi-task/manager-kernel"
+import type { ManagedStartSpec, TaskRecordStore } from "@oh-my-opencode/senpi-task/manager-kernel"
 import type { ChildGuardBinding, OwnedChildToolGuard } from "../../host/owned-child-tool-guard"
 import type { ChildHandle } from "../../host/session-backend"
 import type { HostGrantRequirement, PreparedHostTaskGrant } from "./host-grant"
@@ -37,6 +37,7 @@ export interface NativeChildGuardBindingOptions {
 /** Trusted runtime DATA from the ORIGINAL approved ManagerStartSpec, never from member tool closures. */
 export interface NativeChildGuardOrigin {
   readonly team?: { readonly runId: string; readonly memberName: string }
+  readonly appendTaskEvent?: (event: Parameters<TaskRecordStore["appendEvent"]>[1]) => void
 }
 type Coverage = NonNullable<ChildGuardBinding["coverage"]>
 type Target = NonNullable<Coverage["targets"]>[number]
@@ -100,7 +101,8 @@ export function createNativeChildGuardBinding(options: NativeChildGuardBindingOp
         if (kernel && grant) producers.push(kernel.bindChild({ child, sessionID, agent: approved.buildAgentID, taskId: spec.taskId, grant, assertCurrent: current }))
         if (member && team) {
           producers.push(member.owner.bindChild({ child, sessionID, agent: approved.buildAgentID, taskId: spec.taskId,
-            leadSessionID: spec.parentSessionId, team, config: member.teamConfigFor(spec.parentSessionId), assertCurrent: current }))
+            leadSessionID: spec.parentSessionId, team, config: member.teamConfigFor(spec.parentSessionId), assertCurrent: current,
+            appendEvent: origin.appendTaskEvent }))
           const release = member.onBound?.({ leadSessionID: spec.parentSessionId, teamRunId: team.runId, memberName: team.memberName, sessionID })
           if (release) producers.push({ assertCurrent() {}, revoke: release, async join() { release() } })
         }

@@ -214,6 +214,16 @@ describe("#given a root lead calling team_create with 2 members", () => {
       const toLead = inbox(f.dir, config, runId, "lead")
       expect(toLead).toHaveLength(1)
       expect(toLead[0]).toMatchObject({ to: "lead", body: "member report" })
+      const alpha = (created.members as { task_id: string; name: string }[]).find(member => member.name === "alpha")
+      const events: { type: string; payload: unknown }[] = readFileSync(join(f.dir, LEAD, "logs", `${defined(alpha).task_id}.jsonl`), "utf8").trim().split("\n").map(line => JSON.parse(line))
+      const leadLog = join(defined(nativeTeamSettings(f.dir, LEAD, config).state_dir), "logs", `${defined(alpha).task_id}.jsonl`)
+      const leadEvents: { type: string; payload: unknown }[] = readFileSync(leadLog, "utf8").trim().split("\n").map(line => JSON.parse(line))
+      expect(leadEvents.filter(event => event.type === "team_message_sent").map(event => event.payload)).toEqual([
+        { message_id: (toAlpha[0] as { messageId: string }).messageId, from: "lead", to: "alpha", kind: "message" },
+      ])
+      expect(events.filter(event => event.type === "team_message_sent").map(event => event.payload)).toEqual([
+        { message_id: (toLead[0] as { messageId: string }).messageId, from: "alpha", to: "lead", kind: "message" },
+      ])
 
       // when
       const deleted = details(await call("team_delete", { team_run_id: runId, force: true }))
@@ -253,6 +263,8 @@ describe("#given a root lead calling team_create with 2 members", () => {
       const deleted = details(await call("team_delete", { team_run_id: runId }))
       // then
       expect(deleted.kind).toBe("deleted")
+      expect(deleted.cancelled_task_ids).toEqual([])
+      expect(deleted.released_task_ids).toEqual(taskIds)
       await expectTornDown(f, owner, { runId, sessions, taskIds, config })
       expect(f.calls.filter(entry => entry === "remove")).toHaveLength(2)
     })

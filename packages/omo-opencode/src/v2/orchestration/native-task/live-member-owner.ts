@@ -1,4 +1,5 @@
 import type { TeamModeConfig } from "@oh-my-opencode/team-core/config"
+import type { TaskRecordStore } from "@oh-my-opencode/senpi-task/manager-kernel"
 import { loadRuntimeState } from "@oh-my-opencode/team-core/team-state-store"
 import type { ToolDomain } from "@opencode/plugin/effect/tool"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
@@ -22,6 +23,7 @@ export interface MemberChildInput {
   readonly config: TeamModeConfig
   /** Original backend observation guard plus component generation fences. */
   readonly assertCurrent: () => void
+  readonly appendEvent?: (event: Parameters<TaskRecordStore["appendEvent"]>[1]) => void
 }
 export interface MemberProducer {
   assertCurrent(): void
@@ -61,6 +63,13 @@ function createMemberEntry(input: MemberChildInput, options: TeamMemberOwnerOpti
     native: {
       teamRunId: runId, memberName, taskId: input.taskId, config,
       get members() { return members },
+      appendEvent: (_taskId, event) => {
+        try { input.appendEvent?.(event) }
+        catch {
+          // Mail is already durable. Preserve success so an audit failure does not cause a duplicate send.
+          console.warn("[oh-my-openagent/v2] team message audit append failed after enqueue", { taskId: input.taskId, eventType: event.type })
+        }
+      },
       ...(options.now && { now: options.now }), ...(options.newMessageId && { newMessageId: options.newMessageId }),
     },
     assertCurrent() { if (options.closed()) throw Error("Team member owner is closing") },
@@ -82,7 +91,7 @@ function createMemberEntry(input: MemberChildInput, options: TeamMemberOwnerOpti
     assertCurrent(): void { if (revoked) throw Error("Member producer revoked"); input.assertCurrent() },
     async send(call: TeamMemberSendCall, sendInput: Parameters<typeof producer.invoke>[2]) {
       // The ticket is owned before any await, so a revoke and join during the membership read waits.
-      const { promise: ticket, resolve: settle } = Promise.withResolvers<void>()
+      const { promise: ticket, resolve: settle }: PromiseWithResolvers<void> = Promise.withResolvers()
       tickets.add(ticket)
       try {
         producer.assertCurrent(custody(call))
