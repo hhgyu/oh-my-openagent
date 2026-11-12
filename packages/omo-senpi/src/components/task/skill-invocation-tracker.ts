@@ -1,4 +1,4 @@
-import type { SkillInvocationState } from "@oh-my-opencode/senpi-task"
+import { classifySkillInput, planArtifactPathsTouched, skillNameFromPath, type SkillInvocationState } from "@oh-my-opencode/senpi-task"
 
 import type { SenpiExtensionAPI } from "../../extension/types"
 import {
@@ -31,66 +31,12 @@ export type SkillInvocationTracker = {
   readonly stateFor: (sessionId: string) => SkillInvocationState
 }
 
-const SKILL_COMMAND_PREFIX = "/skill:"
-// senpi expands `/skill:<name>` into this block BEFORE the input event fires, so the raw prefix
-// almost never survives to a handler. Match the NAME ATTRIBUTE: keying off the body would let any
-// other skill that merely mentions "ulw-plan" arm the gate by accident.
-const EXPANDED_SKILL_BLOCK_PATTERN = /<skill\s+name="([^"]+)"/gi
-// The expansion is `<skill name="X" ...>...body...</skill>` followed by the user's own typed text.
-// The body is skill documentation, not something the user said, so it is stripped before any
-// text matching - otherwise a skill whose docs mention ulw-plan would arm the gate. A truncated
-// block with no closing tag is stripped to the end of the input for the same reason.
-const EXPANDED_SKILL_BLOCK_BODY_PATTERNS: readonly RegExp[] = [
-  /<skill\s+name="[^"]*"[\s\S]*?<\/skill>/gi,
-  /<skill\s+name="[^"]*"[\s\S]*$/i,
-]
 // Input injected programmatically by an extension - never a human keystroke.
 const AGENT_MANUFACTURABLE_INPUT_SOURCE = "extension"
 // Replay trusts only the engine's own human-input sources, recorded on the session entry. Anything else
 // (absent, `extension`, an unknown or misspelled value, or a value written on the message itself) is
 // unknown origin and never arms the user-request channel.
 const REPLAY_TRUSTED_INPUT_SOURCES: ReadonlySet<string> = new Set(["interactive", "rpc"])
-const SKILL_MD_PATH_PATTERN = /[\\/]skills[\\/]([^\\/]+)[\\/]SKILL\.md$/i
-const PLAN_ARTIFACT_PATH_PATTERN = /(^|[\\/])\.omo[\\/]plans[\\/][^\\/]+\.md$/i
-const PLAN_ARTIFACT_PATCH_PATTERN = /\.omo[\\/]plans[\\/][^\s"'`]+\.md/i
-const PLAN_ARTIFACT_PATCH_PATTERN_GLOBAL = new RegExp(PLAN_ARTIFACT_PATCH_PATTERN.source, "gi")
-const INJECTED_BLOCK_PATTERNS = [
-  /<ultrawork-mode>[\s\S]*?<\/ultrawork-mode>/gi,
-  /<system-reminder>[\s\S]*?<\/system-reminder>/gi,
-]
-const USER_REQUEST_PATTERNS: Readonly<Record<string, RegExp>> = {
-  "ulw-plan": /\bulw[-_ ]?plan\b/i,
-}
-// Own-words requests for a plan before implementation, per the ulw-plan SKILL.md contract. Kept
-// deliberately narrow: each alternative requires an explicit planning noun plus a request or
-// ordering cue, so ordinary work instructions ("fix the login bug") never arm the gate.
-const OWN_WORDS_PLAN_REQUEST_PATTERNS: readonly RegExp[] = [
-  // English: "plan this before coding", "make/write/create a (work) plan first", "plan before you code"
-  /\b(?:make|write|create|draw|draft|build)\s+(?:me\s+)?(?:a|an|the)?\s*(?:work|implementation|action)?\s*plan\b/i,
-  /\bplan\b[^.!?\n]{0,40}\bbefore\s+(?:you\s+)?(?:cod(?:e|ing)|implement|start|work)/i,
-  /\bbefore\s+(?:you\s+)?(?:cod(?:e|ing)|implement|start)\b[^.!?\n]{0,40}\bplan\b/i,
-  /\bplan\s+(?:it|this|that|the\s+work)\s+(?:out\s+)?first\b/i,
-  // Korean: "계획부터 세워줘", "작업 계획을 먼저 세우자", "계획 작성해줘". The Sino-Korean stems (작성/수립) require the
-  // 해 that turns the noun into a verb: bare "계획 작성" is a noun phrase, and a pasted transcript
-  // saying "승인은 계획 작성까지만 허가" mentions planning without requesting it.
-  /계획(?:서)?(?:부터|을|를|\s)*\s*(?:먼저\s*)?(?:세워|세우|짜|작성해|수립해)/,
-  /(?:먼저|우선)\s*계획(?:서)?(?:을|를)?\s*(?:세워|세우|짜|작성해|수립해)/,
-]
-
-function isOwnWordsPlanRequest(text: string): boolean {
-  return OWN_WORDS_PLAN_REQUEST_PATTERNS.some((pattern) => pattern.test(text))
-}
-
-// Skill names carried by expanded `<skill name="...">` blocks in one input.
-function expandedSkillBlockNames(text: string): readonly string[] {
-  const names: string[] = []
-  for (const match of text.matchAll(EXPANDED_SKILL_BLOCK_PATTERN)) {
-    const name = match[1]?.trim()
-    if (name !== undefined && name.length > 0) names.push(name)
-  }
-  return [...new Set(names)]
-}
-const PLAN_ARTIFACT_PATH_TOOLS: ReadonlySet<string> = new Set(["read", "write", "edit"])
 
 export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvocationTracker {
   const invokedBySession = new Map<string, Set<string>>()
@@ -154,27 +100,9 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
   }
 
   const observeUserInput = (text: string, sessionId: string | undefined): void => {
-    if (text.startsWith(SKILL_COMMAND_PREFIX)) {
-      // Mirror senpi's parse (see the ultrawork component): the skill name runs to the first space.
-      const spaceIndex = text.indexOf(" ")
-      const skill = (
-        spaceIndex === -1 ? text.slice(SKILL_COMMAND_PREFIX.length) : text.slice(SKILL_COMMAND_PREFIX.length, spaceIndex)
-      ).trim()
-      record(invokedBySession, sessionId, skill)
-      record(requestedBySession, sessionId, skill)
-      return
-    }
-    // The expanded form of that same command: the user picked the skill, so it counts as both an
-    // invocation (forbids channel) and a request (requires channel), keyed on the name attribute.
-    for (const skill of expandedSkillBlockNames(text)) {
-      record(invokedBySession, sessionId, skill)
-      record(requestedBySession, sessionId, skill)
-    }
-    const visible = stripInjectedBlocks(text)
-    for (const [skill, pattern] of Object.entries(USER_REQUEST_PATTERNS)) {
-      if (pattern.test(visible)) record(requestedBySession, sessionId, skill)
-    }
-    if (isOwnWordsPlanRequest(visible)) record(requestedBySession, sessionId, "ulw-plan")
+    const evidence = classifySkillInput(text)
+    for (const skill of evidence.invoked) record(invokedBySession, sessionId, skill)
+    for (const skill of evidence.requested) record(requestedBySession, sessionId, skill)
   }
 
   const forget = (sessionId: string): void => {
@@ -354,27 +282,6 @@ function asToolResultEvent(payload: unknown): ToolResultEvent | undefined {
   return { toolName, path, patchText, isError: payload["isError"] === true }
 }
 
-// Returns the distinct normalized plan paths touched by one tool event: the single tool path for
-// read/write/edit, or every distinct .omo/plans/*.md match in an apply_patch body (each counted
-// once per event no matter how often the patch repeats it). Keys normalize backslashes to forward
-// slashes but otherwise keep the observed path, so different worktree roots never collapse.
-function planArtifactPathsTouched(event: ToolResultEvent): readonly string[] {
-  if (PLAN_ARTIFACT_PATH_TOOLS.has(event.toolName)) {
-    if (event.path === undefined || !PLAN_ARTIFACT_PATH_PATTERN.test(event.path)) return []
-    return [normalizePlanPath(event.path)]
-  }
-  if (event.toolName === "apply_patch") {
-    if (event.patchText === undefined) return []
-    const matches = event.patchText.match(PLAN_ARTIFACT_PATCH_PATTERN_GLOBAL)
-    if (matches === null) return []
-    return [...new Set(matches.map(normalizePlanPath))]
-  }
-  return []
-}
-
-function normalizePlanPath(path: string): string {
-  return path.replace(/\\/g, "/")
-}
 
 type InputEvent = {
   readonly text: string
@@ -387,16 +294,4 @@ function asInputEvent(payload: unknown): InputEvent | undefined {
   if (typeof text !== "string") return undefined
   const source = payload["source"]
   return { text, source: typeof source === "string" ? source : undefined }
-}
-
-function stripInjectedBlocks(text: string): string {
-  let visible = text
-  for (const pattern of INJECTED_BLOCK_PATTERNS) visible = visible.replace(pattern, "")
-  for (const pattern of EXPANDED_SKILL_BLOCK_BODY_PATTERNS) visible = visible.replace(pattern, "")
-  return visible
-}
-
-function skillNameFromPath(path: string | undefined): string | undefined {
-  if (path === undefined) return undefined
-  return SKILL_MD_PATH_PATTERN.exec(path)?.[1]
 }
