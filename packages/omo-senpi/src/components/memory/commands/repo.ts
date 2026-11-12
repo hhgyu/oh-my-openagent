@@ -8,8 +8,6 @@ import type { MemoryCommandIdentity } from "@oh-my-opencode/memory-core/commands
 import { senpiCommandDeps } from "./core-deps"
 import type { MemoryCommandDeps } from "./types"
 
-export { runGit } from "@oh-my-opencode/memory-core/commands/repo"
-
 export function openRepo(deps: MemoryCommandDeps, identity: MemoryCommandIdentity): GitMemoryRepo {
   return openCoreRepo(senpiCommandDeps(deps), identity)
 }

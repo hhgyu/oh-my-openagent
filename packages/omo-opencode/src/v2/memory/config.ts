@@ -12,6 +12,8 @@ export type MemoryEnv = Readonly<Record<string, string | undefined>>
 
 export interface MemoryLogger {
   warn(message: string, details?: Record<string, unknown>): void
+  /** Informational records (repo maintenance); a logger without it drops them. */
+  info?(message: string, details?: Record<string, unknown>): void
 }
 
 export const consoleMemoryLogger: MemoryLogger = {

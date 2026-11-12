@@ -3,7 +3,7 @@
 // no UI is attached. Output NEVER enters model context.
 
 import { reportPalace, type PalaceCommandContext, type PalaceContextResolver, type PalacePeopleResolver } from "./report"
-import { generatePalaceHtml } from "./generator"
+import { generatePalaceHtml } from "@oh-my-opencode/memory-core/palace"
 
 const UNBOUND_NOTICE = "memory is not bound in this session, so /palace has nothing to render"
 const REMOTE_ENV_KEYS = ["TMUX", "SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT"] as const

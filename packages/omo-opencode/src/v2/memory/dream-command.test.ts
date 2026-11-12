@@ -16,7 +16,7 @@ function setup(outcome: DreamFireOutcome = { fired: true, runId: "dream-1", stat
   const requests: DreamRequest[] = []
   const command = createDreamCommand({
     request: async (_bound, request) => { requests.push(request); return outcome },
-    settings: () => ({ enabled: true, idleMinutes: 30, minHoursBetween: 24, autoSelectMax: 5, autoSelectMaxChars: 150_000 }),
+    settings: () => ({ enabled: true, idleMinutes: 30, minHoursBetween: 24, shutdownLaunch: false, autoSelectMax: 5, autoSelectMaxChars: 150_000 }),
   })
   return { bound: identity.bound, command, requests }
 }

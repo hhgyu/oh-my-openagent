@@ -1133,7 +1133,6 @@
       "packages/omo-senpi/src/components/memory/commands/people-ask.ts": ["buildAskPrompt"],
       // pre-existing at origin dev 4686e425b5: unused export(s) SLEEPTIME_OVERRIDE_MARK
       "packages/omo-senpi/src/components/memory/commands/sleeptime.ts": ["SLEEPTIME_OVERRIDE_MARK"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) getMemoryRepo
       // pre-existing at origin dev 4686e425b5: unused export(s) DEFAULT_SERVICE_API
       "packages/omo-senpi/src/components/memory/device-session/account-source.ts": ["DEFAULT_SERVICE_API"],
       // pre-existing at origin dev 4686e425b5: unused export(s) FakeScheduler
@@ -1148,10 +1147,8 @@
       "packages/omo-senpi/src/components/memory/facts-run-prune.ts": ["FACTS_RUN_KEEP_LAST", "FACTS_RUN_MAX_TOTAL_BYTES"],
       // pre-existing at origin dev 4686e425b5: unused export(s) AVAILABLE_MODEL
       "packages/omo-senpi/src/components/memory/facts-runner.test-support.ts": ["AVAILABLE_MODEL"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) getMemoryRepo
       // the senpi engine loads this extension's default export by path (`senpi -e <file>` in index-engine.test.ts)
       "packages/omo-senpi/src/components/memory/index-engine.fixture.ts": ["default"],
-      "packages/omo-senpi/src/components/memory/index.ts": ["getMemoryRepo"],
       // pre-existing at origin dev 4686e425b5: unused export(s) UNAVAILABLE_CATEGORY_MAX_CHARS, GATE_MODEL_MAX_CHARS
       "packages/omo-senpi/src/components/memory/kibitzer/notice.ts": ["UNAVAILABLE_CATEGORY_MAX_CHARS", "GATE_MODEL_MAX_CHARS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) encodeKibitzerSessionId, kibitzerWakeRecord, redactKibitzerWakeReason
@@ -1178,18 +1175,6 @@
       "packages/omo-senpi/src/components/memory/memory-usage.test-support.ts": ["IDENTITY"],
       // pre-existing at origin dev 4686e425b5: unused export(s) incrementMemoryUsage, readMemoryUsageLedger, extractMemoryUsagePath
       "packages/omo-senpi/src/components/memory/memory-usage.ts": ["incrementMemoryUsage", "readMemoryUsageLedger", "extractMemoryUsagePath"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) HISTORY_MAX_COMMITS, HISTORY_PER_DIFF_CAP, HISTORY_RECENT_DIFFS, HISTORY_TOTAL_PAYLOAD_CAP, REFLECTION_COMMIT_PATTERN
-      "packages/omo-senpi/src/components/memory/palace/collectors.ts": ["HISTORY_MAX_COMMITS", "HISTORY_PER_DIFF_CAP", "HISTORY_RECENT_DIFFS", "HISTORY_TOTAL_PAYLOAD_CAP", "REFLECTION_COMMIT_PATTERN"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) collectPalaceData, renderPalaceHtml, encodePalaceData
-      "packages/omo-senpi/src/components/memory/palace/generator.ts": ["collectPalaceData", "renderPalaceHtml", "encodePalaceData"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) HISTORY_RECENT_DIFFS
-      "packages/omo-senpi/src/components/memory/palace/history-collector.ts": ["HISTORY_RECENT_DIFFS"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) registerPalaceCommand, runPalaceCommand, HISTORY_MAX_COMMITS, HISTORY_PER_DIFF_CAP, HISTORY_RECENT_DIFFS, HISTORY_TOTAL_PAYLOAD_CAP, REFLECTION_COMMIT_PATTERN, UNCOMMITTED_LABEL, collectCore, collectExternal and 14 more
-      "packages/omo-senpi/src/components/memory/palace/index.ts": ["registerPalaceCommand", "runPalaceCommand", "HISTORY_MAX_COMMITS", "HISTORY_PER_DIFF_CAP", "HISTORY_RECENT_DIFFS", "HISTORY_TOTAL_PAYLOAD_CAP", "REFLECTION_COMMIT_PATTERN", "UNCOMMITTED_LABEL", "collectCore", "collectExternal", "collectHistory", "collectReflection", "collectPalaceData", "encodePalaceData", "generatePalaceHtml", "renderPalaceHtml", "PRIMARY_HUMAN_CARD_PATH", "PRIMARY_HUMAN_SLUG", "collectPeople", "PALACE_DATA_ELEMENT_ID", "PALACE_DATA_PLACEHOLDER", "PALACE_PEOPLE_PANEL", "PALACE_PEOPLE_TAB", "PALACE_TEMPLATE"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) PRIMARY_HUMAN_SLUG, PRIMARY_HUMAN_CARD_PATH
-      "packages/omo-senpi/src/components/memory/palace/people.ts": ["PRIMARY_HUMAN_SLUG", "PRIMARY_HUMAN_CARD_PATH"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) PALACE_DATA_ELEMENT_ID
-      "packages/omo-senpi/src/components/memory/palace/template.ts": ["PALACE_DATA_ELEMENT_ID"],
       // pre-existing at origin dev 4686e425b5: unused export(s) PolicyCapturingFakeExtensionAPI
       "packages/omo-senpi/src/components/memory/policy-guard.test-support.ts": ["PolicyCapturingFakeExtensionAPI"],
       // pre-existing at origin dev 4686e425b5: unused export(s) PROJECT_MEMORY_RECALL_MAX_PROJECTS, formatProjectMemoryNudge

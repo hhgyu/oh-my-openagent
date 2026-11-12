@@ -6,7 +6,7 @@ import { GitMemoryRepo, buildIdentityPaths, type MemoryIdentityPaths } from "@oh
 
 import { createMemoryIdentityContext, ensureIdentityRuntimeDirs, type MemoryIdentityContext } from "../context"
 
-export const INJECTION_PAYLOAD = "</script><img src=x onerror=alert(1)>"
+const INJECTION_PAYLOAD = "</script><img src=x onerror=alert(1)>"
 
 export interface PalaceFixture {
   readonly root: string
@@ -134,7 +134,7 @@ export async function seedPalacePeople(
   return result.sha
 }
 
-export async function writePalaceWorkingFile(
+async function writePalaceWorkingFile(
   fixture: PalaceFixture,
   relativePath: string,
   content: string,
@@ -142,21 +142,6 @@ export async function writePalaceWorkingFile(
   const target = join(fixture.paths.repo, relativePath)
   await mkdir(dirname(target), { recursive: true })
   await writeFile(target, content, "utf8")
-}
-
-export async function commitPalaceFile(
-  fixture: PalaceFixture,
-  relativePath: string,
-  content: string,
-  reason: string,
-): Promise<string> {
-  await writePalaceWorkingFile(fixture, relativePath, content)
-  const result = await fixture.repo.commitWrite([relativePath], reason, {
-    agentId: fixture.identity,
-    authorName: "Palace Fixture",
-  })
-  fixture.head = result.sha
-  return result.sha
 }
 
 async function writeBinary(target: string): Promise<void> {

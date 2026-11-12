@@ -18,7 +18,8 @@ import type * as Plugin from "@opencode/plugin/promise/plugin"
 import { describeError, type BoundMemorySession } from "./binding"
 import type { MemoryLogger } from "./config"
 import type { DreamFireOutcome } from "./dream-fire"
-import type { DreamTriggerSettings, V2DreamOrigin } from "./dream-gates"
+import type { DreamTriggerSettings } from "@oh-my-opencode/memory-core/dream-gates"
+import type { V2DreamOrigin } from "./dream-fire"
 import type { MemoryChildTimers } from "./memory-child-port"
 
 type SessionMessage = Awaited<ReturnType<Plugin.Context["session"]["context"]>>[number]

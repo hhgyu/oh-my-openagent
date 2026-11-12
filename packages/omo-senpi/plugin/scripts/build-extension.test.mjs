@@ -292,8 +292,8 @@ describe("checkExtensionCurrent", () => {
     const { mainInputs, memoryDoctorInputs } = await sharedOutputs()
     for (const suffix of [
       "packages/omo-senpi/src/components/memory/commands/doctor-runtime.ts",
-      "packages/omo-senpi/src/components/memory/commands/doctor-checks.ts",
-      "packages/omo-senpi/src/components/memory/commands/doctor-reservation.ts",
+      "packages/memory-core/src/doctor/checks.ts",
+      "packages/memory-core/src/doctor/reservation.ts",
     ]) {
       expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
       expect(memoryDoctorInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
@@ -353,9 +353,9 @@ describe("checkExtensionCurrent", () => {
     const { mainInputs, memoryPalaceInputs } = await sharedOutputs()
     for (const suffix of [
       "packages/omo-senpi/src/components/memory/palace/runtime.ts",
-      "packages/omo-senpi/src/components/memory/palace/generator.ts",
-      "packages/omo-senpi/src/components/memory/palace/client-script.ts",
-      "packages/omo-senpi/src/components/memory/palace/styles.ts",
+      "packages/memory-core/src/palace/generator.ts",
+      "packages/memory-core/src/palace/client-script.ts",
+      "packages/memory-core/src/palace/styles.ts",
       "packages/omo-senpi/src/components/memory/commands/people-runtime.ts",
     ]) {
       expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
@@ -388,7 +388,7 @@ describe("checkExtensionCurrent", () => {
       "packages/omo-senpi/src/components/memory/commands/search.ts",
       "packages/omo-senpi/src/components/memory/commands/facts.ts",
       // A dream fire loads its conversation selection from this sidecar (keeps omo.js inside its byte budget).
-      "packages/omo-senpi/src/components/memory/dream-selector.ts",
+      "packages/memory-core/src/dream/selector.ts",
     ]) {
       expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
       expect(memoryCommandsInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)

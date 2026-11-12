@@ -6,7 +6,7 @@ import { join } from "node:path"
 import { TranscriptJournal, type TranscriptEntry } from "@oh-my-opencode/memory-core"
 
 import { MemoryFakeExtensionAPI } from "../memory.test-support"
-import { scoreDreamCandidate } from "../dream-selector"
+import { scoreDreamCandidate } from "@oh-my-opencode/memory-core/dream-selection"
 import { fakeCommandContext, fakeDeps, invoke, seededRepo, tempIdentity } from "./commands.test-support"
 import { registerDreamCommand } from "./dream"
 import { stageDreamTranscript } from "./dream-staging"

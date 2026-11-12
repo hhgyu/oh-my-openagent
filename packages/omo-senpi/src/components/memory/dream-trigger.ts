@@ -20,11 +20,20 @@ import type {
 
 import type { ComponentLogger, SenpiExtensionAPI } from "../../extension/types"
 import { fireDream } from "./dream-trigger-fire"
-import type { DreamGateRejection, DreamTriggerSettings } from "./dream-trigger-gates"
+import type { DreamGateRejection, DreamTriggerSettings } from "@oh-my-opencode/memory-core/dream-gates"
 import type { ShutdownEvaluator } from "./shutdown-drain"
 import { isStaleExtensionContextError } from "./stale-extension-context"
 
-export * from "./dream-trigger-gates"
+export {
+  DEFAULT_DREAM_TRIGGER_SETTINGS,
+  DREAM_VOLUME_GATE_BYTES,
+  evaluateDreamGates,
+  resolveDreamTriggerSettings,
+  type DreamGateDecision,
+  type DreamGateProbe,
+  type DreamGateRejection,
+  type DreamTriggerSettings,
+} from "@oh-my-opencode/memory-core/dream-gates"
 
 /** Per-session dream state the wiring evaluates against. */
 export interface DreamTriggerSession {

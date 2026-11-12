@@ -11,14 +11,13 @@ import { existsSync } from "@oh-my-opencode/memory-core/fs"
 import { readdir, rm } from "@oh-my-opencode/memory-core/fs"
 import { join } from "node:path"
 
+import { PRUNE_TOMBSTONE_PREFIX } from "@oh-my-opencode/memory-core/facts-run-prune"
+
 import { describe } from "./facts-run-storage"
 
 /** Artifacts a terminal run no longer needs. Everything else (ledger, sentinel, outcome,
  * extraction, child logs) is diagnosis material and stays. */
 const DISPOSABLE = ["facts-payload.json", ".sandbox-tmp"] as const
-
-/** Retention pruning renames a run dir to this prefix before deleting it outside the runs lock. */
-export const PRUNE_TOMBSTONE_PREFIX = ".prune-"
 
 export type RemoveRunArtifact = (path: string) => Promise<void>
 

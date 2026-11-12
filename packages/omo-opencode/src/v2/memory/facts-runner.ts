@@ -4,6 +4,8 @@
 // run the owned `omo-facts` child, record how it settled, then finalize. Successful outcomes drain the
 // next batch at once (Native `drainFactsLaunches`); a failure stops the drain and leaves pacing to the
 // backoff ledger. Entries over the payload cap are recorded as preflight failures so they back off.
+// Every reconcile (bind recovery included) and every finalize ends with the memory-core retention
+// prune, as Native `facts-run-maintenance.ts` does; reconcile first sweeps `.prune-*` tombstones.
 
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
@@ -12,6 +14,7 @@ import {
   selectCappedFactsBatch, selectLaunchable, serializeFactsPayload,
   type ConsentExchange, type FactsPayload, type FactsPeopleRouting, type FactsQueueEntry, type MemoryIdentityPaths,
 } from "@oh-my-opencode/memory-core"
+import { pruneTerminalFactsRuns, sweepFactsRunTombstones } from "@oh-my-opencode/memory-core/facts-run-prune"
 import { writeFile } from "@oh-my-opencode/memory-core/fs"
 import { describeError } from "./binding"
 import type { MemoryLogger } from "./config"
@@ -91,14 +94,26 @@ export function createFactsRunner(deps: FactsRunnerDeps) {
 
   const finalizeDeps = () => ({ repo: repo(), identity: deps.identity, locksDir: deps.paths.locks, terminal, people: deps.people() })
 
+  /** Native retention (P-15): keep the last 20 terminal runs under 128 MiB; a failure only warns. */
+  async function prune(): Promise<void> {
+    try {
+      await pruneTerminalFactsRuns({ factsDir: deps.paths.facts, locksDir: deps.paths.locks, warn: (message, fields) => { warn(message, fields) } })
+    } catch (error) {
+      warn("facts run retention pruning failed", { error: describeError(error) })
+    }
+  }
+
   async function reconcile(): Promise<boolean> {
     await deps.reclaimChildren?.().catch((error: unknown) => { warn("stranded facts children were not reclaimed", { error: describeError(error) }) })
-    return recoverFactsRuns({
+    await sweepFactsRunTombstones({ factsDir: deps.paths.facts, warn: (message, fields) => { warn(message, fields) } })
+    const active = await recoverFactsRuns({
       factsDir: deps.paths.facts, queue, terminal, warn,
       isOwnRun: runId => runId === activeRunId,
       isForeignLive: ledger => ledger.owner !== deps.owner && deps.ownerAlive(ledger),
       finalize: runDir => finalizeFactsRun(finalizeDeps(), runDir),
     })
+    await prune()
+    return active
   }
 
   async function releaseAll(entries: readonly FactsQueueEntry[], claimId: string): Promise<void> {
@@ -201,6 +216,7 @@ export function createFactsRunner(deps: FactsRunnerDeps) {
       const outcome: FactsRunOutcome = { version: 1, runId: ledger.runId, status: result.status, ...(result.detail === undefined ? {} : { detail: result.detail }), finishedAt: deps.now().toISOString() }
       await writeRunJson(outcomePath(runDir), outcome)
       const decided = await finalizeFactsRun(finalizeDeps(), runDir)
+      await prune()
       return { status: decided ?? "failed", runId: ledger.runId }
     } finally {
       activeRunId = undefined

@@ -19,7 +19,7 @@ import type { MemoryCommandContext, MemoryCommandDeps, MemoryCommandHandler } fr
 
 export { planFactsMutation, FactsPlanParentDirtyError } from "@oh-my-opencode/memory-core"
 // Dream conversation loading and selection run only when a dream fires, so the entry bundle loads them from here.
-export { computeUnreflectedVolumeFast, loadConversations, selectLoadedConversations } from "../dream-selector"
+export { computeUnreflectedVolumeFast, loadConversations, selectLoadedConversations } from "@oh-my-opencode/memory-core/dream-selection"
 
 type CommandRegistrar = (pi: MemoryCommandPort, deps: MemoryCommandDeps) => void
 

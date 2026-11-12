@@ -3,7 +3,7 @@
 // runtime loader.
 
 import type { MemoryIdentityContext } from "../context"
-import type { PalacePeopleOptions } from "./people"
+import type { PalacePeopleOptions } from "@oh-my-opencode/memory-core/palace"
 
 export interface PalaceCommandUi {
   notify(message: string, type?: "info" | "warning" | "error"): void

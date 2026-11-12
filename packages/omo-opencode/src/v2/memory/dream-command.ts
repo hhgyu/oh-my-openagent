@@ -12,8 +12,8 @@ import { parseCommandArgs } from "@oh-my-opencode/memory-core/commands/args"
 import { isAbsolute, relative, sep } from "node:path"
 import type { BoundMemorySession } from "./binding"
 import type { DreamFireOutcome, DreamRequest } from "./dream-fire"
-import type { DreamTriggerSettings } from "./dream-gates"
-import { selectRecentDreamConversations } from "./dream-selector"
+import type { DreamTriggerSettings } from "@oh-my-opencode/memory-core/dream-gates"
+import { selectRecentDreamConversations } from "@oh-my-opencode/memory-core/dream-selection"
 import type { ExtraMemoryCommand } from "./reflect-command"
 
 /** Registered name of the dream command, kept apart from the core `MEMORY_COMMAND_NAMES` record. */
@@ -72,7 +72,7 @@ async function conversationScope(bound: BoundMemorySession, flags: ReadonlyMap<s
   const selected = await selectRecentDreamConversations({
     transcriptsDir: bound.paths.transcripts, currentConversationId: bound.sessionID,
     autoSelectMax: settings.autoSelectMax, autoSelectMaxBytes: settings.autoSelectMaxChars, now: () => new Date(deps.now?.() ?? Date.now()),
-  }, recentN, focus.length === 0 ? undefined : focus)
+  }, recentN, focus.length === 0 ? {} : { focus })
   if (selected.conversationIds.length === 0) throw new TypeError("--recent found no unreflected conversations")
   return selected.conversationIds
 }
