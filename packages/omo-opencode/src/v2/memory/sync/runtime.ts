@@ -19,6 +19,7 @@ import type { MemoryEnv, MemoryLogger } from "../config"
 import { syncEnabled, type MemoryRpcSync, type MemorySyncSeams, type SyncHost, type SyncHostModule, type SyncRpcVerb } from "./ports"
 
 export interface MemorySyncRuntimeOptions {
+  readonly initialBinding?: Pick<BoundMemorySession, "settings" | "identity">
   readonly env: MemoryEnv
   readonly memoryRoot: string
   readonly logger: MemoryLogger
@@ -59,6 +60,7 @@ export function createMemorySyncRuntime(options: MemorySyncRuntimeOptions): Memo
   const waiting = new Map<string, BoundMemorySession>()
   const seeded = (bound: BoundMemorySession): boolean => existsSync(join(bound.paths.repo, ".git", "config"))
   let latestRepo: string | undefined
+  let latestBound = options.initialBinding
   let loaded: Promise<SyncHost> | undefined
   let closed = false
 
@@ -68,6 +70,7 @@ export function createMemorySyncRuntime(options: MemorySyncRuntimeOptions): Memo
       onStatusChange: repo => { if (!closed) options.onRepoChanged(repo) },
       onHeadChange: repo => { if (!closed) options.onRepoChanged(repo) },
       syncStatus: () => latestRepo === undefined ? Promise.resolve(undefined) : status(latestRepo),
+      enabled: () => latestBound === undefined || syncEnabled(latestBound),
       ...(options.seams?.accountSource === undefined ? {} : { source: options.seams.accountSource }),
     })).catch((error: unknown) => {
       // A failed load is not cached: the next bind or call retries.
@@ -129,9 +132,11 @@ export function createMemorySyncRuntime(options: MemorySyncRuntimeOptions): Memo
 
   return {
     onBound(bound) {
-      if (closed || !syncEnabled(bound)) return
+      if (closed) return
+      latestBound = bound
       const repo = bound.paths.repo
       latestRepo = repo
+      if (!syncEnabled(bound)) return
       if (!acquisitions.has(repo) && !waiting.has(repo)) waiting.set(repo, bound)
       acquireSeeded()
     },

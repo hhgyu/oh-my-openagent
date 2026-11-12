@@ -56,6 +56,7 @@ export function createSyncHost(options: SyncHostOptions): SyncHost {
     pinDir,
     signal: options.signal,
     syncStatus: options.syncStatus,
+    enabled: options.enabled,
   })
   return {
     acquire: (identity, paths, space) => runner.acquire(identity, paths, { enabled: true }, space),
