@@ -1755,6 +1755,7 @@
     "packages/senpi-task/src/agents/omo-config-agents.ts",
     "packages/senpi-task/src/agents/resolve-agent-categories.ts",
     "packages/senpi-task/src/agents/resolve-agent.ts",
+    "packages/senpi-task/src/agents/skill-invocation-evidence.ts",
     "packages/senpi-task/src/agents/task-agents.ts",
     "packages/senpi-task/src/agents/tools.ts",
     "packages/senpi-task/src/category/anthropic-categories.ts",
