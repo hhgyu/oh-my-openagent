@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "@code-yeongyu/senpi"
+import { createToolArgumentValidator } from "../argument-validation"
 
 import { normalizeTaskToolArguments } from "./argument-normalization"
 import { buildTaskToolDescription, TASK_PROMPT_GUIDELINES, TASK_PROMPT_SNIPPET } from "./description"
@@ -16,6 +17,7 @@ export const TASK_TOOL_NAME = "task"
 // tripwire), and calling it here would statically bind this module to the engine barrel.
 export function createTaskTool(deps: TaskToolDeps): ToolDefinition<typeof TaskToolParams, TaskToolDetails> {
   const execute = buildTaskExecute(deps)
+  const validate = createToolArgumentValidator(TaskToolParams)
   return {
     name: TASK_TOOL_NAME,
     label: "Task",
@@ -23,7 +25,7 @@ export function createTaskTool(deps: TaskToolDeps): ToolDefinition<typeof TaskTo
     promptSnippet: TASK_PROMPT_SNIPPET,
     promptGuidelines: [...TASK_PROMPT_GUIDELINES],
     parameters: TaskToolParams,
-    prepareArguments: normalizeTaskToolArguments,
+    prepareArguments: value => validate(normalizeTaskToolArguments(value)),
     execute: (toolCallId, params, signal, onUpdate, ctx) => execute(toolCallId, params, signal, onUpdate, ctx),
     renderCall: (args, theme) =>
       linesComponent((width) => renderTaskCallLines(args, theme, width).map((line) => theme.fg("toolTitle", line))),

@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "@code-yeongyu/senpi"
 import { Type } from "typebox"
 import type { Static } from "typebox"
+import { createToolArgumentValidator } from "../argument-validation"
 
 import type { TaskStatus } from "../../state"
 import { withDroppedSteeringNotice } from "../../state/queued-steering"
@@ -12,7 +13,7 @@ export const TaskCancelParams = Type.Object({
   task_id: Type.Optional(Type.String({ description: "Task id (st_...) of the child to cancel. Pass task_id or name; when both are given, task_id wins and name is ignored." })),
   name: Type.Optional(Type.String({ description: "Canonical task name; required if task_id is omitted." })),
   reason: Type.Optional(Type.String({ description: "Optional human-readable reason recorded on the cancelled task." })),
-})
+}, { additionalProperties: false })
 
 export type TaskCancelInput = Static<typeof TaskCancelParams>
 
@@ -84,6 +85,7 @@ export function createTaskCancelTool(deps: TaskCancelDeps): ToolDefinition<typeo
     // Rarely used: searchable and activated by name on first call (#11454).
     exposure: "search", allowLazyActivation: true, searchKeywords: ["cancel child", "stop task", "abort subagent"],
     parameters: TaskCancelParams,
+    prepareArguments: createToolArgumentValidator(TaskCancelParams),
     execute: (_toolCallId, params) => runTaskCancel(deps.manager, params),
     renderCall: (args, theme) => renderTaskCancelCall(args, theme),
     renderResult: (result, options, theme) => renderTaskCancelResult(result, options, theme),

@@ -77,6 +77,6 @@ export const TaskToolParams = Type.Object({
       },
     ),
   ),
-})
+}, { additionalProperties: false })
 
 export type TaskToolParamsStatic = Static<typeof TaskToolParams>
