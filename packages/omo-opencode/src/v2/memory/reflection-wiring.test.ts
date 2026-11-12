@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
+import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { join } from "node:path"
+import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
 import { OmoConfigSchema } from "@oh-my-opencode/omo-config-core"
 import { catalogModel, conversation, createScriptedFactsPorts, until } from "./facts.test-support"
-import { registerMemoryComponent } from "./index"
+import { MEMORY_BINDING_KEY, registerMemoryComponent } from "./index"
 import type { FactsPortRequest } from "./facts-child"
 import type { ReflectionPortRequest } from "./reflection-child"
 import type { MemoryReflectionSeams } from "./reflection-component"
 import { createMemoryFixture } from "./test-support"
 import { FACTS_RECORD_TOOL_NAME } from "./facts-record-tool"
-import { createCountingSlot, createManualTimers, createScriptedPort } from "./kibitzer/test-support"
+import { createCountingSlot, createManualTimers, createScriptedPort, type ScriptedPort } from "./kibitzer/test-support"
 import { REFLECTION_TOOL_NAMES } from "./reflection-tools"
 
 setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
@@ -27,6 +30,58 @@ function setup(seams: Partial<MemoryReflectionSeams> = {}) {
 }
 
 describe("memory reflection wiring", () => {
+  test.each(["request", "session.compaction.ended", "session.compaction.failed", "session.execution.interrupted"] as const)(
+    "#given held Kibitzer nudges and step-eligible reflection #when %s occurs #then only acceptance drops nudges and chooses a compaction reservation",
+    async outcome => {
+      // given
+      const { f, ports, options } = setup()
+      f.addSession("root", { messages: conversation("coffee preference", "noted") })
+      const judges: ScriptedPort[] = []
+      let delivered: (() => void) | undefined
+      const wake = new Promise<void>(resolve => { delivered = resolve })
+      const cleanup = await registerMemoryComponent(f.host, {
+        ...options,
+        kibitzer: {
+          createPort: request => { const port = createScriptedPort(request); judges.push(port); return port },
+          createWakeSlot: () => createCountingSlot(), timers: createManualTimers(), onWake: () => delivered?.(),
+        },
+      })
+      try {
+        await f.runTool("memory", "root", {
+          command: "create", reason: "coffee", file_path: "reference/coffee.md",
+          description: "Coffee preference is oat milk flat white", file_text: "The usual coffee is an oat milk flat white.",
+        })
+        await f.prompt("root", "coffee preference")
+        await until(() => judges.length === 1)
+        const judge = judges[0]
+        if (judge === undefined) throw new Error("no Kibitzer port was created")
+        const child = await judge.started(1)
+        await new Promise<void>(resolve => setImmediate(resolve))
+        await f.runTool("nudge", child.sessionID, { path: "reference/coffee.md", hint: "The note records that the usual coffee is an oat milk flat white." })
+        child.finish()
+        await wake
+        const binding = f.sessions.get("root")?.metadata?.[MEMORY_BINDING_KEY] as { identity: string }
+        const paths = buildIdentityPaths(f.env.OMO_MEMORY_HOME ?? "", binding.identity)
+        const pendingName = readdirSync(paths.recallPending)[0]
+        if (pendingName === undefined) throw new Error("no held nudge file was written")
+        const pending = join(paths.recallPending, pendingName)
+        expect(existsSync(pending)).toBe(true)
+        // when
+        await f.compaction("root")
+        expect(existsSync(pending)).toBe(true)
+        if (outcome !== "request") await f.emitEvent(outcome, "root")
+        await f.idle("root")
+        await until(() => ports.children.length === 1)
+        const payload = JSON.parse(readFileSync(join(paths.reflection, "runs", "run-1", "transcript-payload.json"), "utf8")) as { request: { trigger: string } }
+        await cleanup()
+        // then
+        expect(payload.request.trigger).toBe(outcome === "session.compaction.ended" ? "compaction" : "step-count")
+        expect(existsSync(pending)).toBe(outcome !== "session.compaction.ended")
+        expect(judges).toHaveLength(1)
+      } finally { await cleanup() }
+    },
+  )
+
   test("#given a capable reflection host #when the component registers #then /reflect is added beside the core memory commands", async () => {
     // given
     const { f, options } = setup()
