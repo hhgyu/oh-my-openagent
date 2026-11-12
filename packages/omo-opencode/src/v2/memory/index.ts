@@ -36,6 +36,7 @@ import { createMemoryStatusRpc } from "./status-rpc"
 import { createMemorySyncRuntime } from "./sync/runtime"
 import { registerMemorySyncRpc } from "./sync/rpc"
 import type { MemorySyncSeams } from "./sync/ports"
+import { observeAcceptedCompactions } from "./compaction-events"
 
 export { MEMORY_BINDING_KEY } from "./binding"
 export { MEMORY_PART_MARKER, PROJECTION_PIN_KEY } from "./projection"
@@ -43,7 +44,7 @@ export { RECALL_PART_MARKER } from "./recall-delivery"
 export { MEMORY_COMMAND_NAMES, MEMORY_COMMAND_OUTPUT_KEY } from "./commands"
 export { MEMORY_COMMAND_OUTPUT_ID_PREFIX } from "./command-output"
 
-export type MemoryHost = Pick<Plugin.Context, "session" | "tool" | "options" | "location"> & Partial<Pick<Plugin.Context, "app" | "agent" | "command" | "rpc" | "model" | "provider" | "integration">>
+export type MemoryHost = Pick<Plugin.Context, "session" | "tool" | "options" | "location" | "event"> & Partial<Pick<Plugin.Context, "app" | "agent" | "command" | "rpc" | "model" | "provider" | "integration">>
 
 export interface MemoryComponentOptions {
   /** Environment for `OMO_MEMORY_HOME` and identity resolution; defaults to `process.env`. */
@@ -90,7 +91,7 @@ export interface MemoryComponentOptions {
  *   next bind enqueues a final delta and recovers stranded runs (see `./facts`).
  * - reflection worker -> an owned hidden `omo-reflection` child editing through four private tools, a parent
  *   runner that validates and merges its branch, and bind-time crash recovery (see `./reflection-component`);
- *   step-count and compaction triggers on `experimental.idle` / `compaction` (see `./reflection-triggers`)
+ *   step-count and compaction triggers on `experimental.idle` / `session.compaction.ended` (see `./reflection-triggers`)
  *   and `/reflect` (see `./reflect-command`); dreams through the same runner with the hidden `omo-dream` agent,
  *   an idle timer and a bind-time pressure origin (see `./dream-triggers`) and `/dream` (see `./dream-command`);
  *   the read-side commands `/doctor`, `/sleeptime`, `/people` (no `--ask`) and `/palace` over the memory-core
@@ -224,6 +225,13 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
     return disposal
   }
   try {
+    registrations.push(observeAcceptedCompactions(context.event, async sessionID => {
+      if (closed || isOwnedSession(sessionID)) return
+      triggers?.onCompaction(sessionID)
+      const bound = await binder.resolve(sessionID)
+      // V2 holds accepted Kibitzer nudges only in this pending store; the resident sidecar survives.
+      if (bound !== undefined && !closed) await stores.pending(bound).delete(sessionID)
+    }, logger))
     registrations.push(await context.session.hook("prompt", input => {
       if (closed) return
       if (isOwnedSession(input.sessionID)) return
@@ -272,7 +280,6 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       // A compaction request offers `tools` too: the same child-only exposure rules as the context hook.
       narrowRequestTools(value)
       projection.markCompacted(value.sessionID)
-      if (!closed) triggers?.onCompaction(value.sessionID)
       dreams?.onCompaction(value.sessionID)
     }))
     registrations.push(await context.session.hook("experimental.idle", async value => {

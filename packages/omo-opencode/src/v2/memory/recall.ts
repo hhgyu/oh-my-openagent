@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import {
-  GitMemoryRepo, PendingNudges, RecallCorpusCache, RecallLedger, planRecallQueries, selectRecallCandidates, type RecallCandidate,
+  GitMemoryRepo, PendingNudges, RecallLedger, planRecallQueries, selectRecallCandidates, type RecallCandidate, type RecallCorpusCache,
 } from "@oh-my-opencode/memory-core"
 import type { OmoMemoryRecall } from "@oh-my-opencode/omo-config-core"
 import { existsSync } from "@oh-my-opencode/memory-core/fs"
@@ -13,7 +13,7 @@ const MAX_USER_TEXTS = 4
 
 export interface RecallStores {
   ledger(bound: BoundMemorySession): Pick<RecallLedger, "surfacedPaths" | "markSurfaced">
-  pending(bound: BoundMemorySession): Pick<PendingNudges, "take" | "write">
+  pending(bound: BoundMemorySession): Pick<PendingNudges, "take" | "write" | "delete">
 }
 
 export const fileRecallStores: RecallStores = {
