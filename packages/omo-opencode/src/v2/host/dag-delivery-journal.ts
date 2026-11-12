@@ -37,6 +37,9 @@ export interface DagDeliveryJournal {
   /** Records the genuine synthetic ACK of an intent. Compare-and-set on the exact intent row. */
   markAcked(intent: DagDeliveryRecord, ack: { readonly id: string; readonly sessionID: string }): DagDeliveryRecord
   read(key: DagDeliveryKey): DagDeliveryRecord | undefined
+  /** The run's row (any checkpoint) that carries `inputID`, so one wake's content keeps ONE delivery
+   * across checkpoints; an acked row wins over an intent. */
+  findInput(runId: string, inputID: string): DagDeliveryRecord | undefined
   /** Every run with a row, for retirement once the run is gone. */
   listRuns(): string[]
   /** Forgets a run that no longer exists. */
@@ -121,6 +124,15 @@ export function openDagDeliveryJournal(options: DagDeliveryJournalOptions): DagD
       }).immediate()
     },
     read(key) { active(); return db.transaction(() => readChecked(parseKey(key))).immediate() },
+    findInput(runId, inputID) {
+      active()
+      const run = text.parse(runId)
+      return db.transaction(() => {
+        const rows = db.query<{ seq: number }, [string]>("SELECT seq FROM wakes WHERE run_id=? ORDER BY seq").all(run)
+        const matches = rows.flatMap(row => readChecked({ runId: run, seq: row.seq }) ?? []).filter(value => value.inputID === inputID)
+        return matches.find(value => value.phase === "acked") ?? matches[0]
+      }).immediate()
+    },
     listRuns() {
       active()
       return db.query<{ run_id: string }, []>("SELECT DISTINCT run_id FROM wakes ORDER BY run_id").all().map(row => row.run_id)
