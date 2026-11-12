@@ -642,7 +642,8 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       const row = await journal.read(ref.journalKey)
       return row?.phase === "closed" && row.locator.sessionID === ref.sessionID && row.locator.parentID === ref.parentID && row.locator.backendID === ref.backendID && row.locator.location === ref.location && row.revision >= ref.journalRevision
     },
-    beforeDetach(record) { if (record.status === "running" || record.status === "pending" || record.status === "paused") manager?.markObservationUncertain(record.task_id, new ChildObservationUncertain("observer-detached")) } })
+    beforeDetach(record) { if (record.status === "running" || record.status === "pending" || record.status === "paused") manager?.markObservationUncertain(record.task_id, new ChildObservationUncertain("observer-detached")) },
+    report(message, context) { console.warn(`[oh-my-openagent/v2] ${message}`, context) } })
   const registry: ResidencyRegistry = {
     get(id) { const handle = manager?.getResidentHandle(id); return handle ? { ...handle, kind: handle.kind ?? "in-process", terminate: handle.terminate ?? (async () => { throw new Error("Resident has no end port") }) } : undefined },
     entries() { return (manager?.residentTaskIds() ?? []).flatMap(id => { const handle = registry.get(id); return handle ? [handle] : [] }) },

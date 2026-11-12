@@ -194,6 +194,17 @@ test("unknown admission remains durable uncertainty and cannot replay after relo
 test("forged locator and stale durable owner cannot mutate a host child",async()=>{const f=fixture();const child=await f.stage();await expect(f.backend.close({...child})).rejects.toThrow();f.records.set("child-task",{...defined(f.records.get("child-task")),owner:"replacement"});await expect(f.backend.close(child)).rejects.toThrow();expect(f.events).toEqual(["create"])})
 test("foreign parent/location cannot be adopted or deleted",async()=>{const f=fixture();f.api.create=async()=>({id:sessionID("child"),parentID:sessionID("foreign"),location:{directory:"/other"}});await expect(f.stage()).rejects.toThrow();expect(f.events).not.toContain("remove")})
 test("cleanup failure retains uncertain custody and original parent scope stays alive",async()=>{const f=fixture();const child=await f.stage();f.api.remove=async()=>{throw Error("offline")};await expect(f.backend.close(child)).rejects.toThrow();expect(f.records.get("child-task")?.phase).toBe("uncertain");expect(()=>f.scopes.assert(f.parent)).not.toThrow()})
+test("a child the host already removed closes on the host's own not-found for that exact session, never on a foreign one",async()=>{
+ // given: the host removed the child; one backend's host names that child, the other names a different session
+ const notFound=(id:string)=>Object.assign(Error(`Session not found: ${id}`),{_tag:"Session.NotFoundError",sessionID:id})
+ const gone=fixture();const removed=await gone.stage();gone.sessions.delete("child");gone.api.get=async({sessionID})=>{throw notFound(sessionID)}
+ const foreign=fixture();const other=await foreign.stage();foreign.api.get=async()=>{throw notFound("other-session")}
+ // when
+ const probe=await gone.backend.hostRemoved(removed);await gone.backend.close(removed);const closing=foreign.backend.close(other)
+ // then
+ expect(probe).toBe(true);expect(gone.records.get("child-task")?.phase).toBe("closed");expect(removed.lease.signal.aborted).toBe(true);expect(gone.events).toEqual(["create"])
+ await expect(closing).rejects.toThrow("Child cleanup uncertain");expect(foreign.records.get("child-task")?.phase).toBe("uncertain");await expect(foreign.backend.hostRemoved(other)).rejects.toThrow("Session not found: other-session")
+})
 test("dispose joins in-flight creation and is idempotent",async()=>{const f=fixture();const pending=deferred<void>();const original=f.api.create;f.api.create=async input=>{const result=await original(input);await pending.promise;return result};const stage=f.stage();await Bun.sleep(0);const disposed=f.backend.dispose();pending.resolve();await expect(stage).rejects.toThrow();await disposed;await f.backend.dispose();expect(f.events.filter(x=>x==="remove")).toHaveLength(1)})
 
 test("synthetic admission IDs are durable and cannot be reused after later messages",async()=>{const f=fixture();const child=await f.stage();await f.backend.begin(child,{id:"initial",text:"work"});await f.backend.synthetic(child,{id:"s1",text:"next",resume:true});await f.backend.synthetic(child,{id:"s2",text:"next",resume:true});await expect(f.backend.synthetic(child,{id:"s1",text:"replay",resume:true})).rejects.toThrow();expect(f.events.filter(x=>x==="synthetic")).toHaveLength(2)})
