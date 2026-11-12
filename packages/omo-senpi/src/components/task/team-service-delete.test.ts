@@ -66,6 +66,7 @@ describe("createTeamService team deletion boundary", () => {
     await expect(service.deleteTeam({ teamRunId: unknownId })).resolves.toEqual({
       teamRunId: unknownId,
       cancelledTaskIds: [],
+      releasedTaskIds: [],
     })
   })
 })

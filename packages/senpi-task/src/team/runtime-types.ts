@@ -110,4 +110,5 @@ export type DeleteTeamDeps = {
 export type DeleteTeamResult = {
   readonly teamRunId: string
   readonly cancelledTaskIds: readonly string[]
+  readonly releasedTaskIds: readonly string[]
 }

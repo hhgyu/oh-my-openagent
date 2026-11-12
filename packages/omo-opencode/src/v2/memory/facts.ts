@@ -5,8 +5,8 @@
 //   settle enqueues its journal delta into memory-core's `FactsQueue`; the settle-count debounce
 //   (`memory.facts.debounce_settles`, default 4, counted per identity) launches the extractor, and a
 //   session's first settle launches at once when a previous process left pending batches;
-// - `session_shutdown` final delta -> none exists, so a session bound in an earlier process enqueues
-//   its last delta at its next bind, and every bind reconciles stranded runs (`facts-recovery.ts`);
+// - `session_shutdown` final delta -> bounded local enqueue on close/location shutdown; a session
+//   bound in an earlier process also catches up at its next bind after a crash;
 // - the in-process senpi child -> an owned hidden `omo-facts` child whose only tool is `record_fact`
 //   (`facts-child.ts`); the parent applies the batch (`facts-finalize.ts`).
 // `memory.facts.enabled` (and the per-identity override) is read per call. Children never bind.
@@ -24,6 +24,7 @@ import type { FactsChildHosting } from "./facts-child"
 import { availableFactsModels, resolveFactsModel } from "./facts-model"
 import { factsOwnerAlive, retireFactsOwner, registerFactsOwner } from "./facts-owners"
 import { createFactsRunner, type FactsRunner } from "./facts-runner"
+import { drainFinalFacts } from "./facts-shutdown"
 
 /** Native in-process memory child deadline. */
 const FACTS_CHILD_DEADLINE_MS = 5 * 60_000
@@ -35,6 +36,7 @@ interface MemoryFactsDeps {
   readonly now: () => number
   readonly loadSettings: (cwd: string) => OmoMemorySettings
   readonly hosting: FactsChildHosting
+  readonly flushJournal: (bound: BoundMemorySession, signal: AbortSignal) => Promise<unknown>
   /** Live catalog; absent means no model can be resolved and no launch happens. */
   readonly catalog?: () => Promise<readonly CatalogModel[]>
   readonly loadConfig?: (cwd: string) => OmoConfig
@@ -67,7 +69,9 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
   const states = new Map<string, IdentityState>()
   const userInput = new Set<string>()
   const work = new Set<Promise<unknown>>()
+  const sessions = new Map<string, BoundMemorySession>()
   let closed = false
+  let closing: Promise<void> | undefined
 
   function track(promise: Promise<unknown>, label: string): void {
     const tracked = promise.catch((error: unknown) => { deps.logger.warn(`facts ${label} failed`, { error: describeError(error) }) })
@@ -106,10 +110,10 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
     track(state.runner.launchPending(request), "extractor launch")
   }
 
-  async function enqueue(bound: BoundMemorySession, state: IdentityState): Promise<void> {
+  async function enqueue(bound: BoundMemorySession, state: IdentityState, signal?: AbortSignal): Promise<void> {
     const entries = await new TranscriptJournal({ journalDir: join(bound.paths.transcripts, bound.sessionID) }).readEntries()
     if (entries.length === 0) return
-    await state.runner.queue.enqueue({ identity: bound.identity, sessionId: bound.sessionID, conversationId: bound.sessionID, entries })
+    await state.runner.queue.enqueue({ identity: bound.identity, sessionId: bound.sessionID, conversationId: bound.sessionID, entries, ...(signal === undefined ? {} : { signal }) })
   }
 
   async function settle(sessionID: string): Promise<void> {
@@ -144,6 +148,7 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
     },
     async onBound(bound) {
       if (closed || !factsSettings(bound).enabled) return
+      sessions.set(bound.sessionID, bound)
       const state = stateFor(bound)
       state.settled.delete(bound.sessionID)
       const run = (async () => {
@@ -164,14 +169,26 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
     async settled() {
       while (work.size > 0) await Promise.allSettled([...work])
     },
-    async close() {
+    close() {
+      if (closing !== undefined) return closing
       closed = true
-      await Promise.allSettled([...states.values()].map(state => state.runner.cancelActive()))
-      while (work.size > 0) await Promise.allSettled([...work])
-      deps.hosting.close()
-      states.clear()
-      userInput.clear()
-      retireFactsOwner(owner)
+      closing = (async () => {
+        const cancelled = Promise.allSettled([...states.values()].map(state => state.runner.cancelActive()))
+        await drainFinalFacts({
+          sessions: [...sessions.values()].filter(bound => factsSettings(bound).enabled),
+          flush: deps.flushJournal,
+          enqueue: (bound, signal) => enqueue(bound, stateFor(bound), signal),
+          logger: deps.logger,
+        })
+        await cancelled
+        while (work.size > 0) await Promise.allSettled([...work])
+        deps.hosting.close()
+        states.clear()
+        sessions.clear()
+        userInput.clear()
+        retireFactsOwner(owner)
+      })()
+      return closing
     },
   }
 }

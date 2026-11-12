@@ -38,6 +38,7 @@ import { registerMemorySyncRpc } from "./sync/rpc"
 import type { MemorySyncSeams } from "./sync/ports"
 import { observeAcceptedCompactions } from "./compaction-events"
 import { createAcceptedTurns } from "./accepted-turns"
+import { watchLocationShutdown } from "../orchestration/native-task/location-shutdown"
 
 export { MEMORY_BINDING_KEY } from "./binding"
 export { MEMORY_PART_MARKER, PROJECTION_PIN_KEY } from "./projection"
@@ -89,7 +90,8 @@ export interface MemoryComponentOptions {
  *   (see `./commands`, `./command-output`);
  * - facts queue / extractor (`facts-wiring.ts`) -> `prompt` marks real user input, `experimental.idle` enqueues
  *   and debounces, an owned hidden `omo-facts` child records through `record_fact`, the parent applies, and the
- *   next bind enqueues a final delta and recovers stranded runs (see `./facts`).
+ *   close/location shutdown enqueues the final delta without extraction; the next bind catches up
+ *   after a crash and recovers stranded runs (see `./facts`).
  * - reflection worker -> an owned hidden `omo-reflection` child editing through four private tools, a parent
  *   runner that validates and merges its branch, and bind-time crash recovery (see `./reflection-component`);
  *   step-count and compaction triggers on `experimental.idle` / `session.compaction.ended` (see `./reflection-triggers`)
@@ -137,7 +139,7 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
   const kibitzer: KibitzerComponent | undefined = seams?.createPort !== undefined || (kibitzerHostCapable(context) && persona !== null)
     ? createKibitzerComponent({ host: context, binder, stores, corpusCache, logger, now, ...seams })
     : undefined
-  const factsParts = createFactsComponent(context, { binder, logger, now, loadSettings, ...(options.facts === undefined ? {} : { seams: options.facts }) })
+  const factsParts = createFactsComponent(context, { binder, logger, now, loadSettings, flushJournal: (bound, signal) => journal.onBound(bound, signal), ...(options.facts === undefined ? {} : { seams: options.facts }) })
   const facts = factsParts?.facts
   const factsHosting = factsParts?.hosting
   const factsPersona = factsParts?.persona
@@ -232,6 +234,10 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
     return disposal
   }
   try {
+    if (context.event !== undefined) {
+      const stopShutdownWatch = watchLocationShutdown(context, cleanup)
+      registrations.push({ dispose: async () => { stopShutdownWatch() } })
+    }
     if (context.event !== undefined) registrations.push(userTurns.register(context.event))
     registrations.push(observeAcceptedCompactions(context.event, async sessionID => {
       if (closed || isOwnedSession(sessionID)) return

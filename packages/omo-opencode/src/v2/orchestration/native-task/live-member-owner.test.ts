@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -18,7 +18,7 @@ import { TEAM_MEMBER_SEND_PERMISSION, TEAM_MEMBER_SEND_TOOL_NAME } from "../../t
 import { createNativeChildGuardBinding } from "./child-guard-binding"
 import { childCatalog, hideUnboundTeamMemberSend } from "./component"
 import { prepareHostTaskGrant } from "./host-grant"
-import { acquireTeamMemberOwner } from "./live-member-owner"
+import { acquireTeamMemberOwner, type MemberChildInput } from "./live-member-owner"
 
 type Info = ReturnType<ToolEditor["list"]>[number]
 type Context = Parameters<Info["execute"]>[1]
@@ -63,8 +63,8 @@ async function fixture(options: { readonly guarded?: boolean } = {}) {
   cleanups.push(() => Effect.runPromise(Scope.close(scope, Exit.succeed(undefined))))
   const context = (sessionID = MEMBER, agent = AGENT): Context => ({ sessionID, agent, messageID: "unit-message" as Context["messageID"], id: "unit-call" as Context["id"], progress: () => Effect.void })
   const run = (input: unknown, ctx = context()) => Effect.runPromiseExit(defined(tools.get(TEAM_MEMBER_SEND_TOOL_NAME)).execute(input, ctx))
-  const bindChild = (sessionID = MEMBER) => owner.bindChild({ child: {}, sessionID, agent: AGENT, taskId: "st_00000001", leadSessionID: LEAD,
-    team: { runId: RUN, memberName: "alpha" }, config, assertCurrent() {} })
+  const bindChild = (sessionID = MEMBER, appendEvent?: MemberChildInput["appendEvent"]) => owner.bindChild({ child: {}, sessionID, agent: AGENT, taskId: "st_00000001", leadSessionID: LEAD,
+    team: { runId: RUN, memberName: "alpha" }, config, assertCurrent() {}, ...(appendEvent && { appendEvent }) })
   const leadInbox = getInboxDir(resolveBaseDir(config), RUN, "lead")
   const leadMessages = () => existsSync(leadInbox) ? readdirSync(leadInbox).filter(name => name.endsWith(".json")) : []
   return { tools, owner, guard, config, run, context, bindChild, leadInbox, leadMessages }
@@ -111,6 +111,17 @@ describe("#given the dedicated team member send registration", () => {
 })
 
 describe("#given a bound in-process member", () => {
+  test("#when audit append fails after enqueue #then the successful send is retained and no retryable tool failure is returned", async () => {
+    const f = await fixture()
+    const producer = f.bindChild(MEMBER, () => { throw Error("audit disk unavailable") })
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const exit = await f.run({ to: "lead", message: "report" })
+      expect(Exit.isSuccess(exit)).toBe(true)
+      expect(f.leadMessages()).toHaveLength(1)
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally { warn.mockRestore(); await producer.join() }
+  })
   test("#when it sends to the lead #then exactly one message lands in the team-core lead inbox", async () => {
     // given
     const f = await fixture()
@@ -182,7 +193,7 @@ describe("#given a bound in-process member", () => {
     // given
     const f = await fixture()
     const producer = f.bindChild()
-    const release = Promise.withResolvers<void>(), held = Promise.withResolvers<void>()
+    const release: PromiseWithResolvers<void> = Promise.withResolvers(), held: PromiseWithResolvers<void> = Promise.withResolvers()
     // The REAL team-core inbox lock is held, so the original send blocks inside sendMessage.
     mkdirSync(f.leadInbox, { recursive: true })
     const lock = withLock(`${f.leadInbox}.lock`, async () => { held.resolve(); await release.promise })

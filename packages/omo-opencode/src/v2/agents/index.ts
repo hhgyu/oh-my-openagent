@@ -1,21 +1,28 @@
 import { Agent, Model } from "@opencode/plugin"
 import type { AgentEditor, AgentDomain } from "@opencode/plugin/promise/agent"
 import type { LoadOmoConfigOptions } from "@oh-my-opencode/omo-config-core"
+import { CURATED_READONLY_AGENT_NAMES } from "@oh-my-opencode/senpi-task/agents-builtin"
 import { AGENT_DEFINITIONS } from "./definitions"
 import { loadAgentsConfig, type AgentsConfig, type AgentOverride } from "./config"
+import { nativeAgentIdentities } from "./native-identities"
+import { agentOverrideSchema } from "../config/agent-overrides"
 
 export { AGENT_IDS, AGENT_DEFINITIONS } from "./definitions"
 export { loadAgentsConfig } from "./config"
 
 type Rule = ReturnType<AgentEditor["list"]>[number]["permissions"][number]
 function permissions(override: AgentOverride): Rule[] {
-  const rules: Rule[] = [...(override.permissions ?? [])]
+  const rules: Rule[] = []
+  for (const [action, enabled] of Object.entries(override.tools ?? {})) {
+    if (enabled === true) rules.push({ action, resource: "*", effect: "allow" })
+  }
+  rules.push(...(override.permissions ?? []))
   for (const [action, value] of Object.entries(override.permission ?? {})) {
     if (typeof value === "string") rules.push({ action, resource: "*", effect: value })
     else for (const [resource, effect] of Object.entries(value)) rules.push({ action, resource, effect })
   }
   for (const [action, enabled] of Object.entries(override.tools ?? {})) {
-    rules.push({ action, resource: "*", effect: enabled ? "allow" : "deny" })
+    if (enabled === false) rules.push({ action, resource: "*", effect: "deny" })
   }
   for (const action of override.disallowed_tools ?? []) rules.push({ action, resource: "*", effect: "deny" })
   // Unified config keeps historical tool names, while OpenCode 2.2 uses
@@ -33,8 +40,10 @@ function permissions(override: AgentOverride): Rule[] {
 
 export function applyAgents(editor: AgentEditor, config: AgentsConfig): void {
   const disabled = new Set(config.disabled_agents)
-  for (const definition of AGENT_DEFINITIONS) {
-    const override = config.agents[definition.id] ?? {}
+  for (const definition of [...AGENT_DEFINITIONS, ...nativeAgentIdentities(config)]) {
+    const converted = agentOverrideSchema.safeParse({ ...config.nativeAgents?.[definition.id], ...config.agents[definition.id] })
+    if (!converted.success) throw Error(`Cannot register OmO agent ${definition.id}. Fix agents.${definition.id} model and permission fields for OpenCode, then reload OmO.`)
+    const override = converted.data
     if (disabled.has(definition.id) || override.disable) {
       editor.remove(definition.id)
       continue
@@ -42,8 +51,8 @@ export function applyAgents(editor: AgentEditor, config: AgentsConfig): void {
     editor.update(definition.id, (agent) => {
       agent.name = Agent.Name.make(override.displayName ?? definition.name)
       agent.description = override.description ?? definition.description
-      agent.mode = override.mode ?? definition.mode
-      agent.hidden = false
+      agent.mode = definition.hidden ? "subagent" : override.mode ?? definition.mode
+      agent.hidden = definition.hidden ?? false
       agent.system = [override.prompt ?? definition.system, override.prompt_append].filter((part) => part !== undefined && part.length > 0).join("\n\n")
       if (override.color !== undefined) agent.color = override.color
       const first = override.models?.[0]
@@ -56,7 +65,9 @@ export function applyAgents(editor: AgentEditor, config: AgentsConfig): void {
       if (reasoning !== undefined && agent.model !== undefined) agent.model.variant = Model.VariantID.make(reasoning)
       if (override.temperature !== undefined) agent.request.body.temperature = override.temperature
       // Host replay starts from a fresh draft. Deduplication also makes reapplication safe.
-      const combined = [...agent.permissions, ...permissions(override), ...definition.restrictions]
+      const curatedDefaults: Rule[] = CURATED_READONLY_AGENT_NAMES.has(definition.id)
+        ? ["omo_native_readonly", "omo_native_ls"].map(action => ({ action, resource: "*", effect: "allow" })) : []
+      const combined = [...agent.permissions, ...curatedDefaults, ...permissions(override), ...definition.restrictions]
       agent.permissions = combined.filter((rule, index) => combined.findLastIndex((other) => other.action === rule.action && other.resource === rule.resource) === index)
     })
   }

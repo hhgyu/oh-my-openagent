@@ -174,7 +174,7 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
       if (recoveringKey) child = await backend.recover(journalKey, { restoreParked: restoring })
       else {
         if (!candidateID) throw Error("Native task stage has no candidate session")
-        child = await backend.stage({ key: journalKey, sessionID: candidateID, agent: guarded?.buildAgentID ?? "build", model }, { signal: spec.admission?.hostSignal?.() })
+        child = await backend.stage({ key: journalKey, sessionID: candidateID, agent: guarded?.buildAgentID ?? spec.agentType ?? "build", model }, { signal: spec.admission?.hostSignal?.() })
       }
       if (guarded && guardClaim) {
         const originalCurrent = backend.observationGuard(child)
