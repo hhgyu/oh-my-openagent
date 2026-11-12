@@ -3,6 +3,7 @@
 import { spawnSync } from "node:child_process";
 import {
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
@@ -562,7 +563,7 @@ function readSandboxText(root) {
 }
 
 function mkdirp(path) {
-	spawnSync("mkdir", ["-p", path]);
+	mkdirSync(path, { recursive: true });
 }
 
 function findOnPath(bin) {
