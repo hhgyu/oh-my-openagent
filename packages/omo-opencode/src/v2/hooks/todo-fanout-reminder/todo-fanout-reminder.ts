@@ -1,13 +1,13 @@
 import type * as Plugin from "@opencode/plugin/promise/plugin"
 import type { Registration } from "@opencode/plugin/promise/registration"
 import type { Result } from "@opencode/plugin/promise/tool"
-import { createPromptArmingLedger, type TodoFanoutArming } from "./prompt-arming"
+import { sharedPromptArmingLedger, type PromptArmingLedger, type TodoFanoutArming } from "./prompt-arming"
 import { TODO_FANOUT_REMINDER } from "./reminder"
 
-type Host = Pick<Plugin.Context, "tool" | "session" | "event" | "options">
+type Host = Pick<Plugin.Context, "tool" | "session" | "event" | "options"> & Partial<Pick<Plugin.Context, "location">>
 
 export interface TodoFanoutReminderOptions {
-  /** Ultrawork arming ledger. Defaults to a prompt-keyword ledger owned by this registration. */
+  /** Ultrawork arming ledger. Defaults to the shared directive and reminder ledger. */
   readonly arming?: TodoFanoutArming
 }
 
@@ -50,23 +50,22 @@ function appendReminder(result: Result): Result {
 export async function registerTodoFanoutReminder(context: Host, options: TodoFanoutReminderOptions = {}): Promise<() => Promise<void>> {
   if (context.options?.[DISABLED_FLAG] === true || context.options?.["omo-senpi-disabled"] === true ||
       process.env.OMO_SENPI_DISABLED === "1") return async () => {}
-  let ownedLedger: ReturnType<typeof createPromptArmingLedger> | undefined
+  let ownedLedger: PromptArmingLedger | undefined
   let arming: TodoFanoutArming
   if (options.arming === undefined) {
-    ownedLedger = createPromptArmingLedger()
+    ownedLedger = sharedPromptArmingLedger(context)
     arming = ownedLedger
   } else {
     arming = options.arming
   }
-  const reminded = new Set<string>()
+  const reminderLedger = ownedLedger ?? sharedPromptArmingLedger(context)
   const registrations: Registration[] = []
   const stop = new AbortController()
   let closed = false
   let pump: Promise<void> | undefined
 
   const forget = (sessionID: string) => {
-    reminded.delete(sessionID)
-    ownedLedger?.disarm(sessionID)
+    reminderLedger.resetReminder(sessionID)
   }
 
   let disposal: Promise<void> | undefined
@@ -77,7 +76,6 @@ export async function registerTodoFanoutReminder(context: Host, options: TodoFan
     disposal = (async () => {
       const results = await Promise.allSettled(registrations.map(registration => registration.dispose()))
       if (pump) await pump
-      reminded.clear()
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
       if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Todo fan-out reminder cleanup failed")
     })()
@@ -93,8 +91,7 @@ export async function registerTodoFanoutReminder(context: Host, options: TodoFan
     }
     registrations.push(await context.tool.hook("execute.after", event => {
       if (closed || event.status !== "completed" || !addsTodos(event.tool, event.input)) return
-      if (!arming.isArmed(event.sessionID) || reminded.has(event.sessionID)) return
-      reminded.add(event.sessionID)
+      if (!arming.isArmed(event.sessionID) || !reminderLedger.claimReminder(event.sessionID)) return
       event.result = appendReminder(event.result)
     }))
     pump = (async () => {
@@ -102,6 +99,8 @@ export async function registerTodoFanoutReminder(context: Host, options: TodoFan
         for await (const event of context.event.subscribe({ types: ["session.compaction.ended", "session.deleted"], signal: stop.signal })) {
           if (closed) break
           forget(event.data.sessionID)
+          if (event.type === "session.compaction.ended") ownedLedger?.compact(event.data.sessionID, event.id)
+          else ownedLedger?.disarm(event.data.sessionID)
         }
       } catch (error) {
         if (!stop.signal.aborted) console.warn("[oh-my-openagent/v2] todo-fanout-reminder event stream failed", error)

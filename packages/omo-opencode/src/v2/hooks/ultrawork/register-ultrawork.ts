@@ -3,6 +3,7 @@ import type { Registration } from "@opencode/plugin/promise/registration"
 import type { SessionContext, SessionPrompt } from "@opencode/plugin/promise/session"
 import { resolveVariant, ultraworkPromptVariants, type VariantTable } from "@oh-my-opencode/prompts-core"
 import { classifyUltraworkPrompt } from "./classify-prompt"
+import { sharedPromptArmingLedger } from "../todo-fanout-reminder/prompt-arming"
 
 /*
  * Event mapping (Native Senpi -> OpenCode 2):
@@ -18,10 +19,9 @@ import { classifyUltraworkPrompt } from "./classify-prompt"
  * duplicates it.
  */
 
-type Host = Pick<Plugin.Context, "session" | "options">
+type Host = Pick<Plugin.Context, "session" | "options"> & Partial<Pick<Plugin.Context, "location" | "event">>
 
 const DIRECTIVE_MARKER = "omo.ultrawork"
-const MAX_ARMED_SESSIONS = 1024
 const ULTRAWORK_VARIANTS: VariantTable = ultraworkPromptVariants
 
 function isDisabled(host: Host): boolean {
@@ -42,7 +42,9 @@ function carriesDirective(context: SessionContext): boolean {
 /** Registers ultrawork keyword arming and directive injection; the cleanup disposes both hooks. */
 export async function registerUltrawork(host: Host): Promise<() => Promise<void>> {
   if (isDisabled(host)) return async () => {}
-  const armed = new Set<string>()
+  const arming = sharedPromptArmingLedger(host)
+  const stop = new AbortController()
+  let pump: Promise<void> | undefined
   let closed = false
 
   async function isChildSession(sessionID: SessionPrompt["sessionID"]): Promise<boolean> {
@@ -56,18 +58,16 @@ export async function registerUltrawork(host: Host): Promise<() => Promise<void>
   }
 
   async function onPrompt(input: SessionPrompt): Promise<void> {
-    if (closed || armed.has(input.sessionID)) return
+    if (closed || arming.isArmed(input.sessionID)) return
     if (classifyUltraworkPrompt(input.prompt) !== "arm") return
     if (await isChildSession(input.sessionID) || closed) return
-    armed.add(input.sessionID)
-    if (armed.size > MAX_ARMED_SESSIONS) {
-      const oldest = armed.values().next()
-      if (!oldest.done) armed.delete(oldest.value)
-    }
+    arming.arm(input.sessionID)
   }
 
   function onContext(context: SessionContext): void {
-    if (closed || !armed.has(context.sessionID) || carriesDirective(context)) return
+    if (closed) return
+    arming.resume(context.sessionID)
+    if (!arming.isArmed(context.sessionID) || carriesDirective(context)) return
     const directive = directiveFor(context)
     if (directive === undefined) return
     context.system.push({ type: "text", text: directive, metadata: { [DIRECTIVE_MARKER]: true } })
@@ -78,13 +78,25 @@ export async function registerUltrawork(host: Host): Promise<() => Promise<void>
   const cleanup = (): Promise<void> => {
     if (disposal) return disposal
     closed = true
-    armed.clear()
-    disposal = Promise.all(registrations.map(registration => registration.dispose())).then(() => undefined)
+    stop.abort()
+    disposal = Promise.all(registrations.map(registration => registration.dispose())).then(async () => { await pump })
     return disposal
   }
   try {
     registrations.push(await host.session.hook("prompt", onPrompt))
     registrations.push(await host.session.hook("context", onContext))
+    const events = host.event
+    if (events !== undefined) pump = (async () => {
+      try {
+        for await (const event of events.subscribe({ types: ["session.compaction.ended", "session.deleted"], signal: stop.signal })) {
+          if (closed) break
+          if (event.type === "session.compaction.ended") arming.compact(event.data.sessionID, event.id)
+          else arming.disarm(event.data.sessionID)
+        }
+      } catch (error) {
+        if (!stop.signal.aborted) console.warn("[oh-my-openagent/v2] ultrawork arming event stream failed", error)
+      }
+    })()
   } catch (error) {
     await cleanup()
     throw error
