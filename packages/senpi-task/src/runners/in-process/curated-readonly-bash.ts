@@ -1,7 +1,10 @@
 import { type ChildProcess, execFile } from "node:child_process"
 
 import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
-import { capCuratedReadonlyResult, type CuratedReadonlyFormatter } from "@oh-my-opencode/utils/curated-readonly-presentation"
+import {
+  capCuratedReadonlyResult,
+  type CuratedReadonlyFormatter,
+} from "@oh-my-opencode/utils/curated-readonly-presentation"
 import { Type, type Static } from "typebox"
 
 import { loadSenpiBarrel, senpiBarrel } from "../../lazy/senpi-barrel"
@@ -25,7 +28,11 @@ export type CuratedReadonlyBashInput = Static<typeof CuratedReadonlyBashParams>
 
 /** The original structured broker uses only its captured executor and an optional signal. */
 export type CuratedReadonlyBashTool = Omit<ToolDefinition, "execute"> & {
-  readonly execute: (toolCallId: string, input: CuratedReadonlyBashInput, signal?: AbortSignal) => Promise<AgentToolResult<undefined>>
+  readonly execute: (
+    toolCallId: string,
+    input: CuratedReadonlyBashInput,
+    signal?: AbortSignal,
+  ) => Promise<AgentToolResult<undefined>>
 }
 
 export type CuratedReadonlyRequest = {
@@ -49,17 +56,46 @@ export type CuratedReadonlyExecutor = (
 export type CuratedReadonlyChildObserver = (child: ChildProcess) => void
 
 const CURL_BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
-  "-f", "--fail", "--fail-with-body", "-I", "--head", "-L", "--location",
-  "--compressed", "--no-progress-meter", "-s", "--silent", "-S", "--show-error",
+  "-f",
+  "--fail",
+  "--fail-with-body",
+  "-I",
+  "--head",
+  "-L",
+  "--location",
+  "--compressed",
+  "--no-progress-meter",
+  "-s",
+  "--silent",
+  "-S",
+  "--show-error",
 ])
 const CURL_VALUE_FLAGS: ReadonlySet<string> = new Set([
-  "--connect-timeout", "--max-time", "--retry", "--retry-delay", "-A", "--user-agent",
+  "--connect-timeout",
+  "--max-time",
+  "--retry",
+  "--retry-delay",
+  "-A",
+  "--user-agent",
 ])
 const GH_SEARCH_KINDS: ReadonlySet<string> = new Set(["code", "commits", "issues", "prs", "repos"])
 const GH_SEARCH_BOOLEAN_FLAGS: ReadonlySet<string> = new Set(["--archived", "--include-forks"])
 const GH_SEARCH_VALUE_FLAGS: ReadonlySet<string> = new Set([
-  "--extension", "--filename", "--language", "--limit", "--match", "--order", "--owner",
-  "--repo", "--sort", "--state", "--updated", "--visibility", "--json", "--jq", "--template",
+  "--extension",
+  "--filename",
+  "--language",
+  "--limit",
+  "--match",
+  "--order",
+  "--owner",
+  "--repo",
+  "--sort",
+  "--state",
+  "--updated",
+  "--visibility",
+  "--json",
+  "--jq",
+  "--template",
 ])
 const GH_VIEW_BOOLEAN_FLAGS: ReadonlySet<string> = new Set(["--comments"])
 const GH_VIEW_VALUE_FLAGS: ReadonlySet<string> = new Set(["--json", "--jq", "--repo", "--template"])
@@ -76,7 +112,9 @@ export function planCuratedReadonlyCommand(request: CuratedReadonlyRequest): Cur
     return { program: "curl", args: args[0] === "--version" ? args : ["--disable", ...args] }
   }
   if (request.program === "gh" && isReadonlyGitHub(args)) return { program: "gh", args }
-  throw new CuratedReadonlyCommandError("The curated bash tool accepts read-only GitHub and HTTPS retrieval operations only.")
+  throw new CuratedReadonlyCommandError(
+    "The curated bash tool accepts read-only GitHub and HTTPS retrieval operations only.",
+  )
 }
 
 export function createCuratedReadonlyBashTool(
@@ -113,7 +151,10 @@ function capResultText(text: string, formatter?: CuratedReadonlyFormatter): stri
   if (formatter !== undefined) return capCuratedReadonlyResult(text, formatter)
   const { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncateHead, formatSize } = senpiBarrel()
   return capCuratedReadonlyResult(text, {
-    maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES, truncateHead, formatSize,
+    maxBytes: DEFAULT_MAX_BYTES,
+    maxLines: DEFAULT_MAX_LINES,
+    truncateHead,
+    formatSize,
   })
 }
 
@@ -149,7 +190,8 @@ function isReadonlyGitHub(args: readonly string[]): boolean {
   if (command === "release" && (subcommand === "view" || subcommand === "list")) {
     return flagsAndPositionalsAreSafe(rest, new Set(), GH_VIEW_VALUE_FLAGS, 1)
   }
-  if (command !== "api" || subcommand === undefined || subcommand === "graphql" || subcommand.startsWith("-")) return false
+  if (command !== "api" || subcommand === undefined || subcommand === "graphql" || subcommand.startsWith("-"))
+    return false
   return flagsAndPositionalsAreSafe(rest, GH_API_BOOLEAN_FLAGS, GH_API_VALUE_FLAGS, 0)
 }
 
@@ -183,24 +225,31 @@ function executeCommand(
   observeChild?: CuratedReadonlyChildObserver,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile(command.program, command.args, {
-      cwd,
-      encoding: "utf8",
-      maxBuffer: 512 * 1024,
-      timeout: timeoutSeconds * 1_000,
-      signal,
-      windowsHide: true,
-      env: { ...process.env, GH_PAGER: "cat", GH_PROMPT_DISABLED: "1", GIT_PAGER: "cat", PAGER: "cat" },
-    }, (error, stdout, stderr) => {
-      if (error !== null) {
-        reject(new CuratedReadonlyCommandError(
-          `Read-only ${command.program} request failed: ${stderr.trim() || error.message}`,
-          { cause: error },
-        ))
-        return
-      }
-      resolve([stdout.trim(), stderr.trim()].filter((part) => part.length > 0).join("\n") || "(no output)")
-    })
+    const child = execFile(
+      command.program,
+      command.args,
+      {
+        cwd,
+        encoding: "utf8",
+        maxBuffer: 512 * 1024,
+        timeout: timeoutSeconds * 1_000,
+        signal,
+        windowsHide: true,
+        env: { ...process.env, GH_PAGER: "cat", GH_PROMPT_DISABLED: "1", GIT_PAGER: "cat", PAGER: "cat" },
+      },
+      (error, stdout, stderr) => {
+        if (error !== null) {
+          reject(
+            new CuratedReadonlyCommandError(
+              `Read-only ${command.program} request failed: ${stderr.trim() || error.message}`,
+              { cause: error },
+            ),
+          )
+          return
+        }
+        resolve([stdout.trim(), stderr.trim()].filter((part) => part.length > 0).join("\n") || "(no output)")
+      },
+    )
     // Synchronously after the SAME execFile call returns. An observer throw rejects this request
     // while the original callback still settles the already-spawned process.
     observeChild?.(child)

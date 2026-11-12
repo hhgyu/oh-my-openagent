@@ -1,41 +1,132 @@
 export type BuildNode = {
-	id: string
-	command: string
-	args: string[]
-	deps: string[]
+  id: string
+  command: string
+  args: string[]
+  deps: string[]
 }
 
 // senpi-codemode resolves its worker entries and preludes next to its own modules: never bundle it.
-const V2_EXTERNALS = ["@opencode/plugin", "@opencode/plugin/*", "effect", "effect/*", "@code-yeongyu/senpi-codemode", "@code-yeongyu/senpi-codemode/*"]
-const V2_BUILD_ARGS = ["--splitting", "--chunk-naming", "opencode-[hash].js", ...V2_EXTERNALS.flatMap((name) => ["--external", name])]
+const V2_EXTERNALS = [
+  "@opencode/plugin",
+  "@opencode/plugin/*",
+  "effect",
+  "effect/*",
+  "@code-yeongyu/senpi-codemode",
+  "@code-yeongyu/senpi-codemode/*",
+]
+const V2_BUILD_ARGS = [
+  "--splitting",
+  "--chunk-naming",
+  "opencode-[hash].js",
+  ...V2_EXTERNALS.flatMap((name) => ["--external", name]),
+]
 // The Native eval Worker entry is emitted as its own file next to each bundle's chunks (dist/ and
 // dist/v2/, because the root bundle also carries the V2 graph lazily). The client locates it by this
 // name relative to its chunk, so `[name].[ext]` keeps it flat: dist/codemode-worker.js, dist/v2/codemode-worker.js.
-const CODEMODE_WORKER_ENTRY = ["packages/omo-opencode/src/v2/tools/codemode-worker.ts", "--entry-naming", "[name].[ext]"]
+const CODEMODE_WORKER_ENTRY = [
+  "packages/omo-opencode/src/v2/tools/codemode-worker.ts",
+  "--entry-naming",
+  "[name].[ext]",
+]
 
 const OPENTUI_EXTERNALS = ["@opentui/core", "@opentui/keymap", "@opentui/solid"]
 
 export const BUILD_NODES: BuildNode[] = [
-	{ id: "service-auth", command: "bun", args: ["script/build-service-auth.ts"], deps: [] },
-	{ id: "reflection-lock", command: "bun", args: ["script/build-reflection-lock.ts"], deps: [] },
-	{ id: "git-bash-mcp", command: "bun", args: ["run", "build:git-bash-mcp"], deps: [] },
-	{ id: "ast-grep-mcp", command: "bun", args: ["run", "build:ast-grep-mcp"], deps: [] },
-	{ id: "lsp-tools-mcp", command: "bun", args: ["run", "build:lsp-tools-mcp"], deps: [] },
-	{ id: "lsp-daemon", command: "bun", args: ["run", "build:lsp-daemon"], deps: [] },
-	{ id: "codex-plugin", command: "bun", args: ["run", "build:codex-plugin"], deps: ["git-bash-mcp", "lsp-tools-mcp", "lsp-daemon"] },
-	{ id: "senpi-plugin", command: "bun", args: ["run", "build:senpi-plugin:stage"], deps: ["ast-grep-mcp", "lsp-daemon", "codex-plugin"] },
-	{ id: "index", command: "bun", args: ["build", "packages/omo-opencode/src/index.ts", ...CODEMODE_WORKER_ENTRY, "--outdir", "dist", "--target", "bun", "--format", "esm", "--external", "zod", ...V2_BUILD_ARGS], deps: [] },
-	{ id: "v2-index", command: "bun", args: ["build", "packages/omo-opencode/src/v2/index.ts", ...CODEMODE_WORKER_ENTRY, "--outdir", "dist/v2", "--target", "bun", "--format", "esm", "--external", "zod", ...V2_BUILD_ARGS], deps: [] },
-	{ id: "tui", command: "bun", args: ["build", "packages/omo-opencode/src/tui.ts", "--outdir", "dist", "--target", "bun", "--format", "esm", ...OPENTUI_EXTERNALS.flatMap((name) => ["--external", name])], deps: [] },
-	{ id: "shared-skills-assets", command: "bun", args: ["run", "build:shared-skills-assets"], deps: ["index"] },
-	{ id: "node-require-shim", command: "bun", args: ["run", "build:node-require-shim"], deps: ["index", "v2-index"] },
-	{ id: "v2-personas", command: "bun", args: ["script/stage-v2-personas.ts"], deps: ["index", "v2-index"] },
-	{ id: "declarations", command: "tsc", args: ["--emitDeclarationOnly"], deps: [] },
-	{ id: "cli", command: "bun", args: ["build", "packages/omo-opencode/src/cli/index.ts", "--outdir", "dist/cli", "--target", "bun", "--format", "esm"], deps: [] },
-	{ id: "cli-node", command: "bun", args: ["run", "build:cli-node"], deps: [] },
-	{ id: "codex-install", command: "bun", args: ["run", "build:codex-install"], deps: [] },
-	{ id: "schema", command: "bun", args: ["run", "build:schema"], deps: [] },
-	{ id: "omo-schema", command: "bun", args: ["run", "build:omo-schema"], deps: [] },
+  { id: "service-auth", command: "bun", args: ["script/build-service-auth.ts"], deps: [] },
+  { id: "reflection-lock", command: "bun", args: ["script/build-reflection-lock.ts"], deps: [] },
+  { id: "git-bash-mcp", command: "bun", args: ["run", "build:git-bash-mcp"], deps: [] },
+  { id: "ast-grep-mcp", command: "bun", args: ["run", "build:ast-grep-mcp"], deps: [] },
+  { id: "lsp-tools-mcp", command: "bun", args: ["run", "build:lsp-tools-mcp"], deps: [] },
+  { id: "lsp-daemon", command: "bun", args: ["run", "build:lsp-daemon"], deps: [] },
+  {
+    id: "codex-plugin",
+    command: "bun",
+    args: ["run", "build:codex-plugin"],
+    deps: ["git-bash-mcp", "lsp-tools-mcp", "lsp-daemon"],
+  },
+  {
+    id: "senpi-plugin",
+    command: "bun",
+    args: ["run", "build:senpi-plugin:stage"],
+    deps: ["ast-grep-mcp", "lsp-daemon", "codex-plugin"],
+  },
+  {
+    id: "index",
+    command: "bun",
+    args: [
+      "build",
+      "packages/omo-opencode/src/index.ts",
+      ...CODEMODE_WORKER_ENTRY,
+      "--outdir",
+      "dist",
+      "--target",
+      "bun",
+      "--format",
+      "esm",
+      "--external",
+      "zod",
+      ...V2_BUILD_ARGS,
+    ],
+    deps: [],
+  },
+  {
+    id: "v2-index",
+    command: "bun",
+    args: [
+      "build",
+      "packages/omo-opencode/src/v2/index.ts",
+      ...CODEMODE_WORKER_ENTRY,
+      "--outdir",
+      "dist/v2",
+      "--target",
+      "bun",
+      "--format",
+      "esm",
+      "--external",
+      "zod",
+      ...V2_BUILD_ARGS,
+    ],
+    deps: [],
+  },
+  {
+    id: "tui",
+    command: "bun",
+    args: [
+      "build",
+      "packages/omo-opencode/src/tui.ts",
+      "--outdir",
+      "dist",
+      "--target",
+      "bun",
+      "--format",
+      "esm",
+      ...OPENTUI_EXTERNALS.flatMap((name) => ["--external", name]),
+    ],
+    deps: [],
+  },
+  { id: "shared-skills-assets", command: "bun", args: ["run", "build:shared-skills-assets"], deps: ["index"] },
+  { id: "node-require-shim", command: "bun", args: ["run", "build:node-require-shim"], deps: ["index", "v2-index"] },
+  { id: "v2-personas", command: "bun", args: ["script/stage-v2-personas.ts"], deps: ["index", "v2-index"] },
+  { id: "declarations", command: "tsc", args: ["--emitDeclarationOnly"], deps: [] },
+  {
+    id: "cli",
+    command: "bun",
+    args: [
+      "build",
+      "packages/omo-opencode/src/cli/index.ts",
+      "--outdir",
+      "dist/cli",
+      "--target",
+      "bun",
+      "--format",
+      "esm",
+    ],
+    deps: [],
+  },
+  { id: "cli-node", command: "bun", args: ["run", "build:cli-node"], deps: [] },
+  { id: "codex-install", command: "bun", args: ["run", "build:codex-install"], deps: [] },
+  { id: "schema", command: "bun", args: ["run", "build:schema"], deps: [] },
+  { id: "omo-schema", command: "bun", args: ["run", "build:omo-schema"], deps: [] },
 ]
 
 /**
@@ -51,28 +142,28 @@ export const BUILD_NODES: BuildNode[] = [
  * binary build.
  */
 export const BUILD_PROFILES: Record<string, readonly string[]> = {
-	"omo-native": ["lsp-daemon", "ast-grep-mcp", "service-auth"],
+  "omo-native": ["lsp-daemon", "ast-grep-mcp", "service-auth"],
 }
 
 export function selectBuildNodes(
-	graph: readonly BuildNode[],
-	profile: string | undefined,
-	profiles: Record<string, readonly string[]> = BUILD_PROFILES,
+  graph: readonly BuildNode[],
+  profile: string | undefined,
+  profiles: Record<string, readonly string[]> = BUILD_PROFILES,
 ): BuildNode[] {
-	if (profile === undefined || profile === "") return [...graph]
-	const requested = profiles[profile]
-	if (requested === undefined) {
-		throw new Error(`unknown build profile: ${profile} (known: ${Object.keys(profiles).join(", ")})`)
-	}
-	const byId = new Map(graph.map((node) => [node.id, node]))
-	const keep = new Set<string>()
-	const visit = (id: string): void => {
-		if (keep.has(id)) return
-		const node = byId.get(id)
-		if (node === undefined) throw new Error(`build profile ${profile} names an unknown node: ${id}`)
-		keep.add(id)
-		for (const dep of node.deps) visit(dep)
-	}
-	for (const id of requested) visit(id)
-	return graph.filter((node) => keep.has(node.id))
+  if (profile === undefined || profile === "") return [...graph]
+  const requested = profiles[profile]
+  if (requested === undefined) {
+    throw new Error(`unknown build profile: ${profile} (known: ${Object.keys(profiles).join(", ")})`)
+  }
+  const byId = new Map(graph.map((node) => [node.id, node]))
+  const keep = new Set<string>()
+  const visit = (id: string): void => {
+    if (keep.has(id)) return
+    const node = byId.get(id)
+    if (node === undefined) throw new Error(`build profile ${profile} names an unknown node: ${id}`)
+    keep.add(id)
+    for (const dep of node.deps) visit(dep)
+  }
+  for (const id of requested) visit(id)
+  return graph.filter((node) => keep.has(node.id))
 }

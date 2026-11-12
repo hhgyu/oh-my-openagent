@@ -5,12 +5,12 @@ describe("prepared Native main-profile selector", () => {
   it("selects each lane with its current effort and subscription provider ranking", () => {
     const availableModels = [
       "opencode/claude-opus-5-5", "anthropic/claude-opus-5-5", "anthropic-subscription/claude-opus-5-5",
-      "opencode/claude-fable-5-1", "anthropic-subscription/claude-fable-5-1",
+      "opencode/claude-fable-5-2", "anthropic-subscription/claude-fable-5-2",
       "openai/gpt-6-astra", "chatgpt-subscription/gpt-6-astra",
     ]
     for (const [active, provider, modelId, reasoning] of [
       ["daily-normal", "anthropic-subscription", "claude-opus-5-5", "medium"],
-      ["daily-heavy", "anthropic-subscription", "claude-fable-5-1", "xhigh"],
+      ["daily-heavy", "anthropic-subscription", "claude-fable-5-2", "xhigh"],
       ["geeky-normal", "chatgpt-subscription", "gpt-6-astra", "medium"],
       ["geeky-heavy", "chatgpt-subscription", "gpt-6-astra", "high"],
     ]) expect(resolveModelProfile({ active, availableModels })).toMatchObject({ kind: "resolved", provider, modelId, reasoning, skipped: [] })

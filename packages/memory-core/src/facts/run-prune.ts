@@ -25,7 +25,8 @@
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 
-import { lstat, readdir, readFile, rename, rm } from "../fs/resilient"
+import { removeTree } from "../fs/remove-tree"
+import { lstat, readdir, readFile, rename } from "../fs/resilient"
 import {
   LockContentionError, acquireLock, createLockRecord, factsRunsLockPath, releaseLock, runFinalizationLockPath, withLock,
 } from "../locks"
@@ -76,7 +77,7 @@ export async function pruneTerminalFactsRuns(
   for (const { name, tombstone } of claimed) {
     await options.beforeTombstoneDelete?.(join(runsDir, tombstone))
     try {
-      await rm(join(runsDir, tombstone), { recursive: true, force: true })
+      await removeTree(join(runsDir, tombstone))
     } catch (error) {
       // The tombstone name is already unreachable by reservation; the sweep retries it.
       options.warn?.("facts run tombstone deletion failed", { tombstone, error: describe(error) })
@@ -100,7 +101,7 @@ export async function sweepFactsRunTombstones(options: {
   const removed: string[] = []
   for (const name of names.filter((entry) => entry.startsWith(PRUNE_TOMBSTONE_PREFIX)).sort()) {
     try {
-      await rm(join(runsDir, name), { recursive: true, force: true })
+      await removeTree(join(runsDir, name))
       removed.push(name)
     } catch (error) {
       options.warn?.("facts run tombstone cleanup failed", { path: join(runsDir, name), error: describe(error) })

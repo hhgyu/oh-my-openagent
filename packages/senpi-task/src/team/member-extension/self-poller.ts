@@ -70,13 +70,8 @@ export function createMemberSelfPoller(deps: MemberSelfPollerDeps): MemberSelfPo
   let stopped = false
   const state: MemberPollState = { pending, isStopped: () => stopped }
 
-  const withLease = <T>(fn: () => Promise<T>): Promise<T> => withInboxConsumerLease(
-    deps.teamRunId,
-    deps.memberName,
-    deps.config,
-    fn,
-    { staleAfterMs: DEAD_PID_LEASE_STALE_MS },
-  )
+  const withLease = <T>(fn: () => Promise<T>): Promise<T> =>
+    withInboxConsumerLease(deps.teamRunId, deps.memberName, deps.config, fn, { staleAfterMs: DEAD_PID_LEASE_STALE_MS })
 
   const checkPendingUnderLease = async (): Promise<void> => {
     for (const delivery of [...pending.values()]) {
@@ -113,22 +108,13 @@ export function createMemberSelfPoller(deps: MemberSelfPollerDeps): MemberSelfPo
   }
 }
 
-async function processMessage(
-  deps: MemberSelfPollerDeps,
-  message: Message,
-  state: MemberPollState,
-): Promise<void> {
+async function processMessage(deps: MemberSelfPollerDeps, message: Message, state: MemberPollState): Promise<void> {
   if (await isMessageConsumed(deps.teamRunId, deps.memberName, message.messageId, deps.config)) {
     await ackMessages(deps.teamRunId, deps.memberName, [message.messageId], deps.config)
     return
   }
 
-  const reservation = await reserveMessageForDelivery(
-    deps.teamRunId,
-    deps.memberName,
-    message.messageId,
-    deps.config,
-  )
+  const reservation = await reserveMessageForDelivery(deps.teamRunId, deps.memberName, message.messageId, deps.config)
   if (reservation === null) return
 
   if (state.isStopped()) {
@@ -174,12 +160,7 @@ async function recoverReservations(deps: MemberSelfPollerDeps): Promise<void> {
 
   for (const entry of entries) {
     const message = await readReservedMessage(join(inboxDir(deps), entry))
-    const reservation = await reserveMessageForDelivery(
-      deps.teamRunId,
-      deps.memberName,
-      message.messageId,
-      deps.config,
-    )
+    const reservation = await reserveMessageForDelivery(deps.teamRunId, deps.memberName, message.messageId, deps.config)
     if (reservation === null) continue
     if (await isDelivered(deps, message.messageId)) {
       await commitDeliveryReservation(reservation)
@@ -213,5 +194,3 @@ function appendDeliveredEvent(deps: MemberSelfPollerDeps, message: Message): voi
     payload: { message_id: message.messageId, from: message.from, to: message.to, kind: message.kind },
   })
 }
-
-

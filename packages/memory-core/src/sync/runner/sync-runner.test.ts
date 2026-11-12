@@ -8,7 +8,14 @@ import { join } from "node:path"
 import { buildIdentityPaths } from "../../identity/layout"
 import type { DeviceSync, EngineStatus, SyncSession } from "../engine"
 
-import { SYNC_CLOSE_WAIT_EXCEEDED, SYNC_IDLE_NO_DEVICE_SESSION, SYNC_UNAVAILABLE, createSyncRunner, watchHeadLog } from "./sync-runner"
+import {
+  SYNC_CLOSE_WAIT_EXCEEDED,
+  SYNC_IDLE_NO_DEVICE_SESSION,
+  SYNC_UNAVAILABLE,
+  createSyncRunner,
+  watchHeadLog,
+} from "./sync-runner"
+import { remainingTestTime } from "../../../../../test-support/test-deadline"
 
 const dirs: string[] = []
 afterEach(async () => {
@@ -52,7 +59,13 @@ function fakeOpen() {
 test("sessions sharing a repository share one engine, started once and closed with the last session", async () => {
   const paths = await identity()
   const fake = fakeOpen()
-  const runner = createSyncRunner({ loadRuntime: noRuntime, logger, resolveSession: async () => session, open: fake.open, watchHead: () => () => undefined })
+  const runner = createSyncRunner({
+    loadRuntime: noRuntime,
+    logger,
+    resolveSession: async () => session,
+    open: fake.open,
+    watchHead: () => () => undefined,
+  })
   await runner.acquire("agent", paths, { enabled: true })
   await runner.acquire("agent", paths, { enabled: true })
   expect([fake.opened, fake.started]).toEqual([[paths.repo], [paths.repo]])
@@ -67,7 +80,11 @@ test("sessions sharing a repository share one engine, started once and closed wi
 test("without a device session the production runner is a no-op: one typed idle line, no engine, nothing written", async () => {
   const paths = await identity()
   const lines: string[] = []
-  const recording = { info: (m: string) => lines.push(m), warn: (m: string) => lines.push(`warn ${m}`), error: (m: string) => lines.push(`error ${m}`) }
+  const recording = {
+    info: (m: string) => lines.push(m),
+    warn: (m: string) => lines.push(`warn ${m}`),
+    error: (m: string) => lines.push(`error ${m}`),
+  }
   const runner = createSyncRunner({ loadRuntime: noRuntime, logger: recording })
   await runner.acquire("agent", paths, { enabled: true })
   await runner.acquire("agent", paths, { enabled: true })
@@ -81,9 +98,21 @@ test("without a device session the production runner is a no-op: one typed idle 
 test("memory.sync.enabled false, or no signed-in device session, opens nothing", async () => {
   const paths = await identity()
   const fake = fakeOpen()
-  const off = createSyncRunner({ loadRuntime: noRuntime, logger, resolveSession: async () => session, open: fake.open, watchHead: () => () => undefined })
+  const off = createSyncRunner({
+    loadRuntime: noRuntime,
+    logger,
+    resolveSession: async () => session,
+    open: fake.open,
+    watchHead: () => () => undefined,
+  })
   await off.acquire("agent", paths, { enabled: false })
-  const signedOut = createSyncRunner({ loadRuntime: noRuntime, logger, resolveSession: async () => null, open: fake.open, watchHead: () => () => undefined })
+  const signedOut = createSyncRunner({
+    loadRuntime: noRuntime,
+    logger,
+    resolveSession: async () => null,
+    open: fake.open,
+    watchHead: () => () => undefined,
+  })
   await signedOut.acquire("agent", paths, { enabled: true })
   expect(fake.opened).toEqual([])
   expect(await signedOut.status(paths.repo)).toBeNull()
@@ -105,7 +134,11 @@ test("a commit seen by the HEAD reflog watch starts a local-commit cycle, and on
       watchHeadLog(gitDir, listener, warn, (path, _options, fire) => {
         watched = path
         onChange = fire
-        return Object.assign(new EventEmitter(), { close: () => { closed = true } }) as unknown as FSWatcher
+        return Object.assign(new EventEmitter(), {
+          close: () => {
+            closed = true
+          },
+        }) as unknown as FSWatcher
       }),
   })
   await runner.acquire("agent", paths, { enabled: true })
@@ -119,7 +152,11 @@ test("a commit seen by the HEAD reflog watch starts a local-commit cycle, and on
 
 test("watchHeadLog reports a missing reflog instead of silently never firing", () => {
   const warnings: string[] = []
-  const stop = watchHeadLog("/nonexistent/.git", () => undefined, (m) => warnings.push(m))
+  const stop = watchHeadLog(
+    "/nonexistent/.git",
+    () => undefined,
+    (m) => warnings.push(m),
+  )
   stop()
   expect(warnings).toHaveLength(1)
 })
@@ -128,7 +165,9 @@ test("a missing sync sidecar leaves the runner idle with a typed sync-unavailabl
   const paths = await identity()
   const warned: { message: string; code: unknown }[] = []
   const errors: string[] = []
-  const missing = Object.assign(new Error("Cannot find module '#omo-memory-sync-runtime'"), { code: "ERR_MODULE_NOT_FOUND" })
+  const missing = Object.assign(new Error("Cannot find module '#omo-memory-sync-runtime'"), {
+    code: "ERR_MODULE_NOT_FOUND",
+  })
   const runner = createSyncRunner({
     logger: {
       info: () => undefined,
@@ -159,7 +198,11 @@ test("a release followed at once by an acquire of the same repo waits for the cl
     if (leased) return null
     leased = true
     return {
-      engine: { start: () => { started += 1 } } as unknown as DeviceSync["engine"],
+      engine: {
+        start: () => {
+          started += 1
+        },
+      } as unknown as DeviceSync["engine"],
       status: async (): Promise<EngineStatus> => ({ kind: "never_synced" }),
       notifyLocalCommit: () => undefined,
       close: async () => {
@@ -190,7 +233,11 @@ test("an acquire waiting on a close that never finishes gives up after the bound
   let opens = 0
   const runner = createSyncRunner({
     loadRuntime: noRuntime,
-    logger: { info: () => undefined, warn: () => undefined, error: (message: string, meta?: Record<string, unknown>) => errors.push({ message, code: meta?.code }) },
+    logger: {
+      info: () => undefined,
+      warn: () => undefined,
+      error: (message: string, meta?: Record<string, unknown>) => errors.push({ message, code: meta?.code }),
+    },
     resolveSession: async () => session,
     open: async (): Promise<DeviceSync | null> => {
       opens += 1
@@ -218,7 +265,10 @@ test("the runner answers device names from the session its resolver returned, an
   const runner = createSyncRunner({
     loadRuntime: noRuntime,
     logger,
-    resolveSession: async () => ({ ...session, deviceName: (principal: string) => (principal === "device:dev-mini" ? "Mac mini" : undefined) }),
+    resolveSession: async () => ({
+      ...session,
+      deviceName: (principal: string) => (principal === "device:dev-mini" ? "Mac mini" : undefined),
+    }),
     open: fake.open,
     watchHead: () => () => undefined,
   })
@@ -249,14 +299,27 @@ test("a running engine whose device signs out (or is revoked) closes and leaves 
   const runner = createSyncRunner({
     loadRuntime: noRuntime,
     logger: recording,
-    resolveSession: async () => ({ ...session, onEnded: (notify) => { endSignIn = notify } }),
+    resolveSession: async () => ({
+      ...session,
+      onEnded: (notify) => {
+        endSignIn = notify
+      },
+    }),
     open: fake.open,
     watchHead: () => () => undefined,
   })
   await runner.acquire("agent", paths, { enabled: true })
   expect(fake.opened).toEqual([paths.repo])
   endSignIn()
-  await Promise.race([idle, new Promise((_, reject) => setTimeout(() => reject(new Error("waited 5s for the runner to go idle after sign-out")), 5_000))])
+  await Promise.race([
+    idle,
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("waited out the test budget for the runner to go idle after sign-out")),
+        remainingTestTime(),
+      ),
+    ),
+  ])
   expect(fake.closed).toEqual([paths.repo])
   expect(await runner.status(paths.repo)).toBeNull()
   expect(lines).toEqual([SYNC_IDLE_NO_DEVICE_SESSION])

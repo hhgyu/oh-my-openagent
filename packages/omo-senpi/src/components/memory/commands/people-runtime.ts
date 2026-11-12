@@ -22,12 +22,7 @@ import {
 } from "@oh-my-opencode/memory-core/palace"
 
 import { parseCommandArgs } from "./args"
-import {
-  ABSTENTION_LINE,
-  createPeopleAskRunner,
-  hasNoEvidence,
-  type PeopleAskEvidence,
-} from "./people-ask"
+import { ABSTENTION_LINE, createPeopleAskRunner, hasNoEvidence, type PeopleAskEvidence } from "./people-ask"
 import { collectPersonSearchHits } from "./people-search"
 import { openRepo } from "./repo"
 import {
@@ -38,7 +33,11 @@ import {
   type MemoryCommandIdentity,
 } from "./types"
 
-export { OBSERVATIONS_PER_LEVEL, resolvePersonQuery, type PersonQueryResolution } from "@oh-my-opencode/memory-core/palace"
+export {
+  OBSERVATIONS_PER_LEVEL,
+  resolvePersonQuery,
+  type PersonQueryResolution,
+} from "@oh-my-opencode/memory-core/palace"
 
 /** Derives the roster and the adjacency graph from the person cards in the repository. */
 export async function derivePeopleGraph(
@@ -60,7 +59,11 @@ export async function selectObservations(
   return selectPersonObservations(openRepo(deps, identity), slug, limits, options)
 }
 
-export async function runPeopleCommand(deps: MemoryCommandDeps, args: string, ctx: MemoryCommandContext): Promise<string> {
+export async function runPeopleCommand(
+  deps: MemoryCommandDeps,
+  args: string,
+  ctx: MemoryCommandContext,
+): Promise<string> {
   const identity = requireIdentity(deps, ctx)
   if (typeof identity === "string") return respond(ctx, identity, "error")
 

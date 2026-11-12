@@ -31,7 +31,7 @@ export function failureRpcSync(status: FailingStatus): MemoryRpcSync {
   return {
     state: "failing",
     failure: {
-      kind: failure.kind,
+      kind: failure.kind === "oversized_item" ? "unknown" : failure.kind,
       reason: failure.reason,
       action: failure.action,
       sinceISO: new Date(status.since).toISOString(),

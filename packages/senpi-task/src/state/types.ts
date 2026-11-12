@@ -12,7 +12,7 @@ export type TaskIsolationSpec = {
 }
 
 export type IsolationMergeKind =
-  | "applied" | "already-applied" | "not-applied" | "branch-merged" | "branch-merge-failed" | "no-changes" | "retained"
+  "applied" | "already-applied" | "not-applied" | "branch-merged" | "branch-merge-failed" | "no-changes" | "retained"
 
 export type IsolationMergeResult = {
   readonly kind: IsolationMergeKind
@@ -47,13 +47,7 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number]
 
-export const RESIDENCY_STATES = [
-  "resident",
-  "evicted",
-  "disposed",
-  "persisted_only",
-  "rpc_detached",
-] as const
+export const RESIDENCY_STATES = ["resident", "evicted", "disposed", "persisted_only", "rpc_detached"] as const
 
 export type ResidencyState = (typeof RESIDENCY_STATES)[number]
 export type Messageability = "steer" | "revive" | "not-continuable"
@@ -124,10 +118,7 @@ export type SuspensionReason = (typeof SUSPENSION_REASONS)[number]
 // Why a task reattached onto a session that cannot continue on its own is waiting (senpi#3266):
 // the resumed turn ENDED on an abort, or it never answered at all. `awaiting_input.since` is the
 // reattach timestamp; the flag clears on a successful delivery, a plain reattach, or terminal.
-export const AWAITING_INPUT_REASONS = [
-  "resumed_turn_aborted",
-  "resumed_turn_unfinished",
-] as const
+export const AWAITING_INPUT_REASONS = ["resumed_turn_aborted", "resumed_turn_unfinished"] as const
 
 export type AwaitingInputReason = (typeof AWAITING_INPUT_REASONS)[number]
 
@@ -160,11 +151,7 @@ export type ResolvedModelRecord = {
   readonly source: ResolvedModelSource
 }
 
-export {
-  COST_REPORT_STATUSES,
-  DURATION_SOURCE_STATUSES,
-  TOKEN_COVERAGE_STATUSES,
-} from "./run-stats-types"
+export { COST_REPORT_STATUSES, DURATION_SOURCE_STATUSES, TOKEN_COVERAGE_STATUSES } from "./run-stats-types"
 export type {
   CostReportStatus,
   DurationSourceStatus,
@@ -187,16 +174,20 @@ export type {
   TaskRecordInput,
   TaskSpawnSpec,
 } from "./record-types"
-export type {
-  TaskTransition,
-  TaskTransitionAudit,
-  TaskTransitionResult,
-} from "./transition-types"
+export type { TaskTransition, TaskTransitionAudit, TaskTransitionResult } from "./transition-types"
 
 /** Inert owned external-session reference; never a live custody capability or Native socket. */
 export type OwnedSessionIdentity = {
-  readonly format: 1; readonly backendID: string; readonly location: string; readonly hostVersion: string
-  readonly parentID: string; readonly sessionID: string; readonly generation: number
-  readonly journalKey: string; readonly journalOwner: string; readonly journalRevision: number
-  readonly runEpoch: number; readonly residencyClaim: string
+  readonly format: 1
+  readonly backendID: string
+  readonly location: string
+  readonly hostVersion: string
+  readonly parentID: string
+  readonly sessionID: string
+  readonly generation: number
+  readonly journalKey: string
+  readonly journalOwner: string
+  readonly journalRevision: number
+  readonly runEpoch: number
+  readonly residencyClaim: string
 }

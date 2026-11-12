@@ -97,11 +97,12 @@ export function controlJournal(
     store: options.store,
     runId: record.runId,
     initialCheckpoint: record,
-    applyEvent: (checkpoint, event) => applyDagSchedulerEvent(checkpoint, event, pendingErrors, {
-      store: options.store,
-      pendingTerminalResults: new Map(),
-      now,
-    }),
+    applyEvent: (checkpoint, event) =>
+      applyDagSchedulerEvent(checkpoint, event, pendingErrors, {
+        store: options.store,
+        pendingTerminalResults: new Map(),
+        now,
+      }),
     ...(options.subscriberRing === undefined ? {} : { subscriberRing: options.subscriberRing }),
     now,
     skipDuplicate: skipDuplicateTerminalTransition,

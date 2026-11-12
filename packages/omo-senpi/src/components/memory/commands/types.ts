@@ -76,6 +76,8 @@ export interface MemoryCommandDeps extends CoreMemoryCommandDeps {
   peopleAsk?: PeopleAskRunner
   /** Environment handed to command-spawned children; defaults to process.env. */
   env?: NodeJS.ProcessEnv
+  /** `/doctor --fix`: runs the stale reflection-lock reaper for the session's identity and returns its report lines. */
+  reflectionLockFix?(sessionId: string, options: { readonly dryRun: boolean }): Promise<readonly string[]>
   /** Doctor stale-lock liveness probe; defaults to signal-0. */
   isProcessAlive?(pid: number): boolean
 }

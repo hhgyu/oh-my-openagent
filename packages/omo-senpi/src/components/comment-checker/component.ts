@@ -45,7 +45,8 @@ export function createCommentCheckerComponent(options: CommentCheckerComponentOp
 
         const feedback = await checker.checkToolResult(event, parseToolResultContext(eventContext), {
           onCheckStart: () => reportToolHookStatus(eventContext, "(OmO) Checking Comments"),
-          onCheckFailure: (binaryPath, failure) => reportCommentCheckerFailure(ctx.logger, eventContext, binaryPath, failure),
+          onCheckFailure: (binaryPath, failure) =>
+            reportCommentCheckerFailure(ctx.logger, eventContext, binaryPath, failure),
         })
         if (feedback.length === 0) return undefined
         return { content: [...event.content, ...feedback.map((text) => ({ type: "text", text }))] }

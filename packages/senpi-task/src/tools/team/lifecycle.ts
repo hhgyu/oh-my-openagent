@@ -15,19 +15,25 @@ import type { TeamToolDeps, TeamToolsService } from "./types"
 
 const InlineTeamSpecMemberSchema = Type.Object(
   {
-    name: Type.Optional(Type.String({ description: "Member name; unique within the team, lowercase-stem normalized." })),
+    name: Type.Optional(
+      Type.String({ description: "Member name; unique within the team, lowercase-stem normalized." }),
+    ),
     kind: Type.Optional(
       Type.Union([Type.Literal("category"), Type.Literal("subagent_type"), Type.Literal("agent")], {
-        description: "Member kind; 'agent' is an alias for subagent_type. Inferred from the category/subagent_type field when omitted.",
+        description:
+          "Member kind; 'agent' is an alias for subagent_type. Inferred from the category/subagent_type field when omitted.",
       }),
     ),
     category: Type.Optional(Type.String({ description: "Category to route this member through (kind category)." })),
-    subagent_type: Type.Optional(Type.String({ description: "Agent definition to run this member as (kind subagent_type or agent)." })),
+    subagent_type: Type.Optional(
+      Type.String({ description: "Agent definition to run this member as (kind subagent_type or agent)." }),
+    ),
     prompt: Type.Optional(Type.String({ description: "Member instructions; MUST be written in English." })),
     task_summary: Type.Optional(
       Type.String({
         maxLength: TASK_SUMMARY_MAX_LENGTH,
-        description: "One-line summary of this member's assigned work, shown in the task footer/widget UI. Longer values are force-truncated to 80 chars.",
+        description:
+          "One-line summary of this member's assigned work, shown in the task footer/widget UI. Longer values are force-truncated to 80 chars.",
       }),
     ),
   },
@@ -39,28 +45,47 @@ const InlineTeamSpecSchema = Type.Object(
     name: Type.Optional(Type.String({ description: "Team name; defaults to a derived inline name when omitted." })),
     members: Type.Optional(
       Type.Union([Type.Array(InlineTeamSpecMemberSchema), InlineTeamSpecMemberSchema], {
-        description: "Team members (an array, or a single member object which is wrapped into one). The current session is always the lead; do not declare a lead member.",
+        description:
+          "Team members (an array, or a single member object which is wrapped into one). The current session is always the lead; do not declare a lead member.",
       }),
     ),
   },
   { additionalProperties: true },
 )
 
-export const TeamCreateParams = Type.Object({
-  team_name: Type.Optional(
-    Type.String({ description: "Named team spec (project .omo/teams or omo.json) to create. Ignored when inline_spec is also provided." }),
-  ),
-  inline_spec: Type.Optional(
-    Type.Union([InlineTeamSpecSchema, Type.String({ description: "The same spec as a JSON string; parsed automatically. Passing the object form is preferred." })], {
-      description: "Inline team spec, e.g. { name, members: [{ name, category|subagent_type, prompt? }] }. A JSON string of the same object is also accepted and parsed automatically. Takes precedence when team_name is also provided.",
-    }),
-  ),
-}, { additionalProperties: false })
+export const TeamCreateParams = Type.Object(
+  {
+    team_name: Type.Optional(
+      Type.String({
+        description:
+          "Named team spec (project .omo/teams or omo.json) to create. Ignored when inline_spec is also provided.",
+      }),
+    ),
+    inline_spec: Type.Optional(
+      Type.Union(
+        [
+          InlineTeamSpecSchema,
+          Type.String({
+            description: "The same spec as a JSON string; parsed automatically. Passing the object form is preferred.",
+          }),
+        ],
+        {
+          description:
+            "Inline team spec, e.g. { name, members: [{ name, category|subagent_type, prompt? }] }. A JSON string of the same object is also accepted and parsed automatically. Takes precedence when team_name is also provided.",
+        },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+)
 
-export const TeamDeleteParams = Type.Object({
-  team_run_id: Type.String({ description: "Team run id to delete." }),
-  force: Type.Optional(Type.Boolean({ description: "Tear the run down even while members are still active." })),
-}, { additionalProperties: false })
+export const TeamDeleteParams = Type.Object(
+  {
+    team_run_id: Type.String({ description: "Team run id to delete." }),
+    force: Type.Optional(Type.Boolean({ description: "Tear the run down even while members are still active." })),
+  },
+  { additionalProperties: false },
+)
 
 export type TeamCreateInput = Static<typeof TeamCreateParams>
 export type TeamDeleteInput = Static<typeof TeamDeleteParams>
@@ -76,13 +101,23 @@ export type TeamCreateMemberView = {
 }
 
 export type TeamCreateDetails =
-  | { readonly kind: "created"; readonly team_run_id: string; readonly team_name: string; readonly members: readonly TeamCreateMemberView[] }
+  | {
+      readonly kind: "created"
+      readonly team_run_id: string
+      readonly team_name: string
+      readonly members: readonly TeamCreateMemberView[]
+    }
   | { readonly kind: "invalid_arguments"; readonly reason: string }
   | { readonly kind: "spec_error"; readonly code: string; readonly reason: string }
   | { readonly kind: "runtime_error"; readonly code: string; readonly reason: string }
 
 export type TeamDeleteDetails =
-  | { readonly kind: "deleted"; readonly team_run_id: string; readonly cancelled_task_ids: readonly string[]; readonly released_task_ids: readonly string[] }
+  | {
+      readonly kind: "deleted"
+      readonly team_run_id: string
+      readonly cancelled_task_ids: readonly string[]
+      readonly released_task_ids: readonly string[]
+    }
   | { readonly kind: "invalid_state"; readonly team_run_id: string; readonly code: string; readonly reason: string }
 
 const CREATE_DESCRIPTION = [
@@ -91,9 +126,12 @@ const CREATE_DESCRIPTION = [
   "Returns invalid_arguments for malformed input, spec_error for invalid specs, and runtime_error for spawn/bounds failures.",
 ].join(" ")
 
-const DELETE_DESCRIPTION = "Delete a team run and cancel its members (terminal, not resumable). Lead-only. Pass force=true to tear it down while members are still active."
+const DELETE_DESCRIPTION =
+  "Delete a team run and cancel its members (terminal, not resumable). Lead-only. Pass force=true to tear it down while members are still active."
 
-function coerceInlineSpec(input: unknown): { readonly ok: true; readonly spec: unknown } | { readonly ok: false; readonly reason: string } {
+function coerceInlineSpec(
+  input: unknown,
+): { readonly ok: true; readonly spec: unknown } | { readonly ok: false; readonly reason: string } {
   if (typeof input !== "string") return { ok: true, spec: input }
   try {
     return { ok: true, spec: JSON.parse(input) }
@@ -106,11 +144,17 @@ function coerceInlineSpec(input: unknown): { readonly ok: true; readonly spec: u
   }
 }
 
-export async function runTeamCreate(service: TeamToolsService, params: TeamCreateInput): Promise<ToolExecutionResult<TeamCreateDetails>> {
+export async function runTeamCreate(
+  service: TeamToolsService,
+  params: TeamCreateInput,
+): Promise<ToolExecutionResult<TeamCreateDetails>> {
   const hasName = params.team_name !== undefined && params.team_name.length > 0
   const hasInline = params.inline_spec !== undefined
   if (!hasName && !hasInline) {
-    return toolErrorResult("Provide team_name or inline_spec.", { kind: "invalid_arguments", reason: "provide team_name or inline_spec" })
+    return toolErrorResult("Provide team_name or inline_spec.", {
+      kind: "invalid_arguments",
+      reason: "provide team_name or inline_spec",
+    })
   }
 
   let inlineSpec: unknown
@@ -123,9 +167,7 @@ export async function runTeamCreate(service: TeamToolsService, params: TeamCreat
   }
 
   try {
-    const result = await service.createTeam(
-      hasInline ? { inlineSpec } : { teamName: params.team_name },
-    )
+    const result = await service.createTeam(hasInline ? { inlineSpec } : { teamName: params.team_name })
     const state = result.runtimeState
     const members: TeamCreateMemberView[] = result.members.map((member) => ({
       name: member.name,
@@ -140,18 +182,25 @@ export async function runTeamCreate(service: TeamToolsService, params: TeamCreat
       `Created team '${state.teamName}' (${state.teamRunId}) with ${members.length} members.`,
       ...result.members.map((member) => formatCreatedMemberLine(member)),
     ]
-    return toolResult(
-      lines.join("\n"),
-      { kind: "created", team_run_id: state.teamRunId, team_name: state.teamName, members },
-    )
+    return toolResult(lines.join("\n"), {
+      kind: "created",
+      team_run_id: state.teamRunId,
+      team_name: state.teamName,
+      members,
+    })
   } catch (error) {
-    if (error instanceof SenpiTeamSpecError) return toolErrorResult(error.message, { kind: "spec_error", code: error.code, reason: error.message })
-    if (error instanceof SenpiTeamRuntimeError) return toolErrorResult(error.message, { kind: "runtime_error", code: error.code, reason: error.message })
+    if (error instanceof SenpiTeamSpecError)
+      return toolErrorResult(error.message, { kind: "spec_error", code: error.code, reason: error.message })
+    if (error instanceof SenpiTeamRuntimeError)
+      return toolErrorResult(error.message, { kind: "runtime_error", code: error.code, reason: error.message })
     throw error
   }
 }
 
-export async function runTeamDelete(service: TeamToolsService, params: TeamDeleteInput): Promise<ToolExecutionResult<TeamDeleteDetails>> {
+export async function runTeamDelete(
+  service: TeamToolsService,
+  params: TeamDeleteInput,
+): Promise<ToolExecutionResult<TeamDeleteDetails>> {
   try {
     const result = await service.deleteTeam({ teamRunId: params.team_run_id, force: params.force })
     const cancelled = result.cancelledTaskIds
@@ -164,16 +213,22 @@ export async function runTeamDelete(service: TeamToolsService, params: TeamDelet
     )
   } catch (error) {
     if (error instanceof SenpiTeamRuntimeError) {
-      return toolErrorResult(error.message, { kind: "invalid_state", team_run_id: params.team_run_id, code: error.code, reason: error.message })
+      return toolErrorResult(error.message, {
+        kind: "invalid_state",
+        team_run_id: params.team_run_id,
+        code: error.code,
+        reason: error.message,
+      })
     }
     throw error
   }
 }
 
 function formatMemberRole(role: CreatedMemberInfo["role"]): string {
-  return formatTargetIdentity(
-    role.kind === "category" ? { category: role.category } : { agentType: role.subagentType },
-  ) ?? "task"
+  return (
+    formatTargetIdentity(role.kind === "category" ? { category: role.category } : { agentType: role.subagentType }) ??
+    "task"
+  )
 }
 
 // Prompt excerpts stay in details, never in the text lines: echoing raw member prompts into the
@@ -193,7 +248,10 @@ function formatCreatedMemberLine(member: CreatedMemberInfo): string {
 // resident tool list: a by-name call activates the tool on first use.
 const TEAM_SEARCH_GROUP = "team" as const
 
-type TeamSearchMeta = Pick<ToolDefinition, "exposure" | "searchText" | "searchKeywords" | "searchGroup" | "allowLazyActivation">
+type TeamSearchMeta = Pick<
+  ToolDefinition,
+  "exposure" | "searchText" | "searchKeywords" | "searchGroup" | "allowLazyActivation"
+>
 
 function teamSearchMeta(searchText: string, searchKeywords: readonly string[]): TeamSearchMeta {
   return { exposure: "search", searchText, searchKeywords, searchGroup: TEAM_SEARCH_GROUP, allowLazyActivation: true }
@@ -206,7 +264,10 @@ export function createTeamCreateTool(deps: TeamToolDeps): ToolDefinition<typeof 
     description: CREATE_DESCRIPTION,
     parameters: TeamCreateParams,
     prepareArguments: createToolArgumentValidator(TeamCreateParams),
-    ...teamSearchMeta("create a named team of cooperating agents from an inline spec, run several agents in parallel as a team", ["create team", "team run", "start a team", "cooperating agents", "inline team spec"]),
+    ...teamSearchMeta(
+      "create a named team of cooperating agents from an inline spec, run several agents in parallel as a team",
+      ["create team", "team run", "start a team", "cooperating agents", "inline team spec"],
+    ),
     execute: (_toolCallId: string, params: TeamCreateInput) => runTeamCreate(deps.service, params),
     renderCall: (args, theme) => renderTeamCreateCall(args, theme),
     renderResult: (result, options, theme) => renderTeamCreateResult(result, options, theme),
@@ -220,7 +281,11 @@ export function createTeamDeleteTool(deps: TeamToolDeps): ToolDefinition<typeof 
     description: DELETE_DESCRIPTION,
     parameters: TeamDeleteParams,
     prepareArguments: createToolArgumentValidator(TeamDeleteParams),
-    ...teamSearchMeta("tear down a finished team run and cancel its members", ["delete team", "end the team run", "teardown team"]),
+    ...teamSearchMeta("tear down a finished team run and cancel its members", [
+      "delete team",
+      "end the team run",
+      "teardown team",
+    ]),
     execute: (_toolCallId: string, params: TeamDeleteInput) => runTeamDelete(deps.service, params),
     renderCall: (args, theme) => renderTeamDeleteCall(args, theme),
     renderResult: (result, options, theme) => renderTeamDeleteResult(result, options, theme),

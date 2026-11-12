@@ -21,7 +21,10 @@ export interface CommentCheckerComponentOptions {
   runCommentChecker?: (input: RunCommentCheckerInput) => Promise<CheckResult>
 }
 
-export interface SenpiCommentCheckerBinaryResolverOptions extends Omit<InstalledCommentCheckerBinaryOptions, "importMetaUrl"> {
+export interface SenpiCommentCheckerBinaryResolverOptions extends Omit<
+  InstalledCommentCheckerBinaryOptions,
+  "importMetaUrl"
+> {
   readonly importMetaUrl?: string
 }
 

@@ -98,7 +98,11 @@ function toRunning(harness: SteeringHarness, record: TaskRecord): void {
 
 function toCompleted(harness: SteeringHarness, record: TaskRecord): void {
   toRunning(harness, record)
-  harness.store.transition(record.task_id, { type: "complete", timestamp: new Date().toISOString(), final_response: "first pass" })
+  harness.store.transition(record.task_id, {
+    type: "complete",
+    timestamp: new Date().toISOString(),
+    final_response: "first pass",
+  })
 }
 
 type LoggedEvent = { readonly type: string; readonly payload?: Record<string, unknown> }
@@ -129,7 +133,11 @@ describe("steering event log run epochs", () => {
     expect(harness.store.load(record.task_id)?.notification.run_epoch).toBe(2)
 
     // when
-    const outcome = await harness.engine.sendToTask({ idOrName: record.task_id, message: "keep going", deliverAs: "steer" })
+    const outcome = await harness.engine.sendToTask({
+      idOrName: record.task_id,
+      message: "keep going",
+      deliverAs: "steer",
+    })
 
     // then
     expect(outcome.kind).toBe("steered")

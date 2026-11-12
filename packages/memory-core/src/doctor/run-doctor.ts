@@ -14,13 +14,15 @@ import { factsRemediationHint, formatFactsAdvisory, readFactsOverview } from "..
 import { formatSkillNameFrontmatterRepairReport, repairMissingSkillNameFrontmatter } from "../commands/skill-frontmatter"
 import { estimateSystemTokens } from "../commands/tokens"
 import {
-  requireIdentity, respond,
+  requireIdentity, respond, sessionIdOf,
   type MemoryCommandContext, type MemoryCommandDeps, type MemoryCommandIdentity,
 } from "../commands/types"
+import type { RuntimeRetentionPolicy } from "../retention"
 import { redactSecretLikeMaterial } from "../sync/redact"
 import {
-  checkAbandonedRuns, checkFrontmatter, checkLocks, checkRepository, checkSoulSeed, checkTokens, checkWorktrees,
-  type CheckLevel, type DoctorCheck,
+  checkAbandonedRuns, checkFrontmatter, checkLocks, checkRepository, checkRuntimeSize, checkSoulSeed, checkTokens,
+  checkWorktrees,
+  type CheckLevel, type DoctorCheck, type RuntimeSizeReport,
 } from "./checks"
 import { checkProjection } from "./projection"
 import { checkQuarantinedRuns, checkReceipts, type QuarantinedRun, type ReceiptSummaries } from "./receipts"
@@ -34,6 +36,13 @@ export interface DoctorHostSettings {
   readonly projectionLimits: ExternalProjectionLimits
 }
 
+/** What the runtime-size check reads for one identity: its `memory.runtime` cap and windows. */
+export interface DoctorRuntimeSizeSettings {
+  readonly maxBytes: number
+  readonly policy: RuntimeRetentionPolicy
+  readonly reflectionEnabled: boolean
+}
+
 export interface DoctorDeps extends MemoryCommandDeps {
   doctorSettings(identity: MemoryCommandIdentity): DoctorHostSettings
   /** The reflection-health line: the host owns the reflection run records it reads. */
@@ -45,6 +54,13 @@ export interface DoctorDeps extends MemoryCommandDeps {
    * keeps the doctor read-only (the OpenCode 2 host); absent means repair, as Senpi does.
    */
   readonly skillRepair?: boolean
+  /** The runtime-size line and its JSON report; absent means the host does not report the runtime size. */
+  runtimeSize?(identity: MemoryCommandIdentity): DoctorRuntimeSizeSettings
+  /**
+   * `/doctor --fix`: runs the stale reflection-lock reaper for the session's identity and returns its report
+   * lines. Absent means the host's /doctor has no `--fix` flag.
+   */
+  reflectionLockFix?(sessionId: string, options: { readonly dryRun: boolean }): Promise<readonly string[]>
 }
 
 const LEVEL_ORDER: Record<CheckLevel, number> = { ok: 0, warn: 1, fail: 2 }
@@ -105,24 +121,35 @@ function auditChecks(audit: MemoryAuditReport): DoctorCheck[] {
 }
 
 export async function runDoctor(deps: DoctorDeps, ctx: MemoryCommandContext, args = ""): Promise<string> {
-  const parsed = parseCommandArgs(args, { booleans: ["json"] })
+  const canFix = deps.reflectionLockFix !== undefined
+  const allowed = canFix ? ["json", "fix", "dry-run"] : ["json"]
+  const parsed = parseCommandArgs(args, { booleans: allowed })
   for (const flag of parsed.flags.keys()) {
-    if (flag !== "json") return respond(ctx, `unknown flag --${flag}`, "error")
+    if (!allowed.includes(flag)) return respond(ctx, `unknown flag --${flag}`, "error")
   }
-  if (parsed.positionals.length > 0 || (parsed.flags.has("json") && parsed.flags.get("json") !== true)) {
-    return respond(ctx, "usage: /doctor [--json]", "error")
+  if (
+    parsed.positionals.length > 0
+    || [...parsed.flags.values()].some((value) => value !== true)
+    || (parsed.flags.has("dry-run") && !parsed.flags.has("fix"))
+  ) {
+    return respond(ctx, canFix ? "usage: /doctor [--json] [--fix [--dry-run]]" : "usage: /doctor [--json]", "error")
   }
   const identity = requireIdentity(deps, ctx)
   if (typeof identity === "string") return respond(ctx, identity, "error")
+  const sessionId = sessionIdOf(ctx)
+  const fixLines = parsed.flags.has("fix") && sessionId !== undefined && deps.reflectionLockFix !== undefined
+    ? await deps.reflectionLockFix(sessionId, { dryRun: parsed.flags.has("dry-run") })
+    : []
 
   const repoDir = identity.identityPaths.repo
   const repository = checkRepository(identity)
   const checks: DoctorCheck[] = [repository]
-  const extra: string[] = []
+  const extra: string[] = fixLines.map((line) => `[fix] ${line}`)
   let audit: MemoryAuditReport | null = null
   let skills = { scanned: 0, repaired: 0 }
   let receipts: ReceiptSummaries | null = null
   let quarantinedRuns: readonly QuarantinedRun[] = []
+  let runtimeSize: RuntimeSizeReport | null = null
 
   if (repository.level === "ok") {
     const settings = deps.doctorSettings(identity)
@@ -134,6 +161,18 @@ export async function runDoctor(deps: DoctorDeps, ctx: MemoryCommandContext, arg
     const quarantine = await checkQuarantinedRuns(identity.identityPaths.reflection)
     receipts = receiptCheck.receipts
     quarantinedRuns = quarantine.runs
+    const runtimeSettings = deps.runtimeSize?.(identity)
+    const runtime = runtimeSettings === undefined
+      ? undefined
+      : await checkRuntimeSize(identity.identityPaths, {
+        maxBytes: runtimeSettings.maxBytes,
+        policy: runtimeSettings.policy,
+        now,
+        reflectionEnabled: runtimeSettings.reflectionEnabled,
+        discardUnreflectedJournals: runtimeSettings.policy.discardUnreflectedJournals ?? false,
+        measureBudgetMs: runtimeSettings.policy.passBudgetMs ?? 60_000,
+      })
+    runtimeSize = runtime?.report ?? null
     checks.push(
       ...(await checkFrontmatter(repoDir, audit)),
       await checkSoulSeed(repoDir),
@@ -145,6 +184,7 @@ export async function runDoctor(deps: DoctorDeps, ctx: MemoryCommandContext, arg
       await checkGhostReservation(identity.identityPaths, deps),
       await deps.reflectionHealth(identity, now),
       await checkTokens(repoDir, warnTokens, systemTokens),
+      ...(runtime === undefined ? [] : [runtime.check]),
     )
     const projection = await checkProjection(repoDir, identity.identity, settings.projectionLimits)
     if (projection !== undefined) checks.push(projection)
@@ -155,7 +195,7 @@ export async function runDoctor(deps: DoctorDeps, ctx: MemoryCommandContext, arg
 
     if (deps.skillRepair === false) {
       extra.push("[info] skills: frontmatter repair is not run by this host's /doctor (read-only)")
-      return report(ctx, parsed.flags.has("json"), { identity, checks, extra, audit, skills, receipts, quarantinedRuns })
+      return report(ctx, parsed.flags.has("json"), { identity, checks, extra, audit, skills, receipts, quarantinedRuns, runtimeSize: deps.runtimeSize === undefined ? undefined : runtimeSize })
     }
     const repaired = await repairMissingSkillNameFrontmatter(repoDir)
     skills = { scanned: repaired.scanned, repaired: repaired.repaired.length }
@@ -166,7 +206,7 @@ export async function runDoctor(deps: DoctorDeps, ctx: MemoryCommandContext, arg
     )
   }
 
-  return report(ctx, parsed.flags.has("json"), { identity, checks, extra, audit, skills, receipts, quarantinedRuns })
+  return report(ctx, parsed.flags.has("json"), { identity, checks, extra, audit, skills, receipts, quarantinedRuns, runtimeSize: deps.runtimeSize === undefined ? undefined : runtimeSize })
 }
 
 interface DoctorReport {
@@ -177,14 +217,19 @@ interface DoctorReport {
   readonly skills: { readonly scanned: number; readonly repaired: number }
   readonly receipts: ReceiptSummaries | null
   readonly quarantinedRuns: readonly QuarantinedRun[]
+  /** Present (null before a repository exists) only when the host reports the runtime size. */
+  readonly runtimeSize: RuntimeSizeReport | null | undefined
 }
 
 function report(ctx: MemoryCommandContext, json: boolean, input: DoctorReport): string {
-  const { identity, checks, extra, audit, skills, receipts, quarantinedRuns } = input
+  const { identity, checks, extra, audit, skills, receipts, quarantinedRuns, runtimeSize } = input
   const level = worstLevel(checks)
   const notifyLevel = level === "fail" ? "error" : level === "warn" ? "warning" : "info"
   if (json) {
-    return respond(ctx, JSON.stringify(redactReportStrings({ identity: identity.identity, level, checks, audit, skills, receipts, quarantinedRuns }), null, 2), notifyLevel)
+    return respond(ctx, JSON.stringify(redactReportStrings({
+      identity: identity.identity, level, checks, audit, skills, receipts, quarantinedRuns,
+      ...(runtimeSize === undefined ? {} : { runtimeSize }),
+    }), null, 2), notifyLevel)
   }
   const lines = [
     `# Memory doctor: ${identity.identity}`,

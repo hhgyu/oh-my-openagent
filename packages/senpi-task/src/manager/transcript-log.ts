@@ -3,7 +3,11 @@ import type { ManagedChildEvent, ManagedChildHandle } from "./child-handle"
 import { applyModelEvent, type ModelEventStore } from "./runtime-fallback-event"
 
 import { toPersistedEvent } from "@oh-my-opencode/orchestration-core/transcript/events"
-export { TRANSCRIPT_ASSISTANT_EVENT, TRANSCRIPT_TOOL_EVENT, TRANSCRIPT_ERROR_EVENT } from "@oh-my-opencode/orchestration-core/transcript/events"
+export {
+  TRANSCRIPT_ASSISTANT_EVENT,
+  TRANSCRIPT_TOOL_EVENT,
+  TRANSCRIPT_ERROR_EVENT,
+} from "@oh-my-opencode/orchestration-core/transcript/events"
 
 export type TranscriptLogStore = {
   readonly appendEvent: (taskId: string, event: PersistedTaskEvent) => string
@@ -24,6 +28,10 @@ export function logTranscriptEvent(store: TranscriptLogStore, taskId: string, ev
 
 // Subscribe a running child's events into the store transcript log. Returns the unsubscribe so the
 // manager can detach on dispose. READ path only feeds OUR log; it never mutates child state.
-export function subscribeTranscriptLog(handle: ManagedChildHandle, store: TranscriptLogStore, taskId: string): () => void {
+export function subscribeTranscriptLog(
+  handle: ManagedChildHandle,
+  store: TranscriptLogStore,
+  taskId: string,
+): () => void {
   return handle.subscribe((event) => logTranscriptEvent(store, taskId, event))
 }

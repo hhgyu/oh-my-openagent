@@ -48,8 +48,10 @@ describe("R0 persisted enum compatibility", () => {
       // Check the actual on-disk vocabulary, including additive owned-runner metadata.
       // The frozen R0 reader must not learn new enum values from this build.
       const persisted = (value: string): Record<string, unknown> =>
-        path === "status" ? { ...storedStatus(TASK_STATUSES.find(status => status === value) ?? "running") }
-          : path === "runner_kind" ? recordWith(path, storedRunnerKind(RUNNER_KINDS.find(kind => kind === value) ?? "child-process"))
+        path === "status"
+          ? { ...storedStatus(TASK_STATUSES.find((status) => status === value) ?? "running") }
+          : path === "runner_kind"
+            ? recordWith(path, storedRunnerKind(RUNNER_KINDS.find((kind) => kind === value) ?? "child-process"))
             : recordWith(path, value)
       for (const value of values) expect(() => parseR0PersistedReasons(persisted(value))).not.toThrow()
     })

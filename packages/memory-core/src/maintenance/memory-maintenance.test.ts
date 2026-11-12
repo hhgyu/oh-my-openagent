@@ -21,7 +21,9 @@ import { createMemoryMaintenance } from "./memory-maintenance"
 const roots: string[] = []
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })))
+  await Promise.all(
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })),
+  )
 })
 
 async function identityWithHistory(commits: number) {
@@ -47,7 +49,11 @@ function looseObjects(dir: string): number {
 function recorder() {
   const info: string[] = []
   const warn: string[] = []
-  return { info, warn, logger: { info: (message: string) => info.push(message), warn: (message: string) => warn.push(message) } }
+  return {
+    info,
+    warn,
+    logger: { info: (message: string) => info.push(message), warn: (message: string) => warn.push(message) },
+  }
 }
 
 describe("createMemoryMaintenance", () => {
@@ -72,8 +78,8 @@ describe("createMemoryMaintenance", () => {
 
       expect({
         validation: await validateCompletion(worktree, worktree.baseSha),
-        commonConfigUnchanged: await readFile(worktree.commonConfigPath, "utf8") === worktree.commonConfigSnapshot,
-        gitPointerUnchanged: await readFile(worktree.gitFilePath, "utf8") === worktree.gitFileSnapshot,
+        commonConfigUnchanged: (await readFile(worktree.commonConfigPath, "utf8")) === worktree.commonConfigSnapshot,
+        gitPointerUnchanged: (await readFile(worktree.gitFilePath, "utf8")) === worktree.gitFileSnapshot,
         legacyStamp: await repo.configGet("omo.maintenanceAt"),
         warnings: log.warn,
       }).toEqual({
@@ -83,8 +89,10 @@ describe("createMemoryMaintenance", () => {
         legacyStamp: null,
         warnings: [],
       })
-      expect(JSON.parse(await readFile(join(context.identityPaths.runtime, "maintenance.json"), "utf8")))
-        .toEqual({ version: 1, attemptedAt })
+      expect(JSON.parse(await readFile(join(context.identityPaths.runtime, "maintenance.json"), "utf8"))).toEqual({
+        version: 1,
+        attemptedAt,
+      })
     } finally {
       maintenance.dispose()
       await maintenance.settled()
@@ -119,13 +127,18 @@ describe("createMemoryMaintenance", () => {
     // when
     maintenance.schedule(context)
     await writeFile(join(repo.dir, "concurrent.md"), "written during maintenance\n")
-    const concurrent = repo.commitWrite(["concurrent.md"], "concurrent note", { agentId: context.identity, authorName: context.identity })
+    const concurrent = repo.commitWrite(["concurrent.md"], "concurrent note", {
+      agentId: context.identity,
+      authorName: context.identity,
+    })
     await Promise.all([concurrent, maintenance.settled()])
 
     // then
     const subjects = (await repo.log()).map((commit) => commit.subject)
     expect(subjects).toContain("concurrent note")
-    expect(execFileSync("git", ["fsck", "--connectivity-only"], { cwd: repo.dir, encoding: "utf8" })).not.toContain("missing")
+    expect(execFileSync("git", ["fsck", "--connectivity-only"], { cwd: repo.dir, encoding: "utf8" })).not.toContain(
+      "missing",
+    )
   }, 60_000)
 
   test("#given a pass ran recently for this identity #when a second process schedules one #then it does not run again within the interval", async () => {
@@ -136,11 +149,16 @@ describe("createMemoryMaintenance", () => {
     await first.settled()
     for (let index = 20; index < 40; index += 1) {
       await writeFile(join(repo.dir, `note-${index}.md`), `note ${index}\n`)
-      await repo.commitWrite([`note-${index}.md`], `note ${index}`, { agentId: context.identity, authorName: context.identity })
+      await repo.commitWrite([`note-${index}.md`], `note ${index}`, {
+        agentId: context.identity,
+        authorName: context.identity,
+      })
     }
     const looseAfterNewCommits = looseObjects(repo.dir)
     const childScript = join(context.identityPaths.runtime, "maintenance-child.ts")
-    await writeFile(childScript, `
+    await writeFile(
+      childScript,
+      `
 const core = await import(${JSON.stringify(new URL("../index.ts", import.meta.url).href)})
 const { createMemoryMaintenance } = await import(${JSON.stringify(new URL("./memory-maintenance.ts", import.meta.url).href)})
 const identity = ${JSON.stringify(context.identity)}
@@ -153,12 +171,20 @@ maintenance.schedule(context)
 await maintenance.settled()
 maintenance.dispose()
 console.log(JSON.stringify({ pid: process.pid, info, warn }))
-`, "utf8")
+`,
+      "utf8",
+    )
 
     // when: a distinct OS process observes the first pass's persistent stamp.
-    const second = JSON.parse(execFileSync(process.execPath, [childScript], {
-      cwd: context.identityPaths.runtime, env: process.env, encoding: "utf8", timeout: 30_000, windowsHide: true,
-    })) as { pid: number; info: string[]; warn: string[] }
+    const second = JSON.parse(
+      execFileSync(process.execPath, [childScript], {
+        cwd: context.identityPaths.runtime,
+        env: process.env,
+        encoding: "utf8",
+        timeout: 30_000,
+        windowsHide: true,
+      }),
+    ) as { pid: number; info: string[]; warn: string[] }
 
     // then
     expect(second.pid).not.toBe(process.pid)
@@ -173,9 +199,24 @@ console.log(JSON.stringify({ pid: process.pid, info, warn }))
   const stampCases: ReadonlyArray<{ name: string; legacy?: string; runtime?: unknown; runs: boolean }> = [
     { name: "recent legacy only", legacy: String(now - 1), runs: false },
     { name: "expired legacy only", legacy: String(now - interval - 1), runs: true },
-    { name: "newer runtime", legacy: String(now - interval - 1), runtime: { version: 1, attemptedAt: now - 1 }, runs: false },
-    { name: "newer legacy", legacy: String(now - 1), runtime: { version: 1, attemptedAt: now - interval - 1 }, runs: false },
-    { name: "both expired", legacy: String(now - interval - 2), runtime: { version: 1, attemptedAt: now - interval - 1 }, runs: true },
+    {
+      name: "newer runtime",
+      legacy: String(now - interval - 1),
+      runtime: { version: 1, attemptedAt: now - 1 },
+      runs: false,
+    },
+    {
+      name: "newer legacy",
+      legacy: String(now - 1),
+      runtime: { version: 1, attemptedAt: now - interval - 1 },
+      runs: false,
+    },
+    {
+      name: "both expired",
+      legacy: String(now - interval - 2),
+      runtime: { version: 1, attemptedAt: now - interval - 1 },
+      runs: true,
+    },
     { name: "malformed runtime with recent legacy", legacy: String(now - 1), runtime: "{", runs: false },
     { name: "malformed runtime and legacy", legacy: "invalid", runtime: "{", runs: true },
     { name: "unsupported runtime version", runtime: { version: 2, attemptedAt: now - 1 }, runs: true },
@@ -186,8 +227,12 @@ console.log(JSON.stringify({ pid: process.pid, info, warn }))
       const { context, repo } = await identityWithHistory(0)
       if (item.legacy !== undefined) await repo.configSet("omo.maintenanceAt", item.legacy)
       const stampPath = join(context.identityPaths.runtime, "maintenance.json")
-      const originalStamp = item.runtime === undefined ? undefined
-        : typeof item.runtime === "string" ? item.runtime : JSON.stringify(item.runtime)
+      const originalStamp =
+        item.runtime === undefined
+          ? undefined
+          : typeof item.runtime === "string"
+            ? item.runtime
+            : JSON.stringify(item.runtime)
       if (originalStamp !== undefined) {
         await mkdir(context.identityPaths.runtime, { recursive: true })
         await writeFile(stampPath, originalStamp, "utf8")
@@ -195,7 +240,10 @@ console.log(JSON.stringify({ pid: process.pid, info, warn }))
       const configBefore = await readFile(join(repo.dir, ".git", "config"), "utf8")
       const log = recorder()
       const maintenance = createMemoryMaintenance({
-        logger: log.logger, delayMs: 0, now: () => now, minLooseObjects: Number.MAX_SAFE_INTEGER,
+        logger: log.logger,
+        delayMs: 0,
+        now: () => now,
+        minLooseObjects: Number.MAX_SAFE_INTEGER,
       })
       maintenance.schedule(context)
       await maintenance.settled()
@@ -225,18 +273,32 @@ console.log(JSON.stringify({ pid: process.pid, info, warn }))
 
   test("#given packing fails #when a pass already published its attempt #then the runtime stamp still throttles the next pass", async () => {
     const { context, repo } = await identityWithHistory(0)
-    const failingRepo = new class extends GitMemoryRepo {
-      override async maintain(): Promise<never> { throw new Error("controlled packing failure") }
-    }({ dir: repo.dir, agentId: context.identity })
+    const failingRepo = new (class extends GitMemoryRepo {
+      override async maintain(): Promise<never> {
+        throw new Error("controlled packing failure")
+      }
+    })({ dir: repo.dir, agentId: context.identity })
     const log = recorder()
-    const first = createMemoryMaintenance({ createRepo: () => failingRepo, logger: log.logger, delayMs: 0, now: () => now })
+    const first = createMemoryMaintenance({
+      createRepo: () => failingRepo,
+      logger: log.logger,
+      delayMs: 0,
+      now: () => now,
+    })
     first.schedule(context)
     await first.settled()
     expect(log.warn).toEqual(["memory repo maintenance failed"])
-    expect(JSON.parse(await readFile(join(context.identityPaths.runtime, "maintenance.json"), "utf8")))
-      .toEqual({ version: 1, attemptedAt: now })
+    expect(JSON.parse(await readFile(join(context.identityPaths.runtime, "maintenance.json"), "utf8"))).toEqual({
+      version: 1,
+      attemptedAt: now,
+    })
     const secondLog = recorder()
-    const second = createMemoryMaintenance({ createRepo: () => failingRepo, logger: secondLog.logger, delayMs: 0, now: () => now + 1 })
+    const second = createMemoryMaintenance({
+      createRepo: () => failingRepo,
+      logger: secondLog.logger,
+      delayMs: 0,
+      now: () => now + 1,
+    })
     second.schedule(context)
     await second.settled()
     expect(secondLog.warn).toEqual([])
@@ -248,13 +310,17 @@ console.log(JSON.stringify({ pid: process.pid, info, warn }))
       const { context, repo } = await identityWithHistory(0)
       const worktree = await createReflectionWorktree(repo, "tampered-admin", context.identityPaths.worktrees)
       try {
-        if (target === "git pointer") await writeFile(worktree.gitFilePath, `${worktree.gitFileSnapshot}# tampered\n`, "utf8")
+        if (target === "git pointer")
+          await writeFile(worktree.gitFilePath, `${worktree.gitFileSnapshot}# tampered\n`, "utf8")
         else await repo.configSet(target === "legacy stamp" ? "omo.maintenanceAt" : "core.hooksPath", "tampered")
-        expect(await validateCompletion(worktree, worktree.baseSha))
-          .toEqual({ status: "failed", detail: "Git administration files were modified" })
+        expect(await validateCompletion(worktree, worktree.baseSha)).toEqual({
+          status: "failed",
+          detail: "Git administration files were modified",
+        })
       } finally {
         await writeFile(worktree.gitFilePath, worktree.gitFileSnapshot, "utf8")
-        if (worktree.commonConfigSnapshot !== null) await writeFile(worktree.commonConfigPath, worktree.commonConfigSnapshot, "utf8")
+        if (worktree.commonConfigSnapshot !== null)
+          await writeFile(worktree.commonConfigPath, worktree.commonConfigSnapshot, "utf8")
         await discardReflectionWorktree(repo, worktree.dir, worktree.branch)
       }
     }, 30_000)
@@ -282,7 +348,9 @@ console.log(JSON.stringify({ pid: process.pid, info, warn }))
     // given
     const { context, repo } = await identityWithHistory(20)
     const log = recorder()
-    const runners = Array.from({ length: 10 }, () => createMemoryMaintenance({ logger: log.logger, delayMs: 0, minLooseObjects: 10 }))
+    const runners = Array.from({ length: 10 }, () =>
+      createMemoryMaintenance({ logger: log.logger, delayMs: 0, minLooseObjects: 10 }),
+    )
 
     // when
     for (const runner of runners) runner.schedule(context)
@@ -336,7 +404,11 @@ console.log(JSON.stringify({ pid: process.pid, info, warn }))
   test("#given a loose object no commit references yet (a writer mid-commit) #when a pass packs the repo #then that object is kept", async () => {
     // given
     const { context, repo } = await identityWithHistory(20)
-    const pending = execFileSync("git", ["hash-object", "-w", "--stdin"], { cwd: repo.dir, input: "staged by a writer\n", encoding: "utf8" }).trim()
+    const pending = execFileSync("git", ["hash-object", "-w", "--stdin"], {
+      cwd: repo.dir,
+      input: "staged by a writer\n",
+      encoding: "utf8",
+    }).trim()
     const maintenance = createMemoryMaintenance({ delayMs: 0, minLooseObjects: 10 })
 
     // when
@@ -344,7 +416,9 @@ console.log(JSON.stringify({ pid: process.pid, info, warn }))
     await maintenance.settled()
 
     // then
-    expect(execFileSync("git", ["cat-file", "-p", pending], { cwd: repo.dir, encoding: "utf8" })).toBe("staged by a writer\n")
+    expect(execFileSync("git", ["cat-file", "-p", pending], { cwd: repo.dir, encoding: "utf8" })).toBe(
+      "staged by a writer\n",
+    )
   }, 60_000)
 
   test("#given a shared host where one session exits before its pass #when another session binds later #then that session's pass runs", async () => {
@@ -377,7 +451,10 @@ console.log(JSON.stringify({ pid: process.pid, info, warn }))
       const dir = join(identityPaths.transcripts, sessionId)
       await mkdir(dir, { recursive: true })
       await writeFile(join(dir, "transcript.jsonl"), "")
-      await writeFile(join(dir, "state.json"), JSON.stringify({ schema_version: "v3_assistant_steps", total_completed_steps: 0 }))
+      await writeFile(
+        join(dir, "state.json"),
+        JSON.stringify({ schema_version: "v3_assistant_steps", total_completed_steps: 0 }),
+      )
       for (const file of ["transcript.jsonl", "state.json"]) await utimes(join(dir, file), old, old)
       await utimes(dir, old, old)
     }

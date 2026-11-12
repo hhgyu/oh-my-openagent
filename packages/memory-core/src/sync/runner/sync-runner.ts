@@ -47,7 +47,10 @@ export interface SyncConfigInvalidStatus {
 
 /** Thrown by a session resolver whose own packaged sidecar would not load; reported like the engine sidecar. */
 export class SyncSidecarUnavailableError extends Error {
-  constructor(readonly sidecar: string, cause: unknown) {
+  constructor(
+    readonly sidecar: string,
+    cause: unknown,
+  ) {
     super(`the ${sidecar} sidecar could not be loaded: ${String(cause)}`, { cause })
     this.name = "SyncSidecarUnavailableError"
   }
@@ -104,7 +107,9 @@ export function watchHeadLog(
   try {
     watcher = watchFile(join(gitDir, "logs", "HEAD"), { persistent: false }, onChange)
   } catch (error) {
-    warn(`memory sync: cannot watch ${join(gitDir, "logs", "HEAD")} for local commits (${String(error)}); local edits sync on the next stream event or restart`)
+    warn(
+      `memory sync: cannot watch ${join(gitDir, "logs", "HEAD")} for local commits (${String(error)}); local edits sync on the next stream event or restart`,
+    )
     return () => undefined
   }
   watcher.on("error", (error) => warn(`memory sync: the HEAD reflog watch stopped (${String(error)})`))
@@ -144,7 +149,12 @@ interface Held {
 }
 
 export interface SyncRunner {
-  acquire(identity: string, paths: MemoryIdentityPaths, settings: { readonly enabled: boolean }, space?: SyncSpaceInputs): Promise<void>
+  acquire(
+    identity: string,
+    paths: MemoryIdentityPaths,
+    settings: { readonly enabled: boolean },
+    space?: SyncSpaceInputs,
+  ): Promise<void>
   /**
    * Starts a held repo again once the repository its start waited for exists (a fresh device's first
    * memory write seeds it). Changes no refcount; a no-op for any other held state.
@@ -199,11 +209,19 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
         return null
       }
       if (isSyncConfigError(error)) {
-        logger.error(`memory sync is off: ${error.message}`, { identity, code: SYNC_CONFIG_INVALID, variable: error.variable })
+        logger.error(`memory sync is off: ${error.message}`, {
+          identity,
+          code: SYNC_CONFIG_INVALID,
+          variable: error.variable,
+        })
         return { kind: SYNC_CONFIG_INVALID, variable: error.variable, reason: error.message }
       }
       if (!(error instanceof SyncSidecarUnavailableError)) throw error
-      logger.warn(`memory sync unavailable: the ${error.sidecar} sidecar could not be loaded`, { identity, code: SYNC_UNAVAILABLE, reason: error.message })
+      logger.warn(`memory sync unavailable: the ${error.sidecar} sidecar could not be loaded`, {
+        identity,
+        code: SYNC_UNAVAILABLE,
+        reason: error.message,
+      })
       return { kind: SYNC_UNAVAILABLE, reason: error.message }
     }
     if (resolved === null) {
@@ -219,9 +237,16 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
     if (options.open === undefined) {
       // A missing or unloadable sidecar is an install defect, not a sync failure: report it as a
       // typed status and keep the session running without sync.
-      const loaded = await loadRuntime().then(() => null, (error: unknown) => String(error))
+      const loaded = await loadRuntime().then(
+        () => null,
+        (error: unknown) => String(error),
+      )
       if (loaded !== null) {
-        logger.warn("memory sync unavailable: the sync engine sidecar could not be loaded", { identity, code: SYNC_UNAVAILABLE, reason: loaded })
+        logger.warn("memory sync unavailable: the sync engine sidecar could not be loaded", {
+          identity,
+          code: SYNC_UNAVAILABLE,
+          reason: loaded,
+        })
         return { kind: SYNC_UNAVAILABLE, reason: loaded }
       }
     }
@@ -238,7 +263,11 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
       return null
     }
     device.engine.start()
-    const unwatch = watchHead(join(paths.repo, ".git"), () => device.notifyLocalCommit(), (message) => logger.warn(message, { identity }))
+    const unwatch = watchHead(
+      join(paths.repo, ".git"),
+      () => device.notifyLocalCommit(),
+      (message) => logger.warn(message, { identity }),
+    )
     session.onEnded?.(() => void endSession(identity, paths.repo))
     // A watch is armed some time after it is created (measured: an append right after creation was
     // missed 9 times in 30, every later one delivered). One debounced local-commit cycle covers a
@@ -253,7 +282,10 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
     paths: MemoryIdentityPaths,
     space: SyncSpaceInputs,
     users: number,
-    retryMs = Math.max(Math.min(options.deferredRetryMs ?? DEFERRED_RETRY_MS, DEFERRED_RETRY_MAX_MS), DEFERRED_RETRY_MIN_MS),
+    retryMs = Math.max(
+      Math.min(options.deferredRetryMs ?? DEFERRED_RETRY_MS, DEFERRED_RETRY_MAX_MS),
+      DEFERRED_RETRY_MIN_MS,
+    ),
     previousRetryMs = 0,
     quietMs = 0,
   ): Held => {
@@ -267,30 +299,52 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
       retry = "unseeded"
       logger.info(SYNC_WAITING_FOR_REPOSITORY, { identity })
     }
-    const ready = unseeded ? Promise.resolve(null) : start(identity, paths, space, message => {
-      deferred = true
-      if (retryMs !== previousRetryMs) {
-        logger.warn(`memory sync is waiting: ${message} Sync retries on its own.`, { identity, code: SYNC_SESSION_DEFERRED, retryMs })
-        return
-      }
-      // At the cap every pass is silent; one reminder per 15 minutes says the keychain is still unanswered.
-      nextQuietMs = quietMs + retryMs
-      if (nextQuietMs >= DEFERRED_STILL_WAITING_MS) {
-        nextQuietMs = 0
-        logger.warn("memory sync is still waiting for keychain approval.", { identity, code: SYNC_SESSION_DEFERRED, retryMs })
-      }
-    }).catch((error: unknown) => {
-      retry = "failed"
-      logger.error("memory sync failed to start", { identity, error: String(error) })
-      return null
-    })
-    const held: Held = { users, ready, relaunch: next => launch(identity, paths, space, next) }
+    const ready = unseeded
+      ? Promise.resolve(null)
+      : start(identity, paths, space, (message) => {
+          deferred = true
+          if (retryMs !== previousRetryMs) {
+            logger.warn(`memory sync is waiting: ${message} Sync retries on its own.`, {
+              identity,
+              code: SYNC_SESSION_DEFERRED,
+              retryMs,
+            })
+            return
+          }
+          // At the cap every pass is silent; one reminder per 15 minutes says the keychain is still unanswered.
+          nextQuietMs = quietMs + retryMs
+          if (nextQuietMs >= DEFERRED_STILL_WAITING_MS) {
+            nextQuietMs = 0
+            logger.warn("memory sync is still waiting for keychain approval.", {
+              identity,
+              code: SYNC_SESSION_DEFERRED,
+              retryMs,
+            })
+          }
+        }).catch((error: unknown) => {
+          retry = "failed"
+          logger.error("memory sync failed to start", { identity, error: String(error) })
+          return null
+        })
+    const held: Held = { users, ready, relaunch: (next) => launch(identity, paths, space, next) }
     void ready.then(() => {
       held.settled = true
       if (retry !== undefined) held.retry = retry
       if (!deferred) return
       const timer = setTimeout(() => {
-        if (repos.get(paths.repo) === held) repos.set(paths.repo, launch(identity, paths, space, held.users, Math.min(retryMs * 2, DEFERRED_RETRY_MAX_MS), retryMs, nextQuietMs))
+        if (repos.get(paths.repo) === held)
+          repos.set(
+            paths.repo,
+            launch(
+              identity,
+              paths,
+              space,
+              held.users,
+              Math.min(retryMs * 2, DEFERRED_RETRY_MAX_MS),
+              retryMs,
+              nextQuietMs,
+            ),
+          )
       }, retryMs)
       timer.unref?.()
     })
@@ -314,7 +368,10 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
         ])
         clearTimeout(timer)
         if (!closed) {
-          logger.error(`memory sync: the previous engine for this memory did not close within ${waitMs} ms; starting anyway, and this device may stay idle if it still holds its lease`, { identity, code: SYNC_CLOSE_WAIT_EXCEEDED })
+          logger.error(
+            `memory sync: the previous engine for this memory did not close within ${waitMs} ms; starting anyway, and this device may stay idle if it still holds its lease`,
+            { identity, code: SYNC_CLOSE_WAIT_EXCEEDED },
+          )
         }
       }
       const held = repos.get(paths.repo)
@@ -323,7 +380,10 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
         return
       }
       // A new session is the retry edge for a start that failed or waited for the repo.
-      const launched = held === undefined ? launch(identity, paths, space ?? { profile: null, projectDir: paths.repo }, 1) : held.relaunch(held.users + 1)
+      const launched =
+        held === undefined
+          ? launch(identity, paths, space ?? { profile: null, projectDir: paths.repo }, 1)
+          : held.relaunch(held.users + 1)
       repos.set(paths.repo, launched)
       await launched.ready
     },
