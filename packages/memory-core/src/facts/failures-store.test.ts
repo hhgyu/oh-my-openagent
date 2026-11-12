@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { buildIdentityPaths, type MemoryIdentityPaths } from "../identity"
-import { createLockRecord, factsQueueLockPath, withLock } from "../locks"
+import { createLockRecord, factsQueueLockPath, LockContentionError, withLock } from "../locks"
 import { factsQueuePaths } from "./schema"
 import { FactsFailuresCorruptError } from "./failures-schema"
 import { FactsFailureStore } from "./failures-store"
@@ -46,6 +46,26 @@ describe("facts failures layout", () => {
 })
 
 describe("facts failure store persistence", () => {
+  test("#given a held queue lock #when ledger reads and retry writes contend #then typed busy errors preserve the ledger and release allows a later read", async () => {
+    // given
+    const paths = await identityFixture()
+    const store = new FactsFailureStore({ identityPaths: paths, now: () => T0, lockWaitMs: 0 })
+    await store.recordFailure({ targets: [target()], failureId: "run-a", reason: "child_exit" })
+    const before = await readFile(factsQueuePaths(paths).failuresPath, "utf8")
+    const lockPath = factsQueueLockPath(paths.locks)
+    // when / then
+    await withLock(lockPath, await createLockRecord("facts-queue"), async () => {
+      for (const operation of [() => store.readFailures(), () => store.clearForRetry({}), () => store.recordFailure({ targets: [target()], failureId: "run-b", reason: "child_exit" })]) {
+        const error = await operation().catch((error: unknown) => error)
+        expect(error).toBeInstanceOf(LockContentionError)
+        expect(error).not.toBeInstanceOf(FactsFailuresCorruptError)
+        expect(error).toMatchObject({ lockPath, retriable: true })
+      }
+      expect(await readFile(factsQueuePaths(paths).failuresPath, "utf8")).toBe(before)
+    })
+    expect((await store.readFailures()).entries[0]?.streak).toBe(1)
+  })
+
   test("#given no failures file #when the store reads #then empty state is returned", async () => {
     // given
     const store = new FactsFailureStore({ identityPaths: await identityFixture() })
