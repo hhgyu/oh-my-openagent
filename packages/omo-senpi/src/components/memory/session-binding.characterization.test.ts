@@ -49,11 +49,15 @@ function tempDir(prefix: string): string {
 type SyncCall =
   | { readonly kind: "acquire"; readonly identity: string; readonly repo: string; readonly profile: unknown; readonly projectDir: unknown }
   | { readonly kind: "release"; readonly repo: string }
+  | { readonly kind: "resume"; readonly repo: string }
 
 function recordingSyncRunner(calls: SyncCall[]): SyncRunner {
   return {
     acquire: async (identity, paths, _settings, options) => {
       calls.push({ kind: "acquire", identity, repo: paths.repo, profile: options?.profile, projectDir: options?.projectDir })
+    },
+    resume: async (repo) => {
+      calls.push({ kind: "resume", repo })
     },
     release: async (repo) => {
       calls.push({ kind: "release", repo })
@@ -308,5 +312,37 @@ describe("X8c memory binding at session_start (characterization)", () => {
     }])
     expect(h.syncCalls).toEqual([])
     expect(supervisorDelta(before)).toBe(1)
+  })
+})
+
+// Fresh-device sync: the runner waits while the repo does not exist, and the component's settle is the
+// edge that starts it in the same session (P-22). Protects the runner wiring, not the runner itself.
+describe("sync resume at agent_settled", () => {
+  test("#given a session that acquired sync #when agent_settled fires #then the runner is asked to resume that session's repo", async () => {
+    // given
+    const h = harness()
+    const sessionCwd = h.workspace()
+    const identity = h.identityFor(sessionCwd)
+    const event = sessionContext({ cwd: sessionCwd })
+    await h.pi.dispatch("session_start", {}, event)
+
+    // when
+    await h.pi.dispatch("agent_settled", { type: "agent_settled" }, event)
+
+    // then
+    expect(h.syncCalls.filter((call) => call.kind !== "acquire")).toEqual([{ kind: "resume", repo: identity.paths.repo }])
+  })
+
+  test("#given a one-shot surface that never acquired sync #when agent_settled fires #then nothing is resumed", async () => {
+    // given
+    const h = harness()
+    const event = { ...sessionContext({ cwd: h.workspace() }), hasUI: false }
+    await h.pi.dispatch("session_start", {}, event)
+
+    // when
+    await h.pi.dispatch("agent_settled", { type: "agent_settled" }, event)
+
+    // then
+    expect(h.syncCalls).toEqual([])
   })
 })

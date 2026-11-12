@@ -192,6 +192,16 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
         bindSession(surface, eventCtx, { existing: undefined, verifyRepository: false })
       })
 
+      // A fresh device binds before its first memory write creates the repo; the runner waits, and a
+      // settle after that write starts sync in this session instead of the next one.
+      pi.on("agent_settled", (_payload, eventCtx) => {
+        const repo = sessions.get(readSessionSurface(eventCtx).id)?.syncRepo
+        if (repo === undefined) return
+        void syncRunner.resume(repo).catch((error: unknown) => {
+          ctx.logger.warn("memory sync resume failed", { error: describeError(error) })
+        })
+      })
+
       pi.on("session_shutdown", async (payload, eventCtx) => {
         const sessionId = readSessionSurface(eventCtx).id
         if (syncSessionId === sessionId) {

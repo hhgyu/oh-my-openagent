@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process"
-import { existsSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { delimiter, dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -19,10 +19,10 @@ function selfTest() {
   try {
     seedSandbox(sandbox)
     const binDir = join(sandbox.root, "bin")
-    spawnSync("mkdir", ["-p", binDir])
+    mkdirSync(binDir, { recursive: true })
     const omo = join(binDir, "omo")
     writeFileSync(omo, `#!/bin/sh\nprintf '${activeIncompleteStatusJson}'\n`)
-    spawnSync("chmod", ["+x", omo])
+    chmodSync(omo, 0o755)
     if (!existsSync(omo)) throw new Error("fake omo stub missing")
   } finally {
     rmSync(sandbox.root, { recursive: true, force: true })
@@ -42,13 +42,13 @@ function main() {
   try {
     seedSandbox(sandbox)
     const binDir = join(sandbox.root, "bin")
-    spawnSync("mkdir", ["-p", binDir, sessionDir])
+    for (const dir of [binDir, sessionDir]) mkdirSync(dir, { recursive: true })
     const omo = join(binDir, "omo")
     writeFileSync(
       omo,
       `#!/bin/sh\nif [ "$1 $2 $3" = "ulw-loop status --json" ]; then printf '${activeIncompleteStatusJson}'; exit 0; fi\nexit 1\n`,
     )
-    spawnSync("chmod", ["+x", omo])
+    chmodSync(omo, 0o755)
 
     const senpiBin = process.env.SENPI_BIN?.trim() || "senpi"
     const resolvedSenpi = senpiBin.includes("/") ? (existsSync(senpiBin) ? senpiBin : null) : findOnPath(senpiBin)
@@ -92,7 +92,7 @@ function main() {
     }
 
     tmuxSession = `omo-senpi-qa-${process.pid}`
-    const tmuxPath = `${binDir}:${process.env.PATH ?? ""}`
+    const tmuxPath = `${binDir}${delimiter}${process.env.PATH ?? ""}`
     const tmuxRun = spawnSync(tmuxBin, [
       "new-session",
       "-e",
@@ -157,7 +157,7 @@ function print({ result, reason, continuationQaPath, beforeDigest }) {
 function senpiEnv(sandbox, binDir, sessionDir) {
   return {
     ...isolatedChildEnv(process.env, sandbox.agentDir),
-    PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
     SENPI_CODING_AGENT_DIR: sandbox.agentDir,
     XDG_CONFIG_HOME: sandbox.xdgConfigHome,
     SENPI_CODING_AGENT_SESSION_DIR: sessionDir,

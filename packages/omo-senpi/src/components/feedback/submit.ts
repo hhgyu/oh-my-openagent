@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto"
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { FEEDBACK_SECTION_IDS, type FeedbackDraft, type FeedbackKind, type FeedbackSectionId, type UploadRedactor } from "./draft"
+import { protectFeedbackDirectory, writePrivateFeedbackFile } from "./private-file"
 
 export const FEEDBACK_REDACTOR_VERSION = "1.0.0"
 
@@ -101,14 +102,10 @@ export const feedbackUploadsDisabled = (env: Readonly<Record<string, string | un
 
 const firstLine = (text: string): string => (text.split("\n").find((line) => line.trim() !== "") ?? "").trim().slice(0, 120)
 
-const privateWrite = (path: string, contents: string): void => {
-  writeFileSync(path, contents, { mode: 0o600 })
-  chmodSync(path, 0o600)
-}
-
 const feedbackDir = (stateDir: string): string => {
   const dir = join(stateDir, "feedback")
   mkdirSync(dir, { recursive: true, mode: 0o700 })
+  protectFeedbackDirectory(dir)
   return dir
 }
 
@@ -127,7 +124,7 @@ const rememberDeleteToken = (stateDir: string, entry: SentEntry): void => {
   } catch {
     entries = []
   }
-  privateWrite(path, JSON.stringify([...entries.filter((value) => value.id !== entry.id), entry], null, 2))
+  writePrivateFeedbackFile(path, JSON.stringify([...entries.filter((value) => value.id !== entry.id), entry], null, 2))
 }
 
 const refusalFor = (status: number, code: unknown, requestId: unknown, detail: unknown, redact: UploadRedactor): SubmitResult => {
@@ -174,7 +171,7 @@ export async function submitReport(options: SubmitOptions): Promise<SubmitResult
   if (feedbackUploadsDisabled(options.env)) {
     try {
       const path = join(feedbackDir(options.stateDir), `report-${options.draft.draftId}.json`)
-      privateWrite(path, json)
+      writePrivateFeedbackFile(path, json)
       return { kind: "saved", path }
     } catch {
       return { kind: "refused", reason: "unavailable" }
