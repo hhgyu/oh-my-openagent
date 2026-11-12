@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url"
 
 const CODEMODE_PACKAGE = "@code-yeongyu/senpi-codemode"
 /** The only version these structural types were checked against; any other is refused, never guessed at. */
-export const CODEMODE_VERSION = "2026.11.5-1"
+export const CODEMODE_VERSION = "2026.11.12"
 const DEFAULT_CODEMODE_LOAD_TIMEOUT_MS = 120_000 // the S9c spike's slowest in-host import took about 20 s
 
 type Fn = (...args: never[]) => unknown
