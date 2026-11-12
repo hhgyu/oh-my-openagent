@@ -38,15 +38,30 @@ function permissions(override: AgentOverride): Rule[] {
   })
 }
 
-export function applyAgents(editor: AgentEditor, config: AgentsConfig): void {
+export function applyAgents(editor: AgentEditor, config: AgentsConfig, warn: (message: string) => void = message => console.warn(message)): void {
   const disabled = new Set(config.disabled_agents)
   for (const definition of [...AGENT_DEFINITIONS, ...nativeAgentIdentities(config)]) {
-    const converted = agentOverrideSchema.safeParse({ ...config.nativeAgents?.[definition.id], ...config.agents[definition.id] })
-    if (!converted.success) throw Error(`Cannot register OmO agent ${definition.id}. Fix agents.${definition.id} model and permission fields for OpenCode, then reload OmO.`)
-    const override = converted.data
-    if (disabled.has(definition.id) || override.disable) {
+    const input = { ...config.nativeAgents?.[definition.id], ...config.agents[definition.id] }
+    if (disabled.has(definition.id) || input.disable === true) {
       editor.remove(definition.id)
       continue
+    }
+    const converted = agentOverrideSchema.safeParse(input)
+    if (!converted.success) {
+      const fields = [...new Set(converted.error.issues.map(issue => `agents.${definition.id}.${issue.path.join(".")}`))]
+      warn(`[oh-my-openagent/v2] Ignoring invalid agent override: ${fields.join(", ")}. Fix these fields and reload OmO.${definition.hidden ? " Identity skipped." : " Using stock defaults."}`)
+      if (definition.hidden) { editor.remove(definition.id); continue }
+    }
+    const override = converted.success ? converted.data : {}
+    const first = override.models?.[0]
+    const model = typeof first === "string" ? first : first?.model ?? override.model
+    let modelRef: ReturnType<typeof Model.Ref.parse> | undefined
+    if (model !== undefined) {
+      try { modelRef = Model.Ref.parse(model) }
+      catch {
+        warn(`[oh-my-openagent/v2] Ignoring invalid model reference at agents.${definition.id}.${first === undefined ? "model" : "models.0"}: expected provider/model.${definition.hidden ? " Identity skipped; fix the field and reload OmO." : ""}`)
+        if (definition.hidden) { editor.remove(definition.id); continue }
+      }
     }
     editor.update(definition.id, (agent) => {
       agent.name = Agent.Name.make(override.displayName ?? definition.name)
@@ -55,12 +70,7 @@ export function applyAgents(editor: AgentEditor, config: AgentsConfig): void {
       agent.hidden = definition.hidden ?? false
       agent.system = [override.prompt ?? definition.system, override.prompt_append].filter((part) => part !== undefined && part.length > 0).join("\n\n")
       if (override.color !== undefined) agent.color = override.color
-      const first = override.models?.[0]
-      const model = typeof first === "string" ? first : first?.model ?? override.model
-      if (model !== undefined) {
-        try { agent.model = Model.Ref.parse(model) }
-        catch { console.warn(`[oh-my-openagent/v2] Ignoring invalid model reference for ${definition.id}: expected provider/model`) }
-      }
+      if (modelRef !== undefined) agent.model = modelRef
       const reasoning = (typeof first === "object" ? first.reasoning : undefined) ?? override.reasoning ?? override.variant
       if (reasoning !== undefined && agent.model !== undefined) agent.model.variant = Model.VariantID.make(reasoning)
       if (override.temperature !== undefined) agent.request.body.temperature = override.temperature
@@ -89,6 +99,14 @@ export function applyAgents(editor: AgentEditor, config: AgentsConfig): void {
 
 export async function registerAgents(domain: Pick<AgentDomain, "transform">, options: LoadOmoConfigOptions): Promise<() => Promise<void>> {
   // Reload replays this transform and rereads unified config; disposing removes its ownership.
-  const registration = await domain.transform((editor) => applyAgents(editor, loadAgentsConfig(options)))
+  let previous = new Set<string>()
+  const registration = await domain.transform(editor => {
+    const current = new Set<string>()
+    applyAgents(editor, loadAgentsConfig(options), message => {
+      current.add(message)
+      if (!previous.has(message)) console.warn(message)
+    })
+    previous = current
+  })
   return () => registration.dispose()
 }

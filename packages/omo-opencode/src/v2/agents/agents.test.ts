@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, spyOn } from "bun:test"
 import { join, resolve } from "node:path"
 const fixtureHome = resolve("virtual-v2-home")
 const fixtureProject = join(fixtureHome, "project")
@@ -103,6 +103,47 @@ describe("native v2 agents", () => {
     applyAgents(editor, { agents: { oracle: { model: "not-provider-qualified" } }, disabled_agents: [] })
     expect(editor.get("oracle")?.model).toBeUndefined()
     for (const id of AGENT_IDS) expect(editor.get(id)).toBeDefined()
+  })
+
+  it("#given an unrepresentable Native custom override #when agents register #then only that identity is removed with a field diagnostic", () => {
+    const { editor } = recordingEditor()
+    editor.update("bad-custom", () => {})
+    const warnings = spyOn(console, "warn").mockImplementation(() => undefined)
+    try {
+      applyAgents(editor, { agents: {}, disabled_agents: [], nativeAgents: {
+        "bad-custom": { permission: { read: undefined } }, "good-custom": { prompt: "valid" },
+      } })
+      expect(editor.get("bad-custom")).toBeUndefined()
+      expect(editor.get("good-custom")?.mode).toBe("subagent")
+      for (const id of AGENT_IDS) expect(editor.get(id)).toBeDefined()
+      expect(warnings.mock.calls).toHaveLength(1)
+      expect(warnings.mock.calls[0]?.[0]).toContain("agents.bad-custom.permission.read")
+    } finally { warnings.mockRestore() }
+  })
+
+  it("#given an unrepresentable stock override #when agents register #then its defaults and every other identity survive", () => {
+    const { editor } = recordingEditor()
+    const warnings = spyOn(console, "warn").mockImplementation(() => undefined)
+    try {
+      applyAgents(editor, { agents: {}, disabled_agents: [], nativeAgents: { oracle: { permission: { read: undefined } } } })
+      for (const id of AGENT_IDS) expect(editor.get(id)).toBeDefined()
+      expect(effective(editor, "oracle", "edit")).toBe("deny")
+      expect(warnings.mock.calls).toHaveLength(1)
+      expect(warnings.mock.calls[0]?.[0]).toContain("agents.oracle.permission.read")
+    } finally { warnings.mockRestore() }
+  })
+
+  it("#given a Native custom agent with a malformed model #when agents register #then it stays unavailable without aborting registration", () => {
+    const { editor } = recordingEditor()
+    const warnings = spyOn(console, "warn").mockImplementation(() => undefined)
+    try {
+      applyAgents(editor, { agents: {}, disabled_agents: [], nativeAgents: { "bad-model": { model: "not-qualified" }, "good-custom": {} } })
+      expect(editor.get("bad-model")).toBeUndefined()
+      expect(editor.get("good-custom")).toBeDefined()
+      for (const id of AGENT_IDS) expect(editor.get(id)).toBeDefined()
+      expect(warnings.mock.calls).toHaveLength(1)
+      expect(warnings.mock.calls[0]?.[0]).toContain("agents.bad-model.model")
+    } finally { warnings.mockRestore() }
   })
   it("removes disabled OmO agents but preserves an unrelated host id in the denylist", () => {
     const { editor } = recordingEditor()
@@ -226,6 +267,31 @@ describe("native v2 agents", () => {
     expect(editor.get("oracle")).toBeUndefined()
     await cleanup()
     expect(disposed).toBe(true)
+  })
+
+  it("#given an invalid identity #when the host replays its transform #then the warning repeats only after the configuration is repaired and breaks again", async () => {
+    let callback: ((editor: AgentEditor) => void) | undefined
+    let broken = true
+    const warnings = spyOn(console, "warn").mockImplementation(() => undefined)
+    const cleanup = await registerAgents({ transform: async fn => { callback = fn; return { dispose: async () => undefined } } }, {
+      cwd: fixtureProject, env: { HOME: fixtureHome }, platform: "linux", fileSystem: {
+        existsSync: path => path === fixtureUserConfig,
+        readFileSync: () => JSON.stringify({ agents: { "custom-model": { model: broken ? "invalid" : "mock/valid" } } }),
+      },
+    })
+    try {
+      const { editor } = recordingEditor()
+      callback?.(editor)
+      callback?.(editor)
+      expect(warnings.mock.calls).toHaveLength(1)
+      broken = false
+      callback?.(editor)
+      expect(editor.get("custom-model")).toBeDefined()
+      broken = true
+      callback?.(editor)
+      expect(editor.get("custom-model")).toBeUndefined()
+      expect(warnings.mock.calls).toHaveLength(2)
+    } finally { await cleanup(); warnings.mockRestore() }
   })
 })
 
