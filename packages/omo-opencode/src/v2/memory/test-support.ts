@@ -49,7 +49,7 @@ export interface MemoryFixture {
   toolAfter(sessionID: string, tool: string, input: unknown, output: string, id?: string): Promise<void>
   /** Runs the `compaction` hook; `tools` is the request's tool map, narrowed in place. */
   compaction(sessionID: string, messages?: { id?: string }[], tools?: Record<string, { description: string; input: Record<string, unknown> }>): Promise<void>
-  emitEvent(type: "session.compaction.ended" | "session.compaction.failed" | "session.execution.interrupted" | "location.shutdown", sessionID: string): Promise<void>
+  emitEvent(type: "session.compaction.ended" | "session.compaction.failed" | "session.execution.interrupted" | "session.inbox.enqueued" | "session.deleted" | "location.shutdown", sessionID: string): Promise<void>
   /** Runs the `context` hook over these model-request messages and returns them as the hook left them. */
   requestMessages(sessionID: string, messages: { id?: string }[]): Promise<{ id?: string }[]>
   idle(sessionID: string): Promise<void>
@@ -184,7 +184,8 @@ export function createMemoryFixture(settings: Record<string, unknown> = {}): Mem
     compaction: (sessionID: string, messages: { id?: string }[] = [], tools: Record<string, { description: string; input: Record<string, unknown> }> = {}) =>
       call("session:compaction", { sessionID, system: [], tools, messages }),
     async emitEvent(type, sessionID) {
-      await Promise.all([...subscribers].map(send => send({ type, data: { sessionID } })))
+      const data = type === "session.inbox.enqueued" ? { sessionID, inboxID: crypto.randomUUID(), item: { type: "user" } } : { sessionID }
+      await Promise.all([...subscribers].map(send => send({ type, data })))
     },
     async requestMessages(sessionID: string, messages: { id?: string }[]) {
       await call("session:context", { sessionID, system: [], tools: {}, messages })

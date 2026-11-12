@@ -194,6 +194,52 @@ describe("facts extractor child", () => {
 })
 
 describe("facts reload recovery", () => {
+  test("#given a deleted bound session #when shutdown drains surviving sessions #then its durable queue remains but its final context is not read", async () => {
+    const f = fixture({ facts: { debounce_settles: 10 } })
+    f.addSession("deleted")
+    f.addSession("survivor")
+    const { cleanup } = await register(f)
+    await settle(f, "deleted")
+    await f.prompt("survivor", "last surviving turn")
+    await f.context("survivor")
+    const survivor = f.sessions.get("survivor")
+    if (survivor !== undefined) survivor.messages = conversation("last surviving turn", "Noted.")
+    await f.emitEvent("session.deleted", "deleted")
+    f.sessions.delete("deleted")
+    const read = spyOn(f.host.session, "context")
+    try {
+      await cleanup()
+      expect(read.mock.calls.map(([input]) => input.sessionID)).not.toContain("deleted")
+      const pending = await new FactsQueue({ identityPaths: identityPaths(f) }).listPending()
+      expect(pending.map(entry => entry.sessionId).sort()).toEqual(["deleted", "survivor"])
+    } finally { read.mockRestore() }
+  })
+
+  test("#given a settle awaiting its session model #when the session is deleted #then the late settle cannot launch an extractor", async () => {
+    const f = fixture()
+    f.addSession("deleted", { messages: conversation("queued fact", "Noted.") })
+    const { ports } = await register(f)
+    await f.prompt("deleted", "queued fact")
+    await f.context("deleted")
+    const entered = Promise.withResolvers<undefined>()
+    const held = Promise.withResolvers<undefined>()
+    const original = f.host.session.context.bind(f.host.session)
+    let calls = 0
+    const read = spyOn(f.host.session, "context").mockImplementation(async input => {
+      if (++calls === 2) { entered.resolve(undefined); await held.promise }
+      return original(input)
+    })
+    try {
+      const pending = f.idle("deleted")
+      await entered.promise
+      await f.emitEvent("session.deleted", "deleted")
+      held.resolve(undefined)
+      await pending
+      expect(await new FactsQueue({ identityPaths: identityPaths(f) }).listPending()).toHaveLength(0)
+      expect(ports.requests).toHaveLength(0)
+    } finally { held.resolve(undefined); read.mockRestore() }
+  })
+
   test.each(["close", "location.shutdown"] as const)("#given final turns without idle #when %s runs #then every bound root is queued once without extraction", async edge => {
     // given
     const f = fixture({ facts: { debounce_settles: 10 } })

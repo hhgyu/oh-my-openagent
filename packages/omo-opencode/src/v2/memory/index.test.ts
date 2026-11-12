@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
-import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, readFileSync } from "node:fs"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import { MEMORY_BINDING_KEY, MEMORY_PART_MARKER, PROJECTION_PIN_KEY, registerMemoryComponent } from "./index"
@@ -115,6 +115,44 @@ describe("registerMemoryComponent", () => {
     const repo = join(f.env.OMO_MEMORY_HOME ?? "", "agents", binding.identity, "repo")
     expect(execFileSync("git", ["-C", repo, "log", "-1", "--format=%B"], { encoding: "utf8" })).toContain("Omo-Turn: 1")
     await cleanup()
+  })
+
+  test.each([false, true])("#given acceptance is in flight with another session blocking the stream %s #when its session is deleted #then eviction waits for persistence and a later bind reloads the durable counter", async backlog => {
+    const f = fixture()
+    f.addSession("deleted")
+    f.addSession("blocked")
+    const cleanup = await registerMemoryComponent(f.host, f.options())
+    const entered = Promise.withResolvers<undefined>()
+    const held = Promise.withResolvers<undefined>()
+    const original = f.host.session.get.bind(f.host.session)
+    const read = spyOn(f.host.session, "get").mockImplementation(async input => {
+      entered.resolve(undefined)
+      await held.promise
+      return original(input)
+    })
+    try {
+      const initial = f.prompt(backlog ? "blocked" : "deleted", "accepted before deletion")
+      await entered.promise
+      const pending = backlog ? f.emitEvent("session.inbox.enqueued", "deleted") : initial
+      const deletion = f.emitEvent("session.deleted", "deleted")
+      held.resolve(undefined)
+      await Promise.all([initial, pending, deletion])
+      const binding = f.sessions.get("deleted")?.metadata?.[MEMORY_BINDING_KEY] as { identity: string }
+      const root = join(f.env.OMO_MEMORY_HOME ?? "", "agents", binding.identity)
+      const directory = join(root, "runtime", "accepted-turns")
+      const name = readdirSync(directory).find(file => file.endsWith(".json") && (JSON.parse(readFileSync(join(directory, file), "utf8")) as { sessionID: string }).sessionID === "deleted")
+      if (name === undefined) throw new Error("Missing durable accepted-turn record")
+      const file = join(directory, name)
+      const persisted = JSON.parse(readFileSync(file, "utf8")) as { turns: number }
+      expect(persisted.turns).toBe(1)
+      writeFileSync(file, JSON.stringify({ ...persisted, turns: 7 }))
+      await f.runTool("memory", "deleted", create("reference/resumed.md", "Resumed counter", "durable data survives deletion"))
+      expect(execFileSync("git", ["-C", join(root, "repo"), "log", "-1", "--format=%B"], { encoding: "utf8" })).toContain("Omo-Turn: 7")
+    } finally {
+      held.resolve(undefined)
+      read.mockRestore()
+      await cleanup()
+    }
   })
 
   test("#given a root session #when it writes memory #then the seeded repo is created and one pinned block is projected per request", async () => {
