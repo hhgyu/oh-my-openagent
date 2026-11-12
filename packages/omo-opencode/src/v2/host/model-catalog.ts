@@ -52,7 +52,7 @@ export function createModelCatalog(domains: ModelCatalogDomains) {
             ...(model.capabilities.temperature === undefined ? {} : { temperature: model.capabilities.temperature }),
           },
           limit: { context: model.limit.context, output: model.limit.output, ...(model.limit.input === undefined ? {} : { input: model.limit.input }) },
-          cost: model.cost.map(price => ({
+          cost: (model.cost ?? []).map(price => ({
             ...(price.tier === undefined ? {} : { tier: { type: price.tier.type, size: price.tier.size } }),
             input: price.input, output: price.output, cache: { read: price.cache.read, write: price.cache.write },
           })),

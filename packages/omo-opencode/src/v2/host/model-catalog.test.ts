@@ -48,3 +48,10 @@ it("propagates host catalog failures instead of inventing provider or authentica
   const catalog = createModelCatalog({ model: { list: async () => { throw new Error("host unavailable") } }, provider: { list: async () => ({ location: { directory: "/fixture" }, data: [] }) } })
   await expect(catalog.list()).rejects.toThrow("host unavailable")
 })
+
+it("#given a host entry without prices #when the catalog is read #then it remains unpriced instead of failing every catalog consumer", async () => {
+  const entry = model("custom")
+  Reflect.deleteProperty(entry, "cost")
+  const catalog = createModelCatalog({ model: { list: async () => ({ location: { directory: "/fixture" }, data: [entry] }) }, provider: { list: async () => ({ location: { directory: "/fixture" }, data: [] }) } })
+  expect((await catalog.list())[0].cost).toEqual([])
+})
