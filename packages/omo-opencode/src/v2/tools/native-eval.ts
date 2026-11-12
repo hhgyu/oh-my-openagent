@@ -60,7 +60,8 @@ export type NativeEvalHost = Pick<Plugin.Context, "tool" | "session" | "event" |
 export interface NativeEvalOptions {
   /** Defaults to the codemode worker client; tests drive a fake. */
   readonly backend?: EvalBackend
-  /** Plugin-owned tools a cell may call (`tools.X`); they run here, on the main thread. S9d adds the owned `task` executor. */
+  /** Plugin-owned tools a cell may call (`tools.X`); they run here, on the main thread, and receive the
+   * calling eval call's own SDK context as `caller` (the owned `task` executor, eval-task-host-tool.ts). */
   readonly ownedTools?: readonly OwnedEvalHostTool[]
   readonly processEvents?: ProcessEvents
   readonly home?: string
@@ -73,6 +74,19 @@ export function evalStateDir(projectDirectory: string, sessionID: string, home: 
   const key = createHash("sha256").update(sessionID).digest("hex")
   if (resolve(projectDirectory) === resolve(home)) return join(tmpdir(), "omo-opencode-v2-eval", key)
   return join(projectDirectory, ".omo", "eval", "opencode-v2", key)
+}
+
+/** A cell's host-tool call names its eval call; this resolves it to that call's own SDK context, only
+ * while the call runs and only in the same session. A detached cell's call gets no caller. */
+export function bindEvalCallers(tools: readonly OwnedEvalHostTool[], running: ReadonlyMap<string, ToolContext>): OwnedEvalHostTool[] {
+  return tools.map(tool => ({
+    name: tool.name, description: tool.description, parameters: tool.parameters,
+    execute(params, call) {
+      const context = call.toolCallId === undefined ? undefined : running.get(call.toolCallId)
+      const caller = context && context.sessionID === call.sessionID ? context : undefined
+      return tool.execute(params, { ...call, ...(caller && { caller }) })
+    },
+  }))
 }
 
 function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -95,9 +109,12 @@ export async function registerNativeEval(host: NativeEvalHost, options: NativeEv
   let hostID: string | undefined
   let closed = false
   let pump: Promise<void> | undefined
+  /** Running eval calls by call id: a cell's host-tool call names its eval call, never a context. */
+  const running = new Map<string, ToolContext>()
+  const ownedTools = bindEvalCallers(options.ownedTools ?? [], running)
 
   const backend = options.backend ?? createCodemodeWorkerBackend({
-    cwd: directory, sandbox, ownedTools: options.ownedTools ?? [], stateDir,
+    cwd: directory, sandbox, ownedTools, stateDir,
     ...(options.createTimeoutMs !== undefined && { createTimeoutMs: options.createTimeoutMs }),
     ...(options.disposeTimeoutMs !== undefined && { disposeTimeoutMs: options.disposeTimeoutMs }),
     ...(options.processEvents && { processEvents: options.processEvents }),
@@ -129,7 +146,12 @@ export async function registerNativeEval(host: NativeEvalHost, options: NativeEv
         if (text !== undefined) void context.progress({ eval: { output: text } }).catch(() => {})
       }
       // The worker serializes calls per session (Native runs `eval` sequentially) and prepares the arguments.
-      return adaptEvalResult(await session.run(String(context.id), input, context.signal, onUpdate))
+      running.set(String(context.id), context)
+      try {
+        return adaptEvalResult(await session.run(String(context.id), input, context.signal, onUpdate))
+      } finally {
+        if (running.get(String(context.id)) === context) running.delete(String(context.id))
+      }
     } catch (error) {
       throw toToolError(error)
     }
@@ -143,6 +165,7 @@ export async function registerNativeEval(host: NativeEvalHost, options: NativeEv
       const results = await Promise.allSettled([...registrations.reverse().map(registration => registration.dispose()), backend.dispose()])
       if (pump) await pump
       roots.clear()
+      running.clear()
       const failures = results.flatMap(result => result.status === "rejected" ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, "eval component cleanup incomplete")
     })()

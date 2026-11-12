@@ -79,11 +79,20 @@ export function createCodemodeWorkerBackend(options: CodemodeWorkerBackendOption
   let definition: EvalDefinition | undefined
   let pids: readonly number[] = []
   let disposal: Promise<void> | undefined
+  /** Per eval session: aborted when the session is released or its worker goes, ending its kernel-tool proxies. */
+  const lifetimes = new Map<string, AbortController>()
+  const lifetimeOf = (sessionID: string): AbortSignal => {
+    let controller = lifetimes.get(sessionID)
+    if (!controller) lifetimes.set(sessionID, controller = new AbortController())
+    return controller.signal
+  }
+  const endLifetime = (sessionID: string, reason: Error) => { lifetimes.get(sessionID)?.abort(reason); lifetimes.delete(sessionID) }
 
   /** Stops the current worker without any message: crash, exit, or after a dispose reply. */
   const drop = (error: Error) => {
     const current = connection
     connection = undefined
+    for (const sessionID of [...lifetimes.keys()]) endLifetime(sessionID, error)
     if (current) { current.peer.close(error); current.port.terminate() }
     if (pids.length) { kill(pids); pids = [] }
   }
@@ -96,8 +105,11 @@ export function createCodemodeWorkerBackend(options: CodemodeWorkerBackendOption
     const input = params as HostToolParams
     const tool = owned.get(input.name)
     if (!tool) throw new EvalHostToolRefusedError(`Tool "${input.name}" is not available inside an OpenCode eval cell.`)
-    const kernelTools = input.capability ? createKernelToolsCapabilityProxy(peer, input.capability, input.sessionID) : undefined
-    return tool.execute(input.params, { sessionID: input.sessionID, signal: call.signal, onUpdate: call.update, ...(kernelTools && { kernelTools }) })
+    const kernelTools = input.capability ? createKernelToolsCapabilityProxy(peer, input.capability, input.sessionID, lifetimeOf(input.sessionID)) : undefined
+    return tool.execute(input.params, {
+      sessionID: input.sessionID, signal: call.signal, onUpdate: call.update,
+      ...(kernelTools && { kernelTools }), ...(input.toolCallId !== undefined && { toolCallId: input.toolCallId }),
+    })
   }
 
   function connect(): RpcPeer {
@@ -142,6 +154,7 @@ export function createCodemodeWorkerBackend(options: CodemodeWorkerBackendOption
       }
     },
     async release(sessionID) {
+      endLifetime(sessionID, Error(`eval session ${sessionID} was released`))
       if (connection && !disposal) await connection.peer.call(CODEMODE_RPC.release, { sessionID })
     },
     dispose() {

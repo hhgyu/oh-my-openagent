@@ -7,6 +7,8 @@
 // explicitly: V2's bundled senpi code has a separate storage instance and would never see it (S9d
 // binds kernel tools through this value).
 
+import type { ToolContext } from "@opencode/plugin/promise/tool"
+
 /** senpi `AgentToolResult` shape the codemode bridge expects back from a host tool. */
 export interface EvalHostToolResult {
   readonly content: readonly ({ readonly type: "text"; readonly text: string } | { readonly type: "image"; readonly data: string; readonly mimeType: string })[]
@@ -19,6 +21,10 @@ export interface OwnedEvalHostToolCall {
   readonly onUpdate?: (update: unknown) => void
   /** The live kernel-tools capability of the calling JS cell; undefined for isolated or non-JS cells. */
   readonly kernelTools?: unknown
+  /** The eval call whose cell made this call (worker side); absent for a detached cell. */
+  readonly toolCallId?: string
+  /** Main thread only: that eval call's own live SDK context, resolved by the `eval` tool. */
+  readonly caller?: ToolContext
 }
 
 export interface OwnedEvalHostTool {

@@ -56,6 +56,8 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
   const buildDefinition = deps.buildDefinition ?? buildEvalDefinition
   const capabilities = createKernelCapabilityTable()
   const stateDirs = new Map<string, string>()
+  /** The eval call whose cell runs in each session now (calls are exclusive per session). */
+  const running = new Map<string, string>()
   let init: WorkerInit = { cwd: process.cwd(), sandbox: true, tools: [] }
   let registry: EvalSessionRegistry | undefined
   let definition: Promise<EvalDefinition | undefined> | undefined
@@ -73,7 +75,8 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
     ...entry,
     execute: (params, call) => {
       const capability = call.kernelTools === undefined ? undefined : capabilities.register(call.sessionID, call.kernelTools)
-      return peer.call(CODEMODE_RPC.hostTool, { sessionID: call.sessionID, name: entry.name, params, ...(capability && { capability }) }, {
+      const toolCallId = running.get(call.sessionID)
+      return peer.call(CODEMODE_RPC.hostTool, { sessionID: call.sessionID, name: entry.name, params, ...(capability && { capability }), ...(toolCallId !== undefined && { toolCallId }) }, {
         ...(call.signal && { signal: call.signal }), ...(call.onUpdate && { onUpdate: call.onUpdate }),
       }) as Promise<EvalHostToolResult>
     },
@@ -117,9 +120,14 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
         sessionManager: { getSessionId: () => input.sessionID, getSessionFile: () => join(input.stateDir, "session.jsonl") },
       }
       try {
-        return wireResult(await runtime.exclusive(call.signal, () => {
-          const args = runtime.tool.prepareArguments ? runtime.tool.prepareArguments(input.params) : input.params
-          return runtime.tool.execute(input.toolCallId, args, call.signal, update => call.update(textUpdate(update)), ctx)
+        return wireResult(await runtime.exclusive(call.signal, async () => {
+          running.set(input.sessionID, input.toolCallId)
+          try {
+            const args = runtime.tool.prepareArguments ? runtime.tool.prepareArguments(input.params) : input.params
+            return await runtime.tool.execute(input.toolCallId, args, call.signal, update => call.update(textUpdate(update)), ctx)
+          } finally {
+            if (running.get(input.sessionID) === input.toolCallId) running.delete(input.sessionID)
+          }
         }))
       } finally { report() }
     },
@@ -127,6 +135,7 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
       const { sessionID } = params as { sessionID: string }
       capabilities.releaseSession(sessionID)
       stateDirs.delete(sessionID)
+      running.delete(sessionID)
       try { await registry?.release(sessionID) } finally { report() }
       return null
     },

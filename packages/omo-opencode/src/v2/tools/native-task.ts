@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { Compile } from "typebox/compile"
 import type { TSchema } from "typebox"
-import type { Info, ToolContext, ToolDomain } from "@opencode/plugin/promise/tool"
+import type { Info, Result, ToolContext, ToolDomain } from "@opencode/plugin/promise/tool"
 import type { Registration } from "@opencode/plugin/promise/registration"
 import {
   buildTaskExecute, buildTaskToolDescription, normalizeTaskToolArguments, runTaskOutput, runTaskCancel,
@@ -236,6 +236,10 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
 
   return Object.freeze({
     ready,
+    /** The public `task` operation for a caller that is not an SDK `task` call: an eval cell's
+     * `tools.task` (eval-task-host-tool.ts), under the eval call's own SDK context. Arguments get the
+     * same normalization the `execute.before` hook gives a direct call. */
+    invokeTask(input: unknown, caller: ToolContext): Promise<Result> { return publicCall("task", normalizeTaskToolArguments(input), caller) },
     /** Wire to a genuine session lifetime event at assembly; manual forgetting
      * is not evidence that host session retirement is connected. */
     forgetSession(sessionID: string) { forgetTaskOutputSessionReads(statusReads, sessionID) },

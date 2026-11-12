@@ -24,6 +24,9 @@ import { createNativeChildGuardBinding } from "./child-guard-binding"
 import { acquireTeamMemberOwner, type TeamMemberOwner } from "./live-member-owner"
 import { acquireReadonlyBroker, type ReadonlyBrokerOwner } from "./live-readonly-producer"
 import { acquireCodemodeReadonly, type CodemodeReadonlyOwner } from "./live-codemode-readonly"
+import { acquireKernelToolOwner, applyKernelToolSurface, createKernelCallLedger, type KernelToolOwner } from "./kernel-binding"
+import { KERNEL_TOOL_TOOL_NAME } from "../../tools/kernel-tool"
+import type { EvalTaskPort } from "../../tools/eval-task-host-tool"
 import { CODEMODE_READONLY_NATIVE_NAME } from "../../tools/codemode-readonly"
 import { createNativeTaskService } from "./service"
 import { READONLY_BROKER_TOOL_NAME } from "../../tools/curated-readonly"
@@ -53,6 +56,8 @@ export interface NativeTaskEffectOwners {
   readonly member: TeamMemberOwner
   /** Dedicated CodeMode `ls` counterpart registration, executable only by its bound owned child. */
   readonly codemodeReadonly: CodemodeReadonlyOwner
+  /** Dedicated parent kernel-tool dispatcher, executable only by a child granted kernel tools from an eval cell. */
+  readonly kernel: KernelToolOwner
 }
 
 /** The task settings of a lead's per-lead team service: its team storage lives in the lead's own
@@ -96,8 +101,9 @@ export function acquireNativeTaskEffectOwners(context: EffectPlugin.Context, ses
     const readonly = yield* acquireReadonlyBroker({ tool: context.tool }, permission)
     const member = yield* acquireTeamMemberOwner({ tool: context.tool })
     const codemodeReadonly = yield* acquireCodemodeReadonly({ tool: context.tool }, permission)
+    const kernel = yield* acquireKernelToolOwner({ tool: context.tool })
     const guard = yield* acquireOwnedChildToolGuard({ tool: context.tool, permission: context.permission })
-    return { session, metadataSource, permission, guard, readonly, member, codemodeReadonly }
+    return { session, metadataSource, permission, guard, readonly, member, codemodeReadonly, kernel }
   })
 }
 
@@ -138,9 +144,10 @@ export function nativeTaskStateDir(projectDirectory: string, parentSessionID: st
 /** Unnamespaced actual catalog entries a Native child may be granted. Namespaced CodeMode tools,
  * raw subagent/execute, this component's own public targets, the dedicated read-only broker
  * (bound only through its `curated-readonly-broker` slot) and the dedicated team member send
- * (bound only through its `member-live-bindings` slot) are never catalog grants. */
+ * (bound only through its `member-live-bindings` slot) and the kernel tool dispatcher (bound only
+ * through its `kernel-live-bindings` slots) are never catalog grants. */
 export function childCatalog(actual: readonly ListedTool[]): ListedTool[] {
-  return actual.filter(tool => tool.options?.namespace === undefined && !["subagent", "execute", READONLY_BROKER_TOOL_NAME, TEAM_MEMBER_SEND_TOOL_NAME, ...PUBLIC_TOOLS].includes(tool.name))
+  return actual.filter(tool => tool.options?.namespace === undefined && !["subagent", "execute", READONLY_BROKER_TOOL_NAME, TEAM_MEMBER_SEND_TOOL_NAME, KERNEL_TOOL_TOOL_NAME, ...PUBLIC_TOOLS].includes(tool.name))
 }
 
 type ModelContext = { readonly sessionID: string; readonly tools: Record<string, unknown> }
@@ -170,6 +177,8 @@ export interface NativeTaskComponentOptions {
   readonly team?: (host: NativeTeamHost) => NativeTeamComponent
   /** The blocking `workflow` component, assembled over the SAME registry, kernel and service. */
   readonly dag?: (host: NativeDagHost) => NativeDagComponent
+  /** The eval `tools.task` port: attached once the bridge is ready, so a cell's task runs this component's public `task`. */
+  readonly evalTask?: EvalTaskPort
 }
 
 export async function registerNativeTaskComponent(control: PromisePlugin.Context, owners: NativeTaskEffectOwners, options: NativeTaskComponentOptions = {}): Promise<() => Promise<void>> {
@@ -208,6 +217,11 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     const listingVisibility = await control.session.hook("context", context => hideUnboundCodemodeReadonly(context, owners.codemodeReadonly))
     closers.push(() => listingVisibility.dispose())
     current()
+    // The kernel tool dispatcher is exposed only to a bound child, described with that child's own grant.
+    const kernelVisibility = await control.session.hook("context", context => applyKernelToolSurface(context, owners.kernel))
+    closers.push(() => kernelVisibility.dispose())
+    current()
+    const kernelCalls = createKernelCallLedger()
     const routable = [...PUBLIC_TOOLS, ...initial.map(tool => tool.id)]
     const registry = createToolRegistry([], {})
     const kernel = createToolKernel({ registry, scopes, pipeline: createPolicyPipeline(), permission: owners.permission })
@@ -231,11 +245,11 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
         return { nativeTools: childStructuralToolNames(CUSTOM_CANDIDATES).map(name => ({ name })), catalog, customCounterparts }
       } },
       childToolGuard: owners.guard,
-      // The read-only broker, member task_send and CodeMode `ls` producers are installed; CodeMode
-      // fetch GET is bound only for a child granted Native `webfetch`, deny-all otherwise. Kernel requirements and other member slots stay
-      // unbound, so a selection needing one is refused by the runner, never silently widened.
+      // The read-only broker, member task_send, CodeMode `ls` and parent kernel-tool producers are
+      // installed; CodeMode fetch GET is bound only for a child granted Native `webfetch`, deny-all
+      // otherwise. Other member slots stay unbound, so a selection needing one is refused by the runner.
       childGuardBinding: createNativeChildGuardBinding({ assertGeneration, readonly: owners.readonly,
-        codemodeReadonly: owners.codemodeReadonly, network: { guard: owners.guard },
+        codemodeReadonly: owners.codemodeReadonly, kernel: owners.kernel, network: { guard: owners.guard },
         member: { owner: owners.member, teamConfigFor: lead => nativeTeamConfig(directory, lead, prepared.config),
           onBound: member => teamComponent?.memberBound(member) ?? (() => {}) } }),
     })
@@ -288,7 +302,9 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
           const actual = await owners.session.get({ sessionID: caller.sessionID }, { signal })
           signal.throwIfAborted(); current()
           if (actual.id !== caller.sessionID || actual.location.directory !== directory) throw Error("Foreign Native task context")
-          return { cwd: actual.location.directory, sessionManager: { getSessionId: () => actual.id } }
+          // Only an eval cell's `tools.task` lends a capability; senpi-task decides the grant against it.
+          const kernelTools = kernelCalls.read(caller)
+          return { cwd: actual.location.directory, sessionManager: { getSessionId: () => actual.id }, ...(kernelTools !== undefined && { kernelTools }) }
         },
         taskDependencies: () => ({ resolveChildToolNames: () => childStructuralToolNames(CUSTOM_CANDIDATES) }),
         outputDependencies: caller => ({ stateDir: nativeTaskStateDir(directory, caller.sessionID), transcriptReader: ({ stateDir, taskId }) => readEventLogTranscriptResult(stateDir, taskId) }),
@@ -300,6 +316,13 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     await bridge.ready
     await team?.ready
     await dag?.ready
+    if (options.evalTask) {
+      closers.push(options.evalTask.attach(async (input, caller, kernelTools) => {
+        current()
+        const giveBack = kernelTools === undefined ? undefined : kernelCalls.lend(caller, kernelTools)
+        try { return await bridge.invokeTask(input, caller) } finally { giveBack?.() }
+      }))
+    }
   } catch (error) {
     try { await close() } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Native task component setup failed and cleanup is incomplete") }
     throw error

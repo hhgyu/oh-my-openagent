@@ -96,9 +96,9 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
     if (guarded) {
       guarded.assertLifetime()
       const covered = new Set(guarded.coverage?.boundRequirements)
-      // Kernel tools have no live producer on this host. Member-scoped tools are admitted only
-      // through a live member binding; the slot check below then enforces their completeness.
-      if (spec.kernelTools) throw new RunnerError({ kind: "tools_unavailable", message: "Native live kernel tool grant is not bound to this owned host" })
+      // Kernel tools (granted from a parent eval cell) and member-scoped tools are admitted only
+      // through their live binding; the slot check below then enforces their completeness.
+      if (spec.kernelTools && !covered.has("kernel-live-bindings")) throw new RunnerError({ kind: "tools_unavailable", message: "Native live kernel tool grant has no live kernel binding on this owned host" })
       if (spec.memberScopedTools?.length && !covered.has("member-live-bindings")) throw new RunnerError({ kind: "tools_unavailable", message: "Native member-scoped tools have no live member binding on this owned host" })
       const targets = [...guarded.selection.selected.map(pair => pair.hostID), ...(guarded.coverage?.targets ?? []).map(pair => pair.hostID)]
       const missing = guarded.selection.requirements.some(requirement => !covered.has(requirement)) || guarded.selection.bindingSlots.some(slot => !(guarded.coverage?.targets ?? []).some(target => target.requirement === slot.requirement && target.nativeName === slot.nativeName && target.hostID))

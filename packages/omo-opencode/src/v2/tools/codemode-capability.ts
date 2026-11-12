@@ -83,17 +83,30 @@ export interface KernelToolsCapabilityProxy {
   invoke(request: KernelToolInvokeRequest, options?: KernelToolInvokeOptions): Promise<unknown>
 }
 
-export function createKernelToolsCapabilityProxy(peer: RpcPeer, ref: CapabilityRef, ownerSessionID: string): KernelToolsCapabilityProxy {
+/**
+ * `lifetime` aborts when the owning eval session is released, the worker is lost or eval is disposed.
+ * From then on every call, including one already in flight, fails with `kernel_capability_released`
+ * instead of whatever transport error the closed channel produced.
+ */
+export function createKernelToolsCapabilityProxy(peer: RpcPeer, ref: CapabilityRef, ownerSessionID: string, lifetime?: AbortSignal): KernelToolsCapabilityProxy {
+  const released = () => new KernelCapabilityReleasedError(`kernel tools capability ${ref.id} is no longer held; its eval session ${ownerSessionID} was released or eval stopped`)
+  const guarded = async (work: () => Promise<unknown>): Promise<unknown> => {
+    if (lifetime?.aborted) throw released()
+    try { return await work() } catch (error) {
+      if (lifetime?.aborted) throw released()
+      throw error
+    }
+  }
   return Object.freeze({
     capabilityId: ref.id,
     ownerSessionID,
     capabilities: Object.freeze({ invokeScope: ref.invokeScope }),
     describe(names: readonly string[], options: { readonly signal?: AbortSignal } = {}) {
-      return peer.call(CODEMODE_RPC.capabilityDescribe, { capabilityId: ref.id, names: [...names] }, options.signal ? { signal: options.signal } : {})
+      return guarded(() => peer.call(CODEMODE_RPC.capabilityDescribe, { capabilityId: ref.id, names: [...names] }, options.signal ? { signal: options.signal } : {}))
     },
     invoke(request: KernelToolInvokeRequest, options: KernelToolInvokeOptions = {}) {
       const params = { capabilityId: ref.id, request, ...(options.scope && { scope: options.scope }), ...(options.invoker && { invoker: options.invoker }) }
-      return peer.call(CODEMODE_RPC.capabilityInvoke, params, options.signal ? { signal: options.signal } : {})
+      return guarded(() => peer.call(CODEMODE_RPC.capabilityInvoke, params, options.signal ? { signal: options.signal } : {}))
     },
   })
 }

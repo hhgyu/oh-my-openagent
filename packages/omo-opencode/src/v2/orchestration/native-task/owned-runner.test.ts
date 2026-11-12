@@ -142,6 +142,44 @@ test("G3 zero targets cannot conceal an unresolved live producer requirement", a
   })
 })
 
+/** A parent kernel-tool grant as senpi-task resolves it from an eval cell's capability; the runner never invokes it. */
+function kernelStart() {
+  const capability = { capabilities: { invokeScope: true }, describe: async () => ({ results: [] }), invoke: async () => 42 }
+  return { category: "qa", prompt: "kernel child", kernelTools: { capability, requestedNames: ["double"],
+    descriptors: [{ name: "double", description: "Doubles n", input_schema: { type: "object" }, language: "js" as const, kernel_generation: 1, definition_revision: 1 }] } }
+}
+const kernelCoverage = { boundRequirements: ["codemode-network-guard" as const, "kernel-live-bindings" as const],
+  targets: [{ requirement: "kernel-live-bindings" as const, nativeName: "double", hostID: "omo_kernel_tool" }] }
+
+test("G3 a kernel tool grant is refused before create when the binding lacks a live kernel binding", async () => {
+  await guardFixture(async g => {
+    await withOwnedRuntimeUnit(async (runtime, state) => {
+      // when
+      const outcome = await runtime.start(kernelStart())
+      // then
+      expect(outcome.kind).toBe("start_failed"); expect(state.calls).not.toContain("create")
+    }, guardedOptions(g))
+  })
+})
+
+test("G3 a kernel tool grant starts when the binding covers its live kernel binding and exposes the dispatcher to the child", async () => {
+  await guardFixture(async g => {
+    await withOwnedRuntimeUnit(async (runtime, state) => {
+      // when
+      const started = await runtime.start(kernelStart())
+      // then
+      if (started.kind !== "started") throw Error(JSON.stringify(started))
+      try {
+        await runtime.wait(started.task_id)
+        expect(state.calls).toContain("create")
+        expect(Object.keys((state.contexts[0] as { tools: Record<string, unknown> }).tools).sort()).toEqual(["execute", "omo_kernel_tool", "opaque-read"])
+      } finally { await runtime.end(started.task_id) }
+    }, { childToolGuard: g.owner, authorizePlannedStart: async (spec, plan) => approved(spec, plan),
+      childGuardBinding: (_spec, prepared) => ({ coverage: kernelCoverage, assertCurrent() {}, bind(child, assertCurrent) { return { child, agent: prepared.buildAgentID, coverage: kernelCoverage, assertCurrent } } }) },
+    ["opaque-read", "opaque-edit", "execute", "omo_kernel_tool"])
+  })
+})
+
 const MEMBER_TEAM = { runId: "11111111-1111-4111-8111-111111111111", memberName: "alpha" }
 /** The member's ORIGINAL definition as data only; the guarded runner never invokes it. */
 function memberStart() {
