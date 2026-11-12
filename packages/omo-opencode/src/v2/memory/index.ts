@@ -37,6 +37,7 @@ import { createMemorySyncRuntime } from "./sync/runtime"
 import { registerMemorySyncRpc } from "./sync/rpc"
 import type { MemorySyncSeams } from "./sync/ports"
 import { observeAcceptedCompactions } from "./compaction-events"
+import { createAcceptedTurns } from "./accepted-turns"
 
 export { MEMORY_BINDING_KEY } from "./binding"
 export { MEMORY_PART_MARKER, PROJECTION_PIN_KEY } from "./projection"
@@ -147,10 +148,9 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
   const isOwnedSession = (sessionID: string): boolean => kibitzer?.isKibitzerSession(sessionID) === true || facts?.isFactsSession(sessionID) === true || isReflectionSession(sessionID)
   const collector = createRecallCollector({ binder, stores, corpusCache, logger, ...(kibitzer === undefined ? {} : { judge: kibitzer }) })
   const delivery = createRecallDelivery({ binder, stores, collector, logger })
-  // Senpi persists this counter as a session entry; here it is process-local and restarts at 0 on reload.
-  const userTurns = new Map<string, number>()
+  const userTurns = createAcceptedTurns(binder, logger)
   const journal = createMemoryJournal({ binder, session: context.session, logger, isOwnedSession })
-  const hasUserActivity = (sessionID: string): boolean => (userTurns.get(sessionID) ?? 0) > 0
+  const hasUserActivity = userTurns.hasActivity
   const triggers = reflection === undefined ? undefined : createReflectionTriggers({
     resolve: sessionID => binder.resolve(sessionID), session: context.session, logger, hasUserActivity, isOwnedSession,
     evaluate: (bound, event) => reflection.evaluate(bound, event),
@@ -189,7 +189,7 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
     ],
   })
   const tools = createMemoryTools({
-    binder, userTurns: sessionID => userTurns.get(sessionID) ?? 0,
+    binder, userTurns: userTurns.turns,
     ...(options.lockWaitTimeoutMs === undefined ? {} : { lockWaitTimeoutMs: options.lockWaitTimeoutMs }),
     ...(options.lockRetryDelayMs === undefined ? {} : { lockRetryDelayMs: options.lockRetryDelayMs }),
   })
@@ -201,6 +201,7 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       closed = true
       const results = await Promise.allSettled(registrations.map(registration => registration.dispose()))
       await collector.idle()
+      await userTurns.settled()
       await Promise.allSettled([journal.settled(), commands?.settled()])
       if (facts !== undefined) results.push(...await Promise.allSettled([facts.close()]))
       // Triggers stop before the component closes, so no evaluation reserves a run after its children die.
@@ -218,13 +219,13 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       projection.clear()
       journal.clear()
       collector.clear()
-      userTurns.clear()
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
       if (failures.length > 0) throw new AggregateError(failures.map(failure => failure.reason), "Memory component cleanup failed")
     })()
     return disposal
   }
   try {
+    if (context.event !== undefined) registrations.push(userTurns.register(context.event))
     registrations.push(observeAcceptedCompactions(context.event, async sessionID => {
       if (closed || isOwnedSession(sessionID)) return
       triggers?.onCompaction(sessionID)
@@ -237,7 +238,6 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       if (isOwnedSession(input.sessionID)) return
       dreams?.onPrompt(input.sessionID)
       facts?.onPrompt(input.sessionID)
-      userTurns.set(input.sessionID, (userTurns.get(input.sessionID) ?? 0) + 1)
       kibitzer?.onPrompt(input.sessionID, input.prompt.text)
       collector.observePrompt(input.sessionID, input.prompt.text)
     }))
@@ -271,6 +271,7 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       try {
         await projection.onContext(value)
         await delivery.onContext(value)
+        await userTurns.onContext(value)
       } catch (error) {
         logger.warn("memory context injection skipped", { sessionID: value.sessionID, error: describeError(error) })
       }
