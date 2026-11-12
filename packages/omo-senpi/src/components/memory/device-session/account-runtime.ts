@@ -6,8 +6,8 @@
 import { sessionWorkerData } from "@code-yeongyu/senpi/session-worker-data"
 import { MEMORY_SYNC_WORKER_DATA, type MemorySyncSelection } from "../desktop-sync/hostSelection"
 import { workerMemorySyncSource } from "../desktop-sync/workerPort"
-import { createCliAccountSource } from "./account-source"
-import type { DeviceAccountSource } from "./account-source"
+import { createCliAccountSource } from "@oh-my-opencode/omo-opencode/service-auth/sync-account"
+import type { DeviceAccountSource } from "@oh-my-opencode/memory-core/sync-runner"
 import { accountSourceFromSelection } from "./selected-account-source"
 
 export { claimInheritedDesktopSync } from "../desktop-sync/desktopClaim"

@@ -415,7 +415,7 @@ describe("checkExtensionCurrent", () => {
   test("#given the split extension build #when device account inputs are inspected #then the service-auth sign-in code loads only from the lazy entry", async () => {
     const { mainInputs, deviceAccountInputs } = await sharedOutputs()
     for (const suffix of [
-      "packages/omo-senpi/src/components/memory/device-session/account-source.ts",
+      "packages/omo-opencode/src/cli/service-auth/sync-account/account-source.ts",
       "packages/omo-opencode/src/cli/service-auth/keystore.ts",
       "packages/omo-opencode/src/cli/service-auth/session.ts",
     ]) {

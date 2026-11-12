@@ -8,7 +8,7 @@ import { createCredentialStore, quietNotice } from "@oh-my-opencode/omo-opencode
 
 import { readMemoryStatusSegments } from "../status"
 import { createDeviceSessionResolver, createSyncRunner, SyncSessionDeferredError } from "@oh-my-opencode/memory-core/sync-runner"
-import { createCliAccountSource } from "./account-source"
+import { createCliAccountSource } from "@oh-my-opencode/omo-opencode/service-auth/sync-account"
 
 const dirs: string[] = []
 afterEach(async () => {

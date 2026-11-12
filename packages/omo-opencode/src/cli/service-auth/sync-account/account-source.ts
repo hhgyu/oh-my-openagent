@@ -1,5 +1,7 @@
 // The CLI DeviceAccountSource: the signed-in device from the service-auth credential store. The
 // account types it returns live in memory-core's sync runner, with the resolver that consumes them.
+// Both hosts import this one copy: the Senpi adapter from its lazy device-account sidecar, the
+// OpenCode 2 memory sync host from its lazy chunk (moved here from omo-senpi in S8).
 
 import {
   CredentialIdentityChanged,
@@ -13,7 +15,7 @@ import {
   quietNotice,
   serviceOrigin,
   SignInError,
-} from "@oh-my-opencode/omo-opencode/service-auth"
+} from ".."
 import { randomUUID } from "node:crypto"
 import { deviceKeyringFromMaterial } from "@oh-my-opencode/memory-core/sync-account-ports"
 import { cliAccountOperation, scopedCliKeyring } from "./cli-account-operation"
@@ -21,10 +23,7 @@ import { cliAccountOperation, scopedCliKeyring } from "./cli-account-operation"
 import type { DesktopSyncDescriptor, SyncOperationAuthority } from "@oh-my-opencode/memory-core/sync-engine"
 import { SyncConfigError, SyncSessionDeferredError, type CliDeviceAccount } from "@oh-my-opencode/memory-core/sync-runner"
 
-export type { CliDeviceAccount, DesktopSyncUnavailable, DeviceAccount, DeviceAccountSource, KeyringFactory } from "@oh-my-opencode/memory-core/sync-runner"
-export type { DesktopSyncDescriptor, SyncDevice, SyncOperationAuthority, DesktopSyncOperation, DesktopSyncAccount } from "@oh-my-opencode/memory-core/sync-engine"
-
-export const DEFAULT_SERVICE_API = "https://api.omo.dev"
+const DEFAULT_SERVICE_API = "https://api.omo.dev"
 
 const base64url = (base64: string): string => Buffer.from(base64, "base64").toString("base64url")
 

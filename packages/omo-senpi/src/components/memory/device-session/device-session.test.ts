@@ -12,7 +12,8 @@ import type { AccountSessionOptions, SyncSession } from "@oh-my-opencode/memory-
 import { type CredentialStore, type Credentials, SignInError } from "@oh-my-opencode/omo-opencode/service-auth"
 
 import * as syncRuntime from "../sync-runtime"
-import { createCliAccountSource, type CliDeviceAccount } from "./account-source"
+import { createCliAccountSource } from "@oh-my-opencode/omo-opencode/service-auth/sync-account"
+import type { CliDeviceAccount } from "@oh-my-opencode/memory-core/sync-runner"
 import { createDeviceSessionResolver } from "@oh-my-opencode/memory-core/sync-runner"
 
 const dirs: string[] = []

@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import type { DeviceAccountSource } from "./device-session/account-source"
+import type { DeviceAccountSource } from "@oh-my-opencode/memory-core/sync-runner"
 import type { MemoryRpcSync } from "./memory-rpc-sync"
 import { createSyncRpcClaims } from "./sync-rpc-claims"
 import { registerSyncRpc, type SyncRpcAccount, type SyncRpcRegistration } from "@oh-my-opencode/memory-core/sync-runner"

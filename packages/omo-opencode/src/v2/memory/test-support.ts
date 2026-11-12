@@ -9,12 +9,16 @@ import type { CommandDefinition } from "@opencode/plugin/promise/command"
 import type { SessionContext } from "@opencode/plugin/promise/session"
 import type { Info, Result, ToolContext } from "@opencode/plugin/promise/tool"
 import type { MemoryComponentOptions, MemoryHost } from "./index"
+import type { MemorySyncSeams, SyncHost } from "./sync/ports"
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 export interface FakeSession { id: string; parentID?: string; directory: string; metadata?: Record<string, Json>; messages?: unknown[] }
 export interface EmittedEvent { rpcID: string; name: string; data: unknown }
 export interface SyntheticPost { sessionID: string; id?: string | null; text: string; description?: string | null; metadata?: Record<string, Json>; delivery?: string | null; resume?: boolean | null }
 export type Callback = (input: never) => unknown
+export interface RegisteredRpc { readonly definition: { readonly id: string; readonly methods: Record<string, unknown> }; readonly handlers: Record<string, (input: never, context: never) => Promise<unknown>> }
+/** What the recording sync host saw: host loads, acquires and releases (by repo), and disposal. */
+export interface SyncRecord { loads: number; readonly acquired: string[]; readonly released: string[]; disposed: number }
 type SystemParts = SessionContext["system"]
 
 export interface MemoryFixture {
@@ -31,6 +35,10 @@ export interface MemoryFixture {
   readonly synthetics: SyntheticPost[]
   /** RPC events the component emitted, in order. */
   readonly events: EmittedEvent[]
+  /** Registered RPC definitions and their handlers, by definition id. */
+  readonly rpcs: Map<string, RegisteredRpc>
+  /** The default recording sync host (no account, no network, no Loro). */
+  readonly sync: SyncRecord
   /** `session.synthetic` throws the error this returns for a post, when set. */
   syntheticFailure: ((input: SyntheticPost) => Error | undefined) | undefined
   disposals(): number
@@ -62,6 +70,8 @@ export function createMemoryFixture(settings: Record<string, unknown> = {}): Mem
   const commands = new Map<string, CommandDefinition>()
   const synthetics: SyntheticPost[] = []
   const events: EmittedEvent[] = []
+  const rpcs = new Map<string, RegisteredRpc>()
+  const sync: SyncRecord = { loads: 0, acquired: [], released: [], disposed: 0 }
   const failures: { synthetic: ((input: SyntheticPost) => Error | undefined) | undefined } = { synthetic: undefined }
   let disposed = 0
   const registration = (key: string) => ({ dispose: async () => { disposed++; hooks.delete(key) } })
@@ -94,10 +104,13 @@ export function createMemoryFixture(settings: Record<string, unknown> = {}): Mem
       },
     },
     rpc: {
-      register: async (definition: { id: string }) => ({
-        dispose: async () => { disposed++ },
-        events: { emit: async (name: string, data: unknown) => { events.push({ rpcID: definition.id, name, data: structuredClone(data) }) } },
-      }),
+      register: async (definition: RegisteredRpc["definition"], handlers: RegisteredRpc["handlers"]) => {
+        rpcs.set(definition.id, { definition, handlers })
+        return {
+          dispose: async () => { disposed++; rpcs.delete(definition.id) },
+          events: { emit: async (name: string, data: unknown) => { events.push({ rpcID: definition.id, name, data: structuredClone(data) }) } },
+        }
+      },
     },
     command: {
       transform: async (callback: (editor: { add(definition: CommandDefinition): void }) => void) => {
@@ -119,13 +132,13 @@ export function createMemoryFixture(settings: Record<string, unknown> = {}): Mem
     await Reflect.apply(callback, undefined, [input])
   }
   return {
-    root, home, project, env, host, sessions, updates, hooks, tools, commands, synthetics, events,
+    root, home, project, env, host, sessions, updates, hooks, tools, commands, synthetics, events, rpcs, sync,
     get syntheticFailure() { return failures.synthetic },
     set syntheticFailure(failure: ((input: SyntheticPost) => Error | undefined) | undefined) { failures.synthetic = failure },
     disposals: () => disposed,
     options: (overrides: Partial<MemoryComponentOptions> = {}): MemoryComponentOptions => ({
       env, home, loadSettings: () => memorySettings(settings), lockRetryDelayMs: 5,
-      logger: { warn: () => undefined }, ...overrides,
+      logger: { warn: () => undefined }, sync: recordingSync(sync), ...overrides,
     }),
     addSession(id: string, extra: Partial<FakeSession> = {}) {
       sessions.set(id, { id, directory: project, ...extra })
@@ -158,6 +171,18 @@ export function createMemoryFixture(settings: Record<string, unknown> = {}): Mem
     },
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   }
+}
+
+/** A sync host that records its lifecycle and answers every verb `unavailable`: never the OS credential store. */
+export function recordingSync(record: SyncRecord): MemorySyncSeams {
+  const host: SyncHost = {
+    acquire: async (_identity, paths) => { record.acquired.push(paths.repo) },
+    release: async repo => { record.released.push(repo) },
+    rpcSync: async () => undefined,
+    call: async () => ({ kind: "unavailable", reason: "recording sync host" }),
+    dispose: async () => { record.disposed++ },
+  }
+  return { loadHost: async () => { record.loads++; return { createSyncHost: () => host } } }
 }
 
 function memorySettings(overrides: Record<string, unknown> = {}): OmoMemorySettings {

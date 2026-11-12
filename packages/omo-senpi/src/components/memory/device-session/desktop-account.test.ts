@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
 import type { AccountSessionOptions, SyncSession } from "@oh-my-opencode/memory-core/sync-engine"
-import type { DesktopSyncAccount } from "./account-source"
+import type { DesktopSyncAccount } from "@oh-my-opencode/memory-core/sync-engine"
 import * as syncRuntime from "../sync-runtime"
 import { createDeviceSessionResolver, type DeviceSessionRuntime } from "@oh-my-opencode/memory-core/sync-runner"
 

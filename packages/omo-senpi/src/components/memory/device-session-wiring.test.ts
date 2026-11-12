@@ -11,7 +11,7 @@ import { join } from "node:path"
 import { GitMemoryRepo, resolveMemoryIdentity } from "@oh-my-opencode/memory-core"
 
 import { ensureIdentityRuntimeDirs } from "./context"
-import type { DeviceAccountSource } from "./device-session/account-source"
+import type { DeviceAccountSource } from "@oh-my-opencode/memory-core/sync-runner"
 import { createMemoryComponent } from "./index"
 import { MemoryFakeExtensionAPI, componentContext, loadedMemoryConfig, memorySettings } from "./memory.test-support"
 import { SYNC_IDLE_NO_DEVICE_SESSION, SYNC_IDLE_NOT_JOINED } from "@oh-my-opencode/memory-core/sync-runner"

@@ -1133,8 +1133,6 @@
       "packages/omo-senpi/src/components/memory/commands/people-ask.ts": ["buildAskPrompt"],
       // pre-existing at origin dev 4686e425b5: unused export(s) SLEEPTIME_OVERRIDE_MARK
       "packages/omo-senpi/src/components/memory/commands/sleeptime.ts": ["SLEEPTIME_OVERRIDE_MARK"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) DEFAULT_SERVICE_API
-      "packages/omo-senpi/src/components/memory/device-session/account-source.ts": ["DEFAULT_SERVICE_API"],
       // pre-existing at origin dev 4686e425b5: unused export(s) FakeScheduler
       "packages/omo-senpi/src/components/memory/dream-trigger.test-support.ts": ["FakeScheduler"],
       // pre-existing at origin dev 4686e425b5: unused export(s) factsAgreementContract
@@ -2939,7 +2937,6 @@
         // compiled by path with `bun build --compile` in channel-compiled.test.ts
         "src/components/memory/desktop-sync/channel-compiled.fixture.ts",
         "src/components/memory/desktop-sync/hostSelection.fixture.ts",
-        "src/components/memory/device-session/sibling-writer.fixture.ts",
         "src/components/memory/index-engine.fixture.ts",
         "src/components/memory/index-observer.fixture.ts",
         "src/components/memory/index-selection.fixture.ts",
@@ -3571,6 +3568,8 @@
         "src/v2/tools/test-support.ts",
         // The Native eval Worker entry: started by file name (`new Worker(...)` in codemode-worker-client.ts), never imported.
         "src/v2/tools/codemode-worker.ts",
+        // spawned by path from account-source-freshness.test.ts: a credential writer in its own process, never imported
+        "src/cli/service-auth/sync-account/sibling-writer.fixture.ts",
         "test/fixtures/config-migration/opencode-side-effect-import.ts",
         // Test fixtures run as their own process by path (`bun run <dir>/fixtures/<name>.ts`), so nothing imports them.
         "src/hooks/prometheus-md-only/fixtures/*.ts",

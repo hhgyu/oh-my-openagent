@@ -1,7 +1,7 @@
 import { PassThrough } from "node:stream"
 import { isMainThread, MessageChannel, type MessagePort, parentPort, Worker, workerData } from "node:worker_threads"
 import { accountSourceFromSelection } from "../device-session/selected-account-source"
-import type { DesktopSyncAccount } from "../device-session/account-source"
+import type { DesktopSyncAccount } from "@oh-my-opencode/memory-core/sync-engine"
 import type { DesktopSyncEngineWire } from "./desktopSyncAccount"
 import type { DesktopSyncEvent, DesktopSyncRequest } from "./desktopSyncProtocol"
 import { claimDesktopSync, type DesktopSyncAttachment } from "./desktopClaim"
