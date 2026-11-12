@@ -58,6 +58,18 @@ function withFoldedNodes(input: NativeWorkflowCall, result: DagToolResult, runId
   return withText(result, text => `${text} This call also recorded node(s) ${folded.join(", ")}, which finished before it. ${detachedNotice(snapshot)}`)
 }
 
+/** `resume` of a run a reload paused (not a user stop): OpenCode 2 has no parent-session Resume
+ * control, so this call recovers the run (`runtime.admit` routes a paused run through Native
+ * recovery) and admits what can start now, like a detached wait. Anything else keeps the original
+ * `resume` answer. */
+async function resumeAfterReload(input: NativeWorkflowCall, runId: string): Promise<DagToolResult | undefined> {
+  const before = statusOf(input, runId) === "paused" ? input.runtime.manager.snapshot(runId as DagRunId, input.parentSessionID) : undefined
+  if (before === undefined || before.pause?.reason === "user_stop") return undefined
+  await input.runtime.admit(runId as DagRunId, input.call)
+  const snapshot = input.runtime.manager.snapshot(runId as DagRunId, input.parentSessionID)
+  return { content: [{ type: "text", text: `Resumed dag run ${runId}, which a plugin reload paused. ${detachedNotice(snapshot)}` }], details: { kind: "detached", run_id: runId, snapshot } }
+}
+
 /** ONE `workflow` call on OpenCode 2: the ORIGINAL Native tool logic over this root session's DAG
  * runtime. A blocking start or `wait detach=false` drives the run inside this call until it settles;
  * a detached start or wait admits every ready node inside this call and returns, leaving the run to
@@ -70,6 +82,8 @@ export async function runNativeWorkflow(input: NativeWorkflowCall, params: DagTo
   const detachedStart = params.action === "start" && params.detach === true
   try {
     const runId = params.run_id?.trim()
+    const resumed = params.action === "resume" && runId ? await resumeAfterReload(input, runId) : undefined
+    if (resumed) return resumed
     const status = params.action === "wait" && params.detach !== false && runId ? statusOf(input, runId) : undefined
     // The original detached wait returns at once; on this host it first admits inside this call.
     if (runId && status !== undefined && !TERMINAL.has(status)) await runtime.admit(runId as DagRunId, call)

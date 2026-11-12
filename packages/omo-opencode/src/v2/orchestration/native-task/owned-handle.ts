@@ -5,8 +5,9 @@ import type { RunnerOutcome } from "@oh-my-opencode/orchestration-core/contracts
 import type { ChildHandle, createSessionBackend } from "../../host/session-backend"
 import type { DurableChildJournal } from "../../host/child-journal"
 import type { OwnedChildObserver } from "../../host/owned-child-observer"
+import { retainedTurnCutOff } from "../../host/owned-child-outcome"
 import { createOwnedEventProjection } from "./owned-events"
-import { createOwnedManagedInput } from "./managed-input"
+import { createOwnedManagedInput, ownedInputID } from "./managed-input"
 import { createOwnedTurnTicket } from "./owned-turn"
 
 type Backend = ReturnType<typeof createSessionBackend>
@@ -23,6 +24,11 @@ export interface OwnedTaskControl {
   withInputSignal<T>(signal: AbortSignal | undefined, operation: () => Promise<T>): Promise<T>
   stopInputs(): Promise<void>
   inputDiagnostics(): ReturnType<ReturnType<typeof createOwnedManagedInput>["diagnostics"]>
+  /** Arms the continuation of a turn a host restart (a process stop, a hard kill or a reload) cut
+   * off: when Native reattaches this recovered child as a running task, `text` is delivered as a
+   * fresh, observed turn of the new run, like Native `continueInterruptedTurn`. Nothing is sent when
+   * the retained turn was not cut off (a finished or stopped turn). */
+  continueAfterRestart(text: string): void
 }
 export async function createOwnedTaskHandle(input: {
   spec: ManagedStartSpec; child: ChildHandle; backend: Backend; journal: DurableChildJournal;
@@ -173,6 +179,7 @@ export async function createOwnedTaskHandle(input: {
   let permanentEndRequested = false
   let ending: Promise<void> | undefined
   let inputGeneration = 0
+  let restartContinuation: string | undefined
   function bindReattachedRun(before: TaskRecord, actual: TaskRecord): void {
     if (disposed || busy || ended || cleanupOnly) throw new Error("Owned reattach bookkeeping is unavailable")
     guard()
@@ -194,6 +201,12 @@ export async function createOwnedTaskHandle(input: {
       || prior.journalRevision !== journalRow.revision || next.journalRevision !== prior.journalRevision
       || next.runEpoch !== actual.notification.run_epoch || JSON.stringify(store.load(spec.taskId)) !== JSON.stringify(actual)
       || journalRow.turn && journalRow.turn.nativeEpoch !== epoch) throw new Error("Canonical owned reattach receipt differs from current custody")
+    // A turn a host restart cut off continues as a new observed turn of this run (Native
+    // `continueInterruptedTurn`); the dead turn's observation uncertainty then names no turn of it.
+    const continuation = restartContinuation
+    restartContinuation = undefined
+    const continuing = continuation !== undefined && input.recovered === true && !started && current === undefined
+      && retainedTurnCutOff(observer.observation().records)
     // The Native operation has already published this epoch. Only that exact receipt may
     // advance bookkeeping; retained observation/projection/history are deliberately unchanged.
     busy = true
@@ -206,7 +219,9 @@ export async function createOwnedTaskHandle(input: {
       reference = Object.freeze({ ...next, journalRevision: row.revision })
       store.mutate(spec.taskId, fresh => {
         if (JSON.stringify(fresh) !== JSON.stringify(actual)) throw new Error("Canonical owned reattach record moved during checkpoint")
-        return { ...fresh, owned_session: reference }
+        if (!continuing) return { ...fresh, owned_session: reference }
+        const { observation_uncertain: _deadTurn, ...live } = fresh
+        return { ...live, owned_session: reference }
       })
     } catch (error) {
       // Never roll back the actual Native publication. The same real record/journal
@@ -217,6 +232,60 @@ export async function createOwnedTaskHandle(input: {
       outcomeWait.abort(pumpFault)
       throw error
     } finally { busy = false }
+    if (continuing) continueCutTurn(continuation)
+  }
+  /** Native `continueInterruptedTurn` for a recovered child whose turn a host restart cut off: the
+   * retained observation of the dead turn stays uncertain, so the continuation is a NEW turn of the
+   * run Native just published, observed under its own key from its own input. Its outcome is this
+   * handle's outcome; a continuation that cannot be dispatched settles that outcome as uncertain
+   * (never replayed), exactly like any unconfirmed owned input. */
+  function continueCutTurn(text: string): void {
+    const nativeID = `owned-restart-continuation:${spec.taskId}:${epoch}:${randomUUID()}`
+    const hostID = ownedInputID(child.locator, nativeID), key = `${journalKey}:turn:${epoch}:${randomUUID()}`
+    const work = controlTail.then(async () => {
+      let fresh: OwnedChildObserver | undefined
+      try {
+        if (!input.openObserver) throw Error("Owned continuation observer port missing")
+        fresh = await input.openObserver(key, lifetime.signal)
+        observers.add(fresh)
+        assertOwned()
+      } catch {
+        if (fresh) { observers.delete(fresh); await fresh.dispose().catch(() => {}) }
+        pumpFault = new ChildObservationUncertain("restart-continuation-unavailable")
+        throw pumpFault
+      }
+      const prior = observer, priorInput = managedInput
+      let attempt: ReturnType<Backend["preparePromptContinuation"]> | undefined
+      busy = true
+      try {
+        const row = backend.checkpointTurn(child, { nativeEpoch: epoch, observationKey: key, firstInputID: hostID })
+        journalRow = row
+        reference = Object.freeze({ ...reference, journalRevision: row.revision })
+        store.mutate(spec.taskId, value => {
+          if (value.notification.run_epoch !== epoch || value.residency_claim !== reference.residencyClaim || value.killed) throw Error("Task run moved before its restart continuation")
+          return { ...value, owned_session: reference, last_effect_id: nativeID }
+        })
+        observer = fresh; projection = createOwnedEventProjection(spec.taskId, epoch, input.stateDir, assertOwned)
+        seen = new Set(); lastText = undefined; actualModel = undefined; pumpFault = undefined; outcomeWait = new AbortController(); stopMarked = false
+        managedInput = inputPort()
+        fresh.expectInput(hostID)
+        attempt = backend.preparePromptContinuation(child, { id: hostID, text, delivery: "queue", resume: true }, { signal: lifetime.signal })
+        await attempt.send()
+        await synchronize()
+      } catch {
+        try { await synchronize() } catch { /* The local uncertainty below still settles the outcome. */ }
+        pumpFault = new ChildObservationUncertain(attempt?.invoked() ? "restart-continuation-admission-uncertain" : "restart-continuation-not-dispatched")
+        outcomeWait.abort(pumpFault)
+        throw pumpFault
+      } finally { busy = false }
+      // The continuation is admitted: a failed retirement of the dead turn's observer cannot undo it.
+      observers.delete(prior)
+      await Promise.allSettled([priorInput.close(), prior.dispose()])
+    })
+    controlTail = work.catch(() => {})
+    admission = work
+    current = work.then(outcome)
+    void current.catch(() => {})
   }
   function markStopping() {
     if (stopMarked || disposed || ended) return
@@ -508,6 +577,7 @@ export async function createOwnedTaskHandle(input: {
     return managedInput.abortPending()
   }
   return { handle, child, backend, get observer() { return observer }, flush, stopInputs, withInputSignal: (signal, operation) => invocation.run(signal, operation), inputDiagnostics: () => managedInput.diagnostics(),
+    continueAfterRestart(text) { restartContinuation = text },
     prepareEnd() { const stopped = stopInputs(); return serialize(async () => { await stopped; await assertEndAuthority(); permanentEndRequested = true }) }, end, detach: () => { const stopped = stopInputs(); return serialize(async () => { await stopped; return retire(true) }) },
     begin() {
       assertOwned(); if (started) throw new Error("Original task input cannot be replayed")

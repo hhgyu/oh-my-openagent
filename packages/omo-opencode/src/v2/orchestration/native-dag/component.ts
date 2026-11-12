@@ -10,12 +10,15 @@ import { createNativeDagBridge, type NativeDagTargets } from "../../tools/native
 import type { NativeTaskOperationCall } from "../../tools/native-task"
 import { nativeTaskStateDir } from "../native-task/component"
 import type { NativeTaskTargetPermissionAssociation, createNativeTaskService } from "../native-task/service"
+import { discoverDagRoots } from "./discovery"
 import { createNativeDagGenerationLease } from "./lease"
 import type { NativeDagExecutionSources } from "./refusals"
 import { createNativeDagRuntime, type NativeDagRuntime } from "./runtime"
 import { nativeDagCallPort } from "./task-port"
 import { createNativeDagWakeOwner, type DagWakeOptions } from "./wake"
 import { runNativeWorkflow } from "./workflow-call"
+
+const TERMINAL_RUN: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"])
 
 /** The Native task component's shared owner, handed to the workflow component during its assembly. */
 export interface NativeDagHost {
@@ -98,13 +101,31 @@ export function registerNativeDagComponent(host: NativeDagHost): NativeDagCompon
         async release() {} }
     },
   })
+  // Startup after a reload: every root with a DAG store gets its runs watched again by THIS
+  // generation's wake owner, so an un-ACKed wake is re-posted with its same id and text once every
+  // re-check passes. A wake is a notification: nothing is admitted or recovered without a call.
+  const startup = bridge.ready.then(() => {
+    for (const root of discoverDagRoots(host.directory)) {
+      const runtime = runtimeFor(root)
+      for (const run of runtime.manager.list(root, { limit: 256 })) if (!TERMINAL_RUN.has(run.status)) wake.arm(root, run.runId)
+    }
+  }).catch((error: unknown) => { console.warn("[oh-my-openagent/v2] workflow wake resume held", error instanceof Error ? error.message : String(error)) })
+  /** Native shutdown pause of every live run this generation knows, once its drives retired: the
+   * next generation's call recovers each lazily. Children are parked by the closing task service. */
+  async function pauseRuns(): Promise<void> {
+    const failures: unknown[] = []
+    for (const runtime of runtimes.values()) await runtime.pauseForShutdown().catch((error: unknown) => { failures.push(error) })
+    if (failures.length > 0) throw new AggregateError(failures, "Native workflow shutdown pause incomplete")
+  }
   return Object.freeze({
     ready: bridge.ready,
     async close() {
       try { await bridge.close() } finally {
-        try { await wake.close() } finally {
-          for (const store of taskRecords.values()) store.close()
-          taskRecords.clear(); lease.dispose(); runtimes.clear()
+        try { await startup; await pauseRuns() } finally {
+          try { await wake.close() } finally {
+            for (const store of taskRecords.values()) store.close()
+            taskRecords.clear(); lease.dispose(); runtimes.clear()
+          }
         }
       }
     },

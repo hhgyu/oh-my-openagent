@@ -1,6 +1,7 @@
 import type { ChildCompletionPolicy } from "@oh-my-opencode/orchestration-core/contracts/child-outcome"
 import {
   observationRecordSchema,
+  type ObservationRecord,
   type ObservationSnapshot,
   type ObservedModel,
   type OwnedChildOutcome,
@@ -31,6 +32,28 @@ const terminals = new Set(["session.execution.succeeded", "session.execution.fai
 const finishes = new Set(["stop", "length", "tool-calls"])
 
 function isDefinedNumber(value: number | undefined): value is number { return value !== undefined }
+
+/** Whether the turn a previous observer retained was cut off before the host settled it, read from
+ * the retained records only (a rebound binding is uncertain by design, so its outcome is never
+ * trusted). Cut off: the last observed execution has no terminal, the host interrupted it (a park's
+ * interrupt), or an expected input was never delivered. A local stop, a turn the host
+ * finished or failed, and an observer that saw no input at all are not cut off. This is the
+ * transcript-tail decision of Native `continueInterruptedTurn` (`sessionTailNeedsContinuation`:
+ * an aborted, unanswered or unfinished tail continues) over the owned observation. */
+export function retainedTurnCutOff(records: readonly ObservationRecord[]): boolean {
+  let open = false, interrupted = false
+  const undelivered = new Set<string>()
+  for (const record of records) {
+    if (record.kind === "stop") return false
+    if (record.kind === "input") { undelivered.add(record.inboxID); continue }
+    if (record.kind !== "host") continue
+    const { type, data } = record.event
+    if (type === "session.inbox.delivered" && data.inboxID !== undefined) undelivered.delete(data.inboxID)
+    else if (type === "session.execution.started") { open = true; interrupted = false }
+    else if (open && terminals.has(type)) { open = false; interrupted = type === "session.execution.interrupted" }
+  }
+  return open || interrupted || undelivered.size > 0
+}
 
 /** Own observations, not host wait/info.outcome or a fabricated execution identifier. */
 

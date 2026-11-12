@@ -2,6 +2,8 @@ import {
   createDagScheduler,
   type DagFileStore, type DagLeasePort, type DagManager, type DagNodeId, type DagNodeSpawnPolicy, type DagRunId, type DagRunRecordV1, type DagScheduler, type DagSchedulerOptions,
 } from "@oh-my-opencode/senpi-task/dag"
+import { claimDagRunLease } from "./lease"
+import { prepareRunRecovery, recoverDagRun, restoreRunChildren } from "./recovery"
 import { NativeDagRefusal, type NativeDagExecutionSources } from "./refusals"
 import { createHeldDagTaskPort, type NativeDagCallPort } from "./task-port"
 import { TERMINAL_TASK_STATUSES } from "./wake-projection"
@@ -29,7 +31,7 @@ export interface NativeDagDriveInput {
 }
 
 /** The scheduler options of ONE call: every node start and child action goes through its held port. */
-type NativeDagSchedulerOptions = Omit<DagSchedulerOptions, "initialRecord">
+export type NativeDagSchedulerOptions = Omit<DagSchedulerOptions, "initialRecord">
 /** A scheduler that now owns the run (a retry or amend re-entry) and its run promise. */
 export interface NativeDagEntered {
   readonly scheduler: DagScheduler
@@ -40,8 +42,9 @@ export interface NativeDagEntered {
 export type NativeDagEntry = (options: NativeDagSchedulerOptions) => Promise<NativeDagEntered | undefined>
 
 /** Children an earlier call already admitted: re-entry attaches them instead of starting again. A
- * node whose admission was cut off with no task to attach cannot be resolved before recovery, unless
- * the caller is cancelling the run (`lenient`): such a node has no child, so it is only cancelled. */
+ * node whose admission was cut off with no task to attach is refused here (a drive routes such a run
+ * through recovery first), unless the caller is cancelling the run (`lenient`): such a node has no
+ * child, so it is only cancelled. */
 export function admittedChildren(record: DagRunRecordV1, call: Pick<NativeDagCallPort, "findOwnedTask">, lenient = false): ReadonlyMap<DagNodeId, string> {
   const attached = new Map<DagNodeId, string>()
   const lost: string[] = []
@@ -52,7 +55,7 @@ export function admittedChildren(record: DagRunRecordV1, call: Pick<NativeDagCal
     else attached.set(node.id, taskId)
   }
   if (lost.length > 0 && !lenient) {
-    throw new NativeDagRefusal("run_still_active", `Node(s) ${lost.map(id => `"${id}"`).join(", ")} were being admitted when their workflow call ended and have no task yet. Resolving them needs workflow recovery, which is not available on OpenCode 2 yet (S6f).`, lost)
+    throw new NativeDagRefusal("run_still_active", `Node(s) ${lost.map(id => `"${id}"`).join(", ")} were being admitted when their workflow call ended and have no task yet. Call workflow action=wait on this run: its recovery resolves them inside that call.`, lost)
   }
   return attached
 }
@@ -67,10 +70,11 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   })
 }
 
-/** An admitted node whose child already settled but the scheduler has not folded yet. */
-function hasUnfoldedSettle(record: DagRunRecordV1, call: NativeDagCallPort): boolean {
+/** An admitted node whose child already settled but the scheduler has not folded yet. Read through
+ * the owned lookup, which never captures a stored row this runtime does not own (D-1). */
+function hasUnfoldedSettle(record: DagRunRecordV1, call: Pick<NativeDagCallPort, "findOwnedTask">): boolean {
   return record.nodes.some(node => (node.state === "scheduled" || node.state === "running") && node.taskId !== undefined &&
-    TERMINAL_TASK_STATUSES.has(call.get(node.taskId)?.status ?? ""))
+    TERMINAL_TASK_STATUSES.has(call.findOwnedTask({ kind: "dag", runId: record.runId, nodeId: node.id })?.status ?? ""))
 }
 
 /** Resolves once the scheduler is quiet inside this call: no node start in flight, no settled child
@@ -91,6 +95,23 @@ async function admissionSettled(snapshot: () => DagRunRecordV1, starting: () => 
 function fresh(options: NativeDagSchedulerOptions, initialRecord: DagRunRecordV1, call: NativeDagCallPort): NativeDagEntered {
   const scheduler = createDagScheduler({ ...options, initialRecord, preAttachedTasks: admittedChildren(initialRecord, call) })
   return { scheduler, run: scheduler.run() }
+}
+
+/** The call's drive of a run with no control verb: a run a reload paused, or one with a node whose
+ * admission was cut off or whose child no host backs, goes through Native recovery inside this call
+ * (after this call restored the parked children); any other run is re-attached as it stands. */
+async function enterRun(options: NativeDagSchedulerOptions, input: NativeDagDriveInput): Promise<NativeDagEntered> {
+  const record = input.manager.record(input.runId, input.parentSessionID)
+  if (await prepareRunRecovery(record, input.call)) return recoverDagRun({ store: input.store, record: input.manager.record(input.runId, input.parentSessionID), lease: input.lease, options })
+  return fresh(options, input.manager.record(input.runId, input.parentSessionID), input.call)
+}
+
+/** A control verb's entry: every admitted child a reload parked (or a dead host stranded) is first
+ * restored under this call's approval, so the verb's attach, cancel or steer reaches a child this
+ * runtime owns instead of a stored row its port refuses (D-1, P-24). */
+async function enterControl(options: NativeDagSchedulerOptions, input: NativeDagDriveInput, enter: NativeDagEntry): Promise<NativeDagEntered | undefined> {
+  await restoreRunChildren(input.manager.record(input.runId, input.parentSessionID), input.call)
+  return enter(options)
 }
 
 /** A control verb that needed no re-entry (send, cancel_node) still honors the detached contract:
@@ -118,13 +139,15 @@ export async function driveDagRun(input: NativeDagDriveInput): Promise<DagRunRec
   // A settled run has nothing to drive, but a control (cancel, retry, amend, send) may still act on it.
   if (input.enter === undefined && TERMINAL_RUN.has(initialRecord.status)) return initialRecord
   input.signal.throwIfAborted()
+  // This generation's lease while the call drives (P-05); a run another live generation holds is refused.
+  const releaseLease = claimDagRunLease(input.store, input.runId, input.lease)
   const held = createHeldDagTaskPort(input.runId)
   const release = held.bind(input.call), quiet = new AbortController()
   let retire: (() => Promise<void>) | undefined
   try {
     const options: NativeDagSchedulerOptions = { store: input.store, taskManager: held.port, executionMode: input.executionMode,
       ancestry: { depth: 0 }, lease: input.lease, ...(input.spawnPolicy && { nodeSpawnPolicy: input.spawnPolicy }) }
-    const entered = input.enter ? await input.enter(options) : fresh(options, initialRecord, input.call)
+    const entered = input.enter ? await enterControl(options, input, input.enter) : await enterRun(options, input)
     const drive = entered ?? foldAfterControl(options, input)
     if (drive === undefined) return input.manager.record(input.runId, input.parentSessionID)
     const { scheduler, run: running } = drive
@@ -143,6 +166,6 @@ export async function driveDagRun(input: NativeDagDriveInput): Promise<DagRunRec
   } finally {
     quiet.abort()
     release()
-    await retire?.()
+    try { await retire?.() } finally { releaseLease() }
   }
 }

@@ -74,6 +74,12 @@ interface NotificationRecoveryScope extends NotificationRecoveryOrigin {
   control?: OwnedTaskControl
 }
 
+/** Native's continuation for a child whose turn a host process restart cut off
+ * (`senpi-task` `runners/rpc-host/reconcile-turn.ts` `HOST_RESPAWN_CONTINUATION`, which the package
+ * does not export), delivered by `manager-respawn.ts` `continueInterruptedTurn`. */
+const HOST_RESTART_CONTINUATION =
+  "Your previous turn was interrupted by a host process restart. Resume your task from its current state and finish it - do not restart from scratch, and do not repeat work already recorded in this session."
+
 export interface NativeTaskNotificationBasis {
   readonly callAuthority: ToolCallAuthority
   readonly rootToken: IssuedToolCall
@@ -351,6 +357,9 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     return binding
   }
   const recovering = new Map<string, Promise<void>>()
+  /** Tasks a host restart left behind that `restoreAfterReload` is recovering right now: their
+   * reattach continues the turn the restart cut off (Native `continueInterruptedTurn`). */
+  const restartRecoveries = new Set<string>()
   async function recoveryParent(record: import("@oh-my-opencode/senpi-task/manager-kernel").TaskRecord) {
     const rows = ancestry.path(record.parent_session_id)
     for (const ancestor of [...rows].reverse()) if (!controls.has(ancestor.task_id)) await recoverControl(ancestor)
@@ -468,7 +477,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     },
     async parentForRecord(record) { assertCandidate(record, true); const parent = await cleanupParent(record); return { parent: parent.lease, policy: parent.policy } },
     beforeLeaseRetire: (child, intent) => retireChildren(child.locator.sessionID, intent),
-    installed(control) { forgetRelease(control.handle.task_id); controls.set(control.handle.task_id, control); const record = store.load(control.handle.task_id); if (!record || record.child_session_id !== control.child.locator.sessionID || record.parent_session_id !== control.child.locator.parentID) throw Error("Installed control tree identity differs"); remember(record); registerInstalledNotification(control, record) } })
+    installed(control) { forgetRelease(control.handle.task_id); if (restartRecoveries.has(control.handle.task_id)) control.continueAfterRestart(HOST_RESTART_CONTINUATION); controls.set(control.handle.task_id, control); const record = store.load(control.handle.task_id); if (!record || record.child_session_id !== control.child.locator.sessionID || record.parent_session_id !== control.child.locator.parentID) throw Error("Installed control tree identity differs"); remember(record); registerInstalledNotification(control, record) } })
   function captureNotificationRecovery(record: TaskRecord): NotificationRecoveryOrigin {
     if (!record.owned_session) throw Error("Actual recovery request has no owned journal reference")
     return Object.freeze({ identity: Object.freeze({}), taskId: record.task_id, beforeEpoch: record.notification.run_epoch,
@@ -580,15 +589,20 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     const record = store.load(id)
     if (!record || !record.owned_session) return false
     if (record.residency_state === "resident" && record.host_pid !== undefined && record.host_pid !== process.pid && getPidLiveness(record.host_pid) === "dead") {
-      await recoverControl(record)
+      await afterRestart(id, () => recoverControl(record))
       return controls.has(id)
     }
     if (record.residency_state !== "persisted_only") return false
     const receipt = releaseReceipt(id)
     if (receipt?.kind !== "suspended") return false
     if (receipt.identity !== operationIdentity(record) || receipt.revision !== record.owned_session.journalRevision) throw Error("Suspended child changed since its runtime parked it")
-    await reviveParkedBeforeSend(id)
+    await afterRestart(id, () => reviveParkedBeforeSend(id))
     return controls.has(id)
+  }
+  /** Runs one restore of a child a host restart left behind; a cut-off turn it reattaches continues. */
+  async function afterRestart(id: string, restore: () => Promise<void>): Promise<void> {
+    restartRecoveries.add(id)
+    try { await restore() } finally { restartRecoveries.delete(id) }
   }
   /** Record our own release only when the durable journal row is this record's exact child. */
   async function recordRelease(id: string): Promise<void> {
@@ -843,6 +857,18 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       record.notification.run_epoch, record.residency_claim, record.child_session_id,
       record.owned_session && { ...record.owned_session, journalRevision: undefined }])
   }
+  /** Whether `captureOperationTask` would admit `id` for this call, read WITHOUT capturing it (no
+   * receipt, no re-admission): owned by this runtime, or released by its previous runtime and still
+   * exactly that released child. A row merely parked by a shutdown, or stranded by a dead host,
+   * answers false; such a row is restored only through restoreAfterReload. */
+  function operationTaskOwned(binding: VerifiedParentBinding, id: string): boolean {
+    const parent = bindings.info(binding)
+    const row = manager.get(id)
+    if (!row || row.root_session_id !== parentID || row.parent_session_id !== parent.lease.sessionID && row.root_session_id !== parent.lease.sessionID) return false
+    if (owns(row)) return true
+    const receipt = row.child_session_id && !controls.has(id) && !manager.getResidentHandle(id) ? releaseReceipt(id) : undefined
+    return receipt?.kind === "released" && receipt.identity === operationIdentity(row) && receipt.revision === row.owned_session?.journalRevision
+  }
   function captureOperationTask(binding: VerifiedParentBinding, id: string): AcceptedTaskProof {
     const parent = bindings.info(binding)
     const initial = manager.get(id)
@@ -974,6 +1000,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         manager, parentSessionID: parent.lease.sessionID,
         assertCurrent() { active(); issuedAdmission.assertAdmission(); bindings.info(binding, true) },
         capture: id => captureOperationTask(binding, id),
+        owned: id => operationTaskOwned(binding, id),
         resolve,
         captureSendFormattingScope() {
           // Issued only while the original send is still in its authorized frame.

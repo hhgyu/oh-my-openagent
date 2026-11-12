@@ -4,6 +4,8 @@ import {
 } from "@oh-my-opencode/senpi-task/dag"
 import { nativeTaskStateDir } from "../native-task/component"
 import { driveDagRun, type NativeDagEntry } from "./drive"
+import { fenceForeignTerminalRuns } from "./lease"
+import { pauseRunsForShutdown } from "./recovery"
 import { NativeDagRefusal, type NativeDagExecutionSources } from "./refusals"
 import type { NativeDagCallPort } from "./task-port"
 
@@ -38,6 +40,9 @@ export interface NativeDagRuntime {
   /** Number of runs a call is driving right now. */
   driving(): number
   isDriving(runId: string): boolean
+  /** Component close: waits for every drive to retire (the closing service already ended its call),
+   * then pauses every live run of this root the way Native shutdown does, cancelling no child. */
+  pauseForShutdown(): Promise<readonly DagRunId[]>
 }
 
 /** Native's skill materialization for a node that loads no skills: the effective prompt IS the
@@ -52,20 +57,23 @@ const nativeDagNoSkillMaterializer: DagMaterializeSkills = ({ definition }) => (
 /** The DAG store, manager and per-run blocking drives of ONE root session, stored under that
  * session's Native task state directory. It holds no call: every drive borrows the call it runs in. */
 export function createNativeDagRuntime(options: NativeDagRuntimeOptions): NativeDagRuntime {
-  const store = createDagFileStore({
+  // One fenced store for the manager, every drive and every control: the engine keys its commit
+  // notifications on the store object, and no writer here overwrites another holder's terminal run.
+  const store = fenceForeignTerminalRuns(createDagFileStore({
     project_dir: options.directory,
     task: { state_dir: nativeTaskStateDir(options.directory, options.parentSessionID), ...(options.settings && { dag: options.settings }) },
-  })
+  }), options.lease)
   const manager = createDagManager({ store, materializeSkills: nativeDagNoSkillMaterializer, ...(options.settings && { settings: options.settings }) })
   // Results are projected from the store; a drive returns only after its run is terminal.
   const results = createDagWaitSurface({ store, subscribe: () => () => {} })
-  const driving = new Set<string>()
+  const driving = new Map<string, Promise<unknown>>()
   async function run(runId: DagRunId, call: NativeDagCall, detach: boolean, enter?: NativeDagEntry): Promise<DagRunRecordV1> {
     if (driving.has(runId)) throw new NativeDagRefusal("run_still_active", `Dag run ${runId} is already being driven by another workflow call in this session.`)
-    driving.add(runId)
+    const drive = driveDagRun({ store, manager, runId, parentSessionID: options.parentSessionID, call: call.port, signal: call.signal, detach,
+      executionMode: options.executionMode, lease: options.lease, ...(call.spawnPolicy && { spawnPolicy: call.spawnPolicy }), ...(enter && { enter }) })
+    driving.set(runId, drive)
     try {
-      return await driveDagRun({ store, manager, runId, parentSessionID: options.parentSessionID, call: call.port, signal: call.signal, detach,
-        executionMode: options.executionMode, lease: options.lease, ...(call.spawnPolicy && { spawnPolicy: call.spawnPolicy }), ...(enter && { enter }) })
+      return await drive
     } finally {
       driving.delete(runId)
       options.onDriveEnded?.(runId)
@@ -82,5 +90,9 @@ export function createNativeDagRuntime(options: NativeDagRuntimeOptions): Native
     control: (runId: DagRunId, call: NativeDagCall, entry: NativeDagEntry, detach: boolean) => run(runId, call, detach, entry),
     driving: () => driving.size,
     isDriving: (runId: string) => driving.has(runId),
+    async pauseForShutdown() {
+      await Promise.allSettled([...driving.values()])
+      return pauseRunsForShutdown(store, options.parentSessionID, options.lease)
+    },
   })
 }

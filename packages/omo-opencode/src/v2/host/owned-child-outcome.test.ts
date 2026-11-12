@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test"
-import { projectOwnedChildOutcome } from "./owned-child-outcome"
+import { describe, expect, test } from "bun:test"
+import { projectOwnedChildOutcome, retainedTurnCutOff } from "./owned-child-outcome"
 import type { ObservationRecord, ObservationSnapshot, SafeChildEvent } from "./owned-child-observation-types"
 
 function defined<T>(value: T): NonNullable<T> {
@@ -428,6 +428,34 @@ test("tool progress must reference an active observed call in the same assistant
   progress.event.durable = undefined
   records.splice(index + 1, 0, progress)
   expect(projectOwnedChildOutcome({ ...snapshot, records })).toMatchObject({ status: "uncertain", reason: "unmatched-tool-event" })
+})
+
+describe("#given the records a previous observer retained for a turn", () => {
+  const terminal = (record: ObservationRecord) => record.kind === "host" && record.event.type === "session.execution.succeeded"
+  test("#when the host finished that turn #then it was not cut off", () => {
+    expect(retainedTurnCutOff(fixture().records)).toBe(false)
+  })
+  test("#when the records end mid-turn, before the execution terminal #then it was cut off", () => {
+    const records = fixture().records
+    expect(retainedTurnCutOff(records.slice(0, records.findIndex(terminal)))).toBe(true)
+  })
+  test("#when the host interrupted the turn (a park's interrupt) #then it was cut off", () => {
+    const records = structuredClone(fixture().records)
+    const end = records.find(terminal)
+    if (end?.kind !== "host") throw Error("fixture has no execution terminal")
+    end.event.type = "session.execution.interrupted"
+    expect(retainedTurnCutOff(records)).toBe(true)
+  })
+  test("#when an expected input was never delivered #then it was cut off", () => {
+    expect(retainedTurnCutOff([{ kind: "input", id: "input:msg_pending", inboxID: "msg_pending" }])).toBe(true)
+  })
+  test("#when a local stop was recorded #then the turn is not continued", () => {
+    const records = fixture().records
+    expect(retainedTurnCutOff([...records.slice(0, records.findIndex(terminal)), { kind: "stop", id: "stop-1" }])).toBe(false)
+  })
+  test("#when no input or execution was observed #then nothing was cut off", () => {
+    expect(retainedTurnCutOff([])).toBe(false)
+  })
 })
 
 // Safe envelopes copied from the actual isolated 2.2.6 observations.json capture (2026-11-08).
