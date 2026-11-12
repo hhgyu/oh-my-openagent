@@ -455,9 +455,6 @@
   "packages/senpi-task/src/tools/task/lease-parking.test.ts": {
     "typescript/no-non-null-assertion": 2
   },
-  "packages/senpi-task/src/tools/team/__fixtures__/team-tool-fakes.ts": {
-    "typescript/no-non-null-assertion": 12
-  },
   "packages/senpi-task/src/workpool/aggregate.test.ts": {
     "typescript/no-non-null-assertion": 2
   },
