@@ -3045,6 +3045,8 @@
         "scripts/qa/memory-model-fallback-e2e.mjs",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
         "scripts/qa/memory-skill-startup-e2e.mjs",
+        // live QA driver run by hand (bun scripts/qa/memory-sync-fresh-device-e2e.mjs); nothing imports it
+        "scripts/qa/memory-sync-fresh-device-e2e.mjs",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
         "scripts/qa/memory-write-visual-qa.mjs",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs

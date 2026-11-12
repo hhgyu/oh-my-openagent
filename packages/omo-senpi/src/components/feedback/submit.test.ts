@@ -298,10 +298,16 @@ describe("submitReport", () => {
 })
 
 describe.skipIf(process.platform !== "win32")("report-file privacy check on Windows", () => {
-  test("#given a saved file that Everyone may read #when the privacy check runs #then it names that reader and fails", () => {
+  test("#given a saved file that Everyone may read #when the privacy check runs #then it names that reader and fails", async () => {
     const stateDir = tempDir()
-    const path = join(stateDir, "report.json")
-    writeFileSync(path, "{}")
+    const result = await submitReport({
+      draft, kind: "bug", description: "x", redact: redactTokens, client,
+      env: { OMO_DISABLE_FEEDBACK: "1" }, stateDir, apiOrigin: "https://api.example.test", accessToken: null,
+      transport: async () => { throw new Error("offline feedback must not upload") },
+    })
+    if (result.kind !== "saved") throw new Error("expected a saved report")
+    const path = result.path
+    expectUserOnly(path, stateDir)
     expect(spawnSync("icacls", [path, "/grant", "*S-1-1-0:(R)"], { encoding: "utf8" }).status).toBe(0)
 
     expect(unexpectedWindowsReaders(readWindowsAcl(path))).toEqual(["S-1-1-0"])

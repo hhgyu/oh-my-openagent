@@ -30,6 +30,7 @@ export const SPAWN_BYPASSES = [
   { file: `${QA}/lsp-e2e.mjs`, function: "runChecked", call: "spawnSync(command)", reason: "callers run npm pack and tar only" },
   { file: `${QA}/lsp-e2e.mjs`, function: "runInjectedPostEditProbe", call: `spawnSync("bun")`, reason: "bun -e builds only the LSP component on a FakeExtensionAPI; no telemetry component is constructed" },
   { file: `${QA}/lsp-e2e.mjs`, function: "runSelfTest", call: `spawnSync("bun")`, reason: "bun -e runs the local installer into a temp agent dir; no session starts" },
+  { file: `${QA}/memory-sync-fresh-device-e2e.mjs`, function: "optionsFrom", call: "spawnSync(process.execPath)", reason: RESOLVER },
   { file: `${QA}/package-dir-hygiene-probe.mjs`, function: "reportLane", call: "spawn(process.execPath)", reason: "re-runs this probe to report its own env on purpose; no runtime boots" },
   { file: `${QA}/policy-continuation-e2e.mjs`, function: "scenario", call: "execFileSync(bun)", reason: "bun build of the fixture extension" },
   { file: `${QA}/policy-continuation-e2e.mjs`, function: "run", call: "execFileSync(process.execPath)", reason: RESOLVER },

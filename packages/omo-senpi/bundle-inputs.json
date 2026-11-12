@@ -953,6 +953,7 @@
     "packages/omo-senpi/src/components/feedback/collect.ts",
     "packages/omo-senpi/src/components/feedback/draft.ts",
     "packages/omo-senpi/src/components/feedback/index.ts",
+    "packages/omo-senpi/src/components/feedback/private-file.ts",
     "packages/omo-senpi/src/components/feedback/runtime-loader.ts",
     "packages/omo-senpi/src/components/feedback/runtime.ts",
     "packages/omo-senpi/src/components/feedback/submit.ts",
