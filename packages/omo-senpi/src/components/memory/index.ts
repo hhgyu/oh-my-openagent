@@ -47,7 +47,7 @@ export interface MemoryComponentOptions {
 }
 
 export { MEMORY_BINDING_CUSTOM_TYPE } from "./binding"
-export { ensureIdentityRuntimeDirs, getMemoryRepo } from "./context"
+export { ensureIdentityRuntimeDirs } from "./context"
 export type { MemoryIdentityContext, MemoryPendingLedger, MemoryRepoAccess } from "./context"
 export { memoryModuleSupervisor } from "./supervisor"
 

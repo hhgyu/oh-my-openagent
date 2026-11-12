@@ -23,7 +23,7 @@ function setup(options: { readonly idleMinutes?: number; readonly active?: boole
     resolve: async sessionID => (sessionID === bound.sessionID ? bound : undefined),
     session: { context: async () => structuredClone(transcript.messages) as never },
     request: async (_bound, origin): Promise<DreamFireOutcome> => { requests.push(origin); return { fired: true, runId: "run-1", status: "active" } },
-    settings: () => ({ enabled: true, idleMinutes: options.idleMinutes ?? 30, minHoursBetween: 24, autoSelectMax: 5, autoSelectMaxChars: 150_000 }),
+    settings: () => ({ enabled: true, idleMinutes: options.idleMinutes ?? 30, minHoursBetween: 24, shutdownLaunch: false, autoSelectMax: 5, autoSelectMaxChars: 150_000 }),
     pressure: async () => options.pressure === true,
     hasUserActivity: () => activity.active,
     isOwnedSession: () => options.owned === true,

@@ -79,12 +79,3 @@ export interface MemoryCommandDeps extends CoreMemoryCommandDeps {
   /** Doctor stale-lock liveness probe; defaults to signal-0. */
   isProcessAlive?(pid: number): boolean
 }
-
-export function defaultIsProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}

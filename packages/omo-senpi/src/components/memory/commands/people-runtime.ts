@@ -4,29 +4,30 @@
 // The graph is DERIVED on every read from the `RELATIONSHIP: <predicate>: <target>`
 // lines of `system/human.md` and `people/*/card.md`; it is never stored. Derivation
 // is delegated to the palace collector so the panel and this command share one parser.
-// Output is read-only and is pushed through the notify seam, never into model context.
-
-import { readFile } from "@oh-my-opencode/memory-core/fs"
-import { join } from "node:path"
+// Output is read-only and is pushed through the notify seam, never into model context. The read side
+// (graph, card, observations, rendering) lives in memory-core `./palace`; `--ask` stays Senpi-only.
 
 import type { ObservationGroup, PeopleLimits } from "@oh-my-opencode/memory-core"
-
-import type { PalacePeople, PalacePeopleNode } from "../palace"
-import { collectPeople } from "../palace/people"
-import { parseCommandArgs } from "./args"
 import {
+  derivePeopleGraph as deriveCorePeopleGraph,
+  describePersonMiss,
   parsePeopleCardLines,
-  parsePeopleObservations,
+  readPersonFile as readCorePersonFile,
   renderPersonCard,
   renderRoster,
-} from "./people-render"
+  resolvePersonQuery,
+  selectPersonObservations,
+  type PalacePeople,
+  type PalacePeopleNode,
+} from "@oh-my-opencode/memory-core/palace"
+
+import { parseCommandArgs } from "./args"
 import {
   ABSTENTION_LINE,
   createPeopleAskRunner,
   hasNoEvidence,
   type PeopleAskEvidence,
 } from "./people-ask"
-import { resolvePersonQuery } from "./people-query"
 import { collectPersonSearchHits } from "./people-search"
 import { openRepo } from "./repo"
 import {
@@ -37,10 +38,7 @@ import {
   type MemoryCommandIdentity,
 } from "./types"
 
-/** Fixed render budget per observation level; deliberately NOT a config knob. */
-export const OBSERVATIONS_PER_LEVEL = 20
-
-export { resolvePersonQuery, type PersonQueryResolution } from "./people-query"
+export { OBSERVATIONS_PER_LEVEL, resolvePersonQuery, type PersonQueryResolution } from "@oh-my-opencode/memory-core/palace"
 
 /** Derives the roster and the adjacency graph from the person cards in the repository. */
 export async function derivePeopleGraph(
@@ -48,10 +46,7 @@ export async function derivePeopleGraph(
   identity: MemoryCommandIdentity,
   limits: PeopleLimits,
 ): Promise<PalacePeople> {
-  const repo = openRepo(deps, identity)
-  const head = await repo.head()
-  const people = await collectPeople(repo, head, { enabled: true, limits })
-  return people ?? { nodes: [], edges: [], diagnostics: [] }
+  return deriveCorePeopleGraph(openRepo(deps, identity), limits)
 }
 
 /** Newest-first per level, capped at OBSERVATIONS_PER_LEVEL unless `all` is set. */
@@ -62,13 +57,7 @@ export async function selectObservations(
   limits: PeopleLimits,
   options: { readonly all: boolean },
 ): Promise<readonly ObservationGroup[]> {
-  const raw = await readPersonFile(deps, identity, `people/${slug}/observations.md`)
-  if (raw === undefined) return []
-  const groups = parsePeopleObservations(raw, limits)
-  return groups.map((group) => {
-    const sorted = [...group.entries].sort(byDateDescending)
-    return { section: group.section, entries: options.all ? sorted : sorted.slice(0, OBSERVATIONS_PER_LEVEL) }
-  })
+  return selectPersonObservations(openRepo(deps, identity), slug, limits, options)
 }
 
 export async function runPeopleCommand(deps: MemoryCommandDeps, args: string, ctx: MemoryCommandContext): Promise<string> {
@@ -90,10 +79,7 @@ export async function runPeopleCommand(deps: MemoryCommandDeps, args: string, ct
   if (name.length === 0) return respond(ctx, renderRoster(graph))
 
   const resolved = resolvePersonQuery(graph.nodes, name)
-  if (resolved.kind === "miss") {
-    const close = resolved.close.length === 0 ? "no people records exist yet" : `closest slugs: ${resolved.close.join(", ")}`
-    return respond(ctx, `no person matches "${name}"; ${close}`, "error")
-  }
+  if (resolved.kind === "miss") return respond(ctx, describePersonMiss(graph.nodes, name, resolved.close), "error")
 
   const node = graph.nodes.find((candidate) => candidate.slug === resolved.slug)
   if (node === undefined) return respond(ctx, `no person matches "${name}"`, "error")
@@ -145,12 +131,7 @@ async function readPersonFile(
   identity: MemoryCommandIdentity,
   path: string,
 ): Promise<string | undefined> {
-  const working = await readFile(join(identity.identityPaths.repo, path), "utf8").catch(() => undefined)
-  if (working !== undefined) return working
-  const repo = openRepo(deps, identity)
-  const head = await repo.head()
-  if (head === null) return undefined
-  return repo.show(head, path).catch(() => undefined)
+  return readCorePersonFile(openRepo(deps, identity), path)
 }
 
 /**
@@ -165,10 +146,6 @@ function extractAsk(args: string): { readonly question: string | undefined; read
   const question = unquoted.trim()
   const rest = `${args.slice(0, match.index)} ${args.slice((match.index ?? 0) + match[0].length)}`
   return { question: question.length === 0 ? undefined : question, rest }
-}
-
-function byDateDescending(left: { readonly date: string }, right: { readonly date: string }): number {
-  return right.date.localeCompare(left.date)
 }
 
 function modelRegistryOf(ctx: MemoryCommandContext): Parameters<typeof createPeopleAskRunner>[0]["registry"] {

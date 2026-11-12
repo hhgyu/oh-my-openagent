@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
 
-import { collectReflection } from "../palace/collectors"
+import { collectReflection } from "@oh-my-opencode/memory-core/palace"
 import {
   REFLECTION_COMPLETION_ENTRY_TYPE,
   REFLECTION_SUMMARY_ENTRY_TYPE,

@@ -5,7 +5,7 @@ import { TranscriptJournal, type ReservedRun } from "@oh-my-opencode/memory-core
 import { OmoMemorySettingsSchema } from "@oh-my-opencode/omo-config-core"
 import type { BoundMemorySession } from "./binding"
 import { fireDream } from "./dream-fire"
-import { evaluateDreamGates, resolveDreamTriggerSettings, type DreamTriggerSettings } from "./dream-gates"
+import { evaluateDreamGates, resolveDreamTriggerSettings, type DreamTriggerSettings } from "@oh-my-opencode/memory-core/dream-gates"
 import { reflectionStore } from "./reflection-run-store"
 import { createBoundIdentity } from "./reflection.test-support"
 
@@ -15,7 +15,7 @@ const cleanups: (() => void)[] = []
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup() })
 
 const NOW = Date.parse("2026-11-12T00:00:00.000Z")
-const settings: DreamTriggerSettings = { enabled: true, idleMinutes: 30, minHoursBetween: 24, autoSelectMax: 5, autoSelectMaxChars: 150_000 }
+const settings: DreamTriggerSettings = { enabled: true, idleMinutes: 30, minHoursBetween: 24, shutdownLaunch: false, autoSelectMax: 5, autoSelectMaxChars: 150_000 }
 
 function setup() {
   const identity = createBoundIdentity()

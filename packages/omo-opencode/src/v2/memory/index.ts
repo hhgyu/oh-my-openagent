@@ -27,6 +27,11 @@ import { createReflectCommand } from "./reflect-command"
 import { underSystemTokenPressure } from "./dream-budget"
 import { createDreamCommand } from "./dream-command"
 import { createDreamTriggers } from "./dream-triggers"
+import { createV2MemoryMaintenance, type MemoryMaintenanceSeams } from "./maintenance"
+import { createDoctorCommand } from "./doctor-command"
+import { createSleeptimeCommand } from "./sleeptime-command"
+import { createPeopleCommand } from "./people-command"
+import { createPalaceCommand } from "./palace-command"
 
 export { MEMORY_BINDING_KEY } from "./binding"
 export { MEMORY_PART_MARKER, PROJECTION_PIN_KEY } from "./projection"
@@ -56,6 +61,8 @@ export interface MemoryComponentOptions {
   readonly facts?: MemoryFactsSeams
   /** Reflection seams (child port, timers, deadline, liveness probes, run ids). */
   readonly reflection?: MemoryReflectionSeams
+  /** Repo maintenance seams (delay, interval, packing threshold, clock). */
+  readonly maintenance?: MemoryMaintenanceSeams
 }
 
 /**
@@ -79,7 +86,11 @@ export interface MemoryComponentOptions {
  *   runner that validates and merges its branch, and bind-time crash recovery (see `./reflection-component`);
  *   step-count and compaction triggers on `experimental.idle` / `compaction` (see `./reflection-triggers`)
  *   and `/reflect` (see `./reflect-command`); dreams through the same runner with the hidden `omo-dream` agent,
- *   an idle timer and a bind-time pressure origin (see `./dream-triggers`) and `/dream` (see `./dream-command`).
+ *   an idle timer and a bind-time pressure origin (see `./dream-triggers`) and `/dream` (see `./dream-command`);
+ *   the read-side commands `/doctor`, `/sleeptime`, `/people` (no `--ask`) and `/palace` over the memory-core
+ *   doctor and palace (see `./insight-commands`).
+ * - session_start memory maintenance -> the memory-core scheduler (unref'd delayed timer) scheduled at bind and
+ *   disposed on close (see `./maintenance`).
  * Nothing calls `session.prompt`; subagent children never bind; Kibitzer input goes through the owned
  * session backend's gated admission paths.
  */
@@ -137,17 +148,24 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
     resolve: sessionID => binder.resolve(sessionID), session: context.session, logger, hasUserActivity, isOwnedSession,
     request: (bound, origin) => reflection.requestDream(bound, origin), settings: bound => reflection.dreamSettings(bound), pressure: underSystemTokenPressure,
   })
-  onBound = bound => { void journal.onBound(bound).then(() => facts?.onBound(bound)).then(() => reflection?.onBound(bound)).then(() => dreams?.onBound(bound)) }
+  const maintenance = createV2MemoryMaintenance(logger, options.maintenance)
+  onBound = bound => {
+    maintenance.onBound(bound)
+    void journal.onBound(bound).then(() => facts?.onBound(bound)).then(() => reflection?.onBound(bound)).then(() => dreams?.onBound(bound))
+  }
   let outputEvents: RpcRegistration<typeof memoryCommandRpc>["events"] | undefined
   const commands = context.command === undefined ? undefined : createMemoryCommands({
     display: async output => { await outputEvents?.emit(MEMORY_COMMAND_OUTPUT_EVENT, { ...output }) },
     binder, session: context.session, logger, isClosed: () => closed,
     bustPromptCache: sessionID => { projection.markCompacted(sessionID) },
     ...(facts === undefined ? {} : { factsRetry: (sessionID: string) => facts.retry(sessionID) }),
-    ...(reflection === undefined ? {} : { extraCommands: [
-      createReflectCommand((bound, event) => reflection.evaluate(bound, event)),
-      createDreamCommand({ request: (bound, request) => reflection.requestDream(bound, "manual", request), settings: bound => reflection.dreamSettings(bound) }),
-    ] }),
+    extraCommands: [
+      ...(reflection === undefined ? [] : [
+        createReflectCommand((bound, event) => reflection.evaluate(bound, event)),
+        createDreamCommand({ request: (bound, request) => reflection.requestDream(bound, "manual", request), settings: bound => reflection.dreamSettings(bound) }),
+      ]),
+      createDoctorCommand({ now }), createSleeptimeCommand(), createPeopleCommand(), createPalaceCommand(),
+    ],
   })
   const tools = createMemoryTools({
     binder, userTurns: sessionID => userTurns.get(sessionID) ?? 0,
@@ -169,6 +187,7 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       if (dreams !== undefined) results.push(...await Promise.allSettled([dreams.close()]))
       if (reflection !== undefined) results.push(...await Promise.allSettled([reflection.close()]))
       if (kibitzer !== undefined) results.push(...await Promise.allSettled([kibitzer.close()]))
+      results.push(...await Promise.allSettled([maintenance.close()]))
       await metadata.settled()
       binder.clear()
       projection.clear()

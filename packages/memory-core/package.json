@@ -68,6 +68,24 @@
     "./sync-runner": {
       "import": "./src/sync/runner/index.ts"
     },
+    "./facts-run-prune": {
+      "import": "./src/facts/run-prune.ts"
+    },
+    "./maintenance": {
+      "import": "./src/maintenance/index.ts"
+    },
+    "./doctor": {
+      "import": "./src/doctor/index.ts"
+    },
+    "./palace": {
+      "import": "./src/palace/index.ts"
+    },
+    "./dream-selection": {
+      "import": "./src/dream/index.ts"
+    },
+    "./dream-gates": {
+      "import": "./src/dream/gates.ts"
+    },
     "./personas": {
       "import": "./src/personas/manifest.ts"
     },

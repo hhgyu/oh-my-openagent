@@ -2081,8 +2081,6 @@
         "src/components/memory/commands/sleeptime.ts": ["exports"],
         // pre-existing at origin dev 4686e425b5: unused export(s) identityFor
         "src/components/memory/commands/types.ts": ["exports"],
-        // pre-existing at origin dev 4686e425b5: unused export(s) getMemoryRepo
-        "src/components/memory/context.ts": ["exports"],
         // pre-existing at origin dev 4686e425b5: unused export(s) DEFAULT_SERVICE_API
         "src/components/memory/device-session/account-source.ts": ["exports"],
         // pre-existing at origin dev 4686e425b5: unused export(s) FakeScheduler
@@ -2097,8 +2095,6 @@
         "src/components/memory/facts-run-prune.ts": ["exports"],
         // pre-existing at origin dev 4686e425b5: unused export(s) AVAILABLE_MODEL
         "src/components/memory/facts-runner.test-support.ts": ["exports"],
-        // pre-existing at origin dev 4686e425b5: unused export(s) getMemoryRepo
-        "src/components/memory/index.ts": ["exports"],
         // pre-existing at origin dev 4686e425b5: unused export(s) UNAVAILABLE_CATEGORY_MAX_CHARS, GATE_MODEL_MAX_CHARS
         "src/components/memory/kibitzer/notice.ts": ["exports"],
         // pre-existing at origin dev 4686e425b5: unused export(s) encodeKibitzerSessionId, kibitzerSidecarsRoot, kibitzerWakeRecord, redactKibitzerWakeReason
@@ -2127,18 +2123,6 @@
         "src/components/memory/memory-usage.test-support.ts": ["exports"],
         // pre-existing at origin dev 4686e425b5: unused export(s) incrementMemoryUsage, readMemoryUsageLedger, extractMemoryUsagePath
         "src/components/memory/memory-usage.ts": ["exports"],
-        // pre-existing at origin dev 4686e425b5: unused export(s) HISTORY_MAX_COMMITS, HISTORY_PER_DIFF_CAP, HISTORY_RECENT_DIFFS, HISTORY_TOTAL_PAYLOAD_CAP, REFLECTION_COMMIT_PATTERN
-        "src/components/memory/palace/collectors.ts": ["exports"],
-        // pre-existing at origin dev 4686e425b5: unused export(s) collectPalaceData, renderPalaceHtml, encodePalaceData
-        "src/components/memory/palace/generator.ts": ["exports"],
-        // pre-existing at origin dev 4686e425b5: unused export(s) HISTORY_RECENT_DIFFS
-        "src/components/memory/palace/history-collector.ts": ["exports"],
-        // pre-existing at origin dev 4686e425b5: unused export(s) registerPalaceCommand, runPalaceCommand, HISTORY_MAX_COMMITS, HISTORY_PER_DIFF_CAP, HISTORY_RECENT_DIFFS, HISTORY_TOTAL_PAYLOAD_CAP, REFLECTION_COMMIT_PATTERN, UNCOMMITTED_LABEL, collectCore, collectExternal and 14 more
-        "src/components/memory/palace/index.ts": ["exports"],
-        // pre-existing at origin dev 4686e425b5: unused export(s) PRIMARY_HUMAN_SLUG, PRIMARY_HUMAN_CARD_PATH
-        "src/components/memory/palace/people.ts": ["exports"],
-        // pre-existing at origin dev 4686e425b5: unused export(s) PALACE_DATA_ELEMENT_ID
-        "src/components/memory/palace/template.ts": ["exports"],
         // pre-existing at origin dev 4686e425b5: unused export(s) PolicyCapturingFakeExtensionAPI
         "src/components/memory/policy-guard.test-support.ts": ["exports"],
         // pre-existing at origin dev 4686e425b5: unused export(s) PROJECT_MEMORY_RECALL_MAX_PROJECTS, formatProjectMemoryNudge

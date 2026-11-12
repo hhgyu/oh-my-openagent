@@ -1,8 +1,8 @@
 import type { CapturedConversation, DreamOrigin } from "@oh-my-opencode/memory-core"
 
-import type { LoadedConversation } from "./dream-selector"
+import type { LoadedConversation } from "@oh-my-opencode/memory-core/dream-selection"
 import { loadMemoryCommandsRuntime } from "./commands/runtime-loader"
-import { evaluateDreamGates, readLastDreamAtMs, type DreamTriggerSettings } from "./dream-trigger-gates"
+import { evaluateDreamGates, readLastDreamAtMs, type DreamTriggerSettings } from "@oh-my-opencode/memory-core/dream-gates"
 import type { DreamFireOutcome, DreamTriggerSession, ManualDreamRequest } from "./dream-trigger"
 
 export async function fireDream(input: {

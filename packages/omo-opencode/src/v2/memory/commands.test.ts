@@ -18,8 +18,10 @@ describe("memory commands", () => {
     // when
     const cleanup = await registerMemoryComponent(f.host, f.options())
     // then
+    const core = Object.entries(CORE_MEMORY_COMMANDS).map(([name, entry]) => [MEMORY_COMMAND_NAMES[name as keyof typeof MEMORY_COMMAND_NAMES], entry.description])
     const registered = [...f.commands.values()].map(definition => [definition.name, definition.description])
-    expect(registered).toEqual(Object.entries(CORE_MEMORY_COMMANDS).map(([name, entry]) => [MEMORY_COMMAND_NAMES[name as keyof typeof MEMORY_COMMAND_NAMES], entry.description]))
+    expect(registered.slice(0, core.length)).toEqual(core)
+    expect(registered.slice(core.length).map(([name]) => name)).toEqual(["doctor", "sleeptime", "people", "palace"])
     expect(f.commands.has("init")).toBe(false)
     expect(f.commands.has("memory-init")).toBe(true)
     await cleanup()

@@ -7,7 +7,7 @@ import { join } from "node:path"
 
 import { SenpiSessionProvider, searchTranscripts, searchableText } from "@oh-my-opencode/memory-core"
 
-import type { PalacePeopleNode } from "../palace"
+import type { PalacePeopleNode } from "@oh-my-opencode/memory-core/palace"
 import type { MemoryCommandContext, MemoryCommandDeps } from "./types"
 
 const MAX_HITS = 10

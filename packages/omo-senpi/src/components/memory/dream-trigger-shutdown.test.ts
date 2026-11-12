@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { createShutdownDrain } from "./shutdown-drain"
 import { DREAM_VOLUME_GATE_BYTES, evaluateDreamGates, resolveDreamTriggerSettings, type DreamTriggerSession } from "./dream-trigger"
 import { fireDream } from "./dream-trigger-fire"
-import { loadConversations } from "./dream-selector"
+import { loadConversations } from "@oh-my-opencode/memory-core/dream-selection"
 import { memorySettings } from "./memory.test-support"
 import { CONVERSATION, NOW_MS, fireTimer, fixture, gateProbe, noopSteps, settle, triggerSettings } from "./dream-trigger.test-support"
 
