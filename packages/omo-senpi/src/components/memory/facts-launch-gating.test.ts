@@ -57,17 +57,20 @@ describe("facts launch gating on failure state", () => {
     const store = new FactsFailureStore({ identityPaths: identity.paths })
     let busy = true
     const failures = {
-      readFailures: () => busy ? Promise.reject(new LockContentionError("facts-queue.lock", null)) : store.readFailures(),
+      readFailures: () =>
+        busy ? Promise.reject(new LockContentionError("facts-queue.lock", null)) : store.readFailures(),
       recordFailure: store.recordFailure.bind(store),
       clearOnSuccess: store.clearOnSuccess.bind(store),
     }
-    const runner = new FactsExtractorRunner(runnerOptions(root, identity, queue, "fact", { failures, logger: collector.logger }))
+    const runner = new FactsExtractorRunner(
+      runnerOptions(root, identity, queue, "fact", { failures, logger: collector.logger }),
+    )
     const before = await queue.listPending()
     // when
     const deferred = await runner.launchPending()
     // then
     expect(deferred.status).toBe("skipped")
-    expect(collector.warnings.map(row => row.message)).toEqual(["facts failure ledger is busy; launch deferred"])
+    expect(collector.warnings.map((row) => row.message)).toEqual(["facts failure ledger is busy; launch deferred"])
     expect(await runDirNames(identity)).toEqual([])
     expect(await queue.listPending()).toEqual(before)
     // when / then

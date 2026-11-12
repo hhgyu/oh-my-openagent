@@ -72,7 +72,8 @@ export type TaskAgentInfo = {
 }
 
 /** The canonical task operation consumes these manager methods and its existing lane allocator. */
-export type TaskOperationManager = Pick<TaskManager,
+export type TaskOperationManager = Pick<
+  TaskManager,
   | "start"
   | "get"
   | "waitFor"

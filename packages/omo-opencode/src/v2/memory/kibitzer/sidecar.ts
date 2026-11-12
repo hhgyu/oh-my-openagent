@@ -17,7 +17,13 @@
 // on every exit.
 
 import { decideWake } from "@oh-my-opencode/memory-core/recall-sidecar"
-import type { KibitzerOfferInput, KibitzerOfferResult, KibitzerSidecarOptions, KibitzerSidecarState, KibitzerToolBinding } from "./contract"
+import type {
+  KibitzerOfferInput,
+  KibitzerOfferResult,
+  KibitzerSidecarOptions,
+  KibitzerSidecarState,
+  KibitzerToolBinding,
+} from "./contract"
 import type { KibitzerEvent } from "./events"
 import { chargeBudget, createSidecarCore } from "./sidecar-core"
 import { createTurnLifecycle } from "./sidecar-turn"
@@ -56,18 +62,27 @@ export function createKibitzerSidecar(options: KibitzerSidecarOptions): Kibitzer
       if (core.closing || core.state === "disposed") return { action: "buffered", reason: "disposed" }
       for (const path of input.surfaced) core.surfaced.add(path)
       if (core.state === "backoff") return { action: "buffered", reason: "backoff" }
-      const decision = decideWake({ candidates: input.candidates, offered: core.offered, surfaced: core.surfaced, maxItems: input.maxItems, cooldown: core.cooldown })
+      const decision = decideWake({
+        candidates: input.candidates,
+        offered: core.offered,
+        surfaced: core.surfaced,
+        maxItems: input.maxItems,
+        cooldown: core.cooldown,
+      })
       if (!decision.wake) return { action: "buffered", reason: decision.reason }
       if (input.taskSummary !== undefined) core.taskSummary = input.taskSummary
       const current = core.child
       switch (core.state) {
         case "turn_running": {
           const turn = core.activeTurn
-          if (turn === undefined || current === undefined) throw new Error("kibitzer sidecar invariant broken: turn_running without a live turn")
+          if (turn === undefined || current === undefined)
+            throw new Error("kibitzer sidecar invariant broken: turn_running without a live turn")
           return wake.steer(current, turn, decision.candidates, input.maxItems)
         }
         case "idle":
-          return current === undefined ? wake.seed(decision.candidates, input.maxItems) : wake.followUp(current, decision.candidates, input.maxItems)
+          return current === undefined
+            ? wake.seed(decision.candidates, input.maxItems)
+            : wake.followUp(current, decision.candidates, input.maxItems)
         case "reseeding":
           return wake.seed(decision.candidates, input.maxItems)
         default:
@@ -120,9 +135,10 @@ export function createKibitzerSidecar(options: KibitzerSidecarOptions): Kibitzer
         rememberTask(text)
         return core.stream.onPrompt(text)
       },
-      onAssistant: text => live() && core.stream.onAssistant(text),
+      onAssistant: (text) => live() && core.stream.onAssistant(text),
       onToolCall: (tool, callId, input) => live() && core.stream.onToolCall(tool, callId, input),
-      onToolResult: (tool, callId, isError, output) => live() && core.stream.onToolResult(tool, callId, isError, output),
+      onToolResult: (tool, callId, isError, output) =>
+        live() && core.stream.onToolResult(tool, callId, isError, output),
       lastCursor: () => core.stream.lastCursor(),
     },
     offer,
@@ -140,11 +156,11 @@ export function createKibitzerSidecar(options: KibitzerSidecarOptions): Kibitzer
         surfaced: core.surfaced,
         maxItems: core.activeTurn?.maxItems ?? 0,
         accepted: core.accepted,
-        charge: callId => chargeBudget(budget, callId),
+        charge: (callId) => chargeBudget(budget, callId),
         budgetLimit: budget.limit,
       }
     },
-    history: since => core.stream.history(since),
+    history: (since) => core.stream.history(since),
     shutdown,
     whenIdle: core.whenIdle,
   }

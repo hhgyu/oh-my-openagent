@@ -24,12 +24,16 @@ if ($env:OMO_FEEDBACK_KIND -eq 'dir') {
 }
 `
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath"))
-  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], {
-    env: { ...env, OMO_FEEDBACK_PATH: path, OMO_FEEDBACK_KIND: kind },
-    encoding: "utf8",
-    timeout: 10_000,
-    windowsHide: true,
-  })
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+    {
+      env: { ...env, OMO_FEEDBACK_PATH: path, OMO_FEEDBACK_KIND: kind },
+      encoding: "utf8",
+      timeout: 10_000,
+      windowsHide: true,
+    },
+  )
   if (result.error !== undefined) throw result.error
   if (result.status !== 0) throw new Error("Could not protect the feedback path with an owner-only Windows ACL")
 }

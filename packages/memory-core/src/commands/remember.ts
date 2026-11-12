@@ -15,7 +15,11 @@ export const REMEMBER_INSTRUCTION =
 
 export const NO_MEMORY_TURN_TEXT = "this host cannot start a memory turn from a command; nothing was sent"
 
-export async function runRememberCommand(deps: MemoryCommandDeps, args: string, ctx: MemoryCommandContext): Promise<string> {
+export async function runRememberCommand(
+  deps: MemoryCommandDeps,
+  args: string,
+  ctx: MemoryCommandContext,
+): Promise<string> {
   const identity = requireIdentity(deps, ctx)
   if (typeof identity === "string") return respond(ctx, identity, "error")
 

@@ -16,7 +16,12 @@ import type { CallerSessionResolver } from "../control"
 export type OutputManager = Pick<TaskManager, "get" | "list" | "concurrency">
 
 import type { TranscriptSource, TranscriptReader } from "@oh-my-opencode/orchestration-core/contracts/transcript"
-export type { TranscriptEntry, TranscriptSource, TranscriptReadResult, TranscriptReader } from "@oh-my-opencode/orchestration-core/contracts/transcript"
+export type {
+  TranscriptEntry,
+  TranscriptSource,
+  TranscriptReadResult,
+  TranscriptReader,
+} from "@oh-my-opencode/orchestration-core/contracts/transcript"
 
 export type LostBreadcrumbs = {
   readonly explanation: string

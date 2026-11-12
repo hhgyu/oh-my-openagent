@@ -46,4 +46,3 @@ export const GIT_MASTER_HARNESS_SUPPORT: Record<GitMasterSettingPath, readonly O
 export function resolveOmoGitMasterSettings(config: OmoGitMasterConfigView): OmoGitMasterSettings {
   return config.git_master ?? OmoGitMasterSettingsSchema.parse({})
 }
-

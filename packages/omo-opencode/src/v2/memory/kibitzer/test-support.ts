@@ -13,7 +13,10 @@ export interface Deferred<T> {
 export function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void
   let reject!: (error: unknown) => void
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes
+    reject = no
+  })
   return { promise, resolve, reject }
 }
 
@@ -53,13 +56,30 @@ export function createScriptedPort(request?: KibitzerPortRequest): ScriptedPort 
       port.failNextStart = undefined
       if (failure !== undefined) throw failure
       const sessionID = `ses_kibitzer_${port.children.length + 1}`
-      const lease = request?.scopes.open(sessionID as Parameters<KibitzerPortRequest["scopes"]["open"]>[0], { tools: [], authorize: () => undefined })
+      const lease = request?.scopes.open(sessionID as Parameters<KibitzerPortRequest["scopes"]["open"]>[0], {
+        tools: [],
+        authorize: () => undefined,
+      })
       let turn = deferred<KibitzerChildTurnReport>()
       const child: ScriptedChild = {
-        sessionID, generation: input.generation, prompts: [input.prompt], followUps: [], steers: [], aborts: 0, disposed: false,
-        async followUp(text) { child.followUps.push(text); turn = deferred() },
-        async steer(text) { child.steers.push(text) },
-        async abort() { child.aborts += 1; turn.resolve({ status: "completed", userTexts: [...child.prompts, ...child.followUps] }) },
+        sessionID,
+        generation: input.generation,
+        prompts: [input.prompt],
+        followUps: [],
+        steers: [],
+        aborts: 0,
+        disposed: false,
+        async followUp(text) {
+          child.followUps.push(text)
+          turn = deferred()
+        },
+        async steer(text) {
+          child.steers.push(text)
+        },
+        async abort() {
+          child.aborts += 1
+          turn.resolve({ status: "completed", userTexts: [...child.prompts, ...child.followUps] })
+        },
         waitForIdle: () => turn.promise,
         async dispose() {
           if (child.disposed) return
@@ -67,18 +87,28 @@ export function createScriptedPort(request?: KibitzerPortRequest): ScriptedPort 
           if (lease !== undefined && !lease.signal.aborted) request?.scopes.retire(lease)
           request?.onRetired(sessionID)
         },
-        finish(report = {}) { turn.resolve({ status: "completed", userTexts: [...child.prompts, ...child.followUps, ...child.steers], ...report }) },
+        finish(report = {}) {
+          turn.resolve({
+            status: "completed",
+            userTexts: [...child.prompts, ...child.followUps, ...child.steers],
+            ...report,
+          })
+        },
       }
       if (lease !== undefined) request?.onIssued({ sessionID, lease })
       port.children.push(child)
-      for (const waiter of waiters.filter(entry => entry.count === port.children.length)) waiter.resolve(child)
+      for (const waiter of waiters.filter((entry) => entry.count === port.children.length)) waiter.resolve(child)
       return child
     },
-    async close() { port.closed = true },
+    async close() {
+      port.closed = true
+    },
     started(count) {
       const existing = port.children[count - 1]
       if (existing !== undefined) return Promise.resolve(existing)
-      return new Promise(resolve => { waiters.push({ count, resolve }) })
+      return new Promise((resolve) => {
+        waiters.push({ count, resolve })
+      })
     },
   }
   return port
@@ -94,7 +124,11 @@ export interface CountingSlot extends KibitzerWakeSlot {
 
 export function createCountingSlot(): CountingSlot {
   const slot: CountingSlot = {
-    maxConcurrent: 2, live: 0, acquired: 0, released: 0, next: undefined,
+    maxConcurrent: 2,
+    live: 0,
+    acquired: 0,
+    released: 0,
+    next: undefined,
     async acquire() {
       const next = slot.next
       slot.next = undefined
@@ -105,8 +139,18 @@ export function createCountingSlot(): CountingSlot {
       slot.acquired += 1
       let released = false
       return {
-        status: "acquired", waitedMs: 3,
-        lease: { slot: 1, async release() { if (released) return false; released = true; slot.live -= 1; slot.released += 1; return true } },
+        status: "acquired",
+        waitedMs: 3,
+        lease: {
+          slot: 1,
+          async release() {
+            if (released) return false
+            released = true
+            slot.live -= 1
+            slot.released += 1
+            return true
+          },
+        },
       }
     },
   }
@@ -123,8 +167,14 @@ export function createManualTimers(): ManualTimers {
   const armed = new Map<number, { callback: () => void; ms: number }>()
   let next = 0
   return {
-    set(callback, ms) { next += 1; armed.set(next, { callback, ms }); return next },
-    clear(handle) { if (typeof handle === "number") armed.delete(handle) },
+    set(callback, ms) {
+      next += 1
+      armed.set(next, { callback, ms })
+      return next
+    },
+    clear(handle) {
+      if (typeof handle === "number") armed.delete(handle)
+    },
     pending: () => armed.size,
     fire(ms = Number.POSITIVE_INFINITY) {
       for (const [handle, entry] of [...armed]) {
@@ -138,5 +188,5 @@ export function createManualTimers(): ManualTimers {
 
 /** Resolves after every queued microtask and one macrotask turn. */
 export function flush(): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, 0))
+  return new Promise((resolve) => setTimeout(resolve, 0))
 }

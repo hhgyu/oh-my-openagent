@@ -130,11 +130,7 @@ export async function seedPalacePeople(
   return result.sha
 }
 
-async function writePalaceWorkingFile(
-  fixture: PalaceFixture,
-  relativePath: string,
-  content: string,
-): Promise<void> {
+async function writePalaceWorkingFile(fixture: PalaceFixture, relativePath: string, content: string): Promise<void> {
   const target = join(fixture.paths.repo, relativePath)
   await mkdir(dirname(target), { recursive: true })
   await writeFile(target, content, "utf8")

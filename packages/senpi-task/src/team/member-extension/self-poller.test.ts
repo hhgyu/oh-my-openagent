@@ -236,7 +236,9 @@ describe("member self-poller with a host delivery evidence port", () => {
       sessionDir: harness.sessionDir,
       inject: (content) => harness.injected.push(content),
       appendEvent: (event) => harness.events.push(event),
-      async afterInject(value) { if (accept) delivered.add(value.messageId) },
+      async afterInject(value) {
+        if (accept) delivered.add(value.messageId)
+      },
       isDelivered: (messageId) => delivered.has(messageId),
     })
   }

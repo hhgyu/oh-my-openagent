@@ -2,7 +2,14 @@ import { describe, expect, it, test } from "bun:test"
 import v1Plugin from "../index"
 import { AGENT_IDS, applyAgents } from "./agents"
 import { recordingEditor } from "./agents/test-support"
-import v2Plugin, { BOOTSTRAP_STAGE, PLUGIN_ID, registerBootstrap, statusHandler, statusRpc, type BootstrapRpc } from "./index"
+import v2Plugin, {
+  BOOTSTRAP_STAGE,
+  PLUGIN_ID,
+  registerBootstrap,
+  statusHandler,
+  statusRpc,
+  type BootstrapRpc,
+} from "./index"
 
 describe("OpenCode V2 parity matrix", () => {
   it("keeps the V1 server entry available", () => {
@@ -46,7 +53,11 @@ describe("OpenCode V2 parity matrix", () => {
     const disposed: string[] = []
     const rpc: BootstrapRpc = {
       register: async (definition, handlers) => {
-        registered.push({ id: definition.id, methods: Object.keys(definition.methods), status: Reflect.get(handlers, "status") })
+        registered.push({
+          id: definition.id,
+          methods: Object.keys(definition.methods),
+          status: Reflect.get(handlers, "status"),
+        })
         return {
           dispose: async () => {
             disposed.push(definition.id)

@@ -25,7 +25,7 @@ export function createTaskTool(deps: TaskToolDeps): ToolDefinition<typeof TaskTo
     promptSnippet: TASK_PROMPT_SNIPPET,
     promptGuidelines: [...TASK_PROMPT_GUIDELINES],
     parameters: TaskToolParams,
-    prepareArguments: value => validate(normalizeTaskToolArguments(value)),
+    prepareArguments: (value) => validate(normalizeTaskToolArguments(value)),
     execute: (toolCallId, params, signal, onUpdate, ctx) => execute(toolCallId, params, signal, onUpdate, ctx),
     renderCall: (args, theme) =>
       linesComponent((width) => renderTaskCallLines(args, theme, width).map((line) => theme.fg("toolTitle", line))),

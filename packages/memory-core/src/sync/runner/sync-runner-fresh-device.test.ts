@@ -32,7 +32,11 @@ function harness(resolveSession: SyncSessionResolver = async () => ({}) as SyncS
   let resolves = 0
   const runner = createSyncRunner({
     loadRuntime: noRuntime,
-    logger: { info: (m: string) => lines.push(m), warn: (m: string) => lines.push(`warn ${m}`), error: (m: string) => lines.push(`error ${m}`) },
+    logger: {
+      info: (m: string) => lines.push(m),
+      warn: (m: string) => lines.push(`warn ${m}`),
+      error: (m: string) => lines.push(`error ${m}`),
+    },
     resolveSession: (request) => {
       resolves += 1
       return resolveSession(request)

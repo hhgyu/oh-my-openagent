@@ -33,7 +33,8 @@ function addsTodos(tool: string, input: unknown): boolean {
 
 function appendReminder(result: Result): Result {
   const content = result.content
-  if (typeof content === "string") return { ...result, content: content ? `${content}\n\n${TODO_FANOUT_REMINDER}` : TODO_FANOUT_REMINDER }
+  if (typeof content === "string")
+    return { ...result, content: content ? `${content}\n\n${TODO_FANOUT_REMINDER}` : TODO_FANOUT_REMINDER }
   return { ...result, content: [...(content ?? []), { type: "text", text: TODO_FANOUT_REMINDER }] }
 }
 
@@ -47,9 +48,16 @@ function appendReminder(result: Result): Result {
  *   unless the caller injects its own ledger.
  * No `session.prompt*` call is made: the reminder rides inside the tool result.
  */
-export async function registerTodoFanoutReminder(context: Host, options: TodoFanoutReminderOptions = {}): Promise<() => Promise<void>> {
-  if (context.options?.[DISABLED_FLAG] === true || context.options?.["omo-senpi-disabled"] === true ||
-      process.env.OMO_SENPI_DISABLED === "1") return async () => {}
+export async function registerTodoFanoutReminder(
+  context: Host,
+  options: TodoFanoutReminderOptions = {},
+): Promise<() => Promise<void>> {
+  if (
+    context.options?.[DISABLED_FLAG] === true ||
+    context.options?.["omo-senpi-disabled"] === true ||
+    process.env.OMO_SENPI_DISABLED === "1"
+  )
+    return async () => {}
   let ownedLedger: PromptArmingLedger | undefined
   let arming: TodoFanoutArming
   if (options.arming === undefined) {
@@ -74,29 +82,40 @@ export async function registerTodoFanoutReminder(context: Host, options: TodoFan
     closed = true
     stop.abort(new Error("Todo fan-out reminder disposed"))
     disposal = (async () => {
-      const results = await Promise.allSettled(registrations.map(registration => registration.dispose()))
+      const results = await Promise.allSettled(registrations.map((registration) => registration.dispose()))
       if (pump) await pump
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
-      if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Todo fan-out reminder cleanup failed")
+      if (failures.length)
+        throw new AggregateError(
+          failures.map((result) => result.reason),
+          "Todo fan-out reminder cleanup failed",
+        )
     })()
     return disposal
   }
 
   try {
     if (ownedLedger) {
-      registrations.push(await context.session.hook("prompt", event => {
-        if (closed) return
-        ownedLedger.observePrompt(event.sessionID, event.prompt.text)
-      }))
+      registrations.push(
+        await context.session.hook("prompt", (event) => {
+          if (closed) return
+          ownedLedger.observePrompt(event.sessionID, event.prompt.text)
+        }),
+      )
     }
-    registrations.push(await context.tool.hook("execute.after", event => {
-      if (closed || event.status !== "completed" || !addsTodos(event.tool, event.input)) return
-      if (!arming.isArmed(event.sessionID) || !reminderLedger.claimReminder(event.sessionID)) return
-      event.result = appendReminder(event.result)
-    }))
+    registrations.push(
+      await context.tool.hook("execute.after", (event) => {
+        if (closed || event.status !== "completed" || !addsTodos(event.tool, event.input)) return
+        if (!arming.isArmed(event.sessionID) || !reminderLedger.claimReminder(event.sessionID)) return
+        event.result = appendReminder(event.result)
+      }),
+    )
     pump = (async () => {
       try {
-        for await (const event of context.event.subscribe({ types: ["session.compaction.ended", "session.deleted"], signal: stop.signal })) {
+        for await (const event of context.event.subscribe({
+          types: ["session.compaction.ended", "session.deleted"],
+          signal: stop.signal,
+        })) {
           if (closed) break
           forget(event.data.sessionID)
           if (event.type === "session.compaction.ended") ownedLedger?.compact(event.data.sessionID, event.id)
@@ -107,7 +126,11 @@ export async function registerTodoFanoutReminder(context: Host, options: TodoFan
       }
     })()
   } catch (error) {
-    try { await cleanup() } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Todo fan-out reminder registration and rollback failed") }
+    try {
+      await cleanup()
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Todo fan-out reminder registration and rollback failed")
+    }
     throw error
   }
   return cleanup

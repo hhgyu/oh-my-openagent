@@ -51,7 +51,10 @@ export interface KibitzerSidecarOptions {
   readonly sessionId: string
   readonly port: KibitzerChildPort
   /** Hands re-validated nudges to delivery (ledger mark + pending nudges for the context hook). */
-  readonly deliver: (nudges: readonly RecallNudge[], outcome: Pick<KibitzerWakeOutcome, "wake" | "generation">) => Promise<void>
+  readonly deliver: (
+    nudges: readonly RecallNudge[],
+    outcome: Pick<KibitzerWakeOutcome, "wake" | "generation">,
+  ) => Promise<void>
   readonly onWake?: (outcome: KibitzerWakeOutcome) => void
   readonly wakeSlot: KibitzerWakeSlot
   readonly toolBudget?: number

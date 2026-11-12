@@ -168,7 +168,9 @@ describe("omo config git_master section", () => {
 
 test("git-master support metadata includes Native and OpenCode for exactly the effective fields", () => {
   expect(Object.keys(GIT_MASTER_HARNESS_SUPPORT).sort()).toEqual([
-    "git_master.commit_footer", "git_master.git_env_prefix", "git_master.include_co_authored_by",
+    "git_master.commit_footer",
+    "git_master.git_env_prefix",
+    "git_master.include_co_authored_by",
   ])
   for (const value of Object.values(GIT_MASTER_HARNESS_SUPPORT)) expect(value).toEqual(["native", "opencode"])
 })

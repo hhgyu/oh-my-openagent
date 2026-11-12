@@ -6,7 +6,12 @@
 // older ones fold into the shared one-line digest.
 
 import {
-  DIGEST_TAIL_FRAGMENTS, digestLine, fragmentOf, redactKibitzerEventText, truncateHead, type FoldState,
+  DIGEST_TAIL_FRAGMENTS,
+  digestLine,
+  fragmentOf,
+  redactKibitzerEventText,
+  truncateHead,
+  type FoldState,
 } from "@oh-my-opencode/memory-core/recall-sidecar"
 
 export type KibitzerEventKind = "prompt" | "assistant" | "tool_call" | "tool_result"
@@ -64,7 +69,9 @@ export interface KibitzerEventStream {
 
 const ID_CAP = 64
 
-export function createKibitzerEventStream(options: { readonly caps?: Partial<KibitzerEventCaps>; readonly now?: () => number } = {}): KibitzerEventStream {
+export function createKibitzerEventStream(
+  options: { readonly caps?: Partial<KibitzerEventCaps>; readonly now?: () => number } = {},
+): KibitzerEventStream {
   const caps: KibitzerEventCaps = { ...DEFAULT_KIBITZER_EVENT_CAPS, ...options.caps }
   const now = options.now ?? Date.now
   const events: KibitzerEvent[] = []
@@ -94,7 +101,15 @@ export function createKibitzerEventStream(options: { readonly caps?: Partial<Kib
   function foldInto(event: KibitzerEvent): void {
     const fragment = fragmentOf(event)
     if (fold === undefined) {
-      fold = { count: 1, firstSeq: event.seq, lastSeq: event.seq, firstCursor: event.cursor, lastCursor: event.cursor, head: fragment, tail: [] }
+      fold = {
+        count: 1,
+        firstSeq: event.seq,
+        lastSeq: event.seq,
+        firstCursor: event.cursor,
+        lastCursor: event.cursor,
+        head: fragment,
+        tail: [],
+      }
       return
     }
     fold.count += 1
@@ -105,12 +120,24 @@ export function createKibitzerEventStream(options: { readonly caps?: Partial<Kib
   }
 
   function batch(): KibitzerEventBatch {
-    const digest = fold === undefined ? undefined : {
-      count: fold.count, firstSeq: fold.firstSeq, lastSeq: fold.lastSeq, firstCursor: fold.firstCursor, lastCursor: fold.lastCursor, line: digestLine(fold),
-    }
+    const digest =
+      fold === undefined
+        ? undefined
+        : {
+            count: fold.count,
+            firstSeq: fold.firstSeq,
+            lastSeq: fold.lastSeq,
+            firstCursor: fold.firstCursor,
+            lastCursor: fold.lastCursor,
+            line: digestLine(fold),
+          }
     const first = digest?.firstCursor ?? events[0]?.cursor
     const last = events.at(-1)?.cursor ?? digest?.lastCursor
-    return { events: [...events], ...(digest === undefined ? {} : { digest }), ...(first === undefined || last === undefined ? {} : { cursors: { first, last } }) }
+    return {
+      events: [...events],
+      ...(digest === undefined ? {} : { digest }),
+      ...(first === undefined || last === undefined ? {} : { cursors: { first, last } }),
+    }
   }
 
   return {
@@ -125,11 +152,19 @@ export function createKibitzerEventStream(options: { readonly caps?: Partial<Kib
       return push({ kind: "assistant", ...bounded(text, caps.assistant) })
     },
     onToolCall(tool, callId, input) {
-      return push({ kind: "tool_call", tool: tool.slice(0, ID_CAP), ...(callId === undefined ? {} : { callId: callId.slice(0, ID_CAP) }), ...bounded(argsText(input), caps.toolArgs) })
+      return push({
+        kind: "tool_call",
+        tool: tool.slice(0, ID_CAP),
+        ...(callId === undefined ? {} : { callId: callId.slice(0, ID_CAP) }),
+        ...bounded(argsText(input), caps.toolArgs),
+      })
     },
     onToolResult(tool, callId, isError, output) {
       return push({
-        kind: "tool_result", tool: tool.slice(0, ID_CAP), ...(callId === undefined ? {} : { callId: callId.slice(0, ID_CAP) }), isError,
+        kind: "tool_result",
+        tool: tool.slice(0, ID_CAP),
+        ...(callId === undefined ? {} : { callId: callId.slice(0, ID_CAP) }),
+        isError,
         ...bounded(contentText(output), caps.resultHead),
       })
     },
@@ -141,7 +176,7 @@ export function createKibitzerEventStream(options: { readonly caps?: Partial<Kib
       fold = undefined
       return pending
     },
-    history: since => recorded.filter(event => event.cursor > since),
+    history: (since) => recorded.filter((event) => event.cursor > since),
   }
 }
 
@@ -158,7 +193,8 @@ function argsText(input: unknown): string {
 
 export function contentText(output: unknown): string {
   if (typeof output === "string") return output
-  if (Array.isArray(output)) return output.map(part => (isRecord(part) && typeof part.text === "string" ? part.text : "")).join("")
+  if (Array.isArray(output))
+    return output.map((part) => (isRecord(part) && typeof part.text === "string" ? part.text : "")).join("")
   if (isRecord(output)) {
     if ("content" in output) return contentText(output.content)
     if (typeof output.message === "string") return output.message

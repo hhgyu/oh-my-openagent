@@ -30,13 +30,16 @@ export async function readLaunchableFailures(
   try {
     return { ok: true, failures: await port.readFailures() }
   } catch (error) {
-    warn(error instanceof LockContentionError
-      ? "facts failure ledger is busy; launch deferred"
-      : "facts failure ledger is unreadable; refusing to launch", {
-      error: error instanceof Error ? error.name : "unknown",
-      detail: error instanceof Error ? error.message : String(error),
-      corrupt: error instanceof FactsFailuresCorruptError,
-    })
+    warn(
+      error instanceof LockContentionError
+        ? "facts failure ledger is busy; launch deferred"
+        : "facts failure ledger is unreadable; refusing to launch",
+      {
+        error: error instanceof Error ? error.name : "unknown",
+        detail: error instanceof Error ? error.message : String(error),
+        corrupt: error instanceof FactsFailuresCorruptError,
+      },
+    )
     return { ok: false }
   }
 }

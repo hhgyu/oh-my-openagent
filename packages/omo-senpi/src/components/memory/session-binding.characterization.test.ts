@@ -394,7 +394,9 @@ describe("sync resume at agent_settled", () => {
     await h.pi.dispatch("agent_settled", { type: "agent_settled" }, event)
 
     // then
-    expect(h.syncCalls.filter((call) => call.kind !== "acquire")).toEqual([{ kind: "resume", repo: identity.paths.repo }])
+    expect(h.syncCalls.filter((call) => call.kind !== "acquire")).toEqual([
+      { kind: "resume", repo: identity.paths.repo },
+    ])
   })
 
   test("#given a one-shot surface that never acquired sync #when agent_settled fires #then nothing is resumed", async () => {

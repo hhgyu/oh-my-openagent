@@ -231,10 +231,15 @@ describe("team_create tool", () => {
 
 describe("team_delete tool", () => {
   test("#given a finished member was released #when team_delete reports cleanup #then released and cancelled IDs are separate", async () => {
-    const service = createFakeTeamService({ deleteTeam: async () => fakeDeleteResult({ cancelledTaskIds: [], releasedTaskIds: ["st_done"] }) })
+    const service = createFakeTeamService({
+      deleteTeam: async () => fakeDeleteResult({ cancelledTaskIds: [], releasedTaskIds: ["st_done"] }),
+    })
     const result = await runTeamDelete(service, { team_run_id: "run-1" })
     expect(result.details).toMatchObject({ kind: "deleted", cancelled_task_ids: [], released_task_ids: ["st_done"] })
-    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("released 1 finished member(s): st_done") })
+    expect(result.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("released 1 finished member(s): st_done"),
+    })
   })
   test("#given an active run #when team_delete runs #then it reports the deleted run + cancelled tasks", async () => {
     // given

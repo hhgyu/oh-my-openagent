@@ -6,7 +6,13 @@
 // calls cannot interleave a clean check with another call's write.
 
 import {
-  GitMemoryRepo, MemoryToolError, runMemoryTool, type GitExec, type MemoryToolLock, type MemoryToolParams, type MemoryToolResult,
+  GitMemoryRepo,
+  MemoryToolError,
+  runMemoryTool,
+  type GitExec,
+  type MemoryToolLock,
+  type MemoryToolParams,
+  type MemoryToolResult,
 } from "@oh-my-opencode/memory-core"
 
 const REFLECTION_AUTHOR_NAME = "Reflection Agent"
@@ -36,7 +42,11 @@ export interface ReflectionRunScopeInput {
 }
 
 export function createReflectionRunScope(input: ReflectionRunScopeInput): ReflectionRunScope {
-  const repo = new GitMemoryRepo({ dir: input.worktreeDir, agentId: input.agentId, ...(input.exec === undefined ? {} : { exec: input.exec }) })
+  const repo = new GitMemoryRepo({
+    dir: input.worktreeDir,
+    agentId: input.agentId,
+    ...(input.exec === undefined ? {} : { exec: input.exec }),
+  })
   const shas: string[] = []
   let active = true
   let tail: Promise<unknown> = Promise.resolve()
@@ -52,10 +62,16 @@ export function createReflectionRunScope(input: ReflectionRunScopeInput): Reflec
     transcriptPath: input.transcriptPath,
     active: () => active,
     commits: () => [...shas],
-    deactivate: () => { active = false },
+    deactivate: () => {
+      active = false
+    },
     async edit(params) {
       if (!active) throw new MemoryToolError("the reflection run is no longer active; stop editing")
-      const result = await runMemoryTool({ repo, lock, params: { ...params, author: { agentId: input.agentId, authorName: REFLECTION_AUTHOR_NAME } } })
+      const result = await runMemoryTool({
+        repo,
+        lock,
+        params: { ...params, author: { agentId: input.agentId, authorName: REFLECTION_AUTHOR_NAME } },
+      })
       if (result.commit !== undefined) shas.push(result.commit.sha)
       return result
     },

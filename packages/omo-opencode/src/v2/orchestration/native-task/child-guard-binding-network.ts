@@ -14,8 +14,14 @@ function nativeAllowsGet(url: string): boolean {
 /** The CodeMode `fetch` GET grant of a child whose approved selection includes Native `webfetch`.
  * Undefined (the guard's deny-all) when `webfetch` is not selected, when its names resolve to more
  * than one host tool, or when the guard holds no pre-wrap original for that host tool. */
-export function webfetchNetworkFor(selection: PreparedHostTaskGrant, guard: OwnedChildToolGuard, assertCurrent: () => void): ChildGuardBinding["network"] {
-  const hostIDs = new Set(selection.selected.filter(pair => WEBFETCH_NATIVE_NAMES.has(pair.nativeName)).map(pair => pair.hostID))
+export function webfetchNetworkFor(
+  selection: PreparedHostTaskGrant,
+  guard: OwnedChildToolGuard,
+  assertCurrent: () => void,
+): ChildGuardBinding["network"] {
+  const hostIDs = new Set(
+    selection.selected.filter((pair) => WEBFETCH_NATIVE_NAMES.has(pair.nativeName)).map((pair) => pair.hostID),
+  )
   const [hostID] = hostIDs
   if (hostIDs.size !== 1 || hostID === undefined) return undefined
   const intrinsicGetOriginal = guard.intrinsicGetOriginal(hostID)

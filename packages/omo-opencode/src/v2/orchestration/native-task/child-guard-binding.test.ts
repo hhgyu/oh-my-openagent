@@ -15,26 +15,62 @@ const catalog = [
   { id: "glob", name: "glob", options: { codemode: false as const } },
   { id: "shell", name: "shell", options: { codemode: false as const } },
 ]
-const nativeTools = ["read", "find", "grep", "bash", "edit"].map(name => ({ name }))
+const nativeTools = ["read", "find", "grep", "bash", "edit"].map((name) => ({ name }))
 
 function grantFor(agentType: string): PreparedHostTaskGrant {
-  return prepareHostTaskGrant({ spec: { prompt: "unit", parent_session_id: "ses_parent", depth: 1 }, plan: { model: "unit/model", agentType },
-    includeTaskTools: true, nativeTools, catalog, canonical: { filterSharedParentTools } })
+  return prepareHostTaskGrant({
+    spec: { prompt: "unit", parent_session_id: "ses_parent", depth: 1 },
+    plan: { model: "unit/model", agentType },
+    includeTaskTools: true,
+    nativeTools,
+    catalog,
+    canonical: { filterSharedParentTools },
+  })
 }
 function spec(agentType: string): ManagedStartSpec {
-  return { taskId: "st_00000001", cwd: "/project", stateDir: "/state", prompt: "unit", depth: 1, parentSessionId: "ses_parent", rootSessionId: "ses_parent", agentType }
+  return {
+    taskId: "st_00000001",
+    cwd: "/project",
+    stateDir: "/state",
+    prompt: "unit",
+    depth: 1,
+    parentSessionId: "ses_parent",
+    rootSessionId: "ses_parent",
+    agentType,
+  }
 }
 function child(sessionID: string): ChildHandle {
   return { locator: { sessionID }, lease: {} } as unknown as ChildHandle
 }
 /** The SAME completeness decision `owned-runner.ts` applies before staging a guarded child. */
-function runnerRefuses(selection: PreparedHostTaskGrant, coverage: { readonly boundRequirements: readonly string[]; readonly targets?: readonly { readonly requirement: string; readonly nativeName: string; readonly hostID: string }[] } | undefined): boolean {
+function runnerRefuses(
+  selection: PreparedHostTaskGrant,
+  coverage:
+    | {
+        readonly boundRequirements: readonly string[]
+        readonly targets?: readonly {
+          readonly requirement: string
+          readonly nativeName: string
+          readonly hostID: string
+        }[]
+      }
+    | undefined,
+): boolean {
   const covered = new Set(coverage?.boundRequirements)
-  const targets = [...selection.selected.map(pair => pair.hostID), ...(coverage?.targets ?? []).map(pair => pair.hostID)]
+  const targets = [
+    ...selection.selected.map((pair) => pair.hostID),
+    ...(coverage?.targets ?? []).map((pair) => pair.hostID),
+  ]
   const typed = coverage as Parameters<typeof checkHostGrantTarget>[2]
-  const missing = selection.requirements.some(requirement => !covered.has(requirement)) || selection.bindingSlots.some(slot =>
-    !(coverage?.targets ?? []).some(target => target.requirement === slot.requirement && target.nativeName === slot.nativeName && target.hostID))
-  return missing || targets.some(id => checkHostGrantTarget(selection, id, typed) !== "selected")
+  const missing =
+    selection.requirements.some((requirement) => !covered.has(requirement)) ||
+    selection.bindingSlots.some(
+      (slot) =>
+        !(coverage?.targets ?? []).some(
+          (target) => target.requirement === slot.requirement && target.nativeName === slot.nativeName && target.hostID,
+        ),
+    )
+  return missing || targets.some((id) => checkHostGrantTarget(selection, id, typed) !== "selected")
 }
 function fakeOwner(events: string[]): ReadonlyBrokerOwner {
   return {
@@ -42,7 +78,17 @@ function fakeOwner(events: string[]): ReadonlyBrokerOwner {
     isBound: () => false,
     bindChild(input) {
       events.push(`bind:${input.sessionID}:${input.agent}:${input.cwd}`)
-      return { assertCurrent() { events.push("producer-current") }, revoke() { events.push("revoke") }, async join() { events.push("join") } }
+      return {
+        assertCurrent() {
+          events.push("producer-current")
+        },
+        revoke() {
+          events.push("revoke")
+        },
+        async join() {
+          events.push("join")
+        },
+      }
     },
   }
 }
@@ -50,13 +96,17 @@ function fakeOwner(events: string[]): ReadonlyBrokerOwner {
 describe("#given a curated explore child whose Native floor allows bash", () => {
   test("#when the component binds the approved grant #then the broker is bound to the bash slot and the runner no longer refuses", () => {
     // given
-    const selection = grantFor("explore"), events: string[] = []
+    const selection = grantFor("explore"),
+      events: string[] = []
     expect(selection.requirements).toContain("curated-readonly-broker")
     const binder = createNativeChildGuardBinding({ assertGeneration() {}, readonly: fakeOwner(events) })
     // when
     const producer = binder(spec("explore"), { buildAgentID: "build", selection })
     // then
-    expect(producer.coverage).toEqual({ boundRequirements: ["curated-readonly-broker"], targets: [{ requirement: "curated-readonly-broker", nativeName: "bash", hostID: BROKER_ID }] })
+    expect(producer.coverage).toEqual({
+      boundRequirements: ["curated-readonly-broker"],
+      targets: [{ requirement: "curated-readonly-broker", nativeName: "bash", hostID: BROKER_ID }],
+    })
     expect(runnerRefuses(selection, producer.coverage)).toBe(false)
     expect(checkHostGrantTarget(selection, BROKER_ID, producer.coverage)).toBe("selected")
     expect(checkHostGrantTarget(selection, "shell", producer.coverage)).toBe("denied")
@@ -64,11 +114,19 @@ describe("#given a curated explore child whose Native floor allows bash", () => 
 
   test("#when the child is bound #then one producer is bound to the actual child session and its custody joins the guard binding", async () => {
     // given
-    const selection = grantFor("librarian"), events: string[] = []
-    const binder = createNativeChildGuardBinding({ assertGeneration() { events.push("generation") }, readonly: fakeOwner(events) })
+    const selection = grantFor("librarian"),
+      events: string[] = []
+    const binder = createNativeChildGuardBinding({
+      assertGeneration() {
+        events.push("generation")
+      },
+      readonly: fakeOwner(events),
+    })
     const producer = binder(spec("librarian"), { buildAgentID: "build", selection })
     // when
-    const binding = producer.bind(child("ses_child"), () => { events.push("backend") })
+    const binding = producer.bind(child("ses_child"), () => {
+      events.push("backend")
+    })
     binding.assertCurrent()
     binding.producers?.revoke()
     await binding.producers?.join()
@@ -83,7 +141,8 @@ describe("#given a curated explore child whose Native floor allows bash", () => 
 describe("#given a non-curated child", () => {
   test("#then no broker requirement is claimed and no producer is bound", () => {
     // given
-    const selection = grantFor("sisyphus-junior"), events: string[] = []
+    const selection = grantFor("sisyphus-junior"),
+      events: string[] = []
     const binder = createNativeChildGuardBinding({ assertGeneration() {}, readonly: fakeOwner(events) })
     // when
     const producer = binder(spec("sisyphus-junior"), { buildAgentID: "build", selection })
@@ -102,7 +161,10 @@ describe("#given no live readonly owner", () => {
     // given
     const selection = grantFor("explore")
     // when
-    const producer = createNativeChildGuardBinding({ assertGeneration() {} })(spec("explore"), { buildAgentID: "build", selection })
+    const producer = createNativeChildGuardBinding({ assertGeneration() {} })(spec("explore"), {
+      buildAgentID: "build",
+      selection,
+    })
     // then
     expect(runnerRefuses(selection, producer.coverage)).toBe(true)
   })
@@ -110,24 +172,56 @@ describe("#given no live readonly owner", () => {
 
 const MEMBER_ID = "omo_team_send"
 const TEAM = { runId: "11111111-1111-4111-8111-111111111111", memberName: "alpha" }
-const TEAM_CONFIG = { enabled: true, tmux_visualization: false, max_parallel_members: 4, max_members: 8, max_messages_per_run: 10000, max_wall_clock_minutes: 120,
-  max_member_turns: 500, base_dir: "/teams", message_payload_max_bytes: 32768, recipient_unread_max_bytes: 262144, mailbox_poll_interval_ms: 3000 }
+const TEAM_CONFIG = {
+  enabled: true,
+  tmux_visualization: false,
+  max_parallel_members: 4,
+  max_members: 8,
+  max_messages_per_run: 10000,
+  max_wall_clock_minutes: 120,
+  max_member_turns: 500,
+  base_dir: "/teams",
+  message_payload_max_bytes: 32768,
+  recipient_unread_max_bytes: 262144,
+  mailbox_poll_interval_ms: 3000,
+}
 type MemberScopedTools = NonNullable<Parameters<typeof prepareHostTaskGrant>[0]["spec"]["memberScopedTools"]>
 
 function memberGrant(names: readonly string[]): PreparedHostTaskGrant {
-  const memberScopedTools = names.map(name => ({ name })) as unknown as MemberScopedTools
-  return prepareHostTaskGrant({ spec: { prompt: "unit", parent_session_id: "ses_parent", depth: 1, memberScopedTools },
-    plan: { model: "unit/model", agentType: "sisyphus-junior" }, includeTaskTools: true, nativeTools, catalog, canonical: { filterSharedParentTools } })
+  const memberScopedTools = names.map((name) => ({ name })) as unknown as MemberScopedTools
+  return prepareHostTaskGrant({
+    spec: { prompt: "unit", parent_session_id: "ses_parent", depth: 1, memberScopedTools },
+    plan: { model: "unit/model", agentType: "sisyphus-junior" },
+    includeTaskTools: true,
+    nativeTools,
+    catalog,
+    canonical: { filterSharedParentTools },
+  })
 }
 function fakeMemberOwner(events: string[]): NonNullable<Parameters<typeof createNativeChildGuardBinding>[0]["member"]> {
   return {
-    teamConfigFor: lead => { events.push(`config:${lead}`); return TEAM_CONFIG },
+    teamConfigFor: (lead) => {
+      events.push(`config:${lead}`)
+      return TEAM_CONFIG
+    },
     owner: {
       hostID: MEMBER_ID,
       isBound: () => false,
       bindChild(input) {
-        events.push(`bind:${input.sessionID}:${input.agent}:${input.taskId}:${input.leadSessionID}:${input.team.runId}:${input.team.memberName}:${input.config.base_dir}`)
-        return { assertCurrent() { events.push("member-current") }, revoke() { events.push("member-revoke") }, async join() { events.push("member-join") } }
+        events.push(
+          `bind:${input.sessionID}:${input.agent}:${input.taskId}:${input.leadSessionID}:${input.team.runId}:${input.team.memberName}:${input.config.base_dir}`,
+        )
+        return {
+          assertCurrent() {
+            events.push("member-current")
+          },
+          revoke() {
+            events.push("member-revoke")
+          },
+          async join() {
+            events.push("member-join")
+          },
+        }
       },
     },
   }
@@ -139,7 +233,11 @@ describe("#given an in-process team member selection that needs member live bind
     const selection = memberGrant(["task_send"])
     expect(selection.requirements).toContain("member-live-bindings")
     // when
-    const producer = createNativeChildGuardBinding({ assertGeneration() {} })(spec("sisyphus-junior"), { buildAgentID: "build", selection }, { team: TEAM })
+    const producer = createNativeChildGuardBinding({ assertGeneration() {} })(
+      spec("sisyphus-junior"),
+      { buildAgentID: "build", selection },
+      { team: TEAM },
+    )
     // then
     expect(producer.coverage).toEqual({ boundRequirements: [] })
     expect(runnerRefuses(selection, producer.coverage)).toBe(true)
@@ -147,9 +245,13 @@ describe("#given an in-process team member selection that needs member live bind
 
   test("#when the approved spec has no team identity #then the member slot stays unbound even with an owner", () => {
     // given
-    const selection = memberGrant(["task_send"]), events: string[] = []
+    const selection = memberGrant(["task_send"]),
+      events: string[] = []
     // when
-    const producer = createNativeChildGuardBinding({ assertGeneration() {}, member: fakeMemberOwner(events) })(spec("sisyphus-junior"), { buildAgentID: "build", selection })
+    const producer = createNativeChildGuardBinding({ assertGeneration() {}, member: fakeMemberOwner(events) })(
+      spec("sisyphus-junior"),
+      { buildAgentID: "build", selection },
+    )
     // then
     expect(runnerRefuses(selection, producer.coverage)).toBe(true)
     expect(events).toEqual([])
@@ -157,19 +259,33 @@ describe("#given an in-process team member selection that needs member live bind
 
   test("#when the member owner is installed #then the task_send slot is covered and one producer is bound to the child, session and team", async () => {
     // given
-    const selection = memberGrant(["task_send"]), events: string[] = []
-    const binder = createNativeChildGuardBinding({ assertGeneration() { events.push("generation") }, member: fakeMemberOwner(events) })
+    const selection = memberGrant(["task_send"]),
+      events: string[] = []
+    const binder = createNativeChildGuardBinding({
+      assertGeneration() {
+        events.push("generation")
+      },
+      member: fakeMemberOwner(events),
+    })
     // when
     const producer = binder(spec("sisyphus-junior"), { buildAgentID: "build", selection }, { team: TEAM })
-    const binding = producer.bind(child("ses_member"), () => { events.push("backend") })
+    const binding = producer.bind(child("ses_member"), () => {
+      events.push("backend")
+    })
     binding.assertCurrent()
     binding.producers?.revoke()
     await binding.producers?.join()
     // then
-    expect(producer.coverage).toEqual({ boundRequirements: ["member-live-bindings"], targets: [{ requirement: "member-live-bindings", nativeName: "task_send", hostID: MEMBER_ID }] })
+    expect(producer.coverage).toEqual({
+      boundRequirements: ["member-live-bindings"],
+      targets: [{ requirement: "member-live-bindings", nativeName: "task_send", hostID: MEMBER_ID }],
+    })
     expect(runnerRefuses(selection, producer.coverage)).toBe(false)
     expect(checkHostGrantTarget(selection, MEMBER_ID, producer.coverage)).toBe("selected")
-    expect(events.slice(0, 2)).toEqual(["config:ses_parent", `bind:ses_member:build:st_00000001:ses_parent:${TEAM.runId}:alpha:/teams`])
+    expect(events.slice(0, 2)).toEqual([
+      "config:ses_parent",
+      `bind:ses_member:build:st_00000001:ses_parent:${TEAM.runId}:alpha:/teams`,
+    ])
     expect(events).toContain("member-current")
     expect(events).toContain("member-revoke")
     expect(events.at(-1)).toBe("member-join")
@@ -177,25 +293,42 @@ describe("#given an in-process team member selection that needs member live bind
 
   test("#when a delivery hook is installed #then the bound member starts mail delivery and its release runs with the producers", async () => {
     // given
-    const selection = memberGrant(["task_send"]), events: string[] = []
-    const member = { ...fakeMemberOwner(events), onBound(bound: { leadSessionID: string; teamRunId: string; memberName: string; sessionID: string }) {
-      events.push(`delivery:${bound.leadSessionID}:${bound.teamRunId}:${bound.memberName}:${bound.sessionID}`)
-      return () => { events.push("delivery-release") }
-    } }
+    const selection = memberGrant(["task_send"]),
+      events: string[] = []
+    const member = {
+      ...fakeMemberOwner(events),
+      onBound(bound: { leadSessionID: string; teamRunId: string; memberName: string; sessionID: string }) {
+        events.push(`delivery:${bound.leadSessionID}:${bound.teamRunId}:${bound.memberName}:${bound.sessionID}`)
+        return () => {
+          events.push("delivery-release")
+        }
+      },
+    }
     // when
-    const binding = createNativeChildGuardBinding({ assertGeneration() {}, member })(spec("sisyphus-junior"), { buildAgentID: "build", selection }, { team: TEAM })
-      .bind(child("ses_member"), () => {})
+    const binding = createNativeChildGuardBinding({ assertGeneration() {}, member })(
+      spec("sisyphus-junior"),
+      { buildAgentID: "build", selection },
+      { team: TEAM },
+    ).bind(child("ses_member"), () => {})
     await binding.producers?.join()
     // then
-    expect(events.slice(1, 3)).toEqual([`bind:ses_member:build:st_00000001:ses_parent:${TEAM.runId}:alpha:/teams`, `delivery:ses_parent:${TEAM.runId}:alpha:ses_member`])
+    expect(events.slice(1, 3)).toEqual([
+      `bind:ses_member:build:st_00000001:ses_parent:${TEAM.runId}:alpha:/teams`,
+      `delivery:ses_parent:${TEAM.runId}:alpha:ses_member`,
+    ])
     expect(events).toContain("delivery-release")
   })
 
   test("#when a member slot is not task_send #then the selection stays unbound and the runner refuses it", () => {
     // given
-    const selection = memberGrant(["task_send", "workpool"]), events: string[] = []
+    const selection = memberGrant(["task_send", "workpool"]),
+      events: string[] = []
     // when
-    const producer = createNativeChildGuardBinding({ assertGeneration() {}, member: fakeMemberOwner(events) })(spec("sisyphus-junior"), { buildAgentID: "build", selection }, { team: TEAM })
+    const producer = createNativeChildGuardBinding({ assertGeneration() {}, member: fakeMemberOwner(events) })(
+      spec("sisyphus-junior"),
+      { buildAgentID: "build", selection },
+      { team: TEAM },
+    )
     // then
     expect(producer.coverage.boundRequirements).not.toContain("member-live-bindings")
     expect(runnerRefuses(selection, producer.coverage)).toBe(true)
@@ -206,9 +339,15 @@ describe("#given an in-process team member selection that needs member live bind
 const LISTING_ID = "omo_native_ls"
 const NETWORK = { guard: {} as unknown as OwnedChildToolGuard }
 function listingGrant(agentType: string): PreparedHostTaskGrant {
-  return prepareHostTaskGrant({ spec: { prompt: "unit", parent_session_id: "ses_parent", depth: 1 }, plan: { model: "unit/model", agentType },
-    includeTaskTools: true, nativeTools: [...nativeTools, { name: "ls" }], catalog: [...catalog, { id: LISTING_ID, name: LISTING_ID, options: { codemode: true } }],
-    customCounterparts: [{ nativeName: "ls", hostID: LISTING_ID }], canonical: { filterSharedParentTools } })
+  return prepareHostTaskGrant({
+    spec: { prompt: "unit", parent_session_id: "ses_parent", depth: 1 },
+    plan: { model: "unit/model", agentType },
+    includeTaskTools: true,
+    nativeTools: [...nativeTools, { name: "ls" }],
+    catalog: [...catalog, { id: LISTING_ID, name: LISTING_ID, options: { codemode: true } }],
+    customCounterparts: [{ nativeName: "ls", hostID: LISTING_ID }],
+    canonical: { filterSharedParentTools },
+  })
 }
 function fakeListingOwner(events: string[]): CodemodeReadonlyOwner {
   return {
@@ -216,7 +355,17 @@ function fakeListingOwner(events: string[]): CodemodeReadonlyOwner {
     isBound: () => false,
     bindChild(input) {
       events.push(`listing-bind:${input.sessionID}:${input.agent}:${input.cwd}`)
-      return { assertCurrent() { events.push("listing-current") }, revoke() { events.push("listing-revoke") }, async join() { events.push("listing-join") } }
+      return {
+        assertCurrent() {
+          events.push("listing-current")
+        },
+        revoke() {
+          events.push("listing-revoke")
+        },
+        async join() {
+          events.push("listing-join")
+        },
+      }
     },
   }
 }
@@ -227,7 +376,10 @@ describe("#given a selection whose CodeMode ls counterpart needs the network gua
     const selection = listingGrant("sisyphus-junior")
     expect(selection.requirements).toEqual(["codemode-network-guard"])
     // when
-    const producer = createNativeChildGuardBinding({ assertGeneration() {}, codemodeReadonly: fakeListingOwner([]) })(spec("sisyphus-junior"), { buildAgentID: "build", selection })
+    const producer = createNativeChildGuardBinding({ assertGeneration() {}, codemodeReadonly: fakeListingOwner([]) })(
+      spec("sisyphus-junior"),
+      { buildAgentID: "build", selection },
+    )
     // then
     expect(producer.coverage).toEqual({ boundRequirements: [] })
     expect(runnerRefuses(selection, producer.coverage)).toBe(true)
@@ -235,8 +387,13 @@ describe("#given a selection whose CodeMode ls counterpart needs the network gua
 
   test("#when the guard is supplied #then the requirement is claimed with no live network producer and the ls producer is bound", async () => {
     // given
-    const selection = listingGrant("sisyphus-junior"), events: string[] = []
-    const binder = createNativeChildGuardBinding({ assertGeneration() {}, codemodeReadonly: fakeListingOwner(events), network: NETWORK })
+    const selection = listingGrant("sisyphus-junior"),
+      events: string[] = []
+    const binder = createNativeChildGuardBinding({
+      assertGeneration() {},
+      codemodeReadonly: fakeListingOwner(events),
+      network: NETWORK,
+    })
     // when
     const producer = binder(spec("sisyphus-junior"), { buildAgentID: "build", selection })
     const binding = producer.bind(child("ses_listing"), () => {})
@@ -247,14 +404,24 @@ describe("#given a selection whose CodeMode ls counterpart needs the network gua
     expect(runnerRefuses(selection, producer.coverage)).toBe(false)
     expect(checkHostGrantTarget(selection, LISTING_ID, producer.coverage)).toBe("selected")
     expect(binding.network).toBeUndefined()
-    expect(events).toEqual(["listing-bind:ses_listing:build:/project", "listing-current", "listing-revoke", "listing-join"])
+    expect(events).toEqual([
+      "listing-bind:ses_listing:build:/project",
+      "listing-current",
+      "listing-revoke",
+      "listing-join",
+    ])
   })
 
   test("#when the selection has no CodeMode tool #then the guard claims nothing and no ls producer is bound", () => {
     // given
-    const selection = grantFor("sisyphus-junior"), events: string[] = []
+    const selection = grantFor("sisyphus-junior"),
+      events: string[] = []
     // when
-    const producer = createNativeChildGuardBinding({ assertGeneration() {}, codemodeReadonly: fakeListingOwner(events), network: NETWORK })(spec("sisyphus-junior"), { buildAgentID: "build", selection })
+    const producer = createNativeChildGuardBinding({
+      assertGeneration() {},
+      codemodeReadonly: fakeListingOwner(events),
+      network: NETWORK,
+    })(spec("sisyphus-junior"), { buildAgentID: "build", selection })
     const binding = producer.bind(child("ses_plain"), () => {})
     // then
     expect(producer.coverage).toEqual({ boundRequirements: [] })

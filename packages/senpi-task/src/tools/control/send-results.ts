@@ -48,8 +48,14 @@ export function mapRedispatchOutcome(
 export function invalidArguments(reason: string, fields?: readonly string[]): SendToolResult {
   if (fields !== undefined) {
     const diagnostic: ToolArgumentDiagnostic = {
-      code: "invalid_arguments", fields, expected_fields: Object.keys(TaskSendParams.properties),
-      issues: fields.map(field => ({ code: "invalid_field", path: `/${field.replaceAll(".", "/")}`, fields: [field] })),
+      code: "invalid_arguments",
+      fields,
+      expected_fields: Object.keys(TaskSendParams.properties),
+      issues: fields.map((field) => ({
+        code: "invalid_field",
+        path: `/${field.replaceAll(".", "/")}`,
+        fields: [field],
+      })),
     }
     return toolErrorResult(JSON.stringify({ reason, ...diagnostic }), { kind: "invalid_arguments", reason, diagnostic })
   }

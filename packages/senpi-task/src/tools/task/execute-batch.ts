@@ -8,7 +8,14 @@ import type { ForegroundWaitOptions, ForegroundWaitResult } from "./foreground-w
 import { waitForForegroundTask } from "./foreground-wait"
 import { appendMissingSkills } from "./skill-result"
 import { backgroundConversionText } from "./start-presentation"
-import type { ResolvedSpawnItem, TaskOperationManager, TaskSkillSummary, TaskToolContext, TaskToolDetails, TaskToolItemDetail } from "./types"
+import type {
+  ResolvedSpawnItem,
+  TaskOperationManager,
+  TaskSkillSummary,
+  TaskToolContext,
+  TaskToolDetails,
+  TaskToolItemDetail,
+} from "./types"
 
 type BatchStart =
   | {
@@ -33,7 +40,8 @@ type BatchItemOutput = {
 }
 
 export type ExecuteBatchInput = ForegroundWaitOptions & {
-  readonly manager: Pick<TaskOperationManager,
+  readonly manager: Pick<
+    TaskOperationManager,
     | "get"
     | "waitFor"
     | "subscribeChild"

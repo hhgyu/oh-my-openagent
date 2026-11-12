@@ -45,7 +45,10 @@ function searchDocuments(conversation: FocusConversation): SearchDocument[] {
       content,
       reasoning,
       toolCalls: tools.map((entry) => ({ name: entry.name, arguments: entry.argsText })),
-      toolReturn: tools.map((entry) => entry.resultText).filter((text) => text !== undefined).join("\n"),
+      toolReturn: tools
+        .map((entry) => entry.resultText)
+        .filter((text) => text !== undefined)
+        .join("\n"),
     }
   })
 }

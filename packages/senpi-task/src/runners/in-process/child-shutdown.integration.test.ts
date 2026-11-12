@@ -164,7 +164,9 @@ describe("in-process child teardown shuts down its extensions (#9413)", () => {
       expect(this).toBe(session)
       expect(disposed).toBe(true)
       joinCalls++
-      return originalJoin.call(this).then(() => { joined = true })
+      return originalJoin.call(this).then(() => {
+        joined = true
+      })
     }
     const handle = createRestoredChildHandle({ taskId: "hung-child", session })
 

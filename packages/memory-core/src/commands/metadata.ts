@@ -3,11 +3,22 @@
 
 export const MEMORY_REPOSITORY_SUBCOMMANDS = ["set", "unset", "status", "push"] as const
 
-export const MEMFS_SUBCOMMANDS = ["status", "init", "sync", "repair", "reset", "backup", "restore", "diff", "tokens"] as const
+export const MEMFS_SUBCOMMANDS = [
+  "status",
+  "init",
+  "sync",
+  "repair",
+  "reset",
+  "backup",
+  "restore",
+  "diff",
+  "tokens",
+] as const
 
 export const CORE_MEMORY_COMMANDS = {
   memory: {
-    description: "View committed memory: HEAD, system bodies, external names, and uncommitted changes; unlock re-checks and removes a stranded git lock.",
+    description:
+      "View committed memory: HEAD, system bodies, external names, and uncommitted changes; unlock re-checks and removes a stranded git lock.",
     argumentHint: "[unlock <lock path> [--force]]",
   },
   memfs: {

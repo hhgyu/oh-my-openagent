@@ -21,10 +21,15 @@ export interface NudgeCheckInput {
   readonly accepted: readonly RecallNudge[]
 }
 
-function rejectNudge(params: { readonly path: string; readonly hint: string }, input: NudgeCheckInput): string | undefined {
-  if (!input.offered.has(params.path) && !input.searched.has(params.path)) return `"${params.path}" is not one of the offered candidates.`
+function rejectNudge(
+  params: { readonly path: string; readonly hint: string },
+  input: NudgeCheckInput,
+): string | undefined {
+  if (!input.offered.has(params.path) && !input.searched.has(params.path))
+    return `"${params.path}" is not one of the offered candidates.`
   if (input.surfaced.has(params.path)) return `"${params.path}" was already surfaced in this session.`
-  if (params.path === "system/" || params.path.startsWith("system/")) return `"${params.path}" is a system/ path and cannot be nudged.`
+  if (params.path === "system/" || params.path.startsWith("system/"))
+    return `"${params.path}" is a system/ path and cannot be nudged.`
   if (containsSecretLikeMaterial(params.hint)) return "The hint was rejected because it contains secret-like material."
   const invalidHint = describeInvalidHint(params.hint)
   if (invalidHint === "addresses-agent") {
@@ -33,20 +38,28 @@ function rejectNudge(params: { readonly path: string; readonly hint: string }, i
   if (invalidHint !== undefined) {
     return "The hint must state a memory fact in one non-empty line of at most 200 characters, not comment on whether the memory is relevant or worth nudging."
   }
-  if (input.accepted.length >= input.maxItems) return `The maxItems limit (${input.maxItems}) for this run has been reached.`
+  if (input.accepted.length >= input.maxItems)
+    return `The maxItems limit (${input.maxItems}) for this run has been reached.`
   return undefined
 }
 
-export type NudgeResult = { readonly ok: false; readonly message: string } | { readonly ok: true; readonly message: string; readonly capped: boolean }
+export type NudgeResult =
+  | { readonly ok: false; readonly message: string }
+  | { readonly ok: true; readonly message: string; readonly capped: boolean }
 
 /** Validates and, when admissible, records one nudge in the wake's accepted list. */
-export function applyNudge(params: { readonly path: string; readonly hint: string }, input: NudgeCheckInput & { readonly accepted: RecallNudge[] }): NudgeResult {
+export function applyNudge(
+  params: { readonly path: string; readonly hint: string },
+  input: NudgeCheckInput & { readonly accepted: RecallNudge[] },
+): NudgeResult {
   const rejection = rejectNudge(params, input)
-  if (rejection !== undefined) return { ok: false, message: `Nudge rejected: ${rejection} Correct the call once, or end the run.` }
+  if (rejection !== undefined)
+    return { ok: false, message: `Nudge rejected: ${rejection} Correct the call once, or end the run.` }
   input.accepted.push({ path: params.path, hint: params.hint })
   const capped = input.accepted.length >= input.maxItems
   return {
-    ok: true, capped,
+    ok: true,
+    capped,
     message: capped
       ? `Nudge recorded for ${params.path}. The maxItems limit (${input.maxItems}) is reached; the run ends here.`
       : `Nudge recorded for ${params.path}.`,

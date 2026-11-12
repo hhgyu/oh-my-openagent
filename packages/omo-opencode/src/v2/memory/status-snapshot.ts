@@ -31,7 +31,8 @@ export interface MemoryStatusSnapshot {
   readonly sync?: MemoryRpcSync
 }
 
-const count = (value: unknown): number => typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
+const count = (value: unknown): number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
 
 async function readJournalState(journalDir: string): Promise<Record<string, unknown>> {
   let raw: string
@@ -51,12 +52,19 @@ async function readJournalState(journalDir: string): Promise<Record<string, unkn
   }
 }
 
-export async function buildMemoryStatusSnapshot(bound: BoundMemorySession, sync: MemoryRpcSync | undefined): Promise<MemoryStatusSnapshot> {
+export async function buildMemoryStatusSnapshot(
+  bound: BoundMemorySession,
+  sync: MemoryRpcSync | undefined,
+): Promise<MemoryStatusSnapshot> {
   const journalDir = join(bound.paths.transcripts, bound.sessionID)
-  const [state, entries] = await Promise.all([readJournalState(journalDir), new TranscriptJournal({ journalDir }).readEntriesSnapshot()])
+  const [state, entries] = await Promise.all([
+    readJournalState(journalDir),
+    new TranscriptJournal({ journalDir }).readEntriesSnapshot(),
+  ])
   const totalSteps = Math.max(count(state.total_completed_steps), countCompletedSteps(entries))
   const reflectedSteps = Math.min(count(state.reflected_completed_steps), totalSteps)
-  const succeededAt = typeof state.last_reflection_succeeded_at === "string" ? Date.parse(state.last_reflection_succeeded_at) : Number.NaN
+  const succeededAt =
+    typeof state.last_reflection_succeeded_at === "string" ? Date.parse(state.last_reflection_succeeded_at) : Number.NaN
   return {
     schemaVersion: 1,
     identity: bound.identity,

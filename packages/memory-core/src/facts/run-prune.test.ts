@@ -15,7 +15,9 @@ import {
 const roots: string[] = []
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })))
+  await Promise.all(
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })),
+  )
 })
 
 async function fixture(): Promise<{ readonly factsDir: string; readonly locksDir: string }> {
@@ -42,13 +44,29 @@ async function seedRun(options: {
 }): Promise<void> {
   const runDir = join(options.factsDir, "runs", options.runId)
   await mkdir(runDir, { recursive: true })
-  await writeFile(join(runDir, "ledger.json"), JSON.stringify({ version: 1, runId: options.runId, kind: "facts" }), "utf8")
+  await writeFile(
+    join(runDir, "ledger.json"),
+    JSON.stringify({ version: 1, runId: options.runId, kind: "facts" }),
+    "utf8",
+  )
   const at = options.at ?? instant(0)
   const shape = options.shape ?? "senpi-final"
-  if (shape === "senpi-final") await writeFile(join(runDir, "final.json"), JSON.stringify({ runId: options.runId, finishedAt: at }), "utf8")
-  if (shape === "senpi-abandoned") await writeFile(join(runDir, "abandoned.json"), JSON.stringify({ runId: options.runId, abandonedAt: at }), "utf8")
-  if (shape === "v2-final") await writeFile(join(runDir, "final.json"), JSON.stringify({ version: 1, runId: options.runId, at, outcome: "committed" }), "utf8")
-  if (shape === "v2-abandoned") await writeFile(join(runDir, "abandoned.json"), JSON.stringify({ version: 1, runId: options.runId, at, reason: "unknown_liveness" }), "utf8")
+  if (shape === "senpi-final")
+    await writeFile(join(runDir, "final.json"), JSON.stringify({ runId: options.runId, finishedAt: at }), "utf8")
+  if (shape === "senpi-abandoned")
+    await writeFile(join(runDir, "abandoned.json"), JSON.stringify({ runId: options.runId, abandonedAt: at }), "utf8")
+  if (shape === "v2-final")
+    await writeFile(
+      join(runDir, "final.json"),
+      JSON.stringify({ version: 1, runId: options.runId, at, outcome: "committed" }),
+      "utf8",
+    )
+  if (shape === "v2-abandoned")
+    await writeFile(
+      join(runDir, "abandoned.json"),
+      JSON.stringify({ version: 1, runId: options.runId, at, reason: "unknown_liveness" }),
+      "utf8",
+    )
   if (options.bytes !== undefined) await writeFile(join(runDir, "filler.log"), "x".repeat(options.bytes), "utf8")
 }
 
@@ -68,7 +86,12 @@ describe("pruneTerminalFactsRuns", () => {
     const { factsDir, locksDir } = await fixture()
     const shapes = ["senpi-final", "senpi-abandoned", "v2-final", "v2-abandoned"] as const
     for (let index = 0; index < 23; index += 1) {
-      await seedRun({ factsDir, runId: `facts-aaaa-${String(index).padStart(2, "0")}`, at: instant(index), shape: shapes[index % 4] })
+      await seedRun({
+        factsDir,
+        runId: `facts-aaaa-${String(index).padStart(2, "0")}`,
+        at: instant(index),
+        shape: shapes[index % 4],
+      })
     }
 
     // when

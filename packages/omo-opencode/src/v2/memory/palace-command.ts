@@ -18,10 +18,16 @@ export function createPalaceCommand(deps: { readonly now?: () => Date } = {}): E
     async run(bound: BoundMemorySession | undefined) {
       if (bound === undefined) return { text: UNBOUND_NOTICE, level: "warning" }
       const people = bound.settings.people
-      const { path } = await generatePalaceHtml({ identity: bound.identity, identityPaths: bound.paths }, {
-        people: { enabled: people.enabled, limits: { maxEntries: people.max_entries, maxEntryChars: people.max_entry_chars } },
-        ...(deps.now === undefined ? {} : { now: deps.now }),
-      })
+      const { path } = await generatePalaceHtml(
+        { identity: bound.identity, identityPaths: bound.paths },
+        {
+          people: {
+            enabled: people.enabled,
+            limits: { maxEntries: people.max_entries, maxEntryChars: people.max_entry_chars },
+          },
+          ...(deps.now === undefined ? {} : { now: deps.now }),
+        },
+      )
       return { text: `memory palace written to ${path}`, level: "info" }
     },
   }

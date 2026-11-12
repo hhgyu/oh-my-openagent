@@ -12,7 +12,10 @@ const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g
 /** The ORIGINAL Native `ls` description text. */
 export const NATIVE_LS_DESCRIPTION = `List directory contents. Returns entries sorted alphabetically, with '/' suffix for directories. Includes dotfiles. Output is truncated to ${DEFAULT_LIMIT} entries or ${MAX_BYTES / 1024}KB (whichever is hit first).`
 
-export interface NativeLsInput { readonly path?: string; readonly limit?: number }
+export interface NativeLsInput {
+  readonly path?: string
+  readonly limit?: number
+}
 export interface NativeLsOutput {
   readonly text: string
   readonly details?: { readonly entryLimitReached?: number; readonly truncated?: true }
@@ -31,7 +34,8 @@ function normalize(path: string, model: boolean): string {
   if (model && value.startsWith("@")) value = value.slice(1)
   value = windowsShellPath(value)
   if (value === "~") return homedir()
-  if (value.startsWith("~/") || process.platform === "win32" && value.startsWith("~\\")) return join(homedir(), value.slice(2))
+  if (value.startsWith("~/") || (process.platform === "win32" && value.startsWith("~\\")))
+    return join(homedir(), value.slice(2))
   return /^file:\/\//.test(value) ? fileURLToPath(value) : value
 }
 
@@ -54,30 +58,46 @@ function truncateHead(content: string): { readonly content: string; readonly tru
   for (const [index, line] of content.split("\n").entries()) {
     const size = Buffer.byteLength(line, "utf-8") + (index > 0 ? 1 : 0)
     if (bytes + size > MAX_BYTES) break
-    kept.push(line); bytes += size
+    kept.push(line)
+    bytes += size
   }
   return { content: kept.join("\n"), truncated: true }
 }
 
 async function isDirectory(path: string): Promise<boolean | undefined> {
-  try { return (await stat(path)).isDirectory() } catch { return undefined }
+  try {
+    return (await stat(path)).isDirectory()
+  } catch {
+    return undefined
+  }
 }
 
 /** The SAME listing, ordering, suffixes, limits, notices and error texts as Native `ls`. Read-only. */
-export async function runNativeLs(directory: string, input: NativeLsInput, signal: AbortSignal): Promise<NativeLsOutput> {
+export async function runNativeLs(
+  directory: string,
+  input: NativeLsInput,
+  signal: AbortSignal,
+): Promise<NativeLsOutput> {
   signal.throwIfAborted()
   const limit = input.limit ?? DEFAULT_LIMIT
   const kind = await isDirectory(directory)
   if (kind === undefined) throw Error(`Path not found: ${directory}`)
   if (!kind) throw Error(`Not a directory: ${directory}`)
   let entries: string[]
-  try { entries = await readdir(directory) } catch (error) { throw Error(`Cannot read directory: ${error instanceof Error ? error.message : String(error)}`) }
+  try {
+    entries = await readdir(directory)
+  } catch (error) {
+    throw Error(`Cannot read directory: ${error instanceof Error ? error.message : String(error)}`)
+  }
   entries.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
   const results: string[] = []
   let limitReached = false
   for (const entry of entries) {
     signal.throwIfAborted()
-    if (results.length >= limit) { limitReached = true; break }
+    if (results.length >= limit) {
+      limitReached = true
+      break
+    }
     // Entries that cannot be stat'ed are skipped, as Native does.
     const directoryEntry = await isDirectory(join(directory, entry))
     if (directoryEntry !== undefined) results.push(entry + (directoryEntry ? "/" : ""))
@@ -89,6 +109,11 @@ export async function runNativeLs(directory: string, input: NativeLsInput, signa
   if (truncation.truncated) notices.push(`${formatSize(MAX_BYTES)} limit reached`)
   if (notices.length === 0) return { text: truncation.content }
   // Native sends the notice as a model-only part; the SDK has no such channel, so it stays model-visible text.
-  return { text: `${truncation.content}\n[${notices.join(". ")}]`,
-    details: { ...(limitReached && { entryLimitReached: limit }), ...(truncation.truncated && { truncated: true as const }) } }
+  return {
+    text: `${truncation.content}\n[${notices.join(". ")}]`,
+    details: {
+      ...(limitReached && { entryLimitReached: limit }),
+      ...(truncation.truncated && { truncated: true as const }),
+    },
+  }
 }

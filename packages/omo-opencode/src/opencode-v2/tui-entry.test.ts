@@ -58,10 +58,25 @@ describe("OpenCode 2 TUI memory command output", () => {
     const dialogs: { title: string; message: string }[] = []
     const toasts: { title: string; message: string; variant: string; sessionID: string }[] = []
     const context: MemoryOutputTui = {
-      data: { on: (type, handler) => { handlers.set(type, handler); return () => { handlers.delete(type) } } },
+      data: {
+        on: (type, handler) => {
+          handlers.set(type, handler)
+          return () => {
+            handlers.delete(type)
+          }
+        },
+      },
       ui: {
-        dialog: { alert: async options => { dialogs.push(options) } },
-        toast: { show: options => { toasts.push(options) } },
+        dialog: {
+          alert: async (options) => {
+            dialogs.push(options)
+          },
+        },
+        toast: {
+          show: (options) => {
+            toasts.push(options)
+          },
+        },
       },
     }
     return { handlers, dialogs, toasts, context }
@@ -80,7 +95,9 @@ describe("OpenCode 2 TUI memory command output", () => {
     await Promise.resolve()
     // then
     expect(t.dialogs).toEqual([{ title: "/memory", message: "# Memory: me" }])
-    expect(t.toasts).toEqual([{ title: "/search", message: "/search failed: boom", variant: "error", sessionID: "ses_1" }])
+    expect(t.toasts).toEqual([
+      { title: "/search", message: "/search failed: boom", variant: "error", sessionID: "ses_1" },
+    ])
   })
 
   it("#given a subscription #when it is disposed #then the handler is removed", () => {

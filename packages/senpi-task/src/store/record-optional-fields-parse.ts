@@ -39,7 +39,8 @@ export function parseOptionalClosingChild(record: Record<string, unknown>): Task
   const pid = readOptionalNumber(value, "pid")
   const hostSession = parseOptionalHostSession(value)
   const ownedSession = parseOwnedSession(value.owned_session)
-  if (ownedSession !== undefined && (pid !== undefined || hostSession !== undefined)) throw new Error("Closing owned identity is mixed")
+  if (ownedSession !== undefined && (pid !== undefined || hostSession !== undefined))
+    throw new Error("Closing owned identity is mixed")
   const confirmation = readOptionalBoolean(value, "requires_confirmation")
   return {
     ...(pid === undefined ? {} : { pid }),

@@ -64,7 +64,8 @@ export function createReflectionTriggers(deps: ReflectionTriggerDeps): Reflectio
   const chains = new Map<string, Promise<void>>()
   let closed = false
 
-  const eligible = (sessionID: string): boolean => !closed && !deps.isOwnedSession(sessionID) && deps.hasUserActivity(sessionID)
+  const eligible = (sessionID: string): boolean =>
+    !closed && !deps.isOwnedSession(sessionID) && deps.hasUserActivity(sessionID)
 
   async function settle(sessionID: string): Promise<void> {
     if (closed) return
@@ -86,11 +87,15 @@ export function createReflectionTriggers(deps: ReflectionTriggerDeps): Reflectio
 
   function schedule(sessionID: string): void {
     const previous = chains.get(sessionID) ?? Promise.resolve()
-    const next = previous.then(() => settle(sessionID)).catch((error: unknown) => {
-      deps.logger.warn("memory reflection trigger failed", { sessionID, error: describeError(error) })
-    })
+    const next = previous
+      .then(() => settle(sessionID))
+      .catch((error: unknown) => {
+        deps.logger.warn("memory reflection trigger failed", { sessionID, error: describeError(error) })
+      })
     chains.set(sessionID, next)
-    void next.finally(() => { if (chains.get(sessionID) === next) chains.delete(sessionID) })
+    void next.finally(() => {
+      if (chains.get(sessionID) === next) chains.delete(sessionID)
+    })
   }
 
   async function settled(): Promise<void> {

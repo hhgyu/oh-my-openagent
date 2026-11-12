@@ -1,5 +1,9 @@
 import {
-  MemoryToolError, runMemoryTool, type GitMemoryRepo, type MemoryToolLock, type MemoryToolParams,
+  MemoryToolError,
+  runMemoryTool,
+  type GitMemoryRepo,
+  type MemoryToolLock,
+  type MemoryToolParams,
 } from "@oh-my-opencode/memory-core"
 import { mkdir } from "@oh-my-opencode/memory-core/fs"
 import { Error as ToolError, type Info, type Result, type ToolContext } from "@opencode/plugin/promise/tool"
@@ -14,7 +18,8 @@ const UNBOUND_MEMORY_MESSAGE =
 
 const reason = z.string().describe("Git commit message recorded for this memory change.")
 const memoryInput = z.object({
-  command: z.enum(["create", "str_replace", "insert", "delete", "rename", "update_description", "apply_patch"])
+  command: z
+    .enum(["create", "str_replace", "insert", "delete", "rename", "update_description", "apply_patch"])
     .describe("The memory operation to perform."),
   reason,
   file_path: z.string().optional().describe("Target memory file, relative to the memory repo or absolute inside it."),
@@ -49,15 +54,27 @@ export interface MemoryToolsDeps {
   readonly userTurns?: (sessionID: string) => number | Promise<number>
 }
 
-export function createMemoryTools(deps: MemoryToolsDeps): readonly [Info<typeof memoryInput>, Info<typeof applyPatchInput>] {
+export function createMemoryTools(
+  deps: MemoryToolsDeps,
+): readonly [Info<typeof memoryInput>, Info<typeof applyPatchInput>] {
   const run = async (tool: string, caller: ToolContext, params: Omit<MemoryToolParams, "author">): Promise<Result> => {
     const bound = await deps.binder.resolve(caller.sessionID)
     if (bound === undefined) throw new ToolError({ message: `${tool}: ${UNBOUND_MEMORY_MESSAGE}` })
     try {
       const { repo, lock } = await prepareWrite(bound, caller.sessionID, deps)
-      const provenance = deps.userTurns ? { provenance: { sessionId: caller.sessionID, userTurns: await deps.userTurns(caller.sessionID) } } : {}
-      const result = await runMemoryTool({ repo, lock, params: { ...params, author: { agentId: bound.identity, authorName: bound.identity }, ...provenance } })
-      return { content: result.message, metadata: result.commit === undefined ? {} : { commit: result.commit.sha, paths: [...result.commit.affectedPaths] } }
+      const provenance = deps.userTurns
+        ? { provenance: { sessionId: caller.sessionID, userTurns: await deps.userTurns(caller.sessionID) } }
+        : {}
+      const result = await runMemoryTool({
+        repo,
+        lock,
+        params: { ...params, author: { agentId: bound.identity, authorName: bound.identity }, ...provenance },
+      })
+      return {
+        content: result.message,
+        metadata:
+          result.commit === undefined ? {} : { commit: result.commit.sha, paths: [...result.commit.affectedPaths] },
+      }
     } catch (error) {
       if (error instanceof MemoryToolError) throw new ToolError({ message: error.message })
       throw error
@@ -65,12 +82,19 @@ export function createMemoryTools(deps: MemoryToolsDeps): readonly [Info<typeof 
   }
   return [
     {
-      name: MEMORY_TOOL_NAME, description: MEMORY_DESCRIPTION, input: memoryInput, options: { codemode: false },
+      name: MEMORY_TOOL_NAME,
+      description: MEMORY_DESCRIPTION,
+      input: memoryInput,
+      options: { codemode: false },
       execute: (input, caller) => run(MEMORY_TOOL_NAME, caller, { ...input }),
     },
     {
-      name: MEMORY_APPLY_PATCH_TOOL_NAME, description: APPLY_PATCH_DESCRIPTION, input: applyPatchInput, options: { codemode: false },
-      execute: (input, caller) => run(MEMORY_APPLY_PATCH_TOOL_NAME, caller, { command: "apply_patch", reason: input.reason, input: input.input }),
+      name: MEMORY_APPLY_PATCH_TOOL_NAME,
+      description: APPLY_PATCH_DESCRIPTION,
+      input: applyPatchInput,
+      options: { codemode: false },
+      execute: (input, caller) =>
+        run(MEMORY_APPLY_PATCH_TOOL_NAME, caller, { command: "apply_patch", reason: input.reason, input: input.input }),
     },
   ]
 }
@@ -81,7 +105,11 @@ export function createMemoryTools(deps: MemoryToolsDeps): readonly [Info<typeof 
  * shared HEAD-aware opener, so a `.git` another seeder has created but not yet committed is waited for
  * under the lock instead of being written into.
  */
-async function prepareWrite(bound: BoundMemorySession, sessionID: string, deps: MemoryToolsDeps): Promise<{ repo: GitMemoryRepo; lock: MemoryToolLock }> {
+async function prepareWrite(
+  bound: BoundMemorySession,
+  sessionID: string,
+  deps: MemoryToolsDeps,
+): Promise<{ repo: GitMemoryRepo; lock: MemoryToolLock }> {
   await mkdir(bound.paths.locks, { recursive: true, mode: 0o700 })
   const writerLock = memoryWriterLock(bound, `memory tool (${bound.identity}) oc2-${sessionID}`, {
     ...(deps.lockWaitTimeoutMs === undefined ? {} : { waitTimeoutMs: deps.lockWaitTimeoutMs }),

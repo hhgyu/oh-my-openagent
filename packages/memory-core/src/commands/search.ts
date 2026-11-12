@@ -6,13 +6,7 @@
 import { join } from "node:path"
 
 import { existsSync } from "../fs/resilient"
-import {
-  SenpiSessionProvider,
-  parseQuery,
-  searchTranscripts,
-  searchableText,
-  type SearchResult,
-} from "../index"
+import { SenpiSessionProvider, parseQuery, searchTranscripts, searchableText, type SearchResult } from "../index"
 
 import { parseCommandArgs } from "./args"
 import { respond, type MemoryCommandContext, type MemoryCommandDeps, type MemoryTranscriptSource } from "./types"
@@ -59,7 +53,11 @@ function senpiSessionsSource(deps: MemoryCommandDeps, ctx: MemoryCommandContext)
   return { provider: new SenpiSessionProvider({ sessionsDir }) }
 }
 
-export async function runSearchCommand(deps: MemoryCommandDeps, args: string, ctx: MemoryCommandContext): Promise<string> {
+export async function runSearchCommand(
+  deps: MemoryCommandDeps,
+  args: string,
+  ctx: MemoryCommandContext,
+): Promise<string> {
   const parsed = parseCommandArgs(args, { booleans: ["include-hidden"] })
   const query = parsed.positionals.join(" ").trim()
   if (query.length === 0) return respond(ctx, "usage: /search <query> [--include-hidden]", "error")

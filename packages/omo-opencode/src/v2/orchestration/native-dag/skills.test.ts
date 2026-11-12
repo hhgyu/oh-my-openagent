@@ -10,15 +10,26 @@ import { createWorkflowHarness } from "./test-support"
 
 setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
 
-const roots: string[] = [], cleanups: (() => Promise<void> | void)[] = []
+const roots: string[] = [],
+  cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-const node = (id: string, prompt: string, loadSkills?: readonly string[], dependsOn?: readonly string[]) =>
-  ({ id, prompt, category: "quick", ...(loadSkills && { load_skills: [...loadSkills] }), ...(dependsOn && { dependsOn: [...dependsOn] }) })
-const skillAssert = (id: string) => ({ sessionID: ROOT_CALLER.sessionID, agent: ROOT_CALLER.agent, action: "skill", resources: [id] })
+const node = (id: string, prompt: string, loadSkills?: readonly string[], dependsOn?: readonly string[]) => ({
+  id,
+  prompt,
+  category: "quick",
+  ...(loadSkills && { load_skills: [...loadSkills] }),
+  ...(dependsOn && { dependsOn: [...dependsOn] }),
+})
+const skillAssert = (id: string) => ({
+  sessionID: ROOT_CALLER.sessionID,
+  agent: ROOT_CALLER.agent,
+  action: "skill",
+  resources: [id],
+})
 
 async function harness(authorized = true) {
   const directory = mkdtempSync(join(tmpdir(), "omo-v2-dag-skills-"))
@@ -26,7 +37,13 @@ async function harness(authorized = true) {
   const lease = createNativeDagGenerationLease()
   cleanups.push(() => lease.dispose())
   const host = await preparedSkillHost(directory)
-  const dag = createWorkflowHarness(directory, lease, ROOT_CALLER.sessionID, [], authorized ? host.authority : undefined)
+  const dag = createWorkflowHarness(
+    directory,
+    lease,
+    ROOT_CALLER.sessionID,
+    [],
+    authorized ? host.authority : undefined,
+  )
   cleanups.push(() => dag.wake.close())
   return { dag, host }
 }
@@ -43,13 +60,17 @@ describe("OpenCode 2 workflow node skills (S6g)", () => {
     const location = host.addSkill("alpha", "ALPHA SKILL BODY")
 
     // when
-    const started = await dag.call({ action: "start", detach: true, definition: { key: "s", name: "s", nodes: [node("a", "do a", ["alpha"]), node("b", "do b", ["alpha"])] } })
+    const started = await dag.call({
+      action: "start",
+      detach: true,
+      definition: { key: "s", name: "s", nodes: [node("a", "do a", ["alpha"]), node("b", "do b", ["alpha"])] },
+    })
     const runId = runIdOf(started.result)
 
     // then
     const expected = buildSkillPrepend([{ name: "alpha", content: "ALPHA SKILL BODY", location }], "do a")
     expect(host.asserts).toEqual([skillAssert("alpha-id")])
-    expect(started.fake.starts.find(start => start.nodeId === "a")?.spec.prompt).toBe(expected)
+    expect(started.fake.starts.find((start) => start.nodeId === "a")?.spec.prompt).toBe(expected)
     expect(dag.record(runId).definition.nodes[0]?.effectivePrompt).toBe(expected)
     expect(existsSync(join(dag.runtime.store.paths.root, "skills", `${runId}.json`))).toBe(true)
   })
@@ -62,8 +83,15 @@ describe("OpenCode 2 workflow node skills (S6g)", () => {
     host.denied.add("secret-id")
 
     // when
-    const { fake, pending } = dag.begin({ action: "start", detach: true, definition: { key: "d", name: "d", nodes: [node("a", "do a", ["alpha"]), node("b", "do b", ["secret"])] } })
-    const outcome = await pending.then(() => "started", (error: unknown) => String(error))
+    const { fake, pending } = dag.begin({
+      action: "start",
+      detach: true,
+      definition: { key: "d", name: "d", nodes: [node("a", "do a", ["alpha"]), node("b", "do b", ["secret"])] },
+    })
+    const outcome = await pending.then(
+      () => "started",
+      (error: unknown) => String(error),
+    )
 
     // then
     expect(outcome).toContain("skill secret-id denied")
@@ -78,13 +106,22 @@ describe("OpenCode 2 workflow node skills (S6g)", () => {
     host.addSkill("off", "DISABLED BODY")
 
     // when
-    const started = await dag.call({ action: "start", detach: true, definition: { key: "m", name: "m", nodes: [node("a", "do a", ["nowhere", "off"])] } })
+    const started = await dag.call({
+      action: "start",
+      detach: true,
+      definition: { key: "m", name: "m", nodes: [node("a", "do a", ["nowhere", "off"])] },
+    })
     const runId = runIdOf(started.result)
 
     // then
     expect(host.asserts).toEqual([])
-    expect(started.fake.starts.map(start => start.spec.prompt)).toEqual(["do a"])
-    expect(dag.record(runId).diagnostics.filter(entry => entry.kind === "missing_skill").map(entry => entry.kind === "missing_skill" && entry.skill)).toEqual(["nowhere", "off"])
+    expect(started.fake.starts.map((start) => start.spec.prompt)).toEqual(["do a"])
+    expect(
+      dag
+        .record(runId)
+        .diagnostics.filter((entry) => entry.kind === "missing_skill")
+        .map((entry) => entry.kind === "missing_skill" && entry.skill),
+    ).toEqual(["nowhere", "off"])
   })
 
   test("#given a settled run #when amend changes a node and adds a skill published since #then that call asserts it against a fresh listing and the re-run child carries it", async () => {
@@ -99,19 +136,29 @@ describe("OpenCode 2 workflow node skills (S6g)", () => {
     const location = host.addSkill("beta", "BETA BODY")
 
     // when
-    const amended = await dag.call({ action: "amend", run_id: runId, definition: { ...definition, nodes: [node("a", "second", ["beta"])] } })
+    const amended = await dag.call({
+      action: "amend",
+      run_id: runId,
+      definition: { ...definition, nodes: [node("a", "second", ["beta"])] },
+    })
 
     // then
     expect(amended.result.details.kind).toBe("amended")
     expect(host.asserts).toEqual([skillAssert("beta-id")])
-    expect(amended.fake.starts.map(start => start.spec.prompt)).toEqual([buildSkillPrepend([{ name: "beta", content: "BETA BODY", location }], "second")])
+    expect(amended.fake.starts.map((start) => start.spec.prompt)).toEqual([
+      buildSkillPrepend([{ name: "beta", content: "BETA BODY", location }], "second"),
+    ])
   })
 
   test("#given a failed skilled node #when retried plainly, then with a prompt override #then the plain retry reuses the stored prompt unasserted and the override re-authorizes and re-materializes", async () => {
     // given
     const { dag, host } = await harness()
     const location = host.addSkill("alpha", "ALPHA V1")
-    const first = await dag.call({ action: "start", detach: true, definition: { key: "r", name: "r", nodes: [node("a", "do a", ["alpha"])] } })
+    const first = await dag.call({
+      action: "start",
+      detach: true,
+      definition: { key: "r", name: "r", nodes: [node("a", "do a", ["alpha"])] },
+    })
     const runId = runIdOf(first.result)
     first.fake.settle("a", "error")
     await dag.call({ action: "wait", run_id: runId, detach: false })
@@ -128,10 +175,14 @@ describe("OpenCode 2 workflow node skills (S6g)", () => {
     await override.pending
 
     // then
-    expect(plain.fake.starts.map(start => start.spec.prompt)).toEqual([buildSkillPrepend([{ name: "alpha", content: "ALPHA V1", location }], "do a")])
+    expect(plain.fake.starts.map((start) => start.spec.prompt)).toEqual([
+      buildSkillPrepend([{ name: "alpha", content: "ALPHA V1", location }], "do a"),
+    ])
     expect(assertsAfterPlain).toBe(1)
     expect(host.asserts).toEqual([skillAssert("alpha-id"), skillAssert("alpha-id")])
-    expect(override.fake.starts.map(start => start.spec.prompt)).toEqual([buildSkillPrepend([{ name: "alpha", content: "ALPHA V1", location }], "do a again")])
+    expect(override.fake.starts.map((start) => start.spec.prompt)).toEqual([
+      buildSkillPrepend([{ name: "alpha", content: "ALPHA V1", location }], "do a again"),
+    ])
     expect(dag.record(runId).status).toBe("completed")
   })
 
@@ -147,7 +198,11 @@ describe("OpenCode 2 workflow node skills (S6g)", () => {
     const before = dag.record(runId).definitionFingerprint
 
     // when
-    const { result } = await dag.call({ action: "amend", run_id: runId, definition: { ...definition, nodes: [node("a", "second", ["alpha"])] } })
+    const { result } = await dag.call({
+      action: "amend",
+      run_id: runId,
+      definition: { ...definition, nodes: [node("a", "second", ["alpha"])] },
+    })
 
     // then
     expect(result.details.kind === "error" && result.details.error.code).toBe("invalid_definition")

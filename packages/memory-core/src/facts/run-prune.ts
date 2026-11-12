@@ -28,7 +28,13 @@ import { join } from "node:path"
 import { removeTree } from "../fs/remove-tree"
 import { lstat, readdir, readFile, rename } from "../fs/resilient"
 import {
-  LockContentionError, acquireLock, createLockRecord, factsRunsLockPath, releaseLock, runFinalizationLockPath, withLock,
+  LockContentionError,
+  acquireLock,
+  createLockRecord,
+  factsRunsLockPath,
+  releaseLock,
+  runFinalizationLockPath,
+  withLock,
 } from "../locks"
 
 export const FACTS_RUN_KEEP_LAST = 20
@@ -111,10 +117,7 @@ export async function sweepFactsRunTombstones(options: {
 }
 
 /** Newest-first survivors under both limits; everything after them is prunable. */
-async function selectPrunable(
-  runsDir: string,
-  options: PruneTerminalFactsRunsOptions,
-): Promise<readonly string[]> {
+async function selectPrunable(runsDir: string, options: PruneTerminalFactsRunsOptions): Promise<readonly string[]> {
   const keepLast = options.keepLast ?? FACTS_RUN_KEEP_LAST
   const maxTotalBytes = options.maxTotalBytes ?? FACTS_RUN_MAX_TOTAL_BYTES
   const runs = await readTerminalRuns(runsDir)
@@ -138,8 +141,10 @@ async function readTerminalRuns(runsDir: string): Promise<readonly TerminalRun[]
     const run = await readTerminalRun(runsDir, name)
     if (run !== undefined) runs.push(run)
   }
-  return runs.sort((left, right) =>
-    right.finishedAt - left.finishedAt || (left.name < right.name ? 1 : left.name > right.name ? -1 : 0))
+  return runs.sort(
+    (left, right) =>
+      right.finishedAt - left.finishedAt || (left.name < right.name ? 1 : left.name > right.name ? -1 : 0),
+  )
 }
 
 /** A run is terminal only when ledger, sentinel and directory name all name the same run. */
@@ -155,11 +160,13 @@ async function readTerminalRun(runsDir: string, name: string): Promise<TerminalR
 }
 
 async function readSentinel(runDir: string): Promise<{ readonly runId: string; readonly at: string } | undefined> {
-  const final = await readRunJson<{ runId?: unknown; finishedAt?: unknown; at?: unknown }>(join(runDir, "final.json"))
-    .catch(() => undefined)
+  const final = await readRunJson<{ runId?: unknown; finishedAt?: unknown; at?: unknown }>(
+    join(runDir, "final.json"),
+  ).catch(() => undefined)
   if (final !== undefined) return sentinelRecord(final.runId, final.finishedAt ?? final.at)
-  const abandoned = await readRunJson<{ runId?: unknown; abandonedAt?: unknown; at?: unknown }>(join(runDir, "abandoned.json"))
-    .catch(() => undefined)
+  const abandoned = await readRunJson<{ runId?: unknown; abandonedAt?: unknown; at?: unknown }>(
+    join(runDir, "abandoned.json"),
+  ).catch(() => undefined)
   if (abandoned === undefined) return undefined
   return sentinelRecord(abandoned.runId, abandoned.abandonedAt ?? abandoned.at)
 }
@@ -180,11 +187,7 @@ async function directoryBytes(path: string): Promise<number> {
 }
 
 /** Renames the run away under its own finalize lock; a busy lock means skip, never wait. */
-async function claimForPruning(
-  runsDir: string,
-  locksDir: string,
-  name: string,
-): Promise<string | undefined> {
+async function claimForPruning(runsDir: string, locksDir: string, name: string): Promise<string | undefined> {
   const record = await createLockRecord("facts-finalize", { runId: name })
   const finalizeLock = runFinalizationLockPath(locksDir, name)
   try {

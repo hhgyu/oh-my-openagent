@@ -6,7 +6,11 @@ import { openDesktopSyncAccount, type DesktopSyncEngineWire } from "../desktop-s
 import type { MemorySyncSelection } from "../desktop-sync/hostSelection"
 import { DesktopSyncRefused } from "../desktop-sync/desktopSyncProtocol"
 import type { DesktopSyncAccount } from "@oh-my-opencode/memory-core/sync-engine"
-import type { DeviceAccount, DeviceAccountSource, DesktopSyncUnavailable } from "@oh-my-opencode/memory-core/sync-runner"
+import type {
+  DeviceAccount,
+  DeviceAccountSource,
+  DesktopSyncUnavailable,
+} from "@oh-my-opencode/memory-core/sync-runner"
 
 export function accountSourceFromSelection(options: {
   readonly selection: () => Promise<MemorySyncSelection>

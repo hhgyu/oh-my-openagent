@@ -28,11 +28,7 @@ async function executeFakeGitHub(endpoint: "bytes" | "error" | "lines" | "small"
     }
     return "line one\nline two"
   })
-  const result = await tool.execute(
-    "call-1",
-    { program: "gh", args: ["api", endpoint] },
-    undefined,
-  )
+  const result = await tool.execute("call-1", { program: "gh", args: ["api", endpoint] }, undefined)
   const [part] = result.content
   if (part?.type !== "text") throw new Error("expected a text tool result")
   return part.text
@@ -79,15 +75,29 @@ test("explicit real formatter matches default Native success/error bytes and ori
   for (const text of ["small\nresponse", "x".repeat(60000), "界😀".repeat(16000), Array(2501).fill("row").join("\n")]) {
     const original = new CuratedReadonlyCommandError(text)
     for (const failed of [false, true]) {
-      const executor = async () => { if (failed) throw original; return text }
+      const executor = async () => {
+        if (failed) throw original
+        return text
+      }
       const defaultTool = createCuratedReadonlyBashTool("/fixture", executor)
       const explicitTool = createCuratedReadonlyBashTool("/fixture", executor, curatedReadonlyFormatter)
       const input = { program: "gh" as const, args: ["api", "endpoint"] }
-      if (!failed) expect(await explicitTool.execute("id", input, undefined)).toEqual(await defaultTool.execute("id", input, undefined))
+      if (!failed)
+        expect(await explicitTool.execute("id", input, undefined)).toEqual(
+          await defaultTool.execute("id", input, undefined),
+        )
       else {
         let defaultError: unknown, explicitError: unknown
-        try { await defaultTool.execute("id", input, undefined) } catch (error) { defaultError = error }
-        try { await explicitTool.execute("id", input, undefined) } catch (error) { explicitError = error }
+        try {
+          await defaultTool.execute("id", input, undefined)
+        } catch (error) {
+          defaultError = error
+        }
+        try {
+          await explicitTool.execute("id", input, undefined)
+        } catch (error) {
+          explicitError = error
+        }
         expect(defaultError).toBeInstanceOf(CuratedReadonlyCommandError)
         expect(explicitError).toBeInstanceOf(CuratedReadonlyCommandError)
         if (!(defaultError instanceof Error) || !(explicitError instanceof Error)) throw Error("Missing actual errors")
@@ -101,18 +111,25 @@ test("explicit real formatter matches default Native success/error bytes and ori
 
 test("both presentation routes preserve arbitrary error and original cancellation signal identity", async () => {
   for (const formatter of [undefined, curatedReadonlyFormatter]) {
-    const controller = new AbortController(), reason = Error("original cancellation")
+    const controller = new AbortController(),
+      reason = Error("original cancellation")
     controller.abort(reason)
     let calls = 0
-    const tool = createCuratedReadonlyBashTool("/original-cwd", async (command, cwd, seconds, signal) => {
-      calls++
-      expect(command).toEqual({ program: "curl", args: ["--disable", "https://example.com"] })
-      expect(cwd).toBe("/original-cwd")
-      expect(seconds).toBe(7)
-      expect(signal).toBe(controller.signal)
-      throw present(signal).reason
-    }, formatter)
-    await expect(tool.execute("id", { program: "curl", args: ["https://example.com"], timeout_seconds: 7 }, controller.signal)).rejects.toBe(reason)
+    const tool = createCuratedReadonlyBashTool(
+      "/original-cwd",
+      async (command, cwd, seconds, signal) => {
+        calls++
+        expect(command).toEqual({ program: "curl", args: ["--disable", "https://example.com"] })
+        expect(cwd).toBe("/original-cwd")
+        expect(seconds).toBe(7)
+        expect(signal).toBe(controller.signal)
+        throw present(signal).reason
+      },
+      formatter,
+    )
+    await expect(
+      tool.execute("id", { program: "curl", args: ["https://example.com"], timeout_seconds: 7 }, controller.signal),
+    ).rejects.toBe(reason)
     expect(calls).toBe(1)
   }
 })
@@ -131,7 +148,11 @@ test("fresh default warms Native before planning; explicit formatter needs no Na
     if(!(second instanceof CuratedReadonlyCommandError)||planned!==1||attempts!==1||executed!==0)throw Error("Explicit formatter bypassed command policy or loaded Native");
     console.log(JSON.stringify({defaultWarmupBeforePlan:true,explicitNoNative:true,unsafeExecutorCalls:executed}));
   `
-  const child = Bun.spawnSync([process.execPath, "--eval", source], { env: process.env, timeout: 10000, maxBuffer: 1024 * 1024 })
+  const child = Bun.spawnSync([process.execPath, "--eval", source], {
+    env: process.env,
+    timeout: 10000,
+    maxBuffer: 1024 * 1024,
+  })
   if (child.exitCode !== 0) throw Error(child.stderr.toString())
   expect(child.exitCode).toBe(0)
   expect(child.stdout.toString()).toContain('"defaultWarmupBeforePlan":true')
@@ -178,19 +199,28 @@ describe("executeCuratedReadonlyCommand", () => {
 
   test("#given an observer #when the executable is missing #then it receives the original handle synchronously and the original error path rejects", async () => {
     // given
-    const savedPath = process.env.PATH, savedWindowsPath = process.env.Path
+    const savedPath = process.env.PATH,
+      savedWindowsPath = process.env.Path
     const empty = mkdtempSync(join(tmpdir(), "omo-curated-empty-path-"))
     process.env.PATH = empty
     if (savedWindowsPath !== undefined) process.env.Path = empty
     const observed: ChildProcess[] = []
     try {
       // when
-      const pending = executeCuratedReadonlyCommand({ program: "gh", args: ["--version"] }, empty, 5, undefined, child => { observed.push(child) })
+      const pending = executeCuratedReadonlyCommand(
+        { program: "gh", args: ["--version"] },
+        empty,
+        5,
+        undefined,
+        (child) => {
+          observed.push(child)
+        },
+      )
       // then
       expect(observed).toHaveLength(1)
       expect(typeof present(observed[0]).once).toBe("function")
       await expect(pending).rejects.toBeInstanceOf(CuratedReadonlyCommandError)
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         const child = present(observed[0])
         if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) resolve()
         else child.once("close", () => resolve())
@@ -209,13 +239,25 @@ describe("executeCuratedReadonlyCommand", () => {
     let observed: ChildProcess | undefined
     try {
       // when
-      const pending = executeCuratedReadonlyCommand({ program: "gh", args: ["--version"] }, empty, 5, undefined, child => { observed = child; throw failure })
+      const pending = executeCuratedReadonlyCommand(
+        { program: "gh", args: ["--version"] },
+        empty,
+        5,
+        undefined,
+        (child) => {
+          observed = child
+          throw failure
+        },
+      )
       // then
       await expect(pending).rejects.toBe(failure)
     } finally {
       // The original callback still owns the spawned process; join its close before removing its cwd.
       const child = observed
-      if (child && child.exitCode === null && child.signalCode === null && child.pid !== undefined) await new Promise<void>(resolve => { child.once("close", () => resolve()) })
+      if (child && child.exitCode === null && child.signalCode === null && child.pid !== undefined)
+        await new Promise<void>((resolve) => {
+          child.once("close", () => resolve())
+        })
       rmSync(empty, { recursive: true, force: true })
     }
   })

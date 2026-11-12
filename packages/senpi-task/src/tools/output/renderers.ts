@@ -70,7 +70,9 @@ function taskOutputResultRow(details: TaskOutputDetails): ResultRow {
           resolvedModel: details.snapshot.resolved_model,
           effectiveModel: details.snapshot.effective_model,
         }) ?? `model:${normalizeRendererText(details.snapshot.model)}`
-      const statusLabel = details.snapshot.observation_uncertain ? `observation unknown: ${normalizeRendererText(details.snapshot.observation_uncertain.reason)}` : details.snapshot.suspended?.explanation ?? normalizeRendererText(details.snapshot.status)
+      const statusLabel = details.snapshot.observation_uncertain
+        ? `observation unknown: ${normalizeRendererText(details.snapshot.observation_uncertain.reason)}`
+        : (details.snapshot.suspended?.explanation ?? normalizeRendererText(details.snapshot.status))
       return {
         color: statusThemeColor(details.snapshot.status),
         text: `${joinRendererTokens([`task_output ${identity}`, idSuffix, statusLabel])} · ${target}${runStatsSuffix(details.snapshot.run_stats)}`,

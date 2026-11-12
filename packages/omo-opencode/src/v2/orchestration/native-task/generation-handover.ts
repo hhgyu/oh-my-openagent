@@ -19,8 +19,14 @@ interface HandoverRegistry {
 const REGISTRY = Symbol.for("oh-my-openagent.v2.native-task.generation-handover")
 
 function isRegistry(value: unknown): value is HandoverRegistry {
-  return typeof value === "object" && value !== null && "issued" in value && typeof value.issued === "number"
-    && "retiring" in value && value.retiring instanceof Map
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "issued" in value &&
+    typeof value.issued === "number" &&
+    "retiring" in value &&
+    value.retiring instanceof Map
+  )
 }
 
 function registry(): HandoverRegistry {
@@ -37,17 +43,31 @@ export const PREDECESSOR_WAIT_MS = 30_000
 
 export class PredecessorParkTimeout extends Error {
   constructor(waitedMs: number) {
-    super(`The previous plugin generation of this project is still parking its Native task children after ${Math.round(waitedMs / 1000)} s; no task row was read. Retry the call once it has finished.`)
+    super(
+      `The previous plugin generation of this project is still parking its Native task children after ${Math.round(waitedMs / 1000)} s; no task row was read. Retry the call once it has finished.`,
+    )
     this.name = "PredecessorParkTimeout"
   }
 }
 
-function waitBounded(work: Promise<unknown>, signal: AbortSignal | undefined, deadline: number, waitedFrom: number): Promise<void> {
+function waitBounded(
+  work: Promise<unknown>,
+  signal: AbortSignal | undefined,
+  deadline: number,
+  waitedFrom: number,
+): Promise<void> {
   signal?.throwIfAborted()
   return new Promise<void>((resolveWait, rejectWait) => {
-    const finish = (settle: () => void) => { clearTimeout(timer); signal?.removeEventListener("abort", abort); settle() }
+    const finish = (settle: () => void) => {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", abort)
+      settle()
+    }
     const abort = () => finish(() => rejectWait(signal?.reason))
-    const timer = setTimeout(() => finish(() => rejectWait(new PredecessorParkTimeout(Date.now() - waitedFrom))), Math.max(0, deadline - Date.now()))
+    const timer = setTimeout(
+      () => finish(() => rejectWait(new PredecessorParkTimeout(Date.now() - waitedFrom))),
+      Math.max(0, deadline - Date.now()),
+    )
     signal?.addEventListener("abort", abort, { once: true })
     void work.then(() => finish(resolveWait))
   })
@@ -70,12 +90,24 @@ export interface NativeGenerationHandover {
  * parks its children on the host's shutdown signal instead and the next generation waits for that
  * park; a row the previous generation still holds is never read as a live child of this host. */
 export function enterNativeGeneration(directory: string): NativeGenerationHandover {
-  const shared = registry(), key = resolve(directory), order = ++shared.issued
+  const shared = registry(),
+    key = resolve(directory),
+    order = ++shared.issued
   return Object.freeze({
     retire(close: () => Promise<void>): Promise<void> {
       let work: Promise<void>
-      try { work = close() } catch (error) { work = Promise.reject(error) }
-      const retirement: Retirement = { order, settled: work.then(() => undefined, () => undefined) }
+      try {
+        work = close()
+      } catch (error) {
+        work = Promise.reject(error)
+      }
+      const retirement: Retirement = {
+        order,
+        settled: work.then(
+          () => undefined,
+          () => undefined,
+        ),
+      }
       const set = shared.retiring.get(key) ?? new Set<Retirement>()
       shared.retiring.set(key, set)
       set.add(retirement)
@@ -86,13 +118,21 @@ export function enterNativeGeneration(directory: string): NativeGenerationHandov
       return work
     },
     async predecessorsSettled(signal?: AbortSignal, timeoutMs = PREDECESSOR_WAIT_MS): Promise<void> {
-      const startedAt = Date.now(), deadline = startedAt + timeoutMs
+      const startedAt = Date.now(),
+        deadline = startedAt + timeoutMs
       for (;;) {
-        const pending = [...shared.retiring.get(key) ?? []].filter(retirement => retirement.order < order).map(retirement => retirement.settled)
+        const pending = [...(shared.retiring.get(key) ?? [])]
+          .filter((retirement) => retirement.order < order)
+          .map((retirement) => retirement.settled)
         if (pending.length === 0) return
-        try { await waitBounded(Promise.all(pending), signal, deadline, startedAt) }
-        catch (error) {
-          if (error instanceof PredecessorParkTimeout) console.warn("[oh-my-openagent/v2] Native task call refused: the previous plugin generation did not finish parking", { directory: key, waitedMs: Date.now() - startedAt })
+        try {
+          await waitBounded(Promise.all(pending), signal, deadline, startedAt)
+        } catch (error) {
+          if (error instanceof PredecessorParkTimeout)
+            console.warn(
+              "[oh-my-openagent/v2] Native task call refused: the previous plugin generation did not finish parking",
+              { directory: key, waitedMs: Date.now() - startedAt },
+            )
           throw error
         }
       }

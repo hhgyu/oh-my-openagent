@@ -35,27 +35,62 @@ export function createModelProfileSelector(options: ModelProfileSelectorOptions)
   return {
     async select(): Promise<ModelProfileSelection> {
       const [snapshot, models, declarations] = await Promise.all([
-        options.config(), options.catalog.list(), options.declaredProviders?.() ?? [],
+        options.config(),
+        options.catalog.list(),
+        options.declaredProviders?.() ?? [],
       ])
-      const eligible = models.filter(model => model.type === "chat" && model.availability.enabled && model.availability.providerListed && model.availability.providerActivation !== "disabled" && !isExcludedModel(`${model.providerID}/${model.id}`, snapshot.config.exclude_models))
-      const selectors = eligible.map(model => `${model.providerID}/${model.id}`)
+      const eligible = models.filter(
+        (model) =>
+          model.type === "chat" &&
+          model.availability.enabled &&
+          model.availability.providerListed &&
+          model.availability.providerActivation !== "disabled" &&
+          !isExcludedModel(`${model.providerID}/${model.id}`, snapshot.config.exclude_models),
+      )
+      const selectors = eligible.map((model) => `${model.providerID}/${model.id}`)
       const requested = snapshot.config.model_profile
       const configured = requested !== undefined && requested.trim().length > 0 ? requested : undefined
-      const retired = configured !== undefined && RETIRED_MODEL_PROFILE_IDS.has(configured) && snapshot.config.model_profiles?.[configured] === undefined
+      const retired =
+        configured !== undefined &&
+        RETIRED_MODEL_PROFILE_IDS.has(configured) &&
+        snapshot.config.model_profiles?.[configured] === undefined
       const explicit = retired ? undefined : configured
-      const resolveFor = async (active: string) => ({ resolution: resolveModelProfile({
-        active, profiles: snapshot.config.model_profiles, availableModels: selectors, customProviders: declarations,
-      }) })
-      const { resolution } = explicit === undefined ? await resolveDefaultModelProfile(resolveFor) : await resolveFor(explicit)
-      const selected = resolution.kind === "resolved" ? eligible.find(model => model.providerID === resolution.provider && model.id === resolution.modelId) : undefined
+      const resolveFor = async (active: string) => ({
+        resolution: resolveModelProfile({
+          active,
+          profiles: snapshot.config.model_profiles,
+          availableModels: selectors,
+          customProviders: declarations,
+        }),
+      })
+      const { resolution } =
+        explicit === undefined ? await resolveDefaultModelProfile(resolveFor) : await resolveFor(explicit)
+      const selected =
+        resolution.kind === "resolved"
+          ? eligible.find((model) => model.providerID === resolution.provider && model.id === resolution.modelId)
+          : undefined
       return {
-        resolution, mode: retired ? "retired-default" : explicit === undefined ? "default" : "explicit",
+        resolution,
+        mode: retired ? "retired-default" : explicit === undefined ? "default" : "explicit",
         ...(configured === undefined ? {} : { configured }),
-        ...(selected === undefined ? {} : { candidate: { providerID: selected.providerID, id: selected.id, hostVariants: [...selected.reasoning.variants] } }),
+        ...(selected === undefined
+          ? {}
+          : {
+              candidate: {
+                providerID: selected.providerID,
+                id: selected.id,
+                hostVariants: [...selected.reasoning.variants],
+              },
+            }),
         binding: resolution.kind !== "resolved" ? "not-resolved" : selected ? "catalog-listed" : "unlisted-selection",
-        eligibleSelectors: [...selectors], configSources: snapshot.sources,
+        eligibleSelectors: [...selectors],
+        configSources: snapshot.sources,
         ...(snapshot.profile === undefined ? {} : { configProfile: snapshot.profile }),
-        evidence: { source: "native-selector+opencode-public-catalog", authentication: "unknown", automaticApplication: false },
+        evidence: {
+          source: "native-selector+opencode-public-catalog",
+          authentication: "unknown",
+          automaticApplication: false,
+        },
       }
     },
   }

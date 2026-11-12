@@ -14,21 +14,27 @@ function fixture() {
   fixtures.push(created)
   return created
 }
-afterEach(() => { for (const created of fixtures.splice(0)) created.cleanup() })
+afterEach(() => {
+  for (const created of fixtures.splice(0)) created.cleanup()
+})
 
 /** `<identity runtime>/maintenance.json` stamps under the memory home, wherever the identity landed. */
 function maintenanceStamps(home: string): string[] {
   if (!existsSync(home)) return []
   return readdirSync(home, { recursive: true, encoding: "utf8" })
-    .filter(path => path.replaceAll("\\", "/").endsWith("runtime/maintenance.json"))
-    .map(path => join(home, path))
+    .filter((path) => path.replaceAll("\\", "/").endsWith("runtime/maintenance.json"))
+    .map((path) => join(home, path))
 }
 
 async function seededRoot(f: ReturnType<typeof createMemoryFixture>): Promise<void> {
   f.addSession("root")
   const first = await registerMemoryComponent(f.host, f.options({ maintenance: { delayMs: 60_000 } }))
   await f.runTool("memory", "root", {
-    command: "create", reason: "add notes", file_path: "system/notes.md", description: "Working notes for this project", file_text: "zebra",
+    command: "create",
+    reason: "add notes",
+    file_path: "system/notes.md",
+    description: "Working notes for this project",
+    file_text: "zebra",
   })
   await first()
 }
@@ -51,7 +57,10 @@ describe("memory repo maintenance lifecycle (S7b)", () => {
     // given
     const f = fixture()
     await seededRoot(f)
-    const cleanup = await registerMemoryComponent(f.host, f.options({ maintenance: { delayMs: 0, minLooseObjects: 0, now: () => 1_800_000_000_000 } }))
+    const cleanup = await registerMemoryComponent(
+      f.host,
+      f.options({ maintenance: { delayMs: 0, minLooseObjects: 0, now: () => 1_800_000_000_000 } }),
+    )
 
     // when
     await f.context("root")
@@ -67,16 +76,29 @@ describe("memory repo maintenance lifecycle (S7b)", () => {
     // given
     const f = fixture()
     await seededRoot(f)
-    const first = await registerMemoryComponent(f.host, f.options({ maintenance: { delayMs: 0, minLooseObjects: 0, now: () => 1_800_000_000_000 } }))
+    const first = await registerMemoryComponent(
+      f.host,
+      f.options({ maintenance: { delayMs: 0, minLooseObjects: 0, now: () => 1_800_000_000_000 } }),
+    )
     await f.context("root")
     await until(() => maintenanceStamps(f.env.OMO_MEMORY_HOME ?? "").length === 1, 30_000)
     await first()
     f.addSession("second")
     let entered = 0
-    const second = await registerMemoryComponent(f.host, f.options({ maintenance: {
-      delayMs: 0, minLooseObjects: 0, now: () => 1_800_000_000_000 + 60_000,
-      createRepo: context => { entered++; return new GitMemoryRepo({ dir: context.identityPaths.repo, agentId: context.identity }) },
-    } }))
+    const second = await registerMemoryComponent(
+      f.host,
+      f.options({
+        maintenance: {
+          delayMs: 0,
+          minLooseObjects: 0,
+          now: () => 1_800_000_000_000 + 60_000,
+          createRepo: (context) => {
+            entered++
+            return new GitMemoryRepo({ dir: context.identityPaths.repo, agentId: context.identity })
+          },
+        },
+      }),
+    )
 
     // when
     await f.context("second")

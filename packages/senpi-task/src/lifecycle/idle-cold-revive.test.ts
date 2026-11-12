@@ -22,10 +22,28 @@ afterEach(cleanupProjects)
 describe("idle cold revival", () => {
   test("external owned-session cannot revive from an available Native transcript", async () => {
     const h = coldReviveHarness()
-    const recordPath = join(h.store.stateDir, "tasks", h.record.task_id + ".json"), original = readFileSync(recordPath)
-    h.store.mutate(h.record.task_id, record => ({ ...record, runner_kind: "owned-session", child_session_id: "owned-fixture", residency_claim: "owned-claim",
-      owned_session: { format: 1, backendID: "external-owned-test", location: h.project, hostVersion: "2.2.6", parentID: "parent", sessionID: "owned-fixture",
-        generation: 1, journalKey: `${record.task_id}:0`, journalOwner: "owned-test", journalRevision: 0, runEpoch: record.notification.run_epoch, residencyClaim: "owned-claim" } }))
+    const recordPath = join(h.store.stateDir, "tasks", h.record.task_id + ".json"),
+      original = readFileSync(recordPath)
+    h.store.mutate(h.record.task_id, (record) => ({
+      ...record,
+      runner_kind: "owned-session",
+      child_session_id: "owned-fixture",
+      residency_claim: "owned-claim",
+      owned_session: {
+        format: 1,
+        backendID: "external-owned-test",
+        location: h.project,
+        hostVersion: "2.2.6",
+        parentID: "parent",
+        sessionID: "owned-fixture",
+        generation: 1,
+        journalKey: `${record.task_id}:0`,
+        journalOwner: "owned-test",
+        journalRevision: 0,
+        runEpoch: record.notification.run_epoch,
+        residencyClaim: "owned-claim",
+      },
+    }))
     const before = h.store.load(h.record.task_id)
     try {
       if (!before) throw Error("Missing stored external fixture")
@@ -36,7 +54,11 @@ describe("idle cold revival", () => {
         // Test each marker independently before even consulting a transcript
         // directory. These deliberately mixed in-memory inputs are unit data.
         const store: TaskRecordStore = { ...h.store, load: () => row }
-        Object.defineProperty(store, "stateDir", { get() { throw Error("External record reached Native transcript lookup") } })
+        Object.defineProperty(store, "stateDir", {
+          get() {
+            throw Error("External record reached Native transcript lookup")
+          },
+        })
         const result = await reviveDetachedTerminal({ store } as LifecycleContext, row.task_id)
         expect(result).toEqual({ ok: false, reason: "external owned session requires explicit host control recovery" })
       }
@@ -46,7 +68,10 @@ describe("idle cold revival", () => {
       expect(h.fake.followUpCalls).toHaveLength(0)
       expect(h.store.load(h.record.task_id)).toEqual(before)
       expect(h.manager.concurrency?.getCount("fixture/model")).toBe(0)
-    } finally { writeFileSync(recordPath, original); await h.dispose() }
+    } finally {
+      writeFileSync(recordPath, original)
+      await h.dispose()
+    }
   })
 
   test("#given four concurrent children #when replacements cycle four times across idle parking #then ordinary idle children remain continuable", async () => {

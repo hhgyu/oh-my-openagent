@@ -354,9 +354,18 @@ describe.skipIf(process.platform !== "win32")("report-file privacy check on Wind
   test("#given a saved file that Everyone may read #when the privacy check runs #then it names that reader and fails", async () => {
     const stateDir = tempDir()
     const result = await submitReport({
-      draft, kind: "bug", description: "x", redact: redactTokens, client,
-      env: { OMO_DISABLE_FEEDBACK: "1" }, stateDir, apiOrigin: "https://api.example.test", accessToken: null,
-      transport: async () => { throw new Error("offline feedback must not upload") },
+      draft,
+      kind: "bug",
+      description: "x",
+      redact: redactTokens,
+      client,
+      env: { OMO_DISABLE_FEEDBACK: "1" },
+      stateDir,
+      apiOrigin: "https://api.example.test",
+      accessToken: null,
+      transport: async () => {
+        throw new Error("offline feedback must not upload")
+      },
     })
     if (result.kind !== "saved") throw new Error("expected a saved report")
     const path = result.path

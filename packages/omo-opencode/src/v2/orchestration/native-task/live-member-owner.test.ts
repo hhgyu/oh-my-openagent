@@ -25,9 +25,14 @@ type Context = Parameters<Info["execute"]>[1]
 type MemberScopedTools = NonNullable<Parameters<typeof prepareHostTaskGrant>[0]["spec"]["memberScopedTools"]>
 
 const RUN = "11111111-1111-4111-8111-111111111111"
-const LEAD = "ses_lead", MEMBER = "ses_member_alpha", OTHER = "ses_not_a_member", AGENT = "build"
+const LEAD = "ses_lead",
+  MEMBER = "ses_member_alpha",
+  OTHER = "ses_not_a_member",
+  AGENT = "build"
 const cleanups: (() => Promise<void> | void)[] = []
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
+afterEach(async () => {
+  for (const close of cleanups.splice(0).reverse()) await close()
+})
 
 function defined<T>(value: T): NonNullable<T> {
   if (value === undefined || value === null) throw new Error("Expected value to be defined")
@@ -35,10 +40,31 @@ function defined<T>(value: T): NonNullable<T> {
 }
 
 function runtimeState(overrides: Partial<RuntimeState> = {}): RuntimeState {
-  const member = (name: string): RuntimeState["members"][number] => ({ name, agentType: "general-purpose", status: "running", pendingInjectedMessageIds: [] })
-  return { version: 1, teamRunId: RUN, teamName: "unit-team", specSource: "project", createdAt: 1, status: "active", leadSessionId: LEAD,
-    members: [member("alpha"), member("beta")], shutdownRequests: [],
-    bounds: { maxMembers: 8, maxParallelMembers: 4, maxMessagesPerRun: 10000, maxWallClockMinutes: 120, maxMemberTurns: 500 }, ...overrides }
+  const member = (name: string): RuntimeState["members"][number] => ({
+    name,
+    agentType: "general-purpose",
+    status: "running",
+    pendingInjectedMessageIds: [],
+  })
+  return {
+    version: 1,
+    teamRunId: RUN,
+    teamName: "unit-team",
+    specSource: "project",
+    createdAt: 1,
+    status: "active",
+    leadSessionId: LEAD,
+    members: [member("alpha"), member("beta")],
+    shutdownRequests: [],
+    bounds: {
+      maxMembers: 8,
+      maxParallelMembers: 4,
+      maxMessagesPerRun: 10000,
+      maxWallClockMinutes: 120,
+      maxMemberTurns: 500,
+    },
+    ...overrides,
+  }
 }
 
 /** Controlled UNIT SDK tool domain over REAL team-core state and mailbox files in a temp root. */
@@ -48,31 +74,78 @@ async function fixture(options: { readonly guarded?: boolean } = {}) {
   const config: TeamModeConfig = TeamModeConfigSchema.parse({ base_dir: root })
   mkdirSync(getRuntimeStateDir(resolveBaseDir(config), RUN), { recursive: true })
   await saveRuntimeState(runtimeState(), config)
-  const scope = Scope.makeUnsafe(), tools = new Map<string, Info>()
-  const editor: ToolEditor = { list: () => [...tools.values()], get: id => tools.get(id), namespace() {}, remove: id => { tools.delete(id) },
-    add: value => { tools.set(value.name, { ...value, id: value.name }) },
-    update: (id, change) => { const value = tools.get(id); if (value) change(value) } }
+  const scope = Scope.makeUnsafe(),
+    tools = new Map<string, Info>()
+  const editor: ToolEditor = {
+    list: () => [...tools.values()],
+    get: (id) => tools.get(id),
+    namespace() {},
+    remove: (id) => {
+      tools.delete(id)
+    },
+    add: (value) => {
+      tools.set(value.name, { ...value, id: value.name })
+    },
+    update: (id, change) => {
+      const value = tools.get(id)
+      if (value) change(value)
+    },
+  }
   const tool: Pick<ToolDomain, "transform" | "list"> = {
-    transform: callback => Effect.sync(() => { callback(editor); return { dispose: Effect.void } }),
+    transform: (callback) =>
+      Effect.sync(() => {
+        callback(editor)
+        return { dispose: Effect.void }
+      }),
     list: () => Effect.sync(() => [...tools.values()]),
   }
   let messageCount = 0
-  const owner = await Effect.runPromise(Effect.provideService(acquireTeamMemberOwner({ tool }, { newMessageId: () => `unit-message-${++messageCount}` }), Scope.Scope, scope))
+  const owner = await Effect.runPromise(
+    Effect.provideService(
+      acquireTeamMemberOwner({ tool }, { newMessageId: () => `unit-message-${++messageCount}` }),
+      Scope.Scope,
+      scope,
+    ),
+  )
   const guardPermission: Pick<PermissionDomain, "hook"> = { hook: () => Effect.sync(() => ({ dispose: Effect.void })) }
-  const guard = options.guarded ? await Effect.runPromise(Effect.provideService(acquireOwnedChildToolGuard({ tool, permission: guardPermission }), Scope.Scope, scope)) : undefined
+  const guard = options.guarded
+    ? await Effect.runPromise(
+        Effect.provideService(acquireOwnedChildToolGuard({ tool, permission: guardPermission }), Scope.Scope, scope),
+      )
+    : undefined
   cleanups.push(() => Effect.runPromise(Scope.close(scope, Exit.succeed(undefined))))
-  const context = (sessionID = MEMBER, agent = AGENT): Context => ({ sessionID, agent, messageID: "unit-message" as Context["messageID"], id: "unit-call" as Context["id"], progress: () => Effect.void })
-  const run = (input: unknown, ctx = context()) => Effect.runPromiseExit(defined(tools.get(TEAM_MEMBER_SEND_TOOL_NAME)).execute(input, ctx))
-  const bindChild = (sessionID = MEMBER, appendEvent?: MemberChildInput["appendEvent"]) => owner.bindChild({ child: {}, sessionID, agent: AGENT, taskId: "st_00000001", leadSessionID: LEAD,
-    team: { runId: RUN, memberName: "alpha" }, config, assertCurrent() {}, ...(appendEvent && { appendEvent }) })
+  const context = (sessionID = MEMBER, agent = AGENT): Context => ({
+    sessionID,
+    agent,
+    messageID: "unit-message" as Context["messageID"],
+    id: "unit-call" as Context["id"],
+    progress: () => Effect.void,
+  })
+  const run = (input: unknown, ctx = context()) =>
+    Effect.runPromiseExit(defined(tools.get(TEAM_MEMBER_SEND_TOOL_NAME)).execute(input, ctx))
+  const bindChild = (sessionID = MEMBER, appendEvent?: MemberChildInput["appendEvent"]) =>
+    owner.bindChild({
+      child: {},
+      sessionID,
+      agent: AGENT,
+      taskId: "st_00000001",
+      leadSessionID: LEAD,
+      team: { runId: RUN, memberName: "alpha" },
+      config,
+      assertCurrent() {},
+      ...(appendEvent && { appendEvent }),
+    })
   const leadInbox = getInboxDir(resolveBaseDir(config), RUN, "lead")
-  const leadMessages = () => existsSync(leadInbox) ? readdirSync(leadInbox).filter(name => name.endsWith(".json")) : []
+  const leadMessages = () =>
+    existsSync(leadInbox) ? readdirSync(leadInbox).filter((name) => name.endsWith(".json")) : []
   return { tools, owner, guard, config, run, context, bindChild, leadInbox, leadMessages }
 }
 
 function failureMessage(exit: Exit.Exit<unknown, unknown>): string {
   if (Exit.isSuccess(exit)) throw Error("Expected a failed tool call")
-  const error = exit.cause.reasons.map(reason => reason._tag === "Fail" ? reason.error : undefined).find(value => value instanceof ToolError)
+  const error = exit.cause.reasons
+    .map((reason) => (reason._tag === "Fail" ? reason.error : undefined))
+    .find((value) => value instanceof ToolError)
   if (!(error instanceof ToolError)) throw Error(`Expected a typed tool error, got ${String(exit.cause)}`)
   return error.message
 }
@@ -80,8 +153,11 @@ function failureMessage(exit: Exit.Exit<unknown, unknown>): string {
 function text(exit: Exit.Exit<unknown, unknown>): string {
   if (!Exit.isSuccess(exit)) throw Error(`Expected a successful tool call, got ${String(exit.cause)}`)
   const value = exit.value
-  if (!value || typeof value !== "object" || !("content" in value) || !Array.isArray(value.content)) throw Error("Expected tool content")
-  return value.content.map((part: unknown) => part && typeof part === "object" && "text" in part ? String(part.text) : "").join("")
+  if (!value || typeof value !== "object" || !("content" in value) || !Array.isArray(value.content))
+    throw Error("Expected tool content")
+  return value.content
+    .map((part: unknown) => (part && typeof part === "object" && "text" in part ? String(part.text) : ""))
+    .join("")
 }
 
 describe("#given the dedicated team member send registration", () => {
@@ -113,14 +189,19 @@ describe("#given the dedicated team member send registration", () => {
 describe("#given a bound in-process member", () => {
   test("#when audit append fails after enqueue #then the successful send is retained and no retryable tool failure is returned", async () => {
     const f = await fixture()
-    const producer = f.bindChild(MEMBER, () => { throw Error("audit disk unavailable") })
+    const producer = f.bindChild(MEMBER, () => {
+      throw Error("audit disk unavailable")
+    })
     const warn = spyOn(console, "warn").mockImplementation(() => {})
     try {
       const exit = await f.run({ to: "lead", message: "report" })
       expect(Exit.isSuccess(exit)).toBe(true)
       expect(f.leadMessages()).toHaveLength(1)
       expect(warn).toHaveBeenCalledTimes(1)
-    } finally { warn.mockRestore(); await producer.join() }
+    } finally {
+      warn.mockRestore()
+      await producer.join()
+    }
   })
   test("#when it sends to the lead #then exactly one message lands in the team-core lead inbox", async () => {
     // given
@@ -133,7 +214,13 @@ describe("#given a bound in-process member", () => {
     const files = f.leadMessages()
     expect(files).toHaveLength(1)
     const message: unknown = JSON.parse(readFileSync(join(f.leadInbox, defined(files[0])), "utf8"))
-    expect(message).toMatchObject({ from: "alpha", to: "lead", body: "report", summary: "done", messageId: "unit-message-1" })
+    expect(message).toMatchObject({
+      from: "alpha",
+      to: "lead",
+      body: "report",
+      summary: "done",
+      messageId: "unit-message-1",
+    })
     await producer.join()
   })
 
@@ -153,7 +240,10 @@ describe("#given a bound in-process member", () => {
     // given
     const f = await fixture()
     const producer = f.bindChild()
-    await saveRuntimeState(runtimeState({ members: runtimeState().members.filter(member => member.name !== "alpha") }), f.config)
+    await saveRuntimeState(
+      runtimeState({ members: runtimeState().members.filter((member) => member.name !== "alpha") }),
+      f.config,
+    )
     // when
     const exit = await f.run({ to: "lead", message: "late report" })
     // then
@@ -193,16 +283,22 @@ describe("#given a bound in-process member", () => {
     // given
     const f = await fixture()
     const producer = f.bindChild()
-    const release: PromiseWithResolvers<void> = Promise.withResolvers(), held: PromiseWithResolvers<void> = Promise.withResolvers()
+    const release: PromiseWithResolvers<void> = Promise.withResolvers(),
+      held: PromiseWithResolvers<void> = Promise.withResolvers()
     // The REAL team-core inbox lock is held, so the original send blocks inside sendMessage.
     mkdirSync(f.leadInbox, { recursive: true })
-    const lock = withLock(`${f.leadInbox}.lock`, async () => { held.resolve(); await release.promise })
+    const lock = withLock(`${f.leadInbox}.lock`, async () => {
+      held.resolve()
+      await release.promise
+    })
     await held.promise
     const send = f.run({ to: "lead", message: "in flight" })
     await Bun.sleep(150)
     // when
     let joined = false
-    const join = producer.join().then(() => { joined = true })
+    const join = producer.join().then(() => {
+      joined = true
+    })
     await Bun.sleep(150)
     // then
     expect(joined).toBe(false)
@@ -224,15 +320,42 @@ describe("#given the owned-child tool guard acquired after the member owner", ()
     const guard = defined(f.guard)
     const catalog = [{ id: "read", name: "read", options: { codemode: false as const } }]
     const members = [{ name: "task_send" }] as unknown as MemberScopedTools
-    const selection = prepareHostTaskGrant({ spec: { prompt: "unit", parent_session_id: LEAD, depth: 1, memberScopedTools: members }, plan: { model: "unit/model", agentType: "sisyphus-junior" },
-      includeTaskTools: true, nativeTools: [{ name: "read" }], catalog, canonical: { filterSharedParentTools } })
-    const producer = createNativeChildGuardBinding({ assertGeneration() {}, member: { owner: f.owner, teamConfigFor: () => f.config } })(
-      { taskId: "st_00000001", cwd: "/project", stateDir: "/state", prompt: "unit", depth: 1, parentSessionId: LEAD, rootSessionId: LEAD, agentType: "sisyphus-junior" },
-      { buildAgentID: AGENT, selection }, { team: { runId: RUN, memberName: "alpha" } })
-    const stage = guard.beginStage(guard.approve({}, { selection, buildAgentID: AGENT, assertCurrent() {} }), MEMBER, () => {})
+    const selection = prepareHostTaskGrant({
+      spec: { prompt: "unit", parent_session_id: LEAD, depth: 1, memberScopedTools: members },
+      plan: { model: "unit/model", agentType: "sisyphus-junior" },
+      includeTaskTools: true,
+      nativeTools: [{ name: "read" }],
+      catalog,
+      canonical: { filterSharedParentTools },
+    })
+    const producer = createNativeChildGuardBinding({
+      assertGeneration() {},
+      member: { owner: f.owner, teamConfigFor: () => f.config },
+    })(
+      {
+        taskId: "st_00000001",
+        cwd: "/project",
+        stateDir: "/state",
+        prompt: "unit",
+        depth: 1,
+        parentSessionId: LEAD,
+        rootSessionId: LEAD,
+        agentType: "sisyphus-junior",
+      },
+      { buildAgentID: AGENT, selection },
+      { team: { runId: RUN, memberName: "alpha" } },
+    )
+    const stage = guard.beginStage(
+      guard.approve({}, { selection, buildAgentID: AGENT, assertCurrent() {} }),
+      MEMBER,
+      () => {},
+    )
     const child = { locator: { sessionID: MEMBER }, lease: {} } as unknown as ChildHandle
     // when
-    guard.bind(stage, producer.bind(child, () => {}))
+    guard.bind(
+      stage,
+      producer.bind(child, () => {}),
+    )
     const allowed = await f.run({ to: "lead", message: "guarded report" })
     const lead = await f.run({ to: "lead", message: "spoof" }, f.context(LEAD))
     // then
@@ -251,7 +374,9 @@ describe("#given model request contexts", () => {
     const f = await fixture()
     const producer = f.bindChild()
     const tools = () => ({ read: {}, [TEAM_MEMBER_SEND_TOOL_NAME]: {} })
-    const parent = { sessionID: LEAD, tools: tools() }, other = { sessionID: OTHER, tools: tools() }, member = { sessionID: MEMBER, tools: tools() }
+    const parent = { sessionID: LEAD, tools: tools() },
+      other = { sessionID: OTHER, tools: tools() },
+      member = { sessionID: MEMBER, tools: tools() }
     // when
     hideUnboundTeamMemberSend(parent, f.owner)
     hideUnboundTeamMemberSend(other, f.owner)
@@ -271,7 +396,7 @@ describe("#given model request contexts", () => {
     // given
     const f = await fixture()
     // when
-    const ids = childCatalog([...f.tools.values()]).map(tool => tool.id)
+    const ids = childCatalog([...f.tools.values()]).map((tool) => tool.id)
     // then
     expect(ids).not.toContain(TEAM_MEMBER_SEND_TOOL_NAME)
   })

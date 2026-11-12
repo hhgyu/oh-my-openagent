@@ -4,7 +4,12 @@
 // as every memory command (`./commands`). `coreCommandCall` adapts a bound session to the memory-core
 // command context and dependencies the moved Senpi handlers read.
 
-import type { MemoryCommandContext, MemoryCommandDeps, MemoryCommandIdentity, NotifyLevel } from "@oh-my-opencode/memory-core/commands"
+import type {
+  MemoryCommandContext,
+  MemoryCommandDeps,
+  MemoryCommandIdentity,
+  NotifyLevel,
+} from "@oh-my-opencode/memory-core/commands"
 import type { BoundMemorySession } from "./binding"
 
 /** Registered names of the read-side memory commands. */
@@ -15,7 +20,8 @@ export const INSIGHT_COMMAND_NAMES: Readonly<Record<"doctor" | "sleeptime" | "pe
   palace: "palace",
 }
 
-export const UNBOUND_MEMORY_SESSION = "memory is not bound to this session; start a session with memory enabled and retry"
+export const UNBOUND_MEMORY_SESSION =
+  "memory is not bound to this session; start a session with memory enabled and retry"
 
 export interface CoreCommandCall {
   readonly identity: MemoryCommandIdentity
@@ -35,10 +41,14 @@ export function coreCommandCall(bound: BoundMemorySession): CoreCommandCall {
       hasUI: false,
       cwd: bound.directory,
       sessionManager: { getSessionId: () => bound.sessionID },
-      ui: { notify: (_message, notified = "info") => { level = notified } },
+      ui: {
+        notify: (_message, notified = "info") => {
+          level = notified
+        },
+      },
     },
     deps: {
-      contextForSession: sessionID => (sessionID === bound.sessionID ? identity : undefined),
+      contextForSession: (sessionID) => (sessionID === bound.sessionID ? identity : undefined),
       resolveIdentity: () => identity,
       bustPromptCache: () => undefined,
     },

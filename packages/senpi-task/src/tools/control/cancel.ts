@@ -9,16 +9,21 @@ import { renderTaskCancelCall, renderTaskCancelResult } from "./renderers"
 import { toolResult } from "./tool-result"
 import type { CancelManager, CancelResultDetails, CancelToolResult } from "./types"
 
-export const TaskCancelParams = Type.Object({
-  task_id: Type.Optional(
-    Type.String({
-      description:
-        "Task id (st_...) of the child to cancel. Pass task_id or name; when both are given, task_id wins and name is ignored.",
-    }),
-  ),
-  name: Type.Optional(Type.String({ description: "Canonical task name; required if task_id is omitted." })),
-  reason: Type.Optional(Type.String({ description: "Optional human-readable reason recorded on the cancelled task." })),
-}, { additionalProperties: false })
+export const TaskCancelParams = Type.Object(
+  {
+    task_id: Type.Optional(
+      Type.String({
+        description:
+          "Task id (st_...) of the child to cancel. Pass task_id or name; when both are given, task_id wins and name is ignored.",
+      }),
+    ),
+    name: Type.Optional(Type.String({ description: "Canonical task name; required if task_id is omitted." })),
+    reason: Type.Optional(
+      Type.String({ description: "Optional human-readable reason recorded on the cancelled task." }),
+    ),
+  },
+  { additionalProperties: false },
+)
 
 export type TaskCancelInput = Static<typeof TaskCancelParams>
 

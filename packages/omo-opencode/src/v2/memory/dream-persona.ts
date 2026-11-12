@@ -7,7 +7,12 @@
 // prompt as JSON sections instead, and every `reflection_memory` call is already a commit on the run branch.
 
 import type { ReflectionRequest } from "@oh-my-opencode/memory-core"
-import { REFLECTION_GREP_TOOL_NAME, REFLECTION_LIST_TOOL_NAME, REFLECTION_MEMORY_TOOL_NAME, REFLECTION_READ_TOOL_NAME } from "./reflection-tools"
+import {
+  REFLECTION_GREP_TOOL_NAME,
+  REFLECTION_LIST_TOOL_NAME,
+  REFLECTION_MEMORY_TOOL_NAME,
+  REFLECTION_READ_TOOL_NAME,
+} from "./reflection-tools"
 
 const read = REFLECTION_READ_TOOL_NAME
 const list = REFLECTION_LIST_TOOL_NAME
@@ -74,18 +79,24 @@ interface DreamPromptInputs {
 }
 
 /** The dream run's first user input: Senpi's task prompt plus its eight inputs. */
-export function buildDreamTaskPrompt(request: Pick<ReflectionRequest, "trigger" | "focus" | "targetDoc" | "origin">, inputs: DreamPromptInputs): string {
+export function buildDreamTaskPrompt(
+  request: Pick<ReflectionRequest, "trigger" | "focus" | "targetDoc" | "origin">,
+  inputs: DreamPromptInputs,
+): string {
   const json = (value: unknown): string => JSON.stringify(value, null, 2)
   return [
     "# Dream mechanics",
     `Review the transcript payload with ${read} / ${grep} (target "transcript"), inspect the memory worktree with ${list} / ${read}, and persist every intended memory change through ${edit}.`,
-    ...(request.targetDoc === undefined ? [] : [`Document maintenance target: ${request.targetDoc}`, "Modify no memory document except this target."]),
+    ...(request.targetDoc === undefined
+      ? []
+      : [`Document maintenance target: ${request.targetDoc}`, "Modify no memory document except this target."]),
     "Edit nothing else. When done, end the turn with the report.",
     `Trigger: ${request.trigger}${request.origin === undefined ? "" : ` (origin: ${request.origin})`}`,
     ...(request.focus === undefined || request.focus.trim() === "" ? [] : [`Focus: ${request.focus}`]),
     `System token budget: ${inputs.systemTokenBudget}`,
     `System token target: ${inputs.systemTokenTarget}`,
-    "## System token estimate", json(inputs.systemTokens),
+    "## System token estimate",
+    json(inputs.systemTokens),
     ...Object.entries(inputs.sections).flatMap(([title, value]) => [`## ${title}`, json(value)]),
   ].join("\n")
 }

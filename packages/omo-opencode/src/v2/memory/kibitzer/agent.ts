@@ -26,12 +26,15 @@ export function kibitzerCategoryModel(config: Pick<OmoConfig, "categories">, cat
   const entry = config.categories?.[category]
   if (entry === undefined) return undefined
   const first = entry.models?.[0]
-  const model = typeof first === "string" ? first : first?.model ?? entry.model
+  const model = typeof first === "string" ? first : (first?.model ?? entry.model)
   return model !== undefined && model.includes("/") ? model : undefined
 }
 
-function applyKibitzerAgent(editor: AgentEditor, options: { readonly persona: string; readonly model?: string; readonly warn?: (message: string) => void }): void {
-  editor.update(KIBITZER_AGENT_ID, agent => {
+function applyKibitzerAgent(
+  editor: AgentEditor,
+  options: { readonly persona: string; readonly model?: string; readonly warn?: (message: string) => void },
+): void {
+  editor.update(KIBITZER_AGENT_ID, (agent) => {
     agent.name = Agent.Name.make("Kibitzer")
     agent.description = "Read-only memory recall judge; nudges only through the nudge tool."
     agent.mode = "subagent"
@@ -41,20 +44,30 @@ function applyKibitzerAgent(editor: AgentEditor, options: { readonly persona: st
       try {
         agent.model = Model.Ref.parse(options.model)
       } catch (error) {
-        options.warn?.(`kibitzer ignored an invalid category model reference: ${error instanceof Error ? error.message : String(error)}`)
+        options.warn?.(
+          `kibitzer ignored an invalid category model reference: ${error instanceof Error ? error.message : String(error)}`,
+        )
       }
     }
-    agent.permissions = KIBITZER_PERMISSIONS.map(rule => ({ ...rule }))
+    agent.permissions = KIBITZER_PERMISSIONS.map((rule) => ({ ...rule }))
   })
 }
 
 export async function registerKibitzerAgent(
   domain: Pick<AgentDomain, "transform">,
-  options: { readonly model: () => string | undefined; readonly persona?: () => string; readonly warn?: (message: string) => void },
+  options: {
+    readonly model: () => string | undefined
+    readonly persona?: () => string
+    readonly warn?: (message: string) => void
+  },
 ): Promise<Registration> {
   const persona = options.persona ?? loadKibitzerPersona
-  return domain.transform(editor => {
+  return domain.transform((editor) => {
     const model = options.model()
-    applyKibitzerAgent(editor, { persona: persona(), ...(model === undefined ? {} : { model }), ...(options.warn === undefined ? {} : { warn: options.warn }) })
+    applyKibitzerAgent(editor, {
+      persona: persona(),
+      ...(model === undefined ? {} : { model }),
+      ...(options.warn === undefined ? {} : { warn: options.warn }),
+    })
   })
 }

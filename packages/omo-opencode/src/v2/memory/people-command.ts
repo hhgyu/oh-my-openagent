@@ -5,14 +5,22 @@
 
 import { parseCommandArgs } from "@oh-my-opencode/memory-core/commands/args"
 import {
-  derivePeopleGraph, describePersonMiss, parsePeopleCardLines, readPersonFile, renderPersonCard, renderRoster, resolvePersonQuery, selectPersonObservations,
+  derivePeopleGraph,
+  describePersonMiss,
+  parsePeopleCardLines,
+  readPersonFile,
+  renderPersonCard,
+  renderRoster,
+  resolvePersonQuery,
+  selectPersonObservations,
 } from "@oh-my-opencode/memory-core/palace"
 import { GitMemoryRepo, type PeopleLimits } from "@oh-my-opencode/memory-core"
 import type { BoundMemorySession } from "./binding"
 import { INSIGHT_COMMAND_NAMES, UNBOUND_MEMORY_SESSION } from "./insight-commands"
 import type { ExtraMemoryCommand } from "./reflect-command"
 
-const ASK_REFUSAL = "/people --ask is not available on OpenCode yet: it needs a dedicated memory child; use /people <name> to read the record"
+const ASK_REFUSAL =
+  "/people --ask is not available on OpenCode yet: it needs a dedicated memory child; use /people <name> to read the record"
 
 /** Native reads the root `memory.people` block here (no per-identity override). */
 function peopleLimits(bound: BoundMemorySession): PeopleLimits | undefined {
@@ -36,10 +44,13 @@ export function createPeopleCommand(): ExtraMemoryCommand {
       const name = parsed.positionals.join(" ").trim()
       if (name.length === 0) return { text: renderRoster(graph), level: "info" }
       const resolved = resolvePersonQuery(graph.nodes, name)
-      if (resolved.kind === "miss") return { text: describePersonMiss(graph.nodes, name, resolved.close), level: "error" }
-      const node = graph.nodes.find(candidate => candidate.slug === resolved.slug)
+      if (resolved.kind === "miss")
+        return { text: describePersonMiss(graph.nodes, name, resolved.close), level: "error" }
+      const node = graph.nodes.find((candidate) => candidate.slug === resolved.slug)
       if (node === undefined) return { text: `no person matches "${name}"`, level: "error" }
-      const observations = await selectPersonObservations(repo, node.slug, limits, { all: parsed.flags.get("all") === true })
+      const observations = await selectPersonObservations(repo, node.slug, limits, {
+        all: parsed.flags.get("all") === true,
+      })
       const cardLines = parsePeopleCardLines(await readPersonFile(repo, node.path), limits)
       return { text: renderPersonCard(node, cardLines, observations, graph.edges), level: "info" }
     },

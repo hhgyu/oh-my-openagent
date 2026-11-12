@@ -26,7 +26,13 @@ export { SyncConfigError } from "./sync-config-error"
 export { SyncSessionDeferredError } from "./sync-session-deferred"
 export { createDeviceSessionResolver } from "./device-session-resolver"
 export type { DeviceSessionRuntime } from "./device-session-resolver"
-export type { CliDeviceAccount, DesktopSyncUnavailable, DeviceAccount, DeviceAccountSource, KeyringFactory } from "./device-account"
+export type {
+  CliDeviceAccount,
+  DesktopSyncUnavailable,
+  DeviceAccount,
+  DeviceAccountSource,
+  KeyringFactory,
+} from "./device-account"
 export type { MemoryRpcSync } from "./memory-rpc-sync"
 export { registerSyncRpc } from "./sync-rpc-registration"
 export type {

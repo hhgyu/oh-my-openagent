@@ -13,7 +13,10 @@ export interface CuratedReadonlyHead {
 export interface CuratedReadonlyFormatter {
   readonly maxBytes: number
   readonly maxLines: number
-  readonly truncateHead: (text: string, options: { readonly maxBytes: number; readonly maxLines: number }) => CuratedReadonlyHead
+  readonly truncateHead: (
+    text: string,
+    options: { readonly maxBytes: number; readonly maxLines: number },
+  ) => CuratedReadonlyHead
   readonly formatSize: (bytes: number) => string
 }
 
@@ -28,7 +31,13 @@ export function capCuratedReadonlyResult(text: string, formatter: CuratedReadonl
     const contentBytes = formatter.maxBytes - Buffer.byteLength(`\n${notice}`)
     const truncation = formatter.truncateHead(text, { maxBytes: contentBytes, maxLines: formatter.maxLines - 1 })
     content = truncation.firstLineExceedsLimit ? truncateUtf8Prefix(text, contentBytes) : truncation.content
-    const nextNotice = buildTruncationNotice(boundary.truncatedBy, content, boundary.totalLines, boundary.totalBytes, formatter)
+    const nextNotice = buildTruncationNotice(
+      boundary.truncatedBy,
+      content,
+      boundary.totalLines,
+      boundary.totalBytes,
+      formatter,
+    )
     if (Buffer.byteLength(nextNotice) === Buffer.byteLength(notice)) {
       notice = nextNotice
       break
@@ -39,12 +48,16 @@ export function capCuratedReadonlyResult(text: string, formatter: CuratedReadonl
 }
 
 function buildTruncationNotice(
-  truncatedBy: "bytes" | "lines" | null, content: string, totalLines: number, totalBytes: number,
+  truncatedBy: "bytes" | "lines" | null,
+  content: string,
+  totalLines: number,
+  totalBytes: number,
   formatter: CuratedReadonlyFormatter,
 ): string {
-  const shown = truncatedBy === "lines"
-    ? `${content.length === 0 ? 0 : content.split("\n").length} of ${totalLines} lines`
-    : `${formatter.formatSize(Buffer.byteLength(content))} of ${formatter.formatSize(totalBytes)}`
+  const shown =
+    truncatedBy === "lines"
+      ? `${content.length === 0 ? 0 : content.split("\n").length} of ${totalLines} lines`
+      : `${formatter.formatSize(Buffer.byteLength(content))} of ${formatter.formatSize(totalBytes)}`
   return `[truncated: ${shown}. Narrow the request before retrying.]`
 }
 
@@ -64,13 +77,23 @@ export const curatedReadonlyFormatter: CuratedReadonlyFormatter = Object.freeze(
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
   },
-  truncateHead(text: string, { maxBytes, maxLines }: { readonly maxBytes: number; readonly maxLines: number }): CuratedReadonlyHead {
+  truncateHead(
+    text: string,
+    { maxBytes, maxLines }: { readonly maxBytes: number; readonly maxLines: number },
+  ): CuratedReadonlyHead {
     const totalBytes = Buffer.byteLength(text, "utf-8")
     const lines = text.length === 0 ? [] : text.split("\n")
     if (text.endsWith("\n")) lines.pop()
     const totalLines = lines.length
     if (totalLines <= maxLines && totalBytes <= maxBytes) {
-      return { content: text, truncated: false, truncatedBy: null, totalLines, totalBytes, firstLineExceedsLimit: false }
+      return {
+        content: text,
+        truncated: false,
+        truncatedBy: null,
+        totalLines,
+        totalBytes,
+        firstLineExceedsLimit: false,
+      }
     }
     const firstLine = lines[0]
     if (firstLine === undefined) throw new TypeError("truncateHead requires at least one line when limits are exceeded")
@@ -84,11 +107,21 @@ export const curatedReadonlyFormatter: CuratedReadonlyFormatter = Object.freeze(
       const line = lines[index]
       if (line === undefined) throw new Error(`truncateHead line ${index} is out of range`)
       const bytes = Buffer.byteLength(line, "utf-8") + (index > 0 ? 1 : 0)
-      if (outputBytes + bytes > maxBytes) { truncatedBy = "bytes"; break }
+      if (outputBytes + bytes > maxBytes) {
+        truncatedBy = "bytes"
+        break
+      }
       output.push(line)
       outputBytes += bytes
     }
     if (output.length >= maxLines && outputBytes <= maxBytes) truncatedBy = "lines"
-    return { content: output.join("\n"), truncated: true, truncatedBy, totalLines, totalBytes, firstLineExceedsLimit: false }
+    return {
+      content: output.join("\n"),
+      truncated: true,
+      truncatedBy,
+      totalLines,
+      totalBytes,
+      firstLineExceedsLimit: false,
+    }
   },
 })

@@ -87,7 +87,9 @@ function packageDirectory(entry: string, name: string): string {
     try {
       const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as { name?: unknown }
       if (manifest.name === name) return directory
-    } catch { /* No readable manifest here: keep walking up. */ }
+    } catch {
+      /* No readable manifest here: keep walking up. */
+    }
     const parent = dirname(directory)
     if (parent === directory) throw Error(`${name} package root not found above ${entry}`)
     directory = parent
@@ -116,7 +118,8 @@ function readInstalledVersion(root: string): string {
 
 function pick<T>(module: Record<string, unknown>, name: string, kind: "function" | "object"): T {
   const value = module[name]
-  if (typeof value !== kind || value === null) throw Error(`${CODEMODE_PACKAGE} export ${name} is missing or not a ${kind}`)
+  if (typeof value !== kind || value === null)
+    throw Error(`${CODEMODE_PACKAGE} export ${name} is missing or not a ${kind}`)
   return value as T
 }
 
@@ -125,17 +128,36 @@ function resolveCodemodeSenpi(root: string): string {
   return Bun.resolveSync("@code-yeongyu/senpi", join(root, "src"))
 }
 
-async function importCodemode(root: string, importModule: ImportModule, version: string, senpiEntry: string): Promise<CodemodeModules> {
+async function importCodemode(
+  root: string,
+  importModule: ImportModule,
+  version: string,
+  senpiEntry: string,
+): Promise<CodemodeModules> {
   const url = (path: string) => pathToFileURL(join(root, path)).href
-  const [evalTool, sessionManager, proxy, handles, cells, settings, detect, runtimeFactory, runtimeInfo, kernels, senpi] = await Promise.all([
-    ...Object.values(SOURCES).map(path => importModule(url(path))), importModule(pathToFileURL(senpiEntry).href),
+  const [
+    evalTool,
+    sessionManager,
+    proxy,
+    handles,
+    cells,
+    settings,
+    detect,
+    runtimeFactory,
+    runtimeInfo,
+    kernels,
+    senpi,
+  ] = await Promise.all([
+    ...Object.values(SOURCES).map((path) => importModule(url(path))),
+    importModule(pathToFileURL(senpiEntry).href),
   ])
   const storage = pick<{ getStore?: unknown }>(senpi, "kernelToolsStorage", "object")
   if (typeof storage.getStore !== "function") throw Error("@code-yeongyu/senpi kernelToolsStorage has no getStore")
   const registry = pick<{ list?: unknown }>(kernels ?? {}, "kernelRegistry", "object")
   if (typeof registry.list !== "function") throw Error(`${CODEMODE_PACKAGE} kernelRegistry has no list`)
   return Object.freeze({
-    root, version,
+    root,
+    version,
     createEvalTool: pick<Fn>(evalTool, "createEvalTool", "function"),
     createCodemodeSessionManager: pick<Fn>(sessionManager, "createCodemodeSessionManager", "function"),
     SessionManagerProxy: pick<Ctor>(proxy, "SessionManagerProxy", "function"),
@@ -157,7 +179,7 @@ async function importCodemode(root: string, importModule: ImportModule, version:
   })
 }
 
-const describe = (error: unknown): string => error instanceof Error ? error.message : String(error)
+const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 export function createCodemodeLoader(options: CodemodeLoaderOptions = {}): CodemodeLoader {
   const timeoutMs = options.timeoutMs ?? DEFAULT_CODEMODE_LOAD_TIMEOUT_MS
@@ -170,17 +192,36 @@ export function createCodemodeLoader(options: CodemodeLoaderOptions = {}): Codem
   function start(): Promise<CodemodeModules> {
     inner ??= (async () => {
       let root: string
-      try { root = (options.resolveRoot ?? resolveCodemodeRoot)() } catch (error) {
-        throw new CodemodeUnavailableError(`eval is unavailable: ${CODEMODE_PACKAGE} is not installed next to oh-my-openagent (${describe(error)}). Reinstall the plugin so its runtime dependency is present.`)
+      try {
+        root = (options.resolveRoot ?? resolveCodemodeRoot)()
+      } catch (error) {
+        throw new CodemodeUnavailableError(
+          `eval is unavailable: ${CODEMODE_PACKAGE} is not installed next to oh-my-openagent (${describe(error)}). Reinstall the plugin so its runtime dependency is present.`,
+        )
       }
       const version = (options.readVersion ?? readInstalledVersion)(root)
       if (version !== CODEMODE_VERSION) {
-        throw new CodemodeUnavailableError(`eval is unavailable: ${CODEMODE_PACKAGE} ${version} is installed, but this plugin supports only ${CODEMODE_VERSION}.`)
+        throw new CodemodeUnavailableError(
+          `eval is unavailable: ${CODEMODE_PACKAGE} ${version} is installed, but this plugin supports only ${CODEMODE_VERSION}.`,
+        )
       }
-      try { return await importCodemode(root, importModule, version, (options.resolveSenpi ?? resolveCodemodeSenpi)(root)) } catch (error) {
-        throw new CodemodeUnavailableError(`eval is unavailable: loading ${CODEMODE_PACKAGE} failed (${describe(error)}).`)
+      try {
+        return await importCodemode(root, importModule, version, (options.resolveSenpi ?? resolveCodemodeSenpi)(root))
+      } catch (error) {
+        throw new CodemodeUnavailableError(
+          `eval is unavailable: loading ${CODEMODE_PACKAGE} failed (${describe(error)}).`,
+        )
       }
-    })().then(value => { modules = value; return value }, (error: unknown) => { inner = undefined; throw error })
+    })().then(
+      (value) => {
+        modules = value
+        return value
+      },
+      (error: unknown) => {
+        inner = undefined
+        throw error
+      },
+    )
     return inner
   }
 
@@ -190,9 +231,26 @@ export function createCodemodeLoader(options: CodemodeLoaderOptions = {}): Codem
       if (modules) return Promise.resolve(modules)
       const pending = start()
       return new Promise<CodemodeModules>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new CodemodeUnavailableError(`eval is unavailable: ${CODEMODE_PACKAGE} did not finish loading within ${Math.round(timeoutMs / 1000)} s. Try again; the load continues in the background.`)), timeoutMs)
+        const timer = setTimeout(
+          () =>
+            reject(
+              new CodemodeUnavailableError(
+                `eval is unavailable: ${CODEMODE_PACKAGE} did not finish loading within ${Math.round(timeoutMs / 1000)} s. Try again; the load continues in the background.`,
+              ),
+            ),
+          timeoutMs,
+        )
         timer.unref?.()
-        pending.then(value => { clearTimeout(timer); resolve(value) }, (error: unknown) => { clearTimeout(timer); reject(error) })
+        pending.then(
+          (value) => {
+            clearTimeout(timer)
+            resolve(value)
+          },
+          (error: unknown) => {
+            clearTimeout(timer)
+            reject(error)
+          },
+        )
       })
     },
   }

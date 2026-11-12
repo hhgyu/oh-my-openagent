@@ -9,10 +9,20 @@ import { getInboxDir } from "@oh-my-opencode/team-core/team-registry"
 import { RuntimeStateSchema, type Message } from "@oh-my-opencode/team-core/types"
 import { saveRuntimeState, type loadRuntimeState } from "@oh-my-opencode/team-core/team-state-store"
 import { openTeamDeliveryJournal } from "../../host/team-delivery-journal"
-import { createLeadDeliveryOwner, teamDeliveryInputId, type LeadDeliveryOptions, type LeadDeliveryOwner, type TeamDeliverySession } from "./lead-delivery"
+import {
+  createLeadDeliveryOwner,
+  teamDeliveryInputId,
+  type LeadDeliveryOptions,
+  type LeadDeliveryOwner,
+  type TeamDeliverySession,
+} from "./lead-delivery"
 
-const RUN = "11111111-1111-4111-8111-111111111111", LEAD = "ses_lead", ALPHA = "ses_alpha", DIRECTORY = "/unit/project"
-const roots: string[] = [], owners: LeadDeliveryOwner[] = []
+const RUN = "11111111-1111-4111-8111-111111111111",
+  LEAD = "ses_lead",
+  ALPHA = "ses_alpha",
+  DIRECTORY = "/unit/project"
+const roots: string[] = [],
+  owners: LeadDeliveryOwner[] = []
 afterEach(async () => {
   for (const owner of owners.splice(0)) await owner.close()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
@@ -23,12 +33,26 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), "omo-lead-delivery-"))
   roots.push(root)
   const config: TeamModeConfig = TeamModeConfigSchema.parse({ base_dir: join(root, "teams") })
-  const state = RuntimeStateSchema.parse({ version: 1, teamRunId: RUN, teamName: "qa-team", specSource: "project", createdAt: 1, status: "active", leadSessionId: LEAD,
-    members: [{ name: "alpha", agentType: "general-purpose", status: "running" }], bounds: {} })
-  const calls: Synthetic[] = [], accepted = new Map<string, Synthetic>(), gone = new Set<string>()
+  const state = RuntimeStateSchema.parse({
+    version: 1,
+    teamRunId: RUN,
+    teamName: "qa-team",
+    specSource: "project",
+    createdAt: 1,
+    status: "active",
+    leadSessionId: LEAD,
+    members: [{ name: "alpha", agentType: "general-purpose", status: "running" }],
+    bounds: {},
+  })
+  const calls: Synthetic[] = [],
+    accepted = new Map<string, Synthetic>(),
+    gone = new Set<string>()
   // A host double with the 2.2.6 probe semantics: one row per id, a re-post returns the same row.
   const session: TeamDeliverySession = {
-    async get({ sessionID }) { if (gone.has(sessionID)) throw Error("session not found"); return { id: sessionID, location: { directory: DIRECTORY } } },
+    async get({ sessionID }) {
+      if (gone.has(sessionID)) throw Error("session not found")
+      return { id: sessionID, location: { directory: DIRECTORY } }
+    },
     async synthetic(input) {
       calls.push(input)
       const row = accepted.get(input.id) ?? input
@@ -36,7 +60,16 @@ function fixture() {
       return { id: row.id, sessionID: row.sessionID, type: "synthetic", payload: { text: row.text } }
     },
   }
-  return { root, config, state, calls, accepted, gone, session, journalPath: join(root, "lead-state", "team-deliveries.sqlite") }
+  return {
+    root,
+    config,
+    state,
+    calls,
+    accepted,
+    gone,
+    session,
+    journalPath: join(root, "lead-state", "team-deliveries.sqlite"),
+  }
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
 async function save(f: Fixture): Promise<void> {
@@ -44,8 +77,16 @@ async function save(f: Fixture): Promise<void> {
   await saveRuntimeState(f.state, f.config)
 }
 function owner(f: Fixture, overrides: Partial<LeadDeliveryOptions> = {}): LeadDeliveryOwner {
-  const value = createLeadDeliveryOwner({ session: f.session, directory: DIRECTORY, assertGeneration() {}, teamConfigFor: () => f.config,
-    journalPathFor: () => f.journalPath, isMemberBound: sessionID => sessionID === ALPHA, pollIntervalMs: 0, ...overrides })
+  const value = createLeadDeliveryOwner({
+    session: f.session,
+    directory: DIRECTORY,
+    assertGeneration() {},
+    teamConfigFor: () => f.config,
+    journalPathFor: () => f.journalPath,
+    isMemberBound: (sessionID) => sessionID === ALPHA,
+    pollIntervalMs: 0,
+    ...overrides,
+  })
   owners.push(value)
   return value
 }
@@ -63,9 +104,13 @@ async function seedToAlpha(f: Fixture, messageId: string): Promise<Message> {
   return value
 }
 const inbox = (f: Fixture, recipient: string) => getInboxDir(f.config.base_dir ?? "", RUN, recipient)
-const processed = (f: Fixture, recipient: string, value: Message) => existsSync(join(inbox(f, recipient), "processed", `${value.messageId}.json`))
-const reservations = (f: Fixture, recipient: string) => readdirSync(inbox(f, recipient)).filter(name => name.startsWith(".delivering-"))
-function bindAlpha(value: LeadDeliveryOwner) { return value.memberBound({ leadSessionID: LEAD, teamRunId: RUN, memberName: "alpha", sessionID: ALPHA }) }
+const processed = (f: Fixture, recipient: string, value: Message) =>
+  existsSync(join(inbox(f, recipient), "processed", `${value.messageId}.json`))
+const reservations = (f: Fixture, recipient: string) =>
+  readdirSync(inbox(f, recipient)).filter((name) => name.startsWith(".delivering-"))
+function bindAlpha(value: LeadDeliveryOwner) {
+  return value.memberBound({ leadSessionID: LEAD, teamRunId: RUN, memberName: "alpha", sessionID: ALPHA })
+}
 
 describe("lead delivery owner", () => {
   test("#given one member send #when the team is polled twice #then the lead gets one synthetic with the deterministic id", async () => {
@@ -82,7 +127,12 @@ describe("lead delivery owner", () => {
 
     // then
     expect(f.calls).toHaveLength(1)
-    expect(f.calls[0]).toMatchObject({ sessionID: LEAD, id: teamDeliveryInputId(RUN, "lead", sent.messageId), delivery: "steer", resume: true })
+    expect(f.calls[0]).toMatchObject({
+      sessionID: LEAD,
+      id: teamDeliveryInputId(RUN, "lead", sent.messageId),
+      delivery: "steer",
+      resume: true,
+    })
     expect(f.calls[0]?.text).toContain(`messageId="${sent.messageId}"`)
     expect(processed(f, "lead", sent)).toBe(true)
     expect(reservations(f, "lead")).toEqual([])
@@ -101,7 +151,9 @@ describe("lead delivery owner", () => {
     await delivery.refresh(RUN)
 
     // then
-    expect(f.calls.map(call => [call.sessionID, call.id])).toEqual([[ALPHA, teamDeliveryInputId(RUN, "alpha", sent.messageId)]])
+    expect(f.calls.map((call) => [call.sessionID, call.id])).toEqual([
+      [ALPHA, teamDeliveryInputId(RUN, "alpha", sent.messageId)],
+    ])
     expect(processed(f, "alpha", sent)).toBe(true)
   })
 
@@ -110,7 +162,13 @@ describe("lead delivery owner", () => {
     const f = fixture()
     await save(f)
     const sent = await seedToLead(f, "22222222-2222-4222-8222-000000000003")
-    const lossy: TeamDeliverySession = { ...f.session, async synthetic(input) { await f.session.synthetic(input); throw Error("crash before the ACK was recorded") } }
+    const lossy: TeamDeliverySession = {
+      ...f.session,
+      async synthetic(input) {
+        await f.session.synthetic(input)
+        throw Error("crash before the ACK was recorded")
+      },
+    }
     const first = owner(f, { session: lossy })
     bindAlpha(first)
     await first.refresh(RUN)
@@ -126,7 +184,7 @@ describe("lead delivery owner", () => {
     // then
     const inputID = teamDeliveryInputId(RUN, "lead", sent.messageId)
     expect(f.calls.length).toBeGreaterThan(1)
-    expect(new Set(f.calls.map(call => call.id))).toEqual(new Set([inputID]))
+    expect(new Set(f.calls.map((call) => call.id))).toEqual(new Set([inputID]))
     expect(f.accepted.size).toBe(1)
     expect(processed(f, "lead", sent)).toBe(true)
     expect(await listUnreadMessages(RUN, "lead", f.config)).toEqual([])
@@ -137,7 +195,14 @@ describe("lead delivery owner", () => {
     const f = fixture()
     await save(f)
     const sent = await seedToLead(f, "22222222-2222-4222-8222-000000000004")
-    const first = owner(f, { session: { ...f.session, async synthetic() { throw Error("host crashed before ACK") } } })
+    const first = owner(f, {
+      session: {
+        ...f.session,
+        async synthetic() {
+          throw Error("host crashed before ACK")
+        },
+      },
+    })
     bindAlpha(first)
     await first.refresh(RUN)
     await first.close()
@@ -150,7 +215,7 @@ describe("lead delivery owner", () => {
     await restarted.refresh(RUN)
 
     // then
-    expect(f.calls.map(call => call.id)).toEqual([teamDeliveryInputId(RUN, "lead", sent.messageId)])
+    expect(f.calls.map((call) => call.id)).toEqual([teamDeliveryInputId(RUN, "lead", sent.messageId)])
     expect(processed(f, "lead", sent)).toBe(true)
     expect(await listUnreadMessages(RUN, "lead", f.config)).toEqual([])
     expect(reservations(f, "lead")).toEqual([])
@@ -164,7 +229,9 @@ describe("lead delivery owner authority", () => {
     await delivery.refresh(RUN)
     expect(f.calls).toEqual([])
     expect(reservations(f, recipient)).toEqual([])
-    expect((await listUnreadMessages(RUN, recipient, f.config)).map(value => value.messageId)).toEqual([sent.messageId])
+    expect((await listUnreadMessages(RUN, recipient, f.config)).map((value) => value.messageId)).toEqual([
+      sent.messageId,
+    ])
   }
 
   test("#given the lead session is gone #when mail is due #then no synthetic is posted and the reservation is released", async () => {
@@ -186,7 +253,16 @@ describe("lead delivery owner authority", () => {
     let checks = 0
 
     // when / then
-    await expectHeld(f, owner(f, { assertGeneration() { if (++checks > 1) throw Error("Retired Native task generation") } }), "lead", sent)
+    await expectHeld(
+      f,
+      owner(f, {
+        assertGeneration() {
+          if (++checks > 1) throw Error("Retired Native task generation")
+        },
+      }),
+      "lead",
+      sent,
+    )
   })
 
   test("#given the team stops being active during the pass #when mail is due #then no synthetic is posted and the reservation is released", async () => {
@@ -225,10 +301,18 @@ describe("lead delivery owner authority", () => {
 })
 
 describe("lead delivery owner journal cleanup", () => {
-  const namespace = "opencode2-team:" + createHash("sha256").update(JSON.stringify([DIRECTORY, LEAD])).digest("hex")
+  const namespace =
+    "opencode2-team:" +
+    createHash("sha256")
+      .update(JSON.stringify([DIRECTORY, LEAD]))
+      .digest("hex")
   function rows(f: Fixture, recipient: string, messageId: string) {
     const journal = openTeamDeliveryJournal({ path: f.journalPath, namespace })
-    try { return journal.read({ teamRunId: RUN, recipient, messageId }) } finally { journal.close() }
+    try {
+      return journal.read({ teamRunId: RUN, recipient, messageId })
+    } finally {
+      journal.close()
+    }
   }
 
   test("#given a delete whose tick saw deleting #when the final refresh finds no team #then no rows of that run remain", async () => {
@@ -278,7 +362,11 @@ describe("lead delivery owner journal cleanup", () => {
     const sent = await seedToLead(f, "22222222-2222-4222-8222-000000000012")
     expect(await reserveMessageForDelivery(RUN, "lead", sent.messageId, f.config)).not.toBeNull()
     const journal = openTeamDeliveryJournal({ path: f.journalPath, namespace })
-    journal.recordIntent({ teamRunId: RUN, recipient: "lead", messageId: sent.messageId }, LEAD, teamDeliveryInputId(RUN, "lead", sent.messageId))
+    journal.recordIntent(
+      { teamRunId: RUN, recipient: "lead", messageId: sent.messageId },
+      LEAD,
+      teamDeliveryInputId(RUN, "lead", sent.messageId),
+    )
     journal.close()
     await saveRuntimeState({ ...f.state, status: "deleted" }, f.config)
     const delivery = owner(f)
@@ -296,15 +384,31 @@ describe("lead delivery owner journal cleanup", () => {
 })
 
 describe("lead delivery owner reload recovery", () => {
-  const namespace = "opencode2-team:" + createHash("sha256").update(JSON.stringify([DIRECTORY, LEAD])).digest("hex")
+  const namespace =
+    "opencode2-team:" +
+    createHash("sha256")
+      .update(JSON.stringify([DIRECTORY, LEAD]))
+      .digest("hex")
   const ALPHA_RESTORED = "ses_alpha_restored"
   function row(f: Fixture, recipient: string, messageId: string) {
     const journal = openTeamDeliveryJournal({ path: f.journalPath, namespace })
-    try { return journal.read({ teamRunId: RUN, recipient, messageId }) } finally { journal.close() }
+    try {
+      return journal.read({ teamRunId: RUN, recipient, messageId })
+    } finally {
+      journal.close()
+    }
   }
   function strand(f: Fixture, recipient: string, receiver: string, messageId: string) {
     const journal = openTeamDeliveryJournal({ path: f.journalPath, namespace })
-    try { journal.recordIntent({ teamRunId: RUN, recipient, messageId }, receiver, teamDeliveryInputId(RUN, recipient, messageId)) } finally { journal.close() }
+    try {
+      journal.recordIntent(
+        { teamRunId: RUN, recipient, messageId },
+        receiver,
+        teamDeliveryInputId(RUN, recipient, messageId),
+      )
+    } finally {
+      journal.close()
+    }
   }
 
   test("#given a stranded un-ACKed lead intent and no member bound #when a fresh owner resumes the lead #then the same id is posted once and committed", async () => {
@@ -322,7 +426,9 @@ describe("lead delivery owner reload recovery", () => {
     await delivery.refresh(RUN)
 
     // then
-    expect(f.calls.map(call => [call.sessionID, call.id])).toEqual([[LEAD, teamDeliveryInputId(RUN, "lead", sent.messageId)]])
+    expect(f.calls.map((call) => [call.sessionID, call.id])).toEqual([
+      [LEAD, teamDeliveryInputId(RUN, "lead", sent.messageId)],
+    ])
     expect(processed(f, "lead", sent)).toBe(true)
     expect(reservations(f, "lead")).toEqual([])
     expect(row(f, "lead", sent.messageId)?.phase).toBe("acked")
@@ -341,7 +447,7 @@ describe("lead delivery owner reload recovery", () => {
 
     // then
     expect(f.calls).toEqual([])
-    expect((await listUnreadMessages(RUN, "lead", f.config)).map(value => value.messageId)).toEqual([sent.messageId])
+    expect((await listUnreadMessages(RUN, "lead", f.config)).map((value) => value.messageId)).toEqual([sent.messageId])
   })
 
   test("#given an un-ACKed intent held for a member's old session #when the member binds with its restored session #then the intent moves there and is delivered once with the same id", async () => {
@@ -349,12 +455,19 @@ describe("lead delivery owner reload recovery", () => {
     const f = fixture()
     await save(f)
     const sent = await seedToAlpha(f, "22222222-2222-4222-8222-000000000015")
-    const first = owner(f, { session: { ...f.session, async synthetic() { throw Error("host crashed before ACK") } } })
+    const first = owner(f, {
+      session: {
+        ...f.session,
+        async synthetic() {
+          throw Error("host crashed before ACK")
+        },
+      },
+    })
     bindAlpha(first)
     await first.refresh(RUN)
     await first.close()
     expect(row(f, "alpha", sent.messageId)).toMatchObject({ phase: "intent", receiverSessionID: ALPHA })
-    const restarted = owner(f, { isMemberBound: sessionID => sessionID === ALPHA_RESTORED })
+    const restarted = owner(f, { isMemberBound: (sessionID) => sessionID === ALPHA_RESTORED })
 
     // when
     restarted.memberBound({ leadSessionID: LEAD, teamRunId: RUN, memberName: "alpha", sessionID: ALPHA_RESTORED })
@@ -362,9 +475,15 @@ describe("lead delivery owner reload recovery", () => {
     await restarted.refresh(RUN)
 
     // then
-    expect(f.calls.map(call => [call.sessionID, call.id])).toEqual([[ALPHA_RESTORED, teamDeliveryInputId(RUN, "alpha", sent.messageId)]])
+    expect(f.calls.map((call) => [call.sessionID, call.id])).toEqual([
+      [ALPHA_RESTORED, teamDeliveryInputId(RUN, "alpha", sent.messageId)],
+    ])
     expect(processed(f, "alpha", sent)).toBe(true)
-    expect(row(f, "alpha", sent.messageId)).toMatchObject({ phase: "acked", receiverSessionID: ALPHA_RESTORED, previousReceivers: [ALPHA] })
+    expect(row(f, "alpha", sent.messageId)).toMatchObject({
+      phase: "acked",
+      receiverSessionID: ALPHA_RESTORED,
+      previousReceivers: [ALPHA],
+    })
   })
 
   test("#given a moved intent the host had already accepted in the old session #when it is re-posted #then the earlier row is accepted as its ACK", async () => {
@@ -372,12 +491,18 @@ describe("lead delivery owner reload recovery", () => {
     const f = fixture()
     await save(f)
     const sent = await seedToAlpha(f, "22222222-2222-4222-8222-000000000016")
-    const lossy: TeamDeliverySession = { ...f.session, async synthetic(input) { await f.session.synthetic(input); throw Error("crash before the ACK was recorded") } }
+    const lossy: TeamDeliverySession = {
+      ...f.session,
+      async synthetic(input) {
+        await f.session.synthetic(input)
+        throw Error("crash before the ACK was recorded")
+      },
+    }
     const first = owner(f, { session: lossy })
     bindAlpha(first)
     await first.refresh(RUN)
     await first.close()
-    const restarted = owner(f, { isMemberBound: sessionID => sessionID === ALPHA_RESTORED })
+    const restarted = owner(f, { isMemberBound: (sessionID) => sessionID === ALPHA_RESTORED })
 
     // when
     restarted.memberBound({ leadSessionID: LEAD, teamRunId: RUN, memberName: "alpha", sessionID: ALPHA_RESTORED })

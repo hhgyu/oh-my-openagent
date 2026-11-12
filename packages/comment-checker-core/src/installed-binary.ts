@@ -28,7 +28,12 @@ export function resolveInstalledCommentCheckerBinary(options: InstalledCommentCh
   const checkExists = options.existsSync ?? existsSync
   const env = options.env ?? process.env
   const envBinaryPath = env[COMMENT_CHECKER_ENV_KEY]?.trim()
-  if (envBinaryPath !== undefined && envBinaryPath.length > 0 && isAbsolute(envBinaryPath) && checkExists(envBinaryPath)) {
+  if (
+    envBinaryPath !== undefined &&
+    envBinaryPath.length > 0 &&
+    isAbsolute(envBinaryPath) &&
+    checkExists(envBinaryPath)
+  ) {
     return envBinaryPath
   }
 

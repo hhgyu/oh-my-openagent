@@ -225,7 +225,8 @@ export function recordSpawnedRunner(
   hostSession: ManagedChildHandle["hostSession"],
   ownedSession?: ManagedChildHandle["ownedSession"],
 ): TaskRecord | undefined {
-  if (!isTerminalRecord(record) && kind === "owned-session" && ownedSession !== undefined) return { ...record, runner_kind: "owned-session", owned_session: ownedSession }
+  if (!isTerminalRecord(record) && kind === "owned-session" && ownedSession !== undefined)
+    return { ...record, runner_kind: "owned-session", owned_session: ownedSession }
   if (isTerminalRecord(record) || kind !== "host-session" || hostSession === undefined) return undefined
   return {
     ...record,
@@ -265,7 +266,9 @@ export function childIdentityOf(source: TaskRecord | ManagedChildHandle): ChildI
     }
   }
   return {
-    ...(source.ownedSession === undefined ? {} : { runner_kind: "owned-session" as const, owned_session: source.ownedSession }),
+    ...(source.ownedSession === undefined
+      ? {}
+      : { runner_kind: "owned-session" as const, owned_session: source.ownedSession }),
     ...(source.pid === undefined ? {} : { pid: source.pid }),
     ...(source.kind !== "host-session" || source.hostSession === undefined
       ? {}

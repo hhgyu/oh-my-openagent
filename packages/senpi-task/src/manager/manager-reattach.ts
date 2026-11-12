@@ -12,7 +12,7 @@ import { childIdentityOf, hasChildIdentity, isTerminalRecord, nowIso, recordSpaw
  * process child was spawned for this attempt alone and is ended.
  */
 async function letGoOfRejected(handle: ManagedChildHandle): Promise<void> {
-  if ((handle.kind === "host-session" || handle.kind === "owned-session")) await releaseSupersededHandle(handle)
+  if (handle.kind === "host-session" || handle.kind === "owned-session") await releaseSupersededHandle(handle)
   else await discardManagedHandle(handle)
 }
 
@@ -99,7 +99,13 @@ export async function reattachManagedTask(input: {
     const timestamp = nowIso(input.now)
     const sessionId = input.handle.sessionId
     // A revived daemon child is identified by its session, exactly as a fresh spawn stamps it.
-    const withRunner = recordSpawnedRunner(rest, input.handle.kind, input.handle.hostSession, input.handle.ownedSession === undefined ? undefined : { ...input.handle.ownedSession, runEpoch: epoch }) ?? rest
+    const withRunner =
+      recordSpawnedRunner(
+        rest,
+        input.handle.kind,
+        input.handle.hostSession,
+        input.handle.ownedSession === undefined ? undefined : { ...input.handle.ownedSession, runEpoch: epoch },
+      ) ?? rest
     const reattached: TaskRecord = {
       ...withRunner,
       status: "running",

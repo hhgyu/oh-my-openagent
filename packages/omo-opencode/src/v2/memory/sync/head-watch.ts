@@ -12,9 +12,11 @@ export function watchHeadLog(gitDir: string, onChange: () => void, warn: (messag
   try {
     watcher = watch(path, { persistent: false }, onChange)
   } catch (error) {
-    warn(`memory sync: cannot watch ${path} for local commits (${String(error)}); local edits sync on the next stream event or restart`)
+    warn(
+      `memory sync: cannot watch ${path} for local commits (${String(error)}); local edits sync on the next stream event or restart`,
+    )
     return () => undefined
   }
-  watcher.on("error", error => warn(`memory sync: the HEAD reflog watch stopped (${String(error)})`))
+  watcher.on("error", (error) => warn(`memory sync: the HEAD reflog watch stopped (${String(error)})`))
   return () => watcher.close()
 }

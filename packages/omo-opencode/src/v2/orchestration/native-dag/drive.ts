@@ -1,6 +1,15 @@
 import {
   createDagScheduler,
-  type DagFileStore, type DagLeasePort, type DagManager, type DagMaterializeSkills, type DagNodeId, type DagNodeSpawnPolicy, type DagRunId, type DagRunRecordV1, type DagScheduler, type DagSchedulerOptions,
+  type DagFileStore,
+  type DagLeasePort,
+  type DagManager,
+  type DagMaterializeSkills,
+  type DagNodeId,
+  type DagNodeSpawnPolicy,
+  type DagRunId,
+  type DagRunRecordV1,
+  type DagScheduler,
+  type DagSchedulerOptions,
 } from "@oh-my-opencode/senpi-task/dag"
 import { claimDagRunLease } from "./lease"
 import { prepareRunRecovery, recoverDagRun, restoreRunChildren } from "./recovery"
@@ -47,7 +56,11 @@ export type NativeDagEntry = (options: NativeDagSchedulerOptions) => Promise<Nat
  * node whose admission was cut off with no task to attach is refused here (a drive routes such a run
  * through recovery first), unless the caller is cancelling the run (`lenient`): such a node has no
  * child, so it is only cancelled. */
-export function admittedChildren(record: DagRunRecordV1, call: Pick<NativeDagCallPort, "findOwnedTask">, lenient = false): ReadonlyMap<DagNodeId, string> {
+export function admittedChildren(
+  record: DagRunRecordV1,
+  call: Pick<NativeDagCallPort, "findOwnedTask">,
+  lenient = false,
+): ReadonlyMap<DagNodeId, string> {
   const attached = new Map<DagNodeId, string>()
   const lost: string[] = []
   for (const node of record.nodes) {
@@ -57,7 +70,11 @@ export function admittedChildren(record: DagRunRecordV1, call: Pick<NativeDagCal
     else attached.set(node.id, taskId)
   }
   if (lost.length > 0 && !lenient) {
-    throw new NativeDagRefusal("run_still_active", `Node(s) ${lost.map(id => `"${id}"`).join(", ")} were being admitted when their workflow call ended and have no task yet. Call workflow action=wait on this run: its recovery resolves them inside that call.`, lost)
+    throw new NativeDagRefusal(
+      "run_still_active",
+      `Node(s) ${lost.map((id) => `"${id}"`).join(", ")} were being admitted when their workflow call ended and have no task yet. Call workflow action=wait on this run: its recovery resolves them inside that call.`,
+      lost,
+    )
   }
   return attached
 }
@@ -66,7 +83,10 @@ export function admittedChildren(record: DagRunRecordV1, call: Pick<NativeDagCal
 function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     const abort = () => reject(signal.reason)
-    if (signal.aborted) { abort(); return }
+    if (signal.aborted) {
+      abort()
+      return
+    }
     signal.addEventListener("abort", abort, { once: true })
     work.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort))
   })
@@ -75,17 +95,28 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 /** An admitted node whose child already settled but the scheduler has not folded yet. Read through
  * the owned lookup, which never captures a stored row this runtime does not own (D-1). */
 function hasUnfoldedSettle(record: DagRunRecordV1, call: Pick<NativeDagCallPort, "findOwnedTask">): boolean {
-  return record.nodes.some(node => (node.state === "scheduled" || node.state === "running") && node.taskId !== undefined &&
-    TERMINAL_TASK_STATUSES.has(call.findOwnedTask({ kind: "dag", runId: record.runId, nodeId: node.id })?.status ?? ""))
+  return record.nodes.some(
+    (node) =>
+      (node.state === "scheduled" || node.state === "running") &&
+      node.taskId !== undefined &&
+      TERMINAL_TASK_STATUSES.has(
+        call.findOwnedTask({ kind: "dag", runId: record.runId, nodeId: node.id })?.status ?? "",
+      ),
+  )
 }
 
 /** Resolves once the scheduler is quiet inside this call: no node start in flight, no settled child
  * left unfolded, and the checkpoint unchanged across a full timer turn. Then everything the call can
  * admit now has been admitted; the rest waits for a later settle (and the wake) and a later call. */
-async function admissionSettled(snapshot: () => DagRunRecordV1, starting: () => number, call: NativeDagCallPort, stop: AbortSignal): Promise<DagRunRecordV1> {
+async function admissionSettled(
+  snapshot: () => DagRunRecordV1,
+  starting: () => number,
+  call: NativeDagCallPort,
+  stop: AbortSignal,
+): Promise<DagRunRecordV1> {
   let previous = -1
   for (;;) {
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
     const record = snapshot()
     if (stop.aborted) return record
     if (starting() === 0 && record.checkpointSeq === previous && !hasUnfoldedSettle(record, call)) return record
@@ -94,8 +125,16 @@ async function admissionSettled(snapshot: () => DagRunRecordV1, starting: () => 
 }
 
 /** The call's own scheduler over the run's current record, re-attaching children earlier calls admitted. */
-function fresh(options: NativeDagSchedulerOptions, initialRecord: DagRunRecordV1, call: NativeDagCallPort): NativeDagEntered {
-  const scheduler = createDagScheduler({ ...options, initialRecord, preAttachedTasks: admittedChildren(initialRecord, call) })
+function fresh(
+  options: NativeDagSchedulerOptions,
+  initialRecord: DagRunRecordV1,
+  call: NativeDagCallPort,
+): NativeDagEntered {
+  const scheduler = createDagScheduler({
+    ...options,
+    initialRecord,
+    preAttachedTasks: admittedChildren(initialRecord, call),
+  })
   return { scheduler, run: scheduler.run() }
 }
 
@@ -104,14 +143,24 @@ function fresh(options: NativeDagSchedulerOptions, initialRecord: DagRunRecordV1
  * (after this call restored the parked children); any other run is re-attached as it stands. */
 async function enterRun(options: NativeDagSchedulerOptions, input: NativeDagDriveInput): Promise<NativeDagEntered> {
   const record = input.manager.record(input.runId, input.parentSessionID)
-  if (await prepareRunRecovery(record, input.call)) return recoverDagRun({ store: input.store, record: input.manager.record(input.runId, input.parentSessionID), lease: input.lease, options })
+  if (await prepareRunRecovery(record, input.call))
+    return recoverDagRun({
+      store: input.store,
+      record: input.manager.record(input.runId, input.parentSessionID),
+      lease: input.lease,
+      options,
+    })
   return fresh(options, input.manager.record(input.runId, input.parentSessionID), input.call)
 }
 
 /** A control verb's entry: every admitted child a reload parked (or a dead host stranded) is first
  * restored under this call's approval, so the verb's attach, cancel or steer reaches a child this
  * runtime owns instead of a stored row its port refuses (D-1, P-24). */
-async function enterControl(options: NativeDagSchedulerOptions, input: NativeDagDriveInput, enter: NativeDagEntry): Promise<NativeDagEntered | undefined> {
+async function enterControl(
+  options: NativeDagSchedulerOptions,
+  input: NativeDagDriveInput,
+  enter: NativeDagEntry,
+): Promise<NativeDagEntered | undefined> {
   await restoreRunChildren(input.manager.record(input.runId, input.parentSessionID), input.call)
   return enter(options)
 }
@@ -121,7 +170,10 @@ async function enterControl(options: NativeDagSchedulerOptions, input: NativeDag
  * journal entry (a steer) never leaves an announced settle unfolded behind a new checkpoint (D-3).
  * Returns undefined when the run is not running or nothing settled; a node whose admission was cut
  * off leaves the fold to recovery instead of failing the control that already acted. */
-function foldAfterControl(options: NativeDagSchedulerOptions, input: NativeDagDriveInput): NativeDagEntered | undefined {
+function foldAfterControl(
+  options: NativeDagSchedulerOptions,
+  input: NativeDagDriveInput,
+): NativeDagEntered | undefined {
   const record = input.manager.record(input.runId, input.parentSessionID)
   if (record.status !== "running" || !hasUnfoldedSettle(record, input.call)) return undefined
   try {
@@ -144,11 +196,19 @@ export async function driveDagRun(input: NativeDagDriveInput): Promise<DagRunRec
   // This generation's lease while the call drives (P-05); a run another live generation holds is refused.
   const releaseLease = claimDagRunLease(input.store, input.runId, input.lease)
   const held = createHeldDagTaskPort(input.runId)
-  const release = held.bind(input.call), quiet = new AbortController()
+  const release = held.bind(input.call),
+    quiet = new AbortController()
   let retire: (() => Promise<void>) | undefined
   try {
-    const options: NativeDagSchedulerOptions = { store: input.store, taskManager: held.port, executionMode: input.executionMode,
-      ancestry: { depth: 0 }, lease: input.lease, materializeSkills: input.materializeSkills, ...(input.spawnPolicy && { nodeSpawnPolicy: input.spawnPolicy }) }
+    const options: NativeDagSchedulerOptions = {
+      store: input.store,
+      taskManager: held.port,
+      executionMode: input.executionMode,
+      ancestry: { depth: 0 },
+      lease: input.lease,
+      materializeSkills: input.materializeSkills,
+      ...(input.spawnPolicy && { nodeSpawnPolicy: input.spawnPolicy }),
+    }
     const entered = input.enter ? await enterControl(options, input, input.enter) : await enterRun(options, input)
     const drive = entered ?? foldAfterControl(options, input)
     if (drive === undefined) return input.manager.record(input.runId, input.parentSessionID)
@@ -162,12 +222,21 @@ export async function driveDagRun(input: NativeDagDriveInput): Promise<DagRunRec
     }
     // An aborted call stops waiting here; the retired scheduler's own outcome is the store's.
     void running.catch(() => {})
-    const record = await untilAborted(input.detach || entered === undefined ? Promise.race([running, admissionSettled(scheduler.snapshot, held.starting, input.call, quiet.signal)]) : running, input.signal)
+    const record = await untilAborted(
+      input.detach || entered === undefined
+        ? Promise.race([running, admissionSettled(scheduler.snapshot, held.starting, input.call, quiet.signal)])
+        : running,
+      input.signal,
+    )
     await scheduler.whenIdle()
     return record
   } finally {
     quiet.abort()
     release()
-    try { await retire?.() } finally { releaseLease() }
+    try {
+      await retire?.()
+    } finally {
+      releaseLease()
+    }
   }
 }

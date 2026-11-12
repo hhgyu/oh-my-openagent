@@ -25,8 +25,11 @@ const DIRECTIVE_MARKER = "omo.ultrawork"
 const ULTRAWORK_VARIANTS: VariantTable = ultraworkPromptVariants
 
 function isDisabled(host: Host): boolean {
-  return host.options?.["omo-senpi-ultrawork-disabled"] === true ||
-    host.options?.["omo-senpi-disabled"] === true || process.env.OMO_SENPI_DISABLED === "1"
+  return (
+    host.options?.["omo-senpi-ultrawork-disabled"] === true ||
+    host.options?.["omo-senpi-disabled"] === true ||
+    process.env.OMO_SENPI_DISABLED === "1"
+  )
 }
 
 function directiveFor(context: SessionContext): string | undefined {
@@ -36,7 +39,7 @@ function directiveFor(context: SessionContext): string | undefined {
 }
 
 function carriesDirective(context: SessionContext): boolean {
-  return context.system.some(part => part.metadata?.[DIRECTIVE_MARKER] === true)
+  return context.system.some((part) => part.metadata?.[DIRECTIVE_MARKER] === true)
 }
 
 /** Registers ultrawork keyword arming and directive injection; the cleanup disposes both hooks. */
@@ -60,7 +63,7 @@ export async function registerUltrawork(host: Host): Promise<() => Promise<void>
   async function onPrompt(input: SessionPrompt): Promise<void> {
     if (closed || arming.isArmed(input.sessionID)) return
     if (classifyUltraworkPrompt(input.prompt) !== "arm") return
-    if (await isChildSession(input.sessionID) || closed) return
+    if ((await isChildSession(input.sessionID)) || closed) return
     arming.arm(input.sessionID)
   }
 
@@ -79,24 +82,30 @@ export async function registerUltrawork(host: Host): Promise<() => Promise<void>
     if (disposal) return disposal
     closed = true
     stop.abort()
-    disposal = Promise.all(registrations.map(registration => registration.dispose())).then(async () => { await pump })
+    disposal = Promise.all(registrations.map((registration) => registration.dispose())).then(async () => {
+      await pump
+    })
     return disposal
   }
   try {
     registrations.push(await host.session.hook("prompt", onPrompt))
     registrations.push(await host.session.hook("context", onContext))
     const events = host.event
-    if (events !== undefined) pump = (async () => {
-      try {
-        for await (const event of events.subscribe({ types: ["session.compaction.ended", "session.deleted"], signal: stop.signal })) {
-          if (closed) break
-          if (event.type === "session.compaction.ended") arming.compact(event.data.sessionID, event.id)
-          else arming.disarm(event.data.sessionID)
+    if (events !== undefined)
+      pump = (async () => {
+        try {
+          for await (const event of events.subscribe({
+            types: ["session.compaction.ended", "session.deleted"],
+            signal: stop.signal,
+          })) {
+            if (closed) break
+            if (event.type === "session.compaction.ended") arming.compact(event.data.sessionID, event.id)
+            else arming.disarm(event.data.sessionID)
+          }
+        } catch (error) {
+          if (!stop.signal.aborted) console.warn("[oh-my-openagent/v2] ultrawork arming event stream failed", error)
         }
-      } catch (error) {
-        if (!stop.signal.aborted) console.warn("[oh-my-openagent/v2] ultrawork arming event stream failed", error)
-      }
-    })()
+      })()
   } catch (error) {
     await cleanup()
     throw error

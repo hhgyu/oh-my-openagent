@@ -36,7 +36,7 @@ function createPromptArmingLedger(): PromptArmingLedger {
     pending.delete(sessionID)
   }
   return {
-    isArmed: sessionID => armed.has(sessionID),
+    isArmed: (sessionID) => armed.has(sessionID),
     arm,
     observePrompt(sessionID, text) {
       if (isUltraworkPrompt(text)) arm(sessionID)
@@ -54,13 +54,17 @@ function createPromptArmingLedger(): PromptArmingLedger {
       pending.add(sessionID)
       reminded.delete(sessionID)
     },
-    resume(sessionID) { if (pending.has(sessionID)) arm(sessionID) },
+    resume(sessionID) {
+      if (pending.has(sessionID)) arm(sessionID)
+    },
     claimReminder(sessionID) {
       if (reminded.has(sessionID)) return false
       reminded.add(sessionID)
       return true
     },
-    resetReminder(sessionID) { reminded.delete(sessionID) },
+    resetReminder(sessionID) {
+      reminded.delete(sessionID)
+    },
   }
 }
 
@@ -71,7 +75,9 @@ interface Registry {
   readonly hosts: WeakMap<object, PromptArmingLedger>
 }
 
-export function sharedPromptArmingLedger(host: object & { readonly location?: { readonly directory: string } }): PromptArmingLedger {
+export function sharedPromptArmingLedger(
+  host: object & { readonly location?: { readonly directory: string } },
+): PromptArmingLedger {
   const globals = globalThis as unknown as Record<symbol, Registry | undefined>
   const revision = JSON.stringify(ultraworkPromptVariants)
   let registry = globals[SHARED_ARMING]

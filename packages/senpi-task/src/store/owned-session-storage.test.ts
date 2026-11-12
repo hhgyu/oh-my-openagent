@@ -21,19 +21,42 @@ afterEach(() => {
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "owned-session-storage-"))
   roots.push(root)
-  const base = createTaskRecord({ parent_session_id: "owned-parent", root_session_id: "owned-parent", depth: 1,
-    execution_mode: "in-process", model: "qa/model", notify_on_terminal: false })
-  const owned = { format: 1 as const, backendID: "omo-native-task-opencode", location: root, hostVersion: "2.2.6",
-    parentID: base.parent_session_id, sessionID: "owned-child", generation: 1, journalKey: `${base.task_id}:0`,
-    journalOwner: "fixture-owner", journalRevision: 2, runEpoch: 0, residencyClaim: "fixture-claim" }
-  const record: TaskRecord = { ...base, runner_kind: "owned-session", owned_session: owned,
-    residency_claim: owned.residencyClaim, child_session_id: owned.sessionID }
+  const base = createTaskRecord({
+    parent_session_id: "owned-parent",
+    root_session_id: "owned-parent",
+    depth: 1,
+    execution_mode: "in-process",
+    model: "qa/model",
+    notify_on_terminal: false,
+  })
+  const owned = {
+    format: 1 as const,
+    backendID: "omo-native-task-opencode",
+    location: root,
+    hostVersion: "2.2.6",
+    parentID: base.parent_session_id,
+    sessionID: "owned-child",
+    generation: 1,
+    journalKey: `${base.task_id}:0`,
+    journalOwner: "fixture-owner",
+    journalRevision: 2,
+    runEpoch: 0,
+    residencyClaim: "fixture-claim",
+  }
+  const record: TaskRecord = {
+    ...base,
+    runner_kind: "owned-session",
+    owned_session: owned,
+    residency_claim: owned.residencyClaim,
+    child_session_id: owned.sessionID,
+  }
   const options = { project_dir: root, task: { state_dir: root } }
   return { root, record, options, path: join(root, "tasks", `${record.task_id}.json`) }
 }
 
 test("owned FileStore bytes remain readable by the frozen R0 enum contract without a fake Native endpoint", () => {
-  const f = fixture(), store = createTaskRecordStore(f.options)
+  const f = fixture(),
+    store = createTaskRecordStore(f.options)
   try {
     store.save(f.record)
     const raw = JSON.parse(readFileSync(f.path, "utf8"))
@@ -43,22 +66,31 @@ test("owned FileStore bytes remain readable by the frozen R0 enum contract witho
     expect(raw.status).toBe(f.record.status)
     expect(raw.pid).toBeUndefined()
     expect(raw.host_session).toBeUndefined()
-  } finally { store.close() }
+  } finally {
+    store.close()
+  }
 })
 
 test("reopening and mutating the real store retains the owned runner and exact custody reference", () => {
-  const f = fixture(), store = createTaskRecordStore(f.options)
-  try { store.save(f.record) } finally { store.close() }
+  const f = fixture(),
+    store = createTaskRecordStore(f.options)
+  try {
+    store.save(f.record)
+  } finally {
+    store.close()
+  }
   const reopened = createTaskRecordStore(f.options)
   try {
     expect(reopened.load(f.record.task_id)?.runner_kind).toBe("owned-session")
     expect(reopened.load(f.record.task_id)?.owned_session).toEqual(f.record.owned_session)
-    reopened.mutate(f.record.task_id, record => ({ ...record, description: "updated without losing custody" }))
+    reopened.mutate(f.record.task_id, (record) => ({ ...record, description: "updated without losing custody" }))
     expect(reopened.load(f.record.task_id)?.owned_session).toEqual(f.record.owned_session)
     const raw = JSON.parse(readFileSync(f.path, "utf8"))
     expect(raw.runner_kind).toBe("host-session")
     expect(() => parseR0PersistedReasons(raw)).not.toThrow()
-  } finally { reopened.close() }
+  } finally {
+    reopened.close()
+  }
 })
 
 test("the current reader decodes the compatible encoding and still reads historical raw owned records", () => {
@@ -72,8 +104,11 @@ test("the current reader decodes the compatible encoding and still reads histori
 test("compatible owned encoding preserves all identity and native-mixing refusals", () => {
   const { record } = fixture()
   for (const patch of [
-    { pid: 123 }, { host_session: { socket: "not-an-issued-native-endpoint" } }, { runner_kind: "child-process" },
-    { residency_claim: "foreign" }, { child_session_id: "foreign" },
+    { pid: 123 },
+    { host_session: { socket: "not-an-issued-native-endpoint" } },
+    { runner_kind: "child-process" },
+    { residency_claim: "foreign" },
+    { child_session_id: "foreign" },
     { owned_session: { ...record.owned_session, runEpoch: 1 } },
     { owned_session: { ...record.owned_session, parentID: "foreign" } },
     { owned_session: { ...record.owned_session, fabricatedSocket: "forbidden" } },

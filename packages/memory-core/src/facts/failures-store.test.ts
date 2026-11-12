@@ -53,7 +53,11 @@ describe("facts failure store persistence", () => {
     const lockPath = factsQueueLockPath(paths.locks)
     // when / then
     await withLock(lockPath, await createLockRecord("facts-queue"), async () => {
-      for (const operation of [() => store.readFailures(), () => store.clearForRetry({}), () => store.recordFailure({ targets: [target()], failureId: "run-b", reason: "child_exit" })]) {
+      for (const operation of [
+        () => store.readFailures(),
+        () => store.clearForRetry({}),
+        () => store.recordFailure({ targets: [target()], failureId: "run-b", reason: "child_exit" }),
+      ]) {
         const error = await operation().catch((error: unknown) => error)
         expect(error).toBeInstanceOf(LockContentionError)
         expect(error).not.toBeInstanceOf(FactsFailuresCorruptError)

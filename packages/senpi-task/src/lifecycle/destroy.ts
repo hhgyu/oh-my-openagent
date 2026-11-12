@@ -40,7 +40,8 @@ export async function destroyResidentTask(
     await context.ownedSessions.destroy(owned, cause)
     context.failedTeardowns.delete(taskId)
     context.registry.forget(taskId, { path: cause === "recovery_detach" ? "park" : "end" })
-    if (cause !== "recovery_detach" && cause !== "fallback_handoff" && cause !== "redispatch") recordResidency(context, taskId, cause)
+    if (cause !== "recovery_detach" && cause !== "fallback_handoff" && cause !== "redispatch")
+      recordResidency(context, taskId, cause)
     return
   }
   if (cause === "recovery_detach") {

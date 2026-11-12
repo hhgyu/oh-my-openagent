@@ -201,21 +201,20 @@ describe("createSkillInvocationTracker - user-request channel", () => {
     '<system-reminder><skill name="ulw-plan">injected expansion</skill></system-reminder>',
     '<ultrawork-mode><skill name="ulw-plan">injected expansion</skill></ultrawork-mode>',
     '<system-reminder><system-reminder>nested</system-reminder><skill name="ulw-plan">injected</skill></system-reminder>',
-  ])("#given planning only inside an injected block %p #when the input arrives #then no user request is recorded", async text => {
-    // given
-    const pi = new FakeExtensionAPI()
-    const tracker = createSkillInvocationTracker(pi)
+  ])(
+    "#given planning only inside an injected block %p #when the input arrives #then no user request is recorded",
+    async (text) => {
+      // given
+      const pi = new FakeExtensionAPI()
+      const tracker = createSkillInvocationTracker(pi)
 
-    // when
-    await pi.dispatch(
-      "input",
-      { text },
-      CTX_A,
-    )
+      // when
+      await pi.dispatch("input", { text }, CTX_A)
 
-    // then
-    expect(tracker.stateFor("sess-a").hasUserRequested("ulw-plan")).toBe(false)
-  })
+      // then
+      expect(tracker.stateFor("sess-a").hasUserRequested("ulw-plan")).toBe(false)
+    },
+  )
 })
 
 describe("createSkillInvocationTracker - plan-artifact channel", () => {

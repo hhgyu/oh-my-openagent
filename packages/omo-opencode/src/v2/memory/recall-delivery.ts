@@ -35,29 +35,38 @@ export function createRecallDelivery(deps: MemoryRecallDeliveryDeps): MemoryReca
       try {
         nudges = dedupeByPath(await deps.stores.pending(bound).take(context.sessionID))
       } catch (error) {
-        deps.logger.warn("memory recall pending take skipped", { sessionID: context.sessionID, error: describeError(error) })
+        deps.logger.warn("memory recall pending take skipped", {
+          sessionID: context.sessionID,
+          error: describeError(error),
+        })
         return
       }
       if (nudges.length === 0 || carriesRecall(context.system)) return
       context.system.push({
         type: "text",
         text: nudges.map(renderNudgeBlock).join("\n"),
-        metadata: { [RECALL_PART_MARKER]: true, paths: nudges.map(nudge => nudge.path) },
+        metadata: { [RECALL_PART_MARKER]: true, paths: nudges.map((nudge) => nudge.path) },
       })
       try {
-        await deps.stores.ledger(bound).markSurfaced(context.sessionID, nudges.map(nudge => ({ path: nudge.path, hash: RECALL_SURFACE_HASH })))
+        await deps.stores.ledger(bound).markSurfaced(
+          context.sessionID,
+          nudges.map((nudge) => ({ path: nudge.path, hash: RECALL_SURFACE_HASH })),
+        )
       } catch (error) {
-        deps.logger.warn("memory recall ledger mark skipped", { sessionID: context.sessionID, error: describeError(error) })
+        deps.logger.warn("memory recall ledger mark skipped", {
+          sessionID: context.sessionID,
+          error: describeError(error),
+        })
       }
     },
   }
 }
 
 function carriesRecall(system: SessionContext["system"]): boolean {
-  return system.some(part => part.metadata?.[RECALL_PART_MARKER] === true)
+  return system.some((part) => part.metadata?.[RECALL_PART_MARKER] === true)
 }
 
 function dedupeByPath(nudges: readonly RecallNudge[]): RecallNudge[] {
   const seen = new Set<string>()
-  return nudges.filter(nudge => !seen.has(nudge.path) && seen.add(nudge.path) !== undefined)
+  return nudges.filter((nudge) => !seen.has(nudge.path) && seen.add(nudge.path) !== undefined)
 }

@@ -29,7 +29,12 @@ export type ErrorOutcomeInput = {
 // freshest handles and the freshest on-disk record rather than facts captured when the tracking
 // cycle was armed.
 export type OutcomeTrackerPorts = {
-  readonly observationUncertain?: (taskId: string, handle: ManagedChildHandle, epoch: number, error: ChildObservationUncertain) => void
+  readonly observationUncertain?: (
+    taskId: string,
+    handle: ManagedChildHandle,
+    epoch: number,
+    error: ChildObservationUncertain,
+  ) => void
   readonly scheduleExitConfirmation?: ExitConfirmationSchedule
   readonly store: TaskRecordStore
   readonly now: () => number
@@ -97,7 +102,11 @@ function ownedRecord(
   epoch: number,
 ): TaskRecord | null {
   if (ports.liveHandle(taskId) !== handle) return null
-  try { handle.assertOwned?.() } catch { return null }
+  try {
+    handle.assertOwned?.()
+  } catch {
+    return null
+  }
   const fresh = ports.tryLoad(taskId)
   if (
     fresh === null ||
@@ -387,7 +396,11 @@ export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker
         // Lost observation custody is precisely why local waiters need an uncertainty
         // settlement. The marker checks the fence before any durable mutation; real
         // terminal transitions above still require the complete ownedRecord verdict.
-        if (ChildObservationUncertain.is(error) && turns.get(taskId) === tracking && ports.liveHandle(taskId) === handle) {
+        if (
+          ChildObservationUncertain.is(error) &&
+          turns.get(taskId) === tracking &&
+          ports.liveHandle(taskId) === handle
+        ) {
           ports.observationUncertain?.(taskId, handle, epoch, error)
           return
         }

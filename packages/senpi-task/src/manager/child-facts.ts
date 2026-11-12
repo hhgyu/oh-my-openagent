@@ -29,8 +29,10 @@ export function subscribeChildFacts(input: {
   readonly onLivenessNotice: (record: TaskRecord, status: HostLivenessStatus) => void
 }): () => void {
   const { handle, taskId, now, runStats } = input
-  const transcript = handle.subscribeTranscript?.(input.store, taskId) ?? subscribeTranscriptLog(handle, input.store, taskId)
-  if (handle.observationCoverage === undefined) runStats.set(taskId, createRunStatsTracker(now(), now, currentRunStartEpoch(input.store.load(taskId))))
+  const transcript =
+    handle.subscribeTranscript?.(input.store, taskId) ?? subscribeTranscriptLog(handle, input.store, taskId)
+  if (handle.observationCoverage === undefined)
+    runStats.set(taskId, createRunStatsTracker(now(), now, currentRunStartEpoch(input.store.load(taskId))))
   const effectiveModel = subscribeEffectiveModel(handle, { store: input.store, taskId, now })
   const refusals = observeModelRefusals({ store: input.store, taskId, now })
   const stats = handle.subscribe((event) => {

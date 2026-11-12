@@ -11,7 +11,14 @@
 
 import type { FactsQueue } from "@oh-my-opencode/memory-core"
 import { describeError } from "./binding"
-import { ledgerPath, openFactsRuns, readRunJson, type FactsRunLedger, type FactsRunTerminal, type FactsTerminal } from "./facts-run-store"
+import {
+  ledgerPath,
+  openFactsRuns,
+  readRunJson,
+  type FactsRunLedger,
+  type FactsRunTerminal,
+  type FactsTerminal,
+} from "./facts-run-store"
 
 export interface FactsRecoveryDeps {
   readonly factsDir: string
@@ -35,13 +42,22 @@ export async function recoverFactsRuns(deps: FactsRecoveryDeps): Promise<boolean
       deps.warn("facts run ledger unreadable; run left for inspection", { runDir, error: describeError(error) })
       continue
     }
-    if (deps.isOwnRun(ledger.runId)) { active = true; continue }
-    if (deps.isForeignLive(ledger) && (deps.now ?? Date.now)() < ledger.hardDeadlineAt) { active = true; continue }
+    if (deps.isOwnRun(ledger.runId)) {
+      active = true
+      continue
+    }
+    if (deps.isForeignLive(ledger) && (deps.now ?? Date.now)() < ledger.hardDeadlineAt) {
+      active = true
+      continue
+    }
     try {
       const decided = await deps.finalize(runDir)
       if (decided === undefined) await deps.terminal.abandon(runDir, ledger, "unknown_liveness")
     } catch (error) {
-      deps.warn("facts run recovery failed; it is retried at the next reconcile", { runDir, error: describeError(error) })
+      deps.warn("facts run recovery failed; it is retried at the next reconcile", {
+        runDir,
+        error: describeError(error),
+      })
       continue
     }
     await releaseLedgerClaim(deps.queue, ledger, deps.warn)
@@ -49,10 +65,16 @@ export async function recoverFactsRuns(deps: FactsRecoveryDeps): Promise<boolean
   return active
 }
 
-async function releaseLedgerClaim(queue: FactsQueue, ledger: FactsRunLedger, warn: FactsRecoveryDeps["warn"]): Promise<void> {
+async function releaseLedgerClaim(
+  queue: FactsQueue,
+  ledger: FactsRunLedger,
+  warn: FactsRecoveryDeps["warn"],
+): Promise<void> {
   try {
-    const keys = new Set(ledger.queued.map(key => `${key.conversationId}\u0000${key.end_message_id}`))
-    const entries = (await queue.listPending()).filter(entry => keys.has(`${entry.conversationId}\u0000${entry.range.end_message_id}`))
+    const keys = new Set(ledger.queued.map((key) => `${key.conversationId}\u0000${key.end_message_id}`))
+    const entries = (await queue.listPending()).filter((entry) =>
+      keys.has(`${entry.conversationId}\u0000${entry.range.end_message_id}`),
+    )
     await queue.releaseClaim(entries, ledger.claimId)
   } catch (error) {
     warn("facts claim release failed during recovery", { runId: ledger.runId, error: describeError(error) })

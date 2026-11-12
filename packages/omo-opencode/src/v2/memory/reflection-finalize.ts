@@ -12,8 +12,13 @@
 //   is only reported, and the reflection orphan sweep reclaims it later, as in Senpi.
 
 import {
-  cleanupReflectionWorktree, describeDroppedEntries, integrateValidatedReflection, preflightReflectionDescriptions, validateCompletion,
-  type ReflectionWorktree, type ReservedRun,
+  cleanupReflectionWorktree,
+  describeDroppedEntries,
+  integrateValidatedReflection,
+  preflightReflectionDescriptions,
+  validateCompletion,
+  type ReflectionWorktree,
+  type ReservedRun,
 } from "@oh-my-opencode/memory-core"
 import type { ReflectionChildResult } from "./reflection-child"
 import type { ReflectionDecision } from "./reflection-failure"
@@ -31,21 +36,32 @@ export async function decideReflection(input: {
   const { child, worktree, run } = input
   if (child.status === "deadline") return { outcome: "timed_out", reason: "deadline_exceeded", detail: child.detail }
   if (child.status === "failed") return { outcome: "failed", reason: "child_exit", detail: child.detail }
-  if (child.status === "cancelled") return { outcome: "failed", reason: "cancelled", detail: "the reflection child was cancelled before it settled" }
-  await preflightReflectionDescriptions(worktree, worktree.baseSha, worktree.exec, (message, fields) => { input.warn(message, { ...fields }) })
+  if (child.status === "cancelled")
+    return { outcome: "failed", reason: "cancelled", detail: "the reflection child was cancelled before it settled" }
+  await preflightReflectionDescriptions(worktree, worktree.baseSha, worktree.exec, (message, fields) => {
+    input.warn(message, { ...fields })
+  })
   const validation = await validateCompletion(worktree, worktree.baseSha, worktree.exec)
-  const droppedNote = validation.status === "valid" || validation.status === "no_changes"
-    ? (validation.dropped?.length ? describeDroppedEntries(validation.dropped) : undefined)
-    : undefined
-  if (validation.status === "no_changes") return { outcome: "no_changes", ...(droppedNote === undefined ? {} : { detail: droppedNote }) }
-  if (validation.status !== "valid") return { outcome: validation.status, reason: "completion_validation", detail: validation.detail }
+  const droppedNote =
+    validation.status === "valid" || validation.status === "no_changes"
+      ? validation.dropped?.length
+        ? describeDroppedEntries(validation.dropped)
+        : undefined
+      : undefined
+  if (validation.status === "no_changes")
+    return { outcome: "no_changes", ...(droppedNote === undefined ? {} : { detail: droppedNote }) }
+  if (validation.status !== "valid")
+    return { outcome: validation.status, reason: "completion_validation", detail: validation.detail }
   const target = run.request.targetDoc
-  if (target !== undefined && validation.changedPaths.some(path => path !== target)) {
+  if (target !== undefined && validation.changedPaths.some((path) => path !== target)) {
     return { outcome: "failed", reason: "invalid_target", detail: "Dream changed paths outside targetDoc" }
   }
   const integrated = await integrateValidatedReflection(worktree, {
-    mode: "auto", runId: run.runId, summary: `${run.request.trigger} ${run.runId}`,
-    validated: { tipSha: validation.tipSha, changedPaths: validation.changedPaths }, withWriterLock: input.withWriterLock,
+    mode: "auto",
+    runId: run.runId,
+    summary: `${run.request.trigger} ${run.runId}`,
+    validated: { tipSha: validation.tipSha, changedPaths: validation.changedPaths },
+    withWriterLock: input.withWriterLock,
   })
   const detail = [integrated.detail, droppedNote].filter(Boolean).join("; ")
   return {
@@ -62,7 +78,10 @@ export async function cleanupRunWorktree(worktree: ReflectionWorktree, runId: st
     if (cleanup.worktreeRemoved && cleanup.branchRemoved) return true
     warn("reflection worktree cleanup incomplete; the orphan sweep reclaims it", { runId, ...cleanup })
   } catch (error) {
-    warn("reflection worktree cleanup failed; the orphan sweep reclaims it", { runId, error: error instanceof Error ? error.message : String(error) })
+    warn("reflection worktree cleanup failed; the orphan sweep reclaims it", {
+      runId,
+      error: error instanceof Error ? error.message : String(error),
+    })
   }
   return false
 }

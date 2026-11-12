@@ -30,10 +30,29 @@ test("Native subscription projects through Core into real redacting store and sh
   let listener: ((event: ManagedChildEvent) => void) | undefined
   let detached = false
   try {
-    const handle = { subscribe(next: typeof listener) { listener = next; return () => { detached = true; listener = undefined } } } as unknown as ManagedChildHandle
+    const handle = {
+      subscribe(next: typeof listener) {
+        listener = next
+        return () => {
+          detached = true
+          listener = undefined
+        }
+      },
+    } as unknown as ManagedChildHandle
     const unsubscribe = Writer.subscribeTranscriptLog(handle, store, taskId)
-    listener?.({ type: "message_end", message: { role: "assistant", stopReason: "aborted", content: [{ type: "text", text: "partial work" }] } })
-    listener?.({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "provider failure", content: [{ type: "text", text: "error prose excluded" }] } })
+    listener?.({
+      type: "message_end",
+      message: { role: "assistant", stopReason: "aborted", content: [{ type: "text", text: "partial work" }] },
+    })
+    listener?.({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "provider failure",
+        content: [{ type: "text", text: "error prose excluded" }],
+      },
+    })
     listener?.({ type: "tool_execution_end", toolName: "read", isError: true })
     listener?.({ type: "retry_fallback_exhausted", ...{ chainKey: "chain", lastError: "failure audit" } })
     store.appendEvent(taskId, { type: "team_message_waited", payload: { from: "alpha", body: "waited message" } })
@@ -41,10 +60,16 @@ test("Native subscription projects through Core into real redacting store and sh
     appendFileSync(join(dir, "logs", `${taskId}.jsonl`), "malformed\n")
     unsubscribe()
     expect(detached).toBe(true)
-    expect(Reader.readEventLogTranscriptResult(dir, taskId)).toEqual({ source: "event-log", truncated: false, entries: [
-      { kind: "assistant", text: "partial work" }, { kind: "error", message: "provider failure" },
-      { kind: "tool", tool: "read", is_error: true }, { kind: "assistant", text: "[team message from alpha] waited message" },
-    ] })
+    expect(Reader.readEventLogTranscriptResult(dir, taskId)).toEqual({
+      source: "event-log",
+      truncated: false,
+      entries: [
+        { kind: "assistant", text: "partial work" },
+        { kind: "error", message: "provider failure" },
+        { kind: "tool", tool: "read", is_error: true },
+        { kind: "assistant", text: "[team message from alpha] waited message" },
+      ],
+    })
     const display = Render.renderTranscript(Reader.readEventLogTranscript(dir, taskId), { mode: "full", tailLines: 60 })
     expect(display.text).toContain("assistant: partial work")
     expect(display.text).toContain("error: provider failure")
@@ -52,7 +77,10 @@ test("Native subscription projects through Core into real redacting store and sh
     expect(display.text).not.toContain("error prose excluded")
     expect(display.text).not.toContain("lifecycle hidden")
     expect(readFileSync(join(dir, "logs", `${taskId}.jsonl`), "utf8")).toContain('"retry_fallback_exhausted"')
-  } finally { store.remove(taskId); rmSync(dir, { recursive: true, force: true }) }
+  } finally {
+    store.remove(taskId)
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test("Native model mutation remains before Core projection and append", () => {
@@ -60,20 +88,44 @@ test("Native model mutation remains before Core projection and append", () => {
   const store = createTaskRecordStore({ project_dir: dir, task: { state_dir: dir } })
   const taskId = "st_000000ee"
   try {
-    store.save(makeRecord({ task_id: taskId, model: "alpha/one", resolved_model: { source: "category", provider: "alpha", model_id: "one", display: "alpha/one" } }))
+    store.save(
+      makeRecord({
+        task_id: taskId,
+        model: "alpha/one",
+        resolved_model: { source: "category", provider: "alpha", model_id: "one", display: "alpha/one" },
+      }),
+    )
     const models: (string | undefined)[] = []
-    const event = { type: "retry_fallback_applied", from: "alpha/one", chainKey: "chain", reason: "retry",
-      get to() { models.push(store.load(taskId)?.model); return "beta/two" },
+    const event = {
+      type: "retry_fallback_applied",
+      from: "alpha/one",
+      chainKey: "chain",
+      reason: "retry",
+      get to() {
+        models.push(store.load(taskId)?.model)
+        return "beta/two"
+      },
     }
-    Writer.logTranscriptEvent({ ...store, appendEvent(id, projected) {
-      expect(store.load(taskId)?.model).toBe("beta/two")
-      return store.appendEvent(id, projected)
-    } }, taskId, event)
+    Writer.logTranscriptEvent(
+      {
+        ...store,
+        appendEvent(id, projected) {
+          expect(store.load(taskId)?.model).toBe("beta/two")
+          return store.appendEvent(id, projected)
+        },
+      },
+      taskId,
+      event,
+    )
     expect(models).toEqual(["alpha/one", "beta/two"])
     expect(store.load(taskId)?.resolved_model?.display).toBe("beta/two")
     expect(JSON.parse(readFileSync(join(dir, "logs", `${taskId}.jsonl`), "utf8"))).toEqual({
-      type: "retry_fallback_applied", payload: { from: "alpha/one", to: "beta/two", chain_key: "chain", reason: "retry" },
+      type: "retry_fallback_applied",
+      payload: { from: "alpha/one", to: "beta/two", chain_key: "chain", reason: "retry" },
     })
     expect(Reader.readEventLogTranscript(dir, taskId)).toEqual([])
-  } finally { store.remove(taskId); rmSync(dir, { recursive: true, force: true }) }
+  } finally {
+    store.remove(taskId)
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

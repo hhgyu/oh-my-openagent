@@ -4,7 +4,10 @@ import { generateKeyPairSync } from "node:crypto"
 import type { HeldDeviceCredential } from "@oh-my-opencode/device-service-core"
 import type { CredentialStore, Credentials } from "@oh-my-opencode/omo-opencode/service-auth"
 
-import { createCliAccountSource, type HeldCredentialRelay } from "@oh-my-opencode/omo-opencode/service-auth/sync-account"
+import {
+  createCliAccountSource,
+  type HeldCredentialRelay,
+} from "@oh-my-opencode/omo-opencode/service-auth/sync-account"
 
 // Design D r9 section 3 (r7 N8r, r8): the memory device session already reads the credential for its own sync work;
 // when the device service reports no adopted device it re-sends device.adopt from THAT in-memory credential. The

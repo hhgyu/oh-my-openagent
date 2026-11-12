@@ -51,7 +51,11 @@ describe("InProcessRunner", () => {
     fake.session = {
       ...fake.session,
       model: { provider: "vendor-b", id: "substitute" },
-      whenToolChildClosed() { expect(this).toBe(fake.session); joinCalls++; return closed.promise },
+      whenToolChildClosed() {
+        expect(this).toBe(fake.session)
+        joinCalls++
+        return closed.promise
+      },
     }
     const runner = new InProcessRunner({ createSession: async () => fake.session })
 
@@ -71,7 +75,9 @@ describe("InProcessRunner", () => {
       )
       .catch((error: unknown) => error)
     let settled = false
-    void starting.then(() => { settled = true })
+    void starting.then(() => {
+      settled = true
+    })
     await Bun.sleep(0)
     const beforeJoin = { settled, joinCalls }
     closed.resolve()
@@ -91,13 +97,21 @@ describe("InProcessRunner", () => {
     let joinCalls = 0
     fake.session = {
       ...fake.session,
-      subscribe() { throw construction },
-      whenToolChildClosed() { expect(this).toBe(fake.session); joinCalls++; return closed.promise },
+      subscribe() {
+        throw construction
+      },
+      whenToolChildClosed() {
+        expect(this).toBe(fake.session)
+        joinCalls++
+        return closed.promise
+      },
     }
     const runner = new InProcessRunner({ createSession: async () => fake.session })
     const starting = runner.start(baseSpec()).catch((error: unknown) => error)
     let settled = false
-    void starting.then(() => { settled = true })
+    void starting.then(() => {
+      settled = true
+    })
     await Bun.sleep(0)
     const beforeJoin = { settled, joinCalls }
     closed.resolve()

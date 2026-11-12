@@ -1,4 +1,9 @@
-import { RecallCorpusCache, isAutoAgentValue, resolveAutoIdentity, resolveMemoryIdentity } from "@oh-my-opencode/memory-core"
+import {
+  RecallCorpusCache,
+  isAutoAgentValue,
+  resolveAutoIdentity,
+  resolveMemoryIdentity,
+} from "@oh-my-opencode/memory-core"
 import type { OmoMemorySettings } from "@oh-my-opencode/omo-config-core"
 import type * as Plugin from "@opencode/plugin/promise/plugin"
 import type { Registration } from "@opencode/plugin/promise/registration"
@@ -7,14 +12,28 @@ import { createMemoryBinder, describeError, type BoundMemorySession } from "./bi
 import { createMemoryCommands } from "./commands"
 import { memoryCommandRpc, stripMemoryCommandOutputs } from "./command-output"
 import { MEMORY_COMMAND_OUTPUT_EVENT } from "./command-output-event"
-import { consoleMemoryLogger, loadMemorySettings, memoryComponentEnabled, resolveSafeMemoryRoot, type MemoryEnv, type MemoryLogger } from "./config"
+import {
+  consoleMemoryLogger,
+  loadMemorySettings,
+  memoryComponentEnabled,
+  resolveSafeMemoryRoot,
+  type MemoryEnv,
+  type MemoryLogger,
+} from "./config"
 import { createMemoryJournal } from "./journal"
 import { createMemoryProjection } from "./projection"
 import { createRecallCollector, fileRecallStores, type RecallStores } from "./recall"
 import { createRecallDelivery } from "./recall-delivery"
 import { createSessionMetadataStore } from "./session-metadata"
 import { loadKibitzerPersona } from "@oh-my-opencode/memory-core"
-import { createKibitzerComponent, kibitzerCategoryModel, kibitzerHostCapable, registerKibitzerAgent, type KibitzerComponent, type KibitzerSeams } from "./kibitzer"
+import {
+  createKibitzerComponent,
+  kibitzerCategoryModel,
+  kibitzerHostCapable,
+  registerKibitzerAgent,
+  type KibitzerComponent,
+  type KibitzerSeams,
+} from "./kibitzer"
 import { loadRuntimeConfig } from "../config/runtime"
 import { registerFactsAgent } from "./facts-agent"
 import { createFactsComponent, type MemoryFactsSeams } from "./facts-component"
@@ -46,7 +65,8 @@ export { RECALL_PART_MARKER } from "./recall-delivery"
 export { MEMORY_COMMAND_NAMES, MEMORY_COMMAND_OUTPUT_KEY } from "./commands"
 export { MEMORY_COMMAND_OUTPUT_ID_PREFIX } from "./command-output"
 
-export type MemoryHost = Pick<Plugin.Context, "session" | "tool" | "options" | "location" | "event"> & Partial<Pick<Plugin.Context, "app" | "agent" | "command" | "rpc" | "model" | "provider" | "integration">>
+export type MemoryHost = Pick<Plugin.Context, "session" | "tool" | "options" | "location" | "event"> &
+  Partial<Pick<Plugin.Context, "app" | "agent" | "command" | "rpc" | "model" | "provider" | "integration">>
 
 export interface MemoryComponentOptions {
   /** Environment for `OMO_MEMORY_HOME` and identity resolution; defaults to `process.env`. */
@@ -107,7 +127,10 @@ export interface MemoryComponentOptions {
  * Nothing calls `session.prompt`; subagent children never bind; Kibitzer input goes through the owned
  * session backend's gated admission paths.
  */
-export async function registerMemoryComponent(context: MemoryHost, options: MemoryComponentOptions = {}): Promise<() => Promise<void>> {
+export async function registerMemoryComponent(
+  context: MemoryHost,
+  options: MemoryComponentOptions = {},
+): Promise<() => Promise<void>> {
   const loadSettings = options.loadSettings ?? loadMemorySettings
   const initialSettings = loadSettings(context.location.directory)
   if (!memoryComponentEnabled(initialSettings, context.options)) return async () => {}
@@ -119,9 +142,16 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
   let onBound: ((bound: BoundMemorySession) => void) | undefined
   const env = options.env ?? process.env
   const binder = createMemoryBinder({
-    session: context.session, metadata, env, now, loadSettings, logger,
+    session: context.session,
+    metadata,
+    env,
+    now,
+    loadSettings,
+    logger,
     ...(options.home === undefined ? {} : { home: options.home }),
-    onBound: bound => { if (!closed) onBound?.(bound) },
+    onBound: (bound) => {
+      if (!closed) onBound?.(bound)
+    },
   })
   const stores = options.recallStores ?? fileRecallStores
   const projection = createMemoryProjection({ binder, metadata, now, logger })
@@ -131,74 +161,142 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
   // disable the whole plugin. A missing persona disables only the judge (no recall nudges).
   const persona = (() => {
     if (seams?.createPort !== undefined || !kibitzerHostCapable(context)) return undefined
-    try { return loadKibitzerPersona() } catch (error) {
+    try {
+      return loadKibitzerPersona()
+    } catch (error) {
       logger.warn("kibitzer disabled: persona asset unavailable", { error: describeError(error) })
       return null
     }
   })()
-  const kibitzer: KibitzerComponent | undefined = seams?.createPort !== undefined || (kibitzerHostCapable(context) && persona !== null)
-    ? createKibitzerComponent({ host: context, binder, stores, corpusCache, logger, now, ...seams })
-    : undefined
-  const factsParts = createFactsComponent(context, { binder, logger, now, loadSettings, flushJournal: (bound, signal) => journal.onBound(bound, signal), ...(options.facts === undefined ? {} : { seams: options.facts }) })
+  const kibitzer: KibitzerComponent | undefined =
+    seams?.createPort !== undefined || (kibitzerHostCapable(context) && persona !== null)
+      ? createKibitzerComponent({ host: context, binder, stores, corpusCache, logger, now, ...seams })
+      : undefined
+  const factsParts = createFactsComponent(context, {
+    binder,
+    logger,
+    now,
+    loadSettings,
+    flushJournal: (bound, signal) => journal.onBound(bound, signal),
+    ...(options.facts === undefined ? {} : { seams: options.facts }),
+  })
   const facts = factsParts?.facts
   const factsHosting = factsParts?.hosting
   const factsPersona = factsParts?.persona
-  const reflection = createReflectionComponent(context, { logger, ...(options.reflection === undefined ? {} : { seams: options.reflection }) })
-  const isReflectionSession = (sessionID: string): boolean => reflection?.hosting.isReflectionSession(sessionID) === true
+  const reflection = createReflectionComponent(context, {
+    logger,
+    ...(options.reflection === undefined ? {} : { seams: options.reflection }),
+  })
+  const isReflectionSession = (sessionID: string): boolean =>
+    reflection?.hosting.isReflectionSession(sessionID) === true
   // The reflection hosting runs first: a reflection child keeps only its four tools; every other session loses all child-only tools.
   const privateToolOwners = [reflection?.hosting.onContext, factsHosting?.onContext, kibitzer?.narrowTools]
   const narrowRequestTools = (value: PrivateToolRequest): boolean => narrowPrivateTools(value, privateToolOwners)
-  const isOwnedSession = (sessionID: string): boolean => kibitzer?.isKibitzerSession(sessionID) === true || facts?.isFactsSession(sessionID) === true || isReflectionSession(sessionID)
-  const collector = createRecallCollector({ binder, stores, corpusCache, logger, ...(kibitzer === undefined ? {} : { judge: kibitzer }) })
+  const isOwnedSession = (sessionID: string): boolean =>
+    kibitzer?.isKibitzerSession(sessionID) === true ||
+    facts?.isFactsSession(sessionID) === true ||
+    isReflectionSession(sessionID)
+  const collector = createRecallCollector({
+    binder,
+    stores,
+    corpusCache,
+    logger,
+    ...(kibitzer === undefined ? {} : { judge: kibitzer }),
+  })
   const delivery = createRecallDelivery({ binder, stores, collector, logger })
   const userTurns = createAcceptedTurns(binder, logger)
   const journal = createMemoryJournal({ binder, session: context.session, logger, isOwnedSession })
   const hasUserActivity = userTurns.hasActivity
-  const triggers = reflection === undefined ? undefined : createReflectionTriggers({
-    resolve: sessionID => binder.resolve(sessionID), session: context.session, logger, hasUserActivity, isOwnedSession,
-    evaluate: (bound, event) => reflection.evaluate(bound, event),
-  })
-  const dreams = reflection === undefined ? undefined : createDreamTriggers({
-    resolve: sessionID => binder.resolve(sessionID), session: context.session, logger, hasUserActivity, isOwnedSession,
-    request: (bound, origin) => reflection.requestDream(bound, origin), settings: bound => reflection.dreamSettings(bound), pressure: underSystemTokenPressure,
-  })
+  const triggers =
+    reflection === undefined
+      ? undefined
+      : createReflectionTriggers({
+          resolve: (sessionID) => binder.resolve(sessionID),
+          session: context.session,
+          logger,
+          hasUserActivity,
+          isOwnedSession,
+          evaluate: (bound, event) => reflection.evaluate(bound, event),
+        })
+  const dreams =
+    reflection === undefined
+      ? undefined
+      : createDreamTriggers({
+          resolve: (sessionID) => binder.resolve(sessionID),
+          session: context.session,
+          logger,
+          hasUserActivity,
+          isOwnedSession,
+          request: (bound, origin) => reflection.requestDream(bound, origin),
+          settings: (bound) => reflection.dreamSettings(bound),
+          pressure: underSystemTokenPressure,
+        })
   const maintenance = createV2MemoryMaintenance(logger, options.maintenance)
   // Sync acquires once per distinct bound repo and loads its runtime lazily (see `./sync/runtime`); an
   // unsafe memory root binds nothing, so it gets no sync and no `omo.memory.sync` RPC either.
   const memoryRoot = resolveSafeMemoryRoot(env, context.location.directory, options.home)
-  const statusRpc = createMemoryStatusRpc({ syncStatus: async repo => sync?.status(repo), logger })
-  const sync = !memoryRoot.ok ? undefined : createMemorySyncRuntime({
-    initialBinding: {
-      settings: initialSettings,
-      identity: (isAutoAgentValue(initialSettings.agent)
-        ? resolveAutoIdentity(context.location.directory, { ...env }, initialSettings.auto_identity)
-        : resolveMemoryIdentity(initialSettings.agent, context.location.directory, { ...env })).id,
-    },
-    env, memoryRoot: memoryRoot.root, logger, onRepoChanged: repo => statusRpc.refreshRepo(repo),
-    ...(options.sync === undefined ? {} : { seams: options.sync }),
-  })
-  onBound = bound => {
+  const statusRpc = createMemoryStatusRpc({ syncStatus: async (repo) => sync?.status(repo), logger })
+  const sync = !memoryRoot.ok
+    ? undefined
+    : createMemorySyncRuntime({
+        initialBinding: {
+          settings: initialSettings,
+          identity: (isAutoAgentValue(initialSettings.agent)
+            ? resolveAutoIdentity(context.location.directory, { ...env }, initialSettings.auto_identity)
+            : resolveMemoryIdentity(initialSettings.agent, context.location.directory, { ...env })
+          ).id,
+        },
+        env,
+        memoryRoot: memoryRoot.root,
+        logger,
+        onRepoChanged: (repo) => statusRpc.refreshRepo(repo),
+        ...(options.sync === undefined ? {} : { seams: options.sync }),
+      })
+  onBound = (bound) => {
     maintenance.onBound(bound)
     statusRpc.onBound(bound)
     sync?.onBound(bound)
-    void journal.onBound(bound).then(() => facts?.onBound(bound)).then(() => reflection?.onBound(bound)).then(() => dreams?.onBound(bound))
+    void journal
+      .onBound(bound)
+      .then(() => facts?.onBound(bound))
+      .then(() => reflection?.onBound(bound))
+      .then(() => dreams?.onBound(bound))
   }
   let outputEvents: RpcRegistration<typeof memoryCommandRpc>["events"] | undefined
-  const commands = context.command === undefined ? undefined : createMemoryCommands({
-    display: async output => { await outputEvents?.emit(MEMORY_COMMAND_OUTPUT_EVENT, { ...output }) },
-    binder, session: context.session, logger, isClosed: () => closed,
-    bustPromptCache: sessionID => { projection.markCompacted(sessionID) },
-    ...(facts === undefined ? {} : { factsRetry: (sessionID: string) => facts.retry(sessionID) }),
-    extraCommands: [
-      ...(reflection === undefined ? [] : [
-        createReflectCommand((bound, event) => reflection.evaluate(bound, event)),
-        createDreamCommand({ request: (bound, request) => reflection.requestDream(bound, "manual", request), settings: bound => reflection.dreamSettings(bound) }),
-      ]),
-      createDoctorCommand({ now }), createSleeptimeCommand(), createPeopleCommand(), createPalaceCommand(),
-    ],
-  })
+  const commands =
+    context.command === undefined
+      ? undefined
+      : createMemoryCommands({
+          display: async (output) => {
+            await outputEvents?.emit(MEMORY_COMMAND_OUTPUT_EVENT, { ...output })
+          },
+          binder,
+          session: context.session,
+          logger,
+          isClosed: () => closed,
+          bustPromptCache: (sessionID) => {
+            projection.markCompacted(sessionID)
+          },
+          ...(facts === undefined ? {} : { factsRetry: (sessionID: string) => facts.retry(sessionID) }),
+          extraCommands: [
+            ...(reflection === undefined
+              ? []
+              : [
+                  createReflectCommand((bound, event) => reflection.evaluate(bound, event)),
+                  createDreamCommand({
+                    request: (bound, request) => reflection.requestDream(bound, "manual", request),
+                    settings: (bound) => reflection.dreamSettings(bound),
+                  }),
+                ]),
+            createDoctorCommand({ now }),
+            createSleeptimeCommand(),
+            createPeopleCommand(),
+            createPalaceCommand(),
+          ],
+        })
   const tools = createMemoryTools({
-    binder, userTurns: userTurns.turns,
+    binder,
+    userTurns: userTurns.turns,
     ...(options.lockWaitTimeoutMs === undefined ? {} : { lockWaitTimeoutMs: options.lockWaitTimeoutMs }),
     ...(options.lockRetryDelayMs === undefined ? {} : { lockRetryDelayMs: options.lockRetryDelayMs }),
   })
@@ -208,112 +306,167 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
   const cleanup = (): Promise<void> => {
     disposal ??= (async () => {
       closed = true
-      const results = await Promise.allSettled(registrations.map(registration => registration.dispose()))
+      const results = await Promise.allSettled(registrations.map((registration) => registration.dispose()))
       await collector.idle()
       await userTurns.settled()
       await Promise.allSettled([journal.settled(), commands?.settled()])
-      if (facts !== undefined) results.push(...await Promise.allSettled([facts.close()]))
+      if (facts !== undefined) results.push(...(await Promise.allSettled([facts.close()])))
       // Triggers stop before the component closes, so no evaluation reserves a run after its children die.
-      if (triggers !== undefined) results.push(...await Promise.allSettled([triggers.close()]))
-      if (dreams !== undefined) results.push(...await Promise.allSettled([dreams.close()]))
-      if (reflection !== undefined) results.push(...await Promise.allSettled([reflection.close()]))
-      if (kibitzer !== undefined) results.push(...await Promise.allSettled([kibitzer.close()]))
-      results.push(...await Promise.allSettled([maintenance.close()]))
+      if (triggers !== undefined) results.push(...(await Promise.allSettled([triggers.close()])))
+      if (dreams !== undefined) results.push(...(await Promise.allSettled([dreams.close()])))
+      if (reflection !== undefined) results.push(...(await Promise.allSettled([reflection.close()])))
+      if (kibitzer !== undefined) results.push(...(await Promise.allSettled([kibitzer.close()])))
+      results.push(...(await Promise.allSettled([maintenance.close()])))
       statusRpc.close()
       await statusRpc.settled()
       // Every acquired repo is released before the binder forgets the sessions that bound it.
-      if (sync !== undefined) results.push(...await Promise.allSettled([sync.close()]))
+      if (sync !== undefined) results.push(...(await Promise.allSettled([sync.close()])))
       await metadata.settled()
       binder.clear()
       projection.clear()
       journal.clear()
       collector.clear()
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
-      if (failures.length > 0) throw new AggregateError(failures.map(failure => failure.reason), "Memory component cleanup failed")
+      if (failures.length > 0)
+        throw new AggregateError(
+          failures.map((failure) => failure.reason),
+          "Memory component cleanup failed",
+        )
     })()
     return disposal
   }
   try {
     if (context.event !== undefined) {
       const stopShutdownWatch = watchLocationShutdown(context, cleanup)
-      registrations.push({ dispose: async () => { stopShutdownWatch() } })
+      registrations.push({
+        dispose: async () => {
+          stopShutdownWatch()
+        },
+      })
     }
-    if (context.event !== undefined) registrations.push(userTurns.register(context.event, sessionID => {
-      facts?.onDeleted(sessionID)
-      binder.forget(sessionID)
-    }))
-    registrations.push(observeAcceptedCompactions(context.event, async sessionID => {
-      if (closed || isOwnedSession(sessionID)) return
-      triggers?.onCompaction(sessionID)
-      const bound = await binder.resolve(sessionID)
-      // V2 holds accepted Kibitzer nudges only in this pending store; the resident sidecar survives.
-      if (bound !== undefined && !closed) await stores.pending(bound).delete(sessionID)
-    }, logger))
-    registrations.push(await context.session.hook("prompt", input => {
-      if (closed) return
-      if (isOwnedSession(input.sessionID)) return
-      dreams?.onPrompt(input.sessionID)
-      facts?.onPrompt(input.sessionID)
-      kibitzer?.onPrompt(input.sessionID, input.prompt.text)
-      collector.observePrompt(input.sessionID, input.prompt.text)
-    }))
-    registrations.push(await context.tool.hook("execute.before", event => {
-      if (closed) return
-      kibitzer?.onToolBefore(event)
-      if (isOwnedSession(event.sessionID) || event.tool === MEMORY_TOOL_NAME || event.tool === MEMORY_APPLY_PATCH_TOOL_NAME) return
-      collector.observeToolInput(event.sessionID, event.input)
-    }))
+    if (context.event !== undefined)
+      registrations.push(
+        userTurns.register(context.event, (sessionID) => {
+          facts?.onDeleted(sessionID)
+          binder.forget(sessionID)
+        }),
+      )
+    registrations.push(
+      observeAcceptedCompactions(
+        context.event,
+        async (sessionID) => {
+          if (closed || isOwnedSession(sessionID)) return
+          triggers?.onCompaction(sessionID)
+          const bound = await binder.resolve(sessionID)
+          // V2 holds accepted Kibitzer nudges only in this pending store; the resident sidecar survives.
+          if (bound !== undefined && !closed) await stores.pending(bound).delete(sessionID)
+        },
+        logger,
+      ),
+    )
+    registrations.push(
+      await context.session.hook("prompt", (input) => {
+        if (closed) return
+        if (isOwnedSession(input.sessionID)) return
+        dreams?.onPrompt(input.sessionID)
+        facts?.onPrompt(input.sessionID)
+        kibitzer?.onPrompt(input.sessionID, input.prompt.text)
+        collector.observePrompt(input.sessionID, input.prompt.text)
+      }),
+    )
+    registrations.push(
+      await context.tool.hook("execute.before", (event) => {
+        if (closed) return
+        kibitzer?.onToolBefore(event)
+        if (
+          isOwnedSession(event.sessionID) ||
+          event.tool === MEMORY_TOOL_NAME ||
+          event.tool === MEMORY_APPLY_PATCH_TOOL_NAME
+        )
+          return
+        collector.observeToolInput(event.sessionID, event.input)
+      }),
+    )
     if (kibitzer !== undefined) {
       const judge = kibitzer
-      registrations.push(await context.tool.hook("execute.after", event => {
-        if (closed) return
-        judge.onToolAfter(event.status === "completed"
-          ? { sessionID: event.sessionID, tool: event.tool, id: event.id, status: event.status, result: event.result }
-          : { sessionID: event.sessionID, tool: event.tool, id: event.id, status: event.status, error: event.error })
-      }))
+      registrations.push(
+        await context.tool.hook("execute.after", (event) => {
+          if (closed) return
+          judge.onToolAfter(
+            event.status === "completed"
+              ? {
+                  sessionID: event.sessionID,
+                  tool: event.tool,
+                  id: event.id,
+                  status: event.status,
+                  result: event.result,
+                }
+              : {
+                  sessionID: event.sessionID,
+                  tool: event.tool,
+                  id: event.id,
+                  status: event.status,
+                  error: event.error,
+                },
+          )
+        }),
+      )
       if (context.agent !== undefined) {
         const directory = context.location.directory
-        registrations.push(await registerKibitzerAgent(context.agent, {
-          model: () => kibitzerCategoryModel(loadRuntimeConfig({ cwd: directory }).config, loadSettings(directory).recall.category),
-          warn: message => logger.warn(message),
-          ...(typeof persona === "string" ? { persona: () => persona } : {}),
-        }))
+        registrations.push(
+          await registerKibitzerAgent(context.agent, {
+            model: () =>
+              kibitzerCategoryModel(
+                loadRuntimeConfig({ cwd: directory }).config,
+                loadSettings(directory).recall.category,
+              ),
+            warn: (message) => logger.warn(message),
+            ...(typeof persona === "string" ? { persona: () => persona } : {}),
+          }),
+        )
       }
     }
-    registrations.push(await context.session.hook("context", async value => {
-      // Command output records are for the user; they are dropped from every request, the judge's too.
-      stripMemoryCommandOutputs(value.messages)
-      if (closed || narrowRequestTools(value) || kibitzer?.onContext(value) === true) return
-      try {
-        await projection.onContext(value)
-        await delivery.onContext(value)
-        await userTurns.onContext(value)
-      } catch (error) {
-        logger.warn("memory context injection skipped", { sessionID: value.sessionID, error: describeError(error) })
-      }
-    }))
-    registrations.push(await context.session.hook("compaction", value => {
-      stripMemoryCommandOutputs(value.messages)
-      // A compaction request offers `tools` too: the same child-only exposure rules as the context hook.
-      narrowRequestTools(value)
-      projection.markCompacted(value.sessionID)
-      dreams?.onCompaction(value.sessionID)
-    }))
-    registrations.push(await context.session.hook("experimental.idle", async value => {
-      if (closed) return
-      await journal.onIdle(value.sessionID)
-      statusRpc.refreshSession(value.sessionID)
-      // A write during this turn may have seeded a repo that was bound before it existed.
-      sync?.onSettled()
-      // Detached: evaluates after this reconcile counted the turn's steps, never blocks the idle edge.
-      if (!closed) triggers?.onIdle(value.sessionID)
-      if (!closed) dreams?.onIdle(value.sessionID)
-      await facts?.onIdle(value.sessionID)
-    }))
+    registrations.push(
+      await context.session.hook("context", async (value) => {
+        // Command output records are for the user; they are dropped from every request, the judge's too.
+        stripMemoryCommandOutputs(value.messages)
+        if (closed || narrowRequestTools(value) || kibitzer?.onContext(value) === true) return
+        try {
+          await projection.onContext(value)
+          await delivery.onContext(value)
+          await userTurns.onContext(value)
+        } catch (error) {
+          logger.warn("memory context injection skipped", { sessionID: value.sessionID, error: describeError(error) })
+        }
+      }),
+    )
+    registrations.push(
+      await context.session.hook("compaction", (value) => {
+        stripMemoryCommandOutputs(value.messages)
+        // A compaction request offers `tools` too: the same child-only exposure rules as the context hook.
+        narrowRequestTools(value)
+        projection.markCompacted(value.sessionID)
+        dreams?.onCompaction(value.sessionID)
+      }),
+    )
+    registrations.push(
+      await context.session.hook("experimental.idle", async (value) => {
+        if (closed) return
+        await journal.onIdle(value.sessionID)
+        statusRpc.refreshSession(value.sessionID)
+        // A write during this turn may have seeded a repo that was bound before it existed.
+        sync?.onSettled()
+        // Detached: evaluates after this reconcile counted the turn's steps, never blocks the idle edge.
+        if (!closed) triggers?.onIdle(value.sessionID)
+        if (!closed) dreams?.onIdle(value.sessionID)
+        await facts?.onIdle(value.sessionID)
+      }),
+    )
     if (facts !== undefined && factsPersona !== undefined && context.agent !== undefined) {
       registrations.push(await registerFactsAgent(context.agent, factsPersona))
     }
-    if (reflection !== undefined && context.agent !== undefined) registrations.push(await registerReflectionAgent(context.agent))
+    if (reflection !== undefined && context.agent !== undefined)
+      registrations.push(await registerReflectionAgent(context.agent))
     if (context.rpc !== undefined) {
       registrations.push(await statusRpc.register(context.rpc))
       if (sync !== undefined) registrations.push(await registerMemorySyncRpc(context.rpc, sync))
@@ -325,21 +478,31 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
         outputEvents = registration.events
       }
       const definitions = commands.definitions
-      registrations.push(await context.command.transform(editor => { for (const definition of definitions) editor.add(definition) }))
+      registrations.push(
+        await context.command.transform((editor) => {
+          for (const definition of definitions) editor.add(definition)
+        }),
+      )
     }
     const [memoryTool, applyPatchTool] = tools
     const judgeTools = kibitzer?.tools(memoryTool)
     const factsTool = factsHosting?.tool()
     const reflectionTools = reflection?.hosting.tools() ?? []
-    registrations.push(await context.tool.transform(editor => {
-      if (judgeTools === undefined) editor.add(memoryTool)
-      else for (const tool of judgeTools) editor.add(tool)
-      editor.add(applyPatchTool)
-      if (factsTool !== undefined) editor.add(factsTool)
-      for (const tool of reflectionTools) editor.add(tool)
-    }))
+    registrations.push(
+      await context.tool.transform((editor) => {
+        if (judgeTools === undefined) editor.add(memoryTool)
+        else for (const tool of judgeTools) editor.add(tool)
+        editor.add(applyPatchTool)
+        if (factsTool !== undefined) editor.add(factsTool)
+        for (const tool of reflectionTools) editor.add(tool)
+      }),
+    )
   } catch (error) {
-    try { await cleanup() } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Memory registration and rollback failed") }
+    try {
+      await cleanup()
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Memory registration and rollback failed")
+    }
     throw error
   }
   return cleanup

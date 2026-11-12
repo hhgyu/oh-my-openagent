@@ -4,10 +4,22 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { openDagDeliveryJournal, type DagDeliveryJournal } from "./dag-delivery-journal"
 
-const dirs: string[] = [], journals: DagDeliveryJournal[] = []
-afterEach(() => { for (const journal of journals.splice(0)) journal.close(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
-function file() { const dir = mkdtempSync(join(tmpdir(), "omo-dag-delivery-")); dirs.push(dir); return join(dir, "dag-wakes.sqlite") }
-function open(path = file(), namespace = "/unit/project:root") { const journal = openDagDeliveryJournal({ path, namespace }); journals.push(journal); return journal }
+const dirs: string[] = [],
+  journals: DagDeliveryJournal[] = []
+afterEach(() => {
+  for (const journal of journals.splice(0)) journal.close()
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+function file() {
+  const dir = mkdtempSync(join(tmpdir(), "omo-dag-delivery-"))
+  dirs.push(dir)
+  return join(dir, "dag-wakes.sqlite")
+}
+function open(path = file(), namespace = "/unit/project:root") {
+  const journal = openDagDeliveryJournal({ path, namespace })
+  journals.push(journal)
+  return journal
+}
 const key = { runId: "dag_1", seq: 7 }
 const wake = { kind: "frontier" as const, receiverSessionID: "ses_root", inputID: "msg_omo_dag_a", text: "wake a" }
 
@@ -38,7 +50,9 @@ describe("DAG delivery journal", () => {
     // when / then
     expect(() => journal.markAcked(intent, { id: "msg_other", sessionID: "ses_root" })).toThrow("ACK differs")
     expect(() => journal.recordIntent(key, { ...wake, receiverSessionID: "ses_other" })).toThrow("another root")
-    expect(() => journal.recordIntent({ runId: "dag_2", seq: 1 }, { ...wake, inputID: "msg_omo_team_a" })).toThrow("Invalid DAG delivery record")
+    expect(() => journal.recordIntent({ runId: "dag_2", seq: 1 }, { ...wake, inputID: "msg_omo_team_a" })).toThrow(
+      "Invalid DAG delivery record",
+    )
   })
 
   test("#given rows of two runs #when one run is dropped #then only its rows are gone", () => {

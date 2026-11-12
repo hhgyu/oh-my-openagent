@@ -28,7 +28,11 @@ const TERMINAL_RUN: ReadonlySet<string> = new Set(["completed", "failed", "cance
 export interface NativeDagHost {
   readonly tool: ToolDomain
   readonly directory: string
-  readonly prepared: { readonly config: OmoConfig; readonly agents: NativeDagExecutionSources["agents"]; readonly authorizeSkills: PreparedNativeTaskRuntime["authorizeSkills"] }
+  readonly prepared: {
+    readonly config: OmoConfig
+    readonly agents: NativeDagExecutionSources["agents"]
+    readonly authorizeSkills: PreparedNativeTaskRuntime["authorizeSkills"]
+  }
   readonly registry: ToolRegistry
   readonly kernel: ReturnType<typeof createToolKernel>
   readonly service: ReturnType<typeof createNativeTaskService>
@@ -47,9 +51,13 @@ export interface NativeDagComponent {
 }
 
 /** `workflow` runs only for a root session, like the lead team tools: an owned child never drives a run. */
-export function assertRootWorkflowCaller(sessionID: string, call: Pick<NativeTaskOperationCall, "resolveAncestry">): void {
+export function assertRootWorkflowCaller(
+  sessionID: string,
+  call: Pick<NativeTaskOperationCall, "resolveAncestry">,
+): void {
   const ancestry = call.resolveAncestry(sessionID)
-  if (ancestry === undefined || ancestry.rootSessionId !== sessionID || ancestry.depth !== 0) throw Error("The workflow tool is available only to a root session")
+  if (ancestry === undefined || ancestry.rootSessionId !== sessionID || ancestry.depth !== 0)
+    throw Error("The workflow tool is available only to a root session")
 }
 
 /** Publishes the Native `workflow` tool over the Native task component's SAME registry, kernel and
@@ -60,74 +68,135 @@ export function registerNativeDagComponent(host: NativeDagHost, rpc?: DagStatusR
   const settings = OmoTaskSettingsSchema.parse(host.prepared.config.task ?? {}).dag
   const executionMode: NativeDagExecutionSources = { agents: host.prepared.agents, config: host.prepared.config }
   const runtimes = new Map<string, NativeDagRuntime>()
-  const status = createDagStatusRpc({ snapshots: sessionID => {
-    const runtime = runtimes.get(sessionID) ?? (discoverDagRoots(host.directory).includes(sessionID) ? runtimeFor(sessionID) : undefined)
-    return runtime?.manager.list(sessionID, { limit: 256 }).map(run => runtime.manager.snapshot(run.runId, sessionID)) ?? []
-  } })
+  const status = createDagStatusRpc({
+    snapshots: (sessionID) => {
+      const runtime =
+        runtimes.get(sessionID) ??
+        (discoverDagRoots(host.directory).includes(sessionID) ? runtimeFor(sessionID) : undefined)
+      return (
+        runtime?.manager.list(sessionID, { limit: 256 }).map((run) => runtime.manager.snapshot(run.runId, sessionID)) ??
+        []
+      )
+    },
+  })
   const statusRegistration = rpc ? status.register(rpc) : Promise.resolve(undefined)
   // Read-only views of each root's persisted task records: the wake reads child status with no call.
   const taskRecords = new Map<string, ReturnType<typeof createTaskRecordStore>>()
   function taskRecordsFor(root: string) {
     let store = taskRecords.get(root)
     if (!store) {
-      store = createTaskRecordStore({ project_dir: host.directory, task: { state_dir: nativeTaskStateDir(host.directory, root) } })
+      store = createTaskRecordStore({
+        project_dir: host.directory,
+        task: { state_dir: nativeTaskStateDir(host.directory, root) },
+      })
       taskRecords.set(root, store)
     }
     return store
   }
-  const wake = createNativeDagWakeOwner({ session: host.delivery.session, directory: host.directory, assertGeneration: host.delivery.assertGeneration,
-    journalPathFor: root => join(nativeTaskStateDir(host.directory, root), "dag-wakes.sqlite"),
-    runtimeFor: root => runtimes.get(root),
+  const wake = createNativeDagWakeOwner({
+    session: host.delivery.session,
+    directory: host.directory,
+    assertGeneration: host.delivery.assertGeneration,
+    journalPathFor: (root) => join(nativeTaskStateDir(host.directory, root), "dag-wakes.sqlite"),
+    runtimeFor: (root) => runtimes.get(root),
     childState: (root, taskId) => {
       const child = taskRecordsFor(root).load(taskId)
       return child ? { status: child.status, runEpoch: child.notification.run_epoch } : undefined
-    } })
+    },
+  })
   function runtimeFor(sessionID: string): NativeDagRuntime {
     const existing = runtimes.get(sessionID)
     if (existing) return existing
-    const created = createNativeDagRuntime({ directory: host.directory, parentSessionID: sessionID, executionMode, lease, ...(settings && { settings }),
-      onDriveEnded: runId => wake.arm(sessionID, runId), onChanged: () => status.refreshSession(sessionID) })
+    const created = createNativeDagRuntime({
+      directory: host.directory,
+      parentSessionID: sessionID,
+      executionMode,
+      lease,
+      ...(settings && { settings }),
+      onDriveEnded: (runId) => wake.arm(sessionID, runId),
+      onChanged: () => status.refreshSession(sessionID),
+    })
     runtimes.set(sessionID, created)
     return created
   }
   const bridge = createNativeDagBridge({
     tool: host.tool,
-    async rollbackAcquisition() { await host.service.close() },
+    async rollbackAcquisition() {
+      await host.service.close()
+    },
     async acquire(targets) {
       host.assertCurrent()
       const targetPermissions = await host.register(targets)
       host.assertCurrent()
-      return { registry: host.registry, kernel: host.kernel, service: host.service, targetPermissions,
+      return {
+        registry: host.registry,
+        kernel: host.kernel,
+        service: host.service,
+        targetPermissions,
         workflow(caller, call) {
           assertRootWorkflowCaller(caller.sessionID, call)
           const runtime = runtimeFor(caller.sessionID)
-          const spawnPolicy: DagNodeSpawnPolicy = node => evaluateSpawnPolicy({ manager: call.operation.task, omoConfig: host.prepared.config,
-            agents: host.prepared.agents, resolveSkillInvocations: host.resolveSkillInvocations }, node.subagentType, node.prompt, node.parentSessionId)
+          const spawnPolicy: DagNodeSpawnPolicy = (node) =>
+            evaluateSpawnPolicy(
+              {
+                manager: call.operation.task,
+                omoConfig: host.prepared.config,
+                agents: host.prepared.agents,
+                resolveSkillInvocations: host.resolveSkillInvocations,
+              },
+              node.subagentType,
+              node.prompt,
+              node.parentSessionId,
+            )
           // S2 per-call skill authorization for THIS caller (the root session and its agent), at call time.
           const skillSignal = AbortSignal.any([caller.signal, call.signal])
-          const skills = nativeDagSkillAuthority({ store: runtime.store, cwd: host.directory,
-            authorize: names => host.prepared.authorizeSkills(caller, names, skillSignal) })
-          return params => runNativeWorkflow({ runtime, parentSessionID: caller.sessionID, executionMode, skills,
-            call: { port: nativeDagCallPort(call.operation), signal: call.signal, spawnPolicy } }, params)
+          const skills = nativeDagSkillAuthority({
+            store: runtime.store,
+            cwd: host.directory,
+            authorize: (names) => host.prepared.authorizeSkills(caller, names, skillSignal),
+          })
+          return (params) =>
+            runNativeWorkflow(
+              {
+                runtime,
+                parentSessionID: caller.sessionID,
+                executionMode,
+                skills,
+                call: { port: nativeDagCallPort(call.operation), signal: call.signal, spawnPolicy },
+              },
+              params,
+            )
         },
         // The registry, scopes and service are released by the Native task component.
-        async release() {} }
+        async release() {},
+      }
     },
   })
   // Startup after a reload: every root with a DAG store gets its runs watched again by THIS
   // generation's wake owner, so an un-ACKed wake is re-posted with its same id and text once every
   // re-check passes. A wake is a notification: nothing is admitted or recovered without a call.
-  const startup = bridge.ready.then(() => {
-    for (const root of discoverDagRoots(host.directory)) {
-      const runtime = runtimeFor(root)
-      for (const run of runtime.manager.list(root, { limit: 256 })) if (!TERMINAL_RUN.has(run.status)) wake.arm(root, run.runId)
-    }
-  }).catch((error: unknown) => { console.warn("[oh-my-openagent/v2] workflow wake resume held", error instanceof Error ? error.message : String(error)) })
+  const startup = bridge.ready
+    .then(() => {
+      for (const root of discoverDagRoots(host.directory)) {
+        const runtime = runtimeFor(root)
+        for (const run of runtime.manager.list(root, { limit: 256 }))
+          if (!TERMINAL_RUN.has(run.status)) wake.arm(root, run.runId)
+      }
+    })
+    .catch((error: unknown) => {
+      console.warn(
+        "[oh-my-openagent/v2] workflow wake resume held",
+        error instanceof Error ? error.message : String(error),
+      )
+    })
   /** Native shutdown pause of every live run this generation knows, once its drives retired: the
    * next generation's call recovers each lazily. Children are parked by the closing task service. */
   async function pauseRuns(): Promise<void> {
     const failures: unknown[] = []
-    for (const runtime of runtimes.values()) await runtime.pauseForShutdown().catch((error: unknown) => { failures.push(error) })
+    for (const runtime of runtimes.values())
+      await runtime.pauseForShutdown().catch((error: unknown) => {
+        failures.push(error)
+      })
     if (failures.length > 0) throw new AggregateError(failures, "Native workflow shutdown pause incomplete")
   }
   return Object.freeze({
@@ -138,11 +207,20 @@ export function registerNativeDagComponent(host: NativeDagHost, rpc?: DagStatusR
         await status.settled()
         await (await statusRegistration)?.dispose()
       } finally {
-        try { await bridge.close() } finally {
-          try { await startup; await pauseRuns() } finally {
-            try { await wake.close() } finally {
+        try {
+          await bridge.close()
+        } finally {
+          try {
+            await startup
+            await pauseRuns()
+          } finally {
+            try {
+              await wake.close()
+            } finally {
               for (const store of taskRecords.values()) store.close()
-              taskRecords.clear(); lease.dispose(); runtimes.clear()
+              taskRecords.clear()
+              lease.dispose()
+              runtimes.clear()
             }
           }
         }

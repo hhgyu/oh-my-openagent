@@ -33,14 +33,17 @@ interface FactsComponentParts {
   readonly persona?: string
 }
 
-export function createFactsComponent(context: MemoryHost, deps: {
-  readonly binder: MemoryBinder
-  readonly logger: MemoryLogger
-  readonly now: () => number
-  readonly loadSettings: (cwd: string) => OmoMemorySettings
-  readonly flushJournal: (bound: BoundMemorySession, signal: AbortSignal) => Promise<unknown>
-  readonly seams?: MemoryFactsSeams
-}): FactsComponentParts | undefined {
+export function createFactsComponent(
+  context: MemoryHost,
+  deps: {
+    readonly binder: MemoryBinder
+    readonly logger: MemoryLogger
+    readonly now: () => number
+    readonly loadSettings: (cwd: string) => OmoMemorySettings
+    readonly flushJournal: (bound: BoundMemorySession, signal: AbortSignal) => Promise<unknown>
+    readonly seams?: MemoryFactsSeams
+  },
+): FactsComponentParts | undefined {
   const seams = deps.seams
   let persona: string | undefined
   if (seams?.createPort === undefined) {
@@ -54,7 +57,9 @@ export function createFactsComponent(context: MemoryHost, deps: {
   }
   const model = context.model
   const provider = context.provider
-  const catalog = seams?.catalog ?? (model === undefined || provider === undefined ? undefined : () => createModelCatalog({ model, provider }).list())
+  const catalog =
+    seams?.catalog ??
+    (model === undefined || provider === undefined ? undefined : () => createModelCatalog({ model, provider }).list())
   const hosting = createFactsChildHosting({
     host: context,
     warn: (message, details) => deps.logger.warn(message, details),
@@ -62,7 +67,13 @@ export function createFactsComponent(context: MemoryHost, deps: {
     ...(seams?.timers === undefined ? {} : { timers: seams.timers }),
   })
   const facts = createMemoryFacts({
-    binder: deps.binder, session: context.session, logger: deps.logger, now: deps.now, loadSettings: deps.loadSettings, hosting, flushJournal: deps.flushJournal,
+    binder: deps.binder,
+    session: context.session,
+    logger: deps.logger,
+    now: deps.now,
+    loadSettings: deps.loadSettings,
+    hosting,
+    flushJournal: deps.flushJournal,
     ...(catalog === undefined ? {} : { catalog }),
     ...(seams?.deadlineMs === undefined ? {} : { deadlineMs: seams.deadlineMs }),
     ...(seams?.loadConfig === undefined ? {} : { loadConfig: seams.loadConfig }),

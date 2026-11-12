@@ -12,7 +12,10 @@ const AVAILABLE = ["openai/gpt-quick", "anthropic/haiku", "test/session"]
 describe("facts model selection", () => {
   test("#given a per-identity facts model #then it wins over the global facts model, quick and the session model", () => {
     // given
-    const settings = config({ memory: { facts: { model: "openai/gpt-quick" }, agents: { me: { facts: { model: "anthropic/haiku" } } } }, categories: { quick: { model: "openai/gpt-quick" } } })
+    const settings = config({
+      memory: { facts: { model: "openai/gpt-quick" }, agents: { me: { facts: { model: "anthropic/haiku" } } } },
+      categories: { quick: { model: "openai/gpt-quick" } },
+    })
     // when
     const resolution = resolveFactsModel(settings, AVAILABLE, "test/session", "me")
     // then
@@ -21,7 +24,9 @@ describe("facts model selection", () => {
 
   test("#given an explicit quick category #then its first available declared candidate is used and the rest are fallbacks", () => {
     // given
-    const settings = config({ categories: { quick: { models: ["missing/one", "anthropic/haiku"], model: "openai/gpt-quick" } } })
+    const settings = config({
+      categories: { quick: { models: ["missing/one", "anthropic/haiku"], model: "openai/gpt-quick" } },
+    })
     // when
     const resolution = resolveFactsModel(settings, AVAILABLE, "test/session", "me")
     // then
@@ -53,7 +58,10 @@ describe("facts model selection", () => {
 
   test("#given a catalog #then only enabled chat models of listed providers outside exclude_models are available", () => {
     // given
-    const disabled = { ...catalogModel("test", "off"), availability: { ...catalogModel("test", "off").availability, enabled: false } }
+    const disabled = {
+      ...catalogModel("test", "off"),
+      availability: { ...catalogModel("test", "off").availability, enabled: false },
+    }
     const models = [catalogModel("test", "on"), disabled, catalogModel("test", "excluded")]
     // when
     const available = availableFactsModels(models, { exclude_models: ["test/excluded"] })

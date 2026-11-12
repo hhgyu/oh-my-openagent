@@ -25,7 +25,9 @@ export function createEvalTaskPort(): EvalTaskPort {
     attach(handler: EvalTaskHandler) {
       if (current) throw Error("The eval task port already has a Native task component attached")
       current = handler
-      return () => { if (current === handler) current = undefined }
+      return () => {
+        if (current === handler) current = undefined
+      }
     },
     invoke(input: unknown, caller: ToolContext, kernelTools: unknown) {
       const handler = current
@@ -36,15 +38,19 @@ export function createEvalTaskPort(): EvalTaskPort {
 }
 
 export const EVAL_TASK_HOST_TOOL_NAME = "task"
-const DESCRIPTION = "Start a Native task child, exactly like the `task` tool (same input). Pass tools: [\"name\", ...] to grant the child kernel tools this cell's kernel defined with tool(fn)."
+const DESCRIPTION =
+  'Start a Native task child, exactly like the `task` tool (same input). Pass tools: ["name", ...] to grant the child kernel tools this cell\'s kernel defined with tool(fn).'
 /** JSON copy: the catalog is structured-cloned into the worker, and TypeBox keeps symbol keys. */
 const PARAMETERS: unknown = JSON.parse(JSON.stringify(nativeTaskInputSchemas.task))
 
 function evalResult(result: Result): EvalHostToolResult {
-  const parts = typeof result.content === "string" ? [{ type: "text" as const, text: result.content }] : result.content ?? []
-  const content = parts.map(part => part.type === "text"
-    ? { type: "text" as const, text: part.text }
-    : { type: "text" as const, text: `[file ${part.mime}]` })
+  const parts =
+    typeof result.content === "string" ? [{ type: "text" as const, text: result.content }] : (result.content ?? [])
+  const content = parts.map((part) =>
+    part.type === "text"
+      ? { type: "text" as const, text: part.text }
+      : { type: "text" as const, text: `[file ${part.mime}]` },
+  )
   return { content, ...(result.metadata !== undefined && { details: result.metadata }) }
 }
 
@@ -56,7 +62,9 @@ export function createEvalTaskHostTool(port: EvalTaskPort): OwnedEvalHostTool {
     async execute(params, call) {
       const caller = call.caller
       if (!caller || caller.sessionID !== call.sessionID) {
-        throw Error("tools.task can run only inside a running eval cell; a detached or finished cell cannot start tasks")
+        throw Error(
+          "tools.task can run only inside a running eval cell; a detached or finished cell cannot start tasks",
+        )
       }
       // The eval call's own SDK identity, narrowed to this host call's signal. Task progress is not
       // written onto the eval tool part, whose metadata shows the cell's output.

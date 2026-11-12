@@ -24,7 +24,8 @@ export const memorySyncRpc = {
   events: {},
 } satisfies Rpc.PortableDefinition
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
 
 type MemoryRpcDomain = NonNullable<MemoryHost["rpc"]>
 
@@ -33,11 +34,16 @@ type MemoryRpcDomain = NonNullable<MemoryHost["rpc"]>
  * the component's single RPC owner. The per-call signal is not the ceremony's: a pairing outlives the
  * call that started it and ends with the component.
  */
-export function registerMemorySyncRpc(rpc: MemoryRpcDomain, runtime: Pick<MemorySyncRuntime, "call">): Promise<RpcRegistration<typeof memorySyncRpc>> {
-  const forward = (verb: SyncRpcVerb) => async (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
-    const answer = await runtime.call(verb, input)
-    return isRecord(answer) ? answer : { kind: "unavailable", reason: "The sync operation could not complete." }
-  }
+export function registerMemorySyncRpc(
+  rpc: MemoryRpcDomain,
+  runtime: Pick<MemorySyncRuntime, "call">,
+): Promise<RpcRegistration<typeof memorySyncRpc>> {
+  const forward =
+    (verb: SyncRpcVerb) =>
+    async (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      const answer = await runtime.call(verb, input)
+      return isRecord(answer) ? answer : { kind: "unavailable", reason: "The sync operation could not complete." }
+    }
   return rpc.register(memorySyncRpc, {
     enable: forward("enable"),
     pending: forward("pending"),

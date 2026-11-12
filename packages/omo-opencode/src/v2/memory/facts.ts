@@ -75,30 +75,42 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
   let closing: Promise<void> | undefined
 
   function track(promise: Promise<unknown>, label: string): void {
-    const tracked = promise.catch((error: unknown) => { deps.logger.warn(`facts ${label} failed`, { error: describeError(error) }) })
+    const tracked = promise.catch((error: unknown) => {
+      deps.logger.warn(`facts ${label} failed`, { error: describeError(error) })
+    })
     work.add(tracked)
-    void tracked.finally(() => { work.delete(tracked) })
+    void tracked.finally(() => {
+      work.delete(tracked)
+    })
   }
 
   function factsSettings(bound: BoundMemorySession): { readonly enabled: boolean; readonly debounce: number } {
     const settings = deps.loadSettings(bound.directory)
     const override = settings.agents[bound.identity]?.facts
-    return { enabled: override?.enabled ?? settings.facts.enabled, debounce: Math.max(1, override?.debounce_settles ?? settings.facts.debounce_settles) }
+    return {
+      enabled: override?.enabled ?? settings.facts.enabled,
+      debounce: Math.max(1, override?.debounce_settles ?? settings.facts.debounce_settles),
+    }
   }
 
   function stateFor(bound: BoundMemorySession): IdentityState {
     const existing = states.get(bound.paths.root)
     if (existing !== undefined) return existing
     const runner = createFactsRunner({
-      identity: bound.identity, paths: bound.paths, owner, now: () => new Date(deps.now()), logger: deps.logger,
-      deadlineMs: deps.deadlineMs ?? FACTS_CHILD_DEADLINE_MS, ownerAlive: factsOwnerAlive,
+      identity: bound.identity,
+      paths: bound.paths,
+      owner,
+      now: () => new Date(deps.now()),
+      logger: deps.logger,
+      deadlineMs: deps.deadlineMs ?? FACTS_CHILD_DEADLINE_MS,
+      ownerAlive: factsOwnerAlive,
       people: () => peopleRouting(loadConfig(bound.directory), bound.identity),
-      resolveModel: async sessionModel => {
+      resolveModel: async (sessionModel) => {
         const config = loadConfig(bound.directory)
         const available = deps.catalog === undefined ? undefined : availableFactsModels(await deps.catalog(), config)
         return resolveFactsModel(config, available, sessionModel, bound.identity)
       },
-      launchChild: input => deps.hosting.launch(bound, input),
+      launchChild: (input) => deps.hosting.launch(bound, input),
       reclaimChildren: () => deps.hosting.reclaim(bound),
     })
     const state: IdentityState = { runner, settles: 0, settled: new Set(), lastSession: bound.sessionID }
@@ -107,14 +119,25 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
   }
 
   function launch(state: IdentityState): void {
-    const request = { parentSessionId: state.lastSession, ...(state.lastSessionModel === undefined ? {} : { sessionModel: state.lastSessionModel }) }
+    const request = {
+      parentSessionId: state.lastSession,
+      ...(state.lastSessionModel === undefined ? {} : { sessionModel: state.lastSessionModel }),
+    }
     track(state.runner.launchPending(request), "extractor launch")
   }
 
   async function enqueue(bound: BoundMemorySession, state: IdentityState, signal?: AbortSignal): Promise<void> {
-    const entries = await new TranscriptJournal({ journalDir: join(bound.paths.transcripts, bound.sessionID) }).readEntries()
+    const entries = await new TranscriptJournal({
+      journalDir: join(bound.paths.transcripts, bound.sessionID),
+    }).readEntries()
     if (entries.length === 0) return
-    await state.runner.queue.enqueue({ identity: bound.identity, sessionId: bound.sessionID, conversationId: bound.sessionID, entries, ...(signal === undefined ? {} : { signal }) })
+    await state.runner.queue.enqueue({
+      identity: bound.identity,
+      sessionId: bound.sessionID,
+      conversationId: bound.sessionID,
+      entries,
+      ...(signal === undefined ? {} : { signal }),
+    })
   }
 
   async function settle(sessionID: string): Promise<void> {
@@ -137,7 +160,7 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
   }
 
   return {
-    isFactsSession: sessionID => deps.hosting.isFactsSession(sessionID),
+    isFactsSession: (sessionID) => deps.hosting.isFactsSession(sessionID),
     onPrompt(sessionID) {
       if (!closed && !deps.hosting.isFactsSession(sessionID)) userInput.add(sessionID)
     },
@@ -180,9 +203,9 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
       if (closing !== undefined) return closing
       closed = true
       closing = (async () => {
-        const cancelled = Promise.allSettled([...states.values()].map(state => state.runner.cancelActive()))
+        const cancelled = Promise.allSettled([...states.values()].map((state) => state.runner.cancelActive()))
         await drainFinalFacts({
-          sessions: [...sessions.values()].filter(bound => factsSettings(bound).enabled),
+          sessions: [...sessions.values()].filter((bound) => factsSettings(bound).enabled),
           flush: deps.flushJournal,
           enqueue: (bound, signal) => enqueue(bound, stateFor(bound), signal),
           logger: deps.logger,
@@ -221,9 +244,23 @@ async function latestSessionModel(session: MemoryFactsDeps["session"], sessionID
   }
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
-    if (message === null || typeof message !== "object" || !("type" in message) || message.type !== "assistant" || !("model" in message)) continue
+    if (
+      message === null ||
+      typeof message !== "object" ||
+      !("type" in message) ||
+      message.type !== "assistant" ||
+      !("model" in message)
+    )
+      continue
     const model = message.model
-    if (model !== null && typeof model === "object" && "providerID" in model && "id" in model && typeof model.providerID === "string" && typeof model.id === "string") {
+    if (
+      model !== null &&
+      typeof model === "object" &&
+      "providerID" in model &&
+      "id" in model &&
+      typeof model.providerID === "string" &&
+      typeof model.id === "string"
+    ) {
       return `${model.providerID}/${model.id}`
     }
   }

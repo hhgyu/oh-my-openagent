@@ -11,18 +11,33 @@ import type { ExternalProjectionLimits } from "../compile"
 import { parseCommandArgs } from "../commands/args"
 import { factsParkedCauseSummary } from "../commands/facts-failure-cause"
 import { factsRemediationHint, formatFactsAdvisory, readFactsOverview } from "../commands/facts-status"
-import { formatSkillNameFrontmatterRepairReport, repairMissingSkillNameFrontmatter } from "../commands/skill-frontmatter"
+import {
+  formatSkillNameFrontmatterRepairReport,
+  repairMissingSkillNameFrontmatter,
+} from "../commands/skill-frontmatter"
 import { estimateSystemTokens } from "../commands/tokens"
 import {
-  requireIdentity, respond, sessionIdOf,
-  type MemoryCommandContext, type MemoryCommandDeps, type MemoryCommandIdentity,
+  requireIdentity,
+  respond,
+  sessionIdOf,
+  type MemoryCommandContext,
+  type MemoryCommandDeps,
+  type MemoryCommandIdentity,
 } from "../commands/types"
 import type { RuntimeRetentionPolicy } from "../retention"
 import { redactSecretLikeMaterial } from "../sync/redact"
 import {
-  checkAbandonedRuns, checkFrontmatter, checkLocks, checkRepository, checkRuntimeSize, checkSoulSeed, checkTokens,
+  checkAbandonedRuns,
+  checkFrontmatter,
+  checkLocks,
+  checkRepository,
+  checkRuntimeSize,
+  checkSoulSeed,
+  checkTokens,
   checkWorktrees,
-  type CheckLevel, type DoctorCheck, type RuntimeSizeReport,
+  type CheckLevel,
+  type DoctorCheck,
+  type RuntimeSizeReport,
 } from "./checks"
 import { checkProjection } from "./projection"
 import { checkQuarantinedRuns, checkReceipts, type QuarantinedRun, type ReceiptSummaries } from "./receipts"
@@ -128,18 +143,19 @@ export async function runDoctor(deps: DoctorDeps, ctx: MemoryCommandContext, arg
     if (!allowed.includes(flag)) return respond(ctx, `unknown flag --${flag}`, "error")
   }
   if (
-    parsed.positionals.length > 0
-    || [...parsed.flags.values()].some((value) => value !== true)
-    || (parsed.flags.has("dry-run") && !parsed.flags.has("fix"))
+    parsed.positionals.length > 0 ||
+    [...parsed.flags.values()].some((value) => value !== true) ||
+    (parsed.flags.has("dry-run") && !parsed.flags.has("fix"))
   ) {
     return respond(ctx, canFix ? "usage: /doctor [--json] [--fix [--dry-run]]" : "usage: /doctor [--json]", "error")
   }
   const identity = requireIdentity(deps, ctx)
   if (typeof identity === "string") return respond(ctx, identity, "error")
   const sessionId = sessionIdOf(ctx)
-  const fixLines = parsed.flags.has("fix") && sessionId !== undefined && deps.reflectionLockFix !== undefined
-    ? await deps.reflectionLockFix(sessionId, { dryRun: parsed.flags.has("dry-run") })
-    : []
+  const fixLines =
+    parsed.flags.has("fix") && sessionId !== undefined && deps.reflectionLockFix !== undefined
+      ? await deps.reflectionLockFix(sessionId, { dryRun: parsed.flags.has("dry-run") })
+      : []
 
   const repoDir = identity.identityPaths.repo
   const repository = checkRepository(identity)
@@ -162,16 +178,17 @@ export async function runDoctor(deps: DoctorDeps, ctx: MemoryCommandContext, arg
     receipts = receiptCheck.receipts
     quarantinedRuns = quarantine.runs
     const runtimeSettings = deps.runtimeSize?.(identity)
-    const runtime = runtimeSettings === undefined
-      ? undefined
-      : await checkRuntimeSize(identity.identityPaths, {
-        maxBytes: runtimeSettings.maxBytes,
-        policy: runtimeSettings.policy,
-        now,
-        reflectionEnabled: runtimeSettings.reflectionEnabled,
-        discardUnreflectedJournals: runtimeSettings.policy.discardUnreflectedJournals ?? false,
-        measureBudgetMs: runtimeSettings.policy.passBudgetMs ?? 60_000,
-      })
+    const runtime =
+      runtimeSettings === undefined
+        ? undefined
+        : await checkRuntimeSize(identity.identityPaths, {
+            maxBytes: runtimeSettings.maxBytes,
+            policy: runtimeSettings.policy,
+            now,
+            reflectionEnabled: runtimeSettings.reflectionEnabled,
+            discardUnreflectedJournals: runtimeSettings.policy.discardUnreflectedJournals ?? false,
+            measureBudgetMs: runtimeSettings.policy.passBudgetMs ?? 60_000,
+          })
     runtimeSize = runtime?.report ?? null
     checks.push(
       ...(await checkFrontmatter(repoDir, audit)),
@@ -195,18 +212,39 @@ export async function runDoctor(deps: DoctorDeps, ctx: MemoryCommandContext, arg
 
     if (deps.skillRepair === false) {
       extra.push("[info] skills: frontmatter repair is not run by this host's /doctor (read-only)")
-      return report(ctx, parsed.flags.has("json"), { identity, checks, extra, audit, skills, receipts, quarantinedRuns, runtimeSize: deps.runtimeSize === undefined ? undefined : runtimeSize })
+      return report(ctx, parsed.flags.has("json"), {
+        identity,
+        checks,
+        extra,
+        audit,
+        skills,
+        receipts,
+        quarantinedRuns,
+        runtimeSize: deps.runtimeSize === undefined ? undefined : runtimeSize,
+      })
     }
     const repaired = await repairMissingSkillNameFrontmatter(repoDir)
     skills = { scanned: repaired.scanned, repaired: repaired.repaired.length }
     const repairReport = formatSkillNameFrontmatterRepairReport(repaired)
     extra.push(
       `[info] skills: scanned ${repaired.scanned} skill file${repaired.scanned === 1 ? "" : "s"}`,
-      ...repairReport.split("\n").filter((line) => line.length > 0).map((line) => `[info] skills: ${line}`),
+      ...repairReport
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => `[info] skills: ${line}`),
     )
   }
 
-  return report(ctx, parsed.flags.has("json"), { identity, checks, extra, audit, skills, receipts, quarantinedRuns, runtimeSize: deps.runtimeSize === undefined ? undefined : runtimeSize })
+  return report(ctx, parsed.flags.has("json"), {
+    identity,
+    checks,
+    extra,
+    audit,
+    skills,
+    receipts,
+    quarantinedRuns,
+    runtimeSize: deps.runtimeSize === undefined ? undefined : runtimeSize,
+  })
 }
 
 interface DoctorReport {
@@ -226,10 +264,24 @@ function report(ctx: MemoryCommandContext, json: boolean, input: DoctorReport): 
   const level = worstLevel(checks)
   const notifyLevel = level === "fail" ? "error" : level === "warn" ? "warning" : "info"
   if (json) {
-    return respond(ctx, JSON.stringify(redactReportStrings({
-      identity: identity.identity, level, checks, audit, skills, receipts, quarantinedRuns,
-      ...(runtimeSize === undefined ? {} : { runtimeSize }),
-    }), null, 2), notifyLevel)
+    return respond(
+      ctx,
+      JSON.stringify(
+        redactReportStrings({
+          identity: identity.identity,
+          level,
+          checks,
+          audit,
+          skills,
+          receipts,
+          quarantinedRuns,
+          ...(runtimeSize === undefined ? {} : { runtimeSize }),
+        }),
+        null,
+        2,
+      ),
+      notifyLevel,
+    )
   }
   const lines = [
     `# Memory doctor: ${identity.identity}`,

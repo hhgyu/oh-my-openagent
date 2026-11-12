@@ -15,7 +15,12 @@ export type CatalogModel = {
   readonly status: string
   /** These are host variant IDs, not a fabricated Native reasoning level. */
   readonly reasoning: { readonly source: "opencode.model.variants"; readonly variants: readonly string[] }
-  readonly capabilities: { readonly tools: boolean; readonly input: readonly string[]; readonly output: readonly string[]; readonly temperature?: boolean }
+  readonly capabilities: {
+    readonly tools: boolean
+    readonly input: readonly string[]
+    readonly output: readonly string[]
+    readonly temperature?: boolean
+  }
   readonly limit: { readonly context: number; readonly input?: number; readonly output: number }
   /** Public USD-per-million price tiers only, never provider settings or headers. */
   readonly cost?: readonly {
@@ -44,20 +49,34 @@ export function createModelCatalog(domains: ModelCatalogDomains) {
       return models.data.map((model) => {
         const provider = byID.get(model.providerID)
         return {
-          providerID: model.providerID, id: model.id, modelID: model.modelID,
-          name: model.name, type: model.type ?? "chat", status: model.status,
+          providerID: model.providerID,
+          id: model.id,
+          modelID: model.modelID,
+          name: model.name,
+          type: model.type ?? "chat",
+          status: model.status,
           reasoning: { source: "opencode.model.variants", variants: model.variants.map((variant) => variant.id) },
           capabilities: {
-            tools: model.capabilities.tools, input: [...model.capabilities.input], output: [...model.capabilities.output],
+            tools: model.capabilities.tools,
+            input: [...model.capabilities.input],
+            output: [...model.capabilities.output],
             ...(model.capabilities.temperature === undefined ? {} : { temperature: model.capabilities.temperature }),
           },
-          limit: { context: model.limit.context, output: model.limit.output, ...(model.limit.input === undefined ? {} : { input: model.limit.input }) },
-          cost: (model.cost ?? []).map(price => ({
+          limit: {
+            context: model.limit.context,
+            output: model.limit.output,
+            ...(model.limit.input === undefined ? {} : { input: model.limit.input }),
+          },
+          cost: (model.cost ?? []).map((price) => ({
             ...(price.tier === undefined ? {} : { tier: { type: price.tier.type, size: price.tier.size } }),
-            input: price.input, output: price.output, cache: { read: price.cache.read, write: price.cache.write },
+            input: price.input,
+            output: price.output,
+            cache: { read: price.cache.read, write: price.cache.write },
           })),
           availability: {
-            source: "opencode.model.list+provider.list", listed: true, enabled: model.enabled,
+            source: "opencode.model.list+provider.list",
+            listed: true,
+            enabled: model.enabled,
             providerListed: provider !== undefined,
             ...(provider === undefined ? {} : { providerActivation: provider.activation }),
             authentication: "unknown",

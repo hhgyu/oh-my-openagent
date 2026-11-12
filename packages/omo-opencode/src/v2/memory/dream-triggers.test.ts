@@ -6,12 +6,26 @@ import { createManualTimers } from "./kibitzer/test-support"
 import { createBoundIdentity } from "./reflection.test-support"
 
 const cleanups: (() => void)[] = []
-afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup() })
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup()
+})
 
 const user = (id: string) => ({ type: "user", id, text: "hello" })
-const answer = (id: string, completed = true) => ({ type: "assistant", id, content: [], time: completed ? { created: 1, completed: 2 } : { created: 1 } })
+const answer = (id: string, completed = true) => ({
+  type: "assistant",
+  id,
+  content: [],
+  time: completed ? { created: 1, completed: 2 } : { created: 1 },
+})
 
-function setup(options: { readonly idleMinutes?: number; readonly active?: boolean; readonly owned?: boolean; readonly pressure?: boolean } = {}) {
+function setup(
+  options: {
+    readonly idleMinutes?: number
+    readonly active?: boolean
+    readonly owned?: boolean
+    readonly pressure?: boolean
+  } = {},
+) {
   const identity = createBoundIdentity()
   cleanups.push(identity.cleanup)
   const bound: BoundMemorySession = identity.bound
@@ -20,19 +34,37 @@ function setup(options: { readonly idleMinutes?: number; readonly active?: boole
   const requests: string[] = []
   const activity = { active: options.active !== false }
   const triggers = createDreamTriggers({
-    resolve: async sessionID => (sessionID === bound.sessionID ? bound : undefined),
+    resolve: async (sessionID) => (sessionID === bound.sessionID ? bound : undefined),
     session: { context: async () => structuredClone(transcript.messages) as never },
-    request: async (_bound, origin): Promise<DreamFireOutcome> => { requests.push(origin); return { fired: true, runId: "run-1", status: "active" } },
-    settings: () => ({ enabled: true, idleMinutes: options.idleMinutes ?? 30, minHoursBetween: 24, shutdownLaunch: false, autoSelectMax: 5, autoSelectMaxChars: 150_000 }),
+    request: async (_bound, origin): Promise<DreamFireOutcome> => {
+      requests.push(origin)
+      return { fired: true, runId: "run-1", status: "active" }
+    },
+    settings: () => ({
+      enabled: true,
+      idleMinutes: options.idleMinutes ?? 30,
+      minHoursBetween: 24,
+      shutdownLaunch: false,
+      autoSelectMax: 5,
+      autoSelectMaxChars: 150_000,
+    }),
     pressure: async () => options.pressure === true,
     hasUserActivity: () => activity.active,
     isOwnedSession: () => options.owned === true,
     logger: { warn: () => undefined },
     timers,
   })
-  cleanups.push(() => { void triggers.close() })
-  const idle = async () => { triggers.onIdle(bound.sessionID); await triggers.settled() }
-  const fire = async () => { timers.fire(); await triggers.settled() }
+  cleanups.push(() => {
+    void triggers.close()
+  })
+  const idle = async () => {
+    triggers.onIdle(bound.sessionID)
+    await triggers.settled()
+  }
+  const fire = async () => {
+    timers.fire()
+    await triggers.settled()
+  }
   return { bound, timers, transcript, requests, activity, triggers, idle, fire }
 }
 

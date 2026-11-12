@@ -4,7 +4,10 @@ import type { DagRunSnapshot } from "@oh-my-opencode/senpi-task/dag"
 import { dagStatusRpc, dagStatusSnapshot } from "../../rpc/dag"
 
 export interface DagStatusRpcPort {
-  register(definition: typeof dagStatusRpc, handlers: RpcHandlers<typeof dagStatusRpc>): Promise<RpcRegistration<typeof dagStatusRpc>>
+  register(
+    definition: typeof dagStatusRpc,
+    handlers: RpcHandlers<typeof dagStatusRpc>,
+  ): Promise<RpcRegistration<typeof dagStatusRpc>>
 }
 
 export function createDagStatusRpc(deps: { readonly snapshots: (sessionID: string) => readonly DagRunSnapshot[] }) {
@@ -27,20 +30,34 @@ export function createDagStatusRpc(deps: { readonly snapshots: (sessionID: strin
     refreshSession(sessionID: string): void {
       if (closed || events === undefined) return
       const emitter = events
-      const next = (chains.get(sessionID) ?? Promise.resolve()).then(async () => {
-        if (closed) return
-        const current = snapshot(sessionID)
-        const fingerprint = JSON.stringify(current)
-        if (published.get(sessionID) === fingerprint) return
-        await emitter.emit("updated", current)
-        published.set(sessionID, fingerprint)
-      }).catch((error: unknown) => {
-        console.warn("[oh-my-openagent/v2] DAG status update skipped", sessionID, error instanceof Error ? error.message : String(error))
-      })
+      const next = (chains.get(sessionID) ?? Promise.resolve())
+        .then(async () => {
+          if (closed) return
+          const current = snapshot(sessionID)
+          const fingerprint = JSON.stringify(current)
+          if (published.get(sessionID) === fingerprint) return
+          await emitter.emit("updated", current)
+          published.set(sessionID, fingerprint)
+        })
+        .catch((error: unknown) => {
+          console.warn(
+            "[oh-my-openagent/v2] DAG status update skipped",
+            sessionID,
+            error instanceof Error ? error.message : String(error),
+          )
+        })
       chains.set(sessionID, next)
-      void next.finally(() => { if (chains.get(sessionID) === next) chains.delete(sessionID) })
+      void next.finally(() => {
+        if (chains.get(sessionID) === next) chains.delete(sessionID)
+      })
     },
-    async settled(): Promise<void> { await Promise.allSettled([...chains.values()]) },
-    close(): void { closed = true; events = undefined; published.clear() },
+    async settled(): Promise<void> {
+      await Promise.allSettled([...chains.values()])
+    },
+    close(): void {
+      closed = true
+      events = undefined
+      published.clear()
+    },
   }
 }

@@ -5,7 +5,14 @@ import type { KernelToolsCapabilityProxy } from "./codemode-capability"
 import { childKernelScope, createKernelToolInvoker, kernelToolOutcomeCode } from "./kernel-tool-proxy"
 import { connectFakeWorker } from "./test-support"
 
-const DOUBLE = { name: "double", description: "Doubles n", input_schema: { type: "object" }, language: "js" as const, kernel_generation: 1, definition_revision: 1 }
+const DOUBLE = {
+  name: "double",
+  description: "Doubles n",
+  input_schema: { type: "object" },
+  language: "js" as const,
+  kernel_generation: 1,
+  definition_revision: 1,
+}
 
 /** codemode's live capability as the JS kernel publishes it inside the worker, fenced by kernel generation. */
 function liveCapability(invokeScope = true) {
@@ -14,13 +21,23 @@ function liveCapability(invokeScope = true) {
   const capability = {
     capabilities: { invokeScope },
     describe: async () => ({ results: [] }),
-    invoke: async (request: { kernel_generation: number; args: { n: number } }, options: Record<string, unknown> = {}) => {
+    invoke: async (
+      request: { kernel_generation: number; args: { n: number } },
+      options: Record<string, unknown> = {},
+    ) => {
       calls.push({ request, options })
-      if (request.kernel_generation !== generation) throw Object.assign(Error("kernel was reset"), { code: "kernel_tool_stale" })
+      if (request.kernel_generation !== generation)
+        throw Object.assign(Error("kernel was reset"), { code: "kernel_tool_stale" })
       return request.args.n * 2
     },
   }
-  return { capability, calls, reset: () => { generation++ } }
+  return {
+    capability,
+    calls,
+    reset: () => {
+      generation++
+    },
+  }
 }
 
 function grantOver(capability: KernelToolGrant["capability"], scope?: KernelToolGrant["scope"]): KernelToolGrant {
@@ -32,9 +49,23 @@ async function proxyThroughWorker() {
   const live = liveCapability()
   const seen: OwnedEvalHostToolCall[] = []
   const fake = connectFakeWorker({
-    ownedTools: [{ name: "probe", description: "p", parameters: {}, async execute(_params, call) { seen.push(call); return { content: [] } } }],
-    execute: async input => {
-      await createOwnedHostToolBridge({ sessionID: input.sessionID, tools: input.ownedTools, readKernelTools: () => live.capability }).executeTool("probe", {})
+    ownedTools: [
+      {
+        name: "probe",
+        description: "p",
+        parameters: {},
+        async execute(_params, call) {
+          seen.push(call)
+          return { content: [] }
+        },
+      },
+    ],
+    execute: async (input) => {
+      await createOwnedHostToolBridge({
+        sessionID: input.sessionID,
+        tools: input.ownedTools,
+        readKernelTools: () => live.capability,
+      }).executeTool("probe", {})
       return { content: [] }
     },
   })
@@ -51,14 +82,23 @@ describe("child kernel tool invoker over the worker capability proxy", () => {
   test("#given a granted double #when the child invokes it #then the worker's live capability answers 42 with the child invoker and the child scope", async () => {
     // given
     const { live, fake, proxy, seen } = await proxyThroughWorker()
-    const invoker = createKernelToolInvoker({ grant: grantOver(proxy, { tools: { allow: ["read", "task"], deny: ["bash"] } }), invokerSessionID: "ses_child" })
+    const invoker = createKernelToolInvoker({
+      grant: grantOver(proxy, { tools: { allow: ["read", "task"], deny: ["bash"] } }),
+      invokerSessionID: "ses_child",
+    })
     // when
     const outcome = await invoker.invoke(call())
     // then
     expect(seen[0]?.toolCallId).toBe("call_eval")
     expect(JSON.parse(outcome.text)).toEqual({ kernel_tool: "double", value: 42 })
     expect(outcome.isError).toBe(false)
-    expect(live.calls[0]?.request).toEqual({ name: "double", kernel_generation: 1, definition_revision: 1, args: { n: 21 }, call_id: "kc_1" })
+    expect(live.calls[0]?.request).toEqual({
+      name: "double",
+      kernel_generation: 1,
+      definition_revision: 1,
+      args: { n: 21 },
+      call_id: "kc_1",
+    })
     expect(live.calls[0]?.options.invoker).toEqual({ sessionId: "ses_child" })
     expect(live.calls[0]?.options.scope).toEqual({ tools: { allow: ["read"], deny: ["bash", "task"] } })
     await fake.backend.dispose()
@@ -93,7 +133,7 @@ describe("child kernel tool invoker over the worker capability proxy", () => {
     await disposed.fake.backend.dispose()
     const outcomes = [await first.invoke(call()), await second.invoke(call())]
     // then
-    expect(outcomes.map(outcome => outcome.details.error?.code)).toEqual(["tools_unavailable", "tools_unavailable"])
+    expect(outcomes.map((outcome) => outcome.details.error?.code)).toEqual(["tools_unavailable", "tools_unavailable"])
     await crashed.fake.backend.dispose()
     crashed.fake.close()
     disposed.fake.close()
@@ -105,9 +145,23 @@ describe("child kernel tool invoker over the worker capability proxy", () => {
     const seen: OwnedEvalHostToolCall[] = []
     let later: (() => Promise<unknown>) | undefined
     const fake = connectFakeWorker({
-      ownedTools: [{ name: "probe", description: "p", parameters: {}, async execute(_params, hostCall) { seen.push(hostCall); return { content: [] } } }],
-      execute: async input => {
-        const bridge = createOwnedHostToolBridge({ sessionID: input.sessionID, tools: input.ownedTools, readKernelTools: () => live.capability })
+      ownedTools: [
+        {
+          name: "probe",
+          description: "p",
+          parameters: {},
+          async execute(_params, hostCall) {
+            seen.push(hostCall)
+            return { content: [] }
+          },
+        },
+      ],
+      execute: async (input) => {
+        const bridge = createOwnedHostToolBridge({
+          sessionID: input.sessionID,
+          tools: input.ownedTools,
+          readKernelTools: () => live.capability,
+        })
         later = () => bridge.executeTool("probe", {})
         return { content: [] }
       },
@@ -129,7 +183,11 @@ describe("child kernel tool invoker semantics", () => {
     // given
     const live = liveCapability()
     let current = true
-    const invoker = createKernelToolInvoker({ grant: grantOver(live.capability), invokerSessionID: "ses_child", isCurrent: () => current })
+    const invoker = createKernelToolInvoker({
+      grant: grantOver(live.capability),
+      invokerSessionID: "ses_child",
+      isCurrent: () => current,
+    })
     // when
     const missing = await invoker.invoke(call("triple"))
     current = false
@@ -154,10 +212,22 @@ describe("child kernel tool invoker semantics", () => {
 
   test("#given thrown errors #then codemode codes survive, a released capability is unavailable and anything else is a failure", () => {
     // given
-    const errors = [{ code: "kernel_tool_recursion" }, { code: "kernel_capability_released" }, { code: "something_else" }, Error("plain"), "text"]
+    const errors = [
+      { code: "kernel_tool_recursion" },
+      { code: "kernel_capability_released" },
+      { code: "something_else" },
+      Error("plain"),
+      "text",
+    ]
     // when
     const codes = errors.map(kernelToolOutcomeCode)
     // then
-    expect(codes).toEqual(["kernel_tool_recursion", "tools_unavailable", "kernel_tool_failed", "kernel_tool_failed", "kernel_tool_failed"])
+    expect(codes).toEqual([
+      "kernel_tool_recursion",
+      "tools_unavailable",
+      "kernel_tool_failed",
+      "kernel_tool_failed",
+      "kernel_tool_failed",
+    ])
   })
 })

@@ -1,4 +1,11 @@
-import { createDagRecovery, type DagFileStore, type DagLeasePort, type DagRunId, type DagRunRecordV1, type InstalledDagRun } from "@oh-my-opencode/senpi-task/dag"
+import {
+  createDagRecovery,
+  type DagFileStore,
+  type DagLeasePort,
+  type DagRunId,
+  type DagRunRecordV1,
+  type InstalledDagRun,
+} from "@oh-my-opencode/senpi-task/dag"
 import type { NativeDagEntered, NativeDagSchedulerOptions } from "./drive"
 import { NativeDagRefusal } from "./refusals"
 import { createHeldDagTaskPort, type NativeDagCallPort } from "./task-port"
@@ -8,14 +15,21 @@ import { TERMINAL_TASK_STATUSES } from "./wake-projection"
  * absent, so `installPausedRuns` / `pauseRunsForShutdown` (which visit a whole session) act on the
  * run THIS call names and nothing else. Writes, locks and events are the real store's. */
 function runScopedStore(store: DagFileStore, runId: DagRunId): DagFileStore {
-  return { ...store, readCheckpoint: <T extends object>(id: DagRunId): T | null => id === runId ? store.readCheckpoint<T>(id) : null }
+  return {
+    ...store,
+    readCheckpoint: <T extends object>(id: DagRunId): T | null => (id === runId ? store.readCheckpoint<T>(id) : null),
+  }
 }
 
 /** Native shutdown pause (`recovery.ts` `pauseRunsForShutdown`) of every live run of `parent`:
  * `dag.run.paused` (`session_shutdown`) journaled, the lease moved to `previousLeaseHolderPid`, no
  * child cancelled. Needs no task authority, so the recovery's port is an unbound held port. */
 export function pauseRunsForShutdown(store: DagFileStore, parent: string, lease: DagLeasePort): readonly DagRunId[] {
-  return createDagRecovery({ store, lease, taskManager: createHeldDagTaskPort(`shutdown:${parent}` as DagRunId).port }).pauseRunsForShutdown(parent)
+  return createDagRecovery({
+    store,
+    lease,
+    taskManager: createHeldDagTaskPort(`shutdown:${parent}` as DagRunId).port,
+  }).pauseRunsForShutdown(parent)
 }
 
 /** Whether THIS host backs a node's child, decided WITHOUT capturing it (D-1): a child its previous
@@ -26,7 +40,11 @@ export function pauseRunsForShutdown(store: DagFileStore, parent: string, lease:
  * A settled child counts as backed only when this runtime owns it (its settle is then folded by
  * the call's scheduler); a settled child this runtime does not own (a hard kill stranded it) is
  * never restored and is left to Native recovery, which folds it from the owned lookup. */
-async function hostsChild(call: NativeDagCallPort, runId: DagRunId, node: DagRunRecordV1["nodes"][number]): Promise<boolean> {
+async function hostsChild(
+  call: NativeDagCallPort,
+  runId: DagRunId,
+  node: DagRunRecordV1["nodes"][number],
+): Promise<boolean> {
   const child = call.findOwnedTask({ kind: "dag", runId, nodeId: node.id })
   if (child === undefined) return false
   if (TERMINAL_TASK_STATUSES.has(child.status)) return call.isOwned(child.task_id)
@@ -42,7 +60,7 @@ export async function restoreRunChildren(record: DagRunRecordV1, call: NativeDag
   let backed = true
   for (const node of record.nodes) {
     if (node.state !== "scheduled" && node.state !== "running") continue
-    if (!await hostsChild(call, record.runId, node)) backed = false
+    if (!(await hostsChild(call, record.runId, node))) backed = false
   }
   return backed
 }
@@ -68,20 +86,34 @@ export async function recoverDagRun(input: {
   readonly options: NativeDagSchedulerOptions
 }): Promise<NativeDagEntered> {
   const { record, lease, options } = input
-  if (record.pause?.reason === "user_stop") throw new NativeDagRefusal("run_paused_by_user", `Dag run ${record.runId} was stopped by the user; only the user's Resume restarts it.`)
+  if (record.pause?.reason === "user_stop")
+    throw new NativeDagRefusal(
+      "run_paused_by_user",
+      `Dag run ${record.runId} was stopped by the user; only the user's Resume restarts it.`,
+    )
   const store = runScopedStore(input.store, record.runId)
-  const recovery = createDagRecovery({ store, lease, taskManager: options.taskManager, ancestry: { depth: 0 },
-    ...(options.nodeSpawnPolicy && { nodeSpawnPolicy: options.nodeSpawnPolicy }) })
+  const recovery = createDagRecovery({
+    store,
+    lease,
+    taskManager: options.taskManager,
+    ancestry: { depth: 0 },
+    ...(options.nodeSpawnPolicy && { nodeSpawnPolicy: options.nodeSpawnPolicy }),
+  })
   if (record.status !== "paused") recovery.pauseRunsForShutdown(record.parentSessionId)
   const adopted: InstalledDagRun[] = []
-  const outcomes = await recovery.installPausedRuns(record.parentSessionId, run => { adopted.push(run) })
+  const outcomes = await recovery.installPausedRuns(record.parentSessionId, (run) => {
+    adopted.push(run)
+  })
   const installed = adopted[0]
   if (installed === undefined) {
-    const held = outcomes.find(outcome => outcome.reason === "live_lease")
-    throw new NativeDagRefusal("run_still_active", held
-      ? `Dag run ${record.runId} is held by another live OpenCode 2 plugin generation (lease ${held.holderPid ?? "unknown"}); call workflow again once it has shut down.`
-      : `Dag run ${record.runId} could not be recovered: it is no longer paused by a reload.`)
+    const held = outcomes.find((outcome) => outcome.reason === "live_lease")
+    throw new NativeDagRefusal(
+      "run_still_active",
+      held
+        ? `Dag run ${record.runId} is held by another live OpenCode 2 plugin generation (lease ${held.holderPid ?? "unknown"}); call workflow again once it has shut down.`
+        : `Dag run ${record.runId} could not be recovered: it is no longer paused by a reload.`,
+    )
   }
   const { scheduler, settled } = installed
-  return { scheduler, run: settled.then(outcome => outcome.record ?? scheduler.snapshot()) }
+  return { scheduler, run: settled.then((outcome) => outcome.record ?? scheduler.snapshot()) }
 }

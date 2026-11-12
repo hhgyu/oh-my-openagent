@@ -24,7 +24,18 @@ describe("eval host tool bridge", () => {
     const bridge = createOwnedHostToolBridge({
       sessionID: "ses_1",
       readKernelTools: () => store,
-      tools: [{ name: "probe", description: "probe", parameters: { type: "object" }, async execute(_params, call) { await Promise.resolve(); calls.push(call); return { content: [{ type: "text", text: "ok" }] } } }],
+      tools: [
+        {
+          name: "probe",
+          description: "probe",
+          parameters: { type: "object" },
+          async execute(_params, call) {
+            await Promise.resolve()
+            calls.push(call)
+            return { content: [{ type: "text", text: "ok" }] }
+          },
+        },
+      ],
     })
     const signal = new AbortController().signal
 
@@ -45,7 +56,8 @@ describe("eval host tool bridge", () => {
     const tool = { name: "probe", description: "", parameters: {}, execute: async () => ({ content: [] }) }
 
     // when
-    const build = () => createOwnedHostToolBridge({ sessionID: "s", tools: [tool, tool], readKernelTools: () => undefined })
+    const build = () =>
+      createOwnedHostToolBridge({ sessionID: "s", tools: [tool, tool], readKernelTools: () => undefined })
 
     // then
     expect(build).toThrow("Duplicate eval host tool probe")

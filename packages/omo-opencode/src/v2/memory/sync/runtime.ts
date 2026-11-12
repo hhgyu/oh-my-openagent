@@ -16,7 +16,14 @@ import { existsSync } from "@oh-my-opencode/memory-core/fs"
 import type { SyncRpcContext } from "@oh-my-opencode/memory-core/sync-runner"
 import { describeError, type BoundMemorySession } from "../binding"
 import type { MemoryEnv, MemoryLogger } from "../config"
-import { syncEnabled, type MemoryRpcSync, type MemorySyncSeams, type SyncHost, type SyncHostModule, type SyncRpcVerb } from "./ports"
+import {
+  syncEnabled,
+  type MemoryRpcSync,
+  type MemorySyncSeams,
+  type SyncHost,
+  type SyncHostModule,
+  type SyncRpcVerb,
+} from "./ports"
 
 export interface MemorySyncRuntimeOptions {
   readonly initialBinding?: Pick<BoundMemorySession, "settings" | "identity">
@@ -53,7 +60,10 @@ export function createMemorySyncRuntime(options: MemorySyncRuntimeOptions): Memo
   const owner: SyncRpcContext = {
     ownerId: `opencode-v2:${randomUUID()}`,
     disconnectSignal: lifetime.signal,
-    admit: dispatch => { lifetime.signal.throwIfAborted(); return dispatch() },
+    admit: (dispatch) => {
+      lifetime.signal.throwIfAborted()
+      return dispatch()
+    },
   }
   const acquisitions = new Map<string, Promise<boolean>>()
   // Repos bound before their repository existed, waiting for the write that seeds them.
@@ -65,18 +75,29 @@ export function createMemorySyncRuntime(options: MemorySyncRuntimeOptions): Memo
   let closed = false
 
   const host = (): Promise<SyncHost> => {
-    loaded ??= loadModule().then(module => module.createSyncHost({
-      env: options.env, memoryRoot: options.memoryRoot, logger: options.logger, signal: lifetime.signal,
-      onStatusChange: repo => { if (!closed) options.onRepoChanged(repo) },
-      onHeadChange: repo => { if (!closed) options.onRepoChanged(repo) },
-      syncStatus: () => latestRepo === undefined ? Promise.resolve(undefined) : status(latestRepo),
-      enabled: () => latestBound === undefined || syncEnabled(latestBound),
-      ...(options.seams?.accountSource === undefined ? {} : { source: options.seams.accountSource }),
-    })).catch((error: unknown) => {
-      // A failed load is not cached: the next bind or call retries.
-      loaded = undefined
-      throw error
-    })
+    loaded ??= loadModule()
+      .then((module) =>
+        module.createSyncHost({
+          env: options.env,
+          memoryRoot: options.memoryRoot,
+          logger: options.logger,
+          signal: lifetime.signal,
+          onStatusChange: (repo) => {
+            if (!closed) options.onRepoChanged(repo)
+          },
+          onHeadChange: (repo) => {
+            if (!closed) options.onRepoChanged(repo)
+          },
+          syncStatus: () => (latestRepo === undefined ? Promise.resolve(undefined) : status(latestRepo)),
+          enabled: () => latestBound === undefined || syncEnabled(latestBound),
+          ...(options.seams?.accountSource === undefined ? {} : { source: options.seams.accountSource }),
+        }),
+      )
+      .catch((error: unknown) => {
+        // A failed load is not cached: the next bind or call retries.
+        loaded = undefined
+        throw error
+      })
     return loaded
   }
 
@@ -97,24 +118,36 @@ export function createMemorySyncRuntime(options: MemorySyncRuntimeOptions): Memo
       try {
         loadedHost = await host()
       } catch (error) {
-        options.logger.warn("memory sync host could not be loaded", { identity: bound.identity, error: describeError(error) })
+        options.logger.warn("memory sync host could not be loaded", {
+          identity: bound.identity,
+          error: describeError(error),
+        })
         return false
       }
       if (closed) return false
       try {
-        await loadedHost.acquire(bound.identity, bound.paths, { profile: bound.settings.agent, projectDir: bound.directory })
+        await loadedHost.acquire(bound.identity, bound.paths, {
+          profile: bound.settings.agent,
+          projectDir: bound.directory,
+        })
         return true
       } catch (error) {
-        options.logger.warn("memory sync could not start for this memory", { identity: bound.identity, error: describeError(error) })
+        options.logger.warn("memory sync could not start for this memory", {
+          identity: bound.identity,
+          error: describeError(error),
+        })
         // Keep the runner's refcount balanced, so the next attempt starts a fresh engine.
         await loadedHost.release(repo).catch((releaseError: unknown) => {
-          options.logger.warn("memory sync release after a failed start failed", { identity: bound.identity, error: describeError(releaseError) })
+          options.logger.warn("memory sync release after a failed start failed", {
+            identity: bound.identity,
+            error: describeError(releaseError),
+          })
         })
         return false
       }
     })()
     acquisitions.set(repo, attempt)
-    void attempt.then(acquired => {
+    void attempt.then((acquired) => {
       if (acquired || acquisitions.get(repo) !== attempt) return
       acquisitions.delete(repo)
       // Back to waiting: the next bind or settle edge tries again, never a timer.
@@ -169,10 +202,14 @@ export function createMemorySyncRuntime(options: MemorySyncRuntimeOptions): Memo
       if (loaded === undefined) return
       const loadedHost = await loaded.catch(() => undefined)
       if (loadedHost === undefined) return
-      const results = await Promise.allSettled(repos.map(repo => loadedHost.release(repo)))
-      results.push(...await Promise.allSettled([loadedHost.dispose()]))
+      const results = await Promise.allSettled(repos.map((repo) => loadedHost.release(repo)))
+      results.push(...(await Promise.allSettled([loadedHost.dispose()])))
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
-      if (failures.length > 0) throw new AggregateError(failures.map(failure => failure.reason), "Memory sync cleanup failed")
+      if (failures.length > 0)
+        throw new AggregateError(
+          failures.map((failure) => failure.reason),
+          "Memory sync cleanup failed",
+        )
     },
   }
 }

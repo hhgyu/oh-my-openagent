@@ -22,7 +22,11 @@ export interface TaskRecoveryRequest {
 export type RecoveryWorkerCapabilities = Pick<WorkpoolEngine, "ownsTask" | "yieldResults">
 /** Adapter-local Native service: record/sessionPath/handles remain Native contracts. */
 export interface TaskRecoveryRuntime {
-  respawn(request: TaskRecoveryRequest, workers: RecoveryWorkerCapabilities, epoch: () => number): Promise<RespawnResult>
+  respawn(
+    request: TaskRecoveryRequest,
+    workers: RecoveryWorkerCapabilities,
+    epoch: () => number,
+  ): Promise<RespawnResult>
   settleTeardowns(): Promise<void>
 }
 export type TaskRecoveryRuntimeFactory = (options: TaskManagerImplOptions) => TaskRecoveryRuntime
@@ -34,22 +38,26 @@ export function createNativeTaskRecoveryRuntime(options: TaskManagerImplOptions)
   const rpcRunner = options.rpcRespawnRunner ?? new RpcProcessRunner()
   return {
     respawn(request, workers, epoch) {
-      return respawnWithWorkpool({
-        record: request.record,
-        ...(request.paused === true ? { paused: true } : {}),
-        sessionPath: request.sessionPath,
-        stateDir: options.store.stateDir,
-        runners,
-        rpcRunner,
-        beforeLaunch: request.beforeLaunch,
-        ...(options.trustedRespawnLaunch === undefined
-          ? {}
-          : { trustedLaunch: options.trustedRespawnLaunch }),
-        ...(options.resolveInheritedExtensions === undefined
-          ? {}
-          : { inheritedExtensions: options.resolveInheritedExtensions }),
-      }, workers, epoch)
+      return respawnWithWorkpool(
+        {
+          record: request.record,
+          ...(request.paused === true ? { paused: true } : {}),
+          sessionPath: request.sessionPath,
+          stateDir: options.store.stateDir,
+          runners,
+          rpcRunner,
+          beforeLaunch: request.beforeLaunch,
+          ...(options.trustedRespawnLaunch === undefined ? {} : { trustedLaunch: options.trustedRespawnLaunch }),
+          ...(options.resolveInheritedExtensions === undefined
+            ? {}
+            : { inheritedExtensions: options.resolveInheritedExtensions }),
+        },
+        workers,
+        epoch,
+      )
     },
-    async settleTeardowns() { await rpcRunner.settleTeardowns?.() },
+    async settleTeardowns() {
+      await rpcRunner.settleTeardowns?.()
+    },
   }
 }

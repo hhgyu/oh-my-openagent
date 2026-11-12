@@ -1,15 +1,35 @@
-import { resolveDagNodeExecutionMode, type DagExecutionModeSources, type DagRoute } from "@oh-my-opencode/senpi-task/dag"
+import {
+  resolveDagNodeExecutionMode,
+  type DagExecutionModeSources,
+  type DagRoute,
+} from "@oh-my-opencode/senpi-task/dag"
 import type { DagToolDefinitionInput, DagToolErrorCode, DagToolResult } from "@oh-my-opencode/senpi-task/dag-operations"
 
 /** An OpenCode 2 refusal, returned to the model in the original tool's error envelope. */
 export class NativeDagRefusal extends Error {
-  constructor(readonly code: DagToolErrorCode, message: string, readonly nodeIds: readonly string[] = []) { super(message) }
+  constructor(
+    readonly code: DagToolErrorCode,
+    message: string,
+    readonly nodeIds: readonly string[] = [],
+  ) {
+    super(message)
+  }
 }
 
 export function refusalResult(refusal: NativeDagRefusal): DagToolResult {
   return {
     content: [{ type: "text", text: refusal.message }],
-    details: { kind: "error", error: { code: refusal.code, message: refusal.message, nodes: [], errors: [], diagnostics: [], node_ids: [...refusal.nodeIds] } },
+    details: {
+      kind: "error",
+      error: {
+        code: refusal.code,
+        message: refusal.message,
+        nodes: [],
+        errors: [],
+        diagnostics: [],
+        node_ids: [...refusal.nodeIds],
+      },
+    },
   }
 }
 
@@ -21,18 +41,29 @@ function nodeRoute(node: DagToolDefinitionInput["nodes"][number]): DagRoute | un
   return undefined
 }
 
-function quoted(ids: readonly string[]): string { return ids.map(id => `"${id}"`).join(", ") }
+function quoted(ids: readonly string[]): string {
+  return ids.map((id) => `"${id}"`).join(", ")
+}
 
 /** Definition features this host cannot run, refused before any engine work (and before any skill
  * authorization) for `start` and `amend`: process execution mode (P-02). */
-export function refuseDefinition(definition: DagToolDefinitionInput | undefined, sources: NativeDagExecutionSources): NativeDagRefusal | undefined {
+export function refuseDefinition(
+  definition: DagToolDefinitionInput | undefined,
+  sources: NativeDagExecutionSources,
+): NativeDagRefusal | undefined {
   if (definition === undefined) return undefined
-  const processNodes = definition.nodes.filter(node => {
-    const route = nodeRoute(node)
-    return route !== undefined && resolveDagNodeExecutionMode({ ...sources, route }) === "process"
-  }).map(node => node.id)
+  const processNodes = definition.nodes
+    .filter((node) => {
+      const route = nodeRoute(node)
+      return route !== undefined && resolveDagNodeExecutionMode({ ...sources, route }) === "process"
+    })
+    .map((node) => node.id)
   if (processNodes.length > 0) {
-    return new NativeDagRefusal("invalid_definition", `Node(s) ${quoted(processNodes)} resolve to process execution mode. OpenCode 2 runs DAG nodes in-process only; pick an agent or category that runs in-process.`, processNodes)
+    return new NativeDagRefusal(
+      "invalid_definition",
+      `Node(s) ${quoted(processNodes)} resolve to process execution mode. OpenCode 2 runs DAG nodes in-process only; pick an agent or category that runs in-process.`,
+      processNodes,
+    )
   }
   return undefined
 }

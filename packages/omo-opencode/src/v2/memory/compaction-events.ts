@@ -15,13 +15,23 @@ export function observeAcceptedCompactions(
       for await (const event of events.subscribe({ types: ["session.compaction.ended"], signal: stop.signal })) {
         if (stop.signal.aborted) break
         if (event.type !== "session.compaction.ended") continue
-        try { await accept(event.data.sessionID) } catch (error) {
-          logger.warn("memory accepted-compaction handling failed", { sessionID: event.data.sessionID, error: describeError(error) })
+        try {
+          await accept(event.data.sessionID)
+        } catch (error) {
+          logger.warn("memory accepted-compaction handling failed", {
+            sessionID: event.data.sessionID,
+            error: describeError(error),
+          })
         }
       }
     } catch (error) {
       if (!stop.signal.aborted) logger.warn("memory compaction event stream failed", { error: describeError(error) })
     }
   })()
-  return { async dispose() { stop.abort(); await work } }
+  return {
+    async dispose() {
+      stop.abort()
+      await work
+    },
+  }
 }

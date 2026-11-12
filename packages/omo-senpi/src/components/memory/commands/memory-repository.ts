@@ -10,6 +10,7 @@ import type { MemoryCommandContext, MemoryCommandDeps } from "./types"
 export function registerMemoryRepositoryCommand(pi: MemoryCommandPort, deps: MemoryCommandDeps): void {
   pi.registerCommand("memory-repository", {
     ...LAZY_MEMORY_COMMANDS["memory-repository"],
-    handler: (args: string, ctx: MemoryCommandContext): Promise<string> => runMemoryRepositoryCommand(senpiCommandDeps(deps), args, ctx),
+    handler: (args: string, ctx: MemoryCommandContext): Promise<string> =>
+      runMemoryRepositoryCommand(senpiCommandDeps(deps), args, ctx),
   })
 }

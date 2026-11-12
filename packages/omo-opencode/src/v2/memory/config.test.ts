@@ -30,7 +30,9 @@ describe("resolveSafeMemoryRoot", () => {
 
 describe("memory component with an unsafe root", () => {
   const fixtures: ReturnType<typeof createMemoryFixture>[] = []
-  afterEach(() => { for (const created of fixtures.splice(0)) created.cleanup() })
+  afterEach(() => {
+    for (const created of fixtures.splice(0)) created.cleanup()
+  })
 
   test("#given OMO_MEMORY_HOME under ~/.omo/desktop #when the root session writes #then the write is refused and nothing is created", async () => {
     // given
@@ -40,7 +42,13 @@ describe("memory component with an unsafe root", () => {
     const reserved = join(f.home, ".omo", "desktop", "memory")
     const cleanup = await registerMemoryComponent(f.host, f.options({ env: { OMO_MEMORY_HOME: reserved } }))
     // when
-    const write = f.runTool("memory", "root", { command: "create", reason: "r", file_path: "system/a.md", description: "Notes", file_text: "x" })
+    const write = f.runTool("memory", "root", {
+      command: "create",
+      reason: "r",
+      file_path: "system/a.md",
+      description: "Notes",
+      file_text: "x",
+    })
     // then
     await expect(write).rejects.toBeInstanceOf(ToolError)
     expect(existsSync(join(f.home, ".omo"))).toBe(false)

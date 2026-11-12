@@ -26,7 +26,10 @@ export function loadMemorySettings(cwd: string): OmoMemorySettings {
 }
 
 /** Both gates must pass: the config flag and the plugin option (an explicit `false` disables). */
-export function memoryComponentEnabled(settings: OmoMemorySettings, options: Plugin.Context["options"] | undefined): boolean {
+export function memoryComponentEnabled(
+  settings: OmoMemorySettings,
+  options: Plugin.Context["options"] | undefined,
+): boolean {
   return settings.enabled && options?.[MEMORY_ENABLED_OPTION] !== false
 }
 
@@ -38,8 +41,7 @@ export function resolveRecallSettings(settings: OmoMemorySettings, identity: str
 }
 
 export type MemoryRootDecision =
-  | { readonly ok: true; readonly root: string }
-  | { readonly ok: false; readonly root: string; readonly reason: string }
+  { readonly ok: true; readonly root: string } | { readonly ok: false; readonly root: string; readonly reason: string }
 
 /**
  * Resolves the memory root (`OMO_MEMORY_HOME` else `~/.omo/memory`) and refuses the OmO home itself and

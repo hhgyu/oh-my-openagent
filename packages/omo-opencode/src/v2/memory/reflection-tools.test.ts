@@ -4,22 +4,43 @@ import { join } from "node:path"
 import { createNodeGitExec, validateCompletion } from "@oh-my-opencode/memory-core"
 import type { AgentEditor } from "@opencode/plugin/promise/agent"
 import { DREAM_PERSONA } from "./dream-persona"
-import { DREAM_AGENT_ID, REFLECTION_AGENT_ID, REFLECTION_PERMISSIONS, registerReflectionAgent } from "./reflection-agent"
+import {
+  DREAM_AGENT_ID,
+  REFLECTION_AGENT_ID,
+  REFLECTION_PERMISSIONS,
+  registerReflectionAgent,
+} from "./reflection-agent"
 import { REFLECTION_PERSONA } from "./reflection-persona"
 import { createReflectionRunScope } from "./reflection-run-scope"
 import { createReflectionTools, REFLECTION_FOREIGN_SESSION_MESSAGE, REFLECTION_TOOL_NAMES } from "./reflection-tools"
-import { createReflectionFixture, refusal, REFLECTION_TEST_AGENT, runTool, toolContext, type ReflectionFixture } from "./reflection.test-support"
+import {
+  createReflectionFixture,
+  refusal,
+  REFLECTION_TEST_AGENT,
+  runTool,
+  toolContext,
+  type ReflectionFixture,
+} from "./reflection.test-support"
 
 setDefaultTimeout(process.platform === "win32" ? 30_000 : 10_000)
 
 const fixtures: ReflectionFixture[] = []
-afterEach(() => { for (const fixture of fixtures.splice(0)) fixture.cleanup() })
+afterEach(() => {
+  for (const fixture of fixtures.splice(0)) fixture.cleanup()
+})
 
 async function setup() {
   const fixture = await createReflectionFixture()
   fixtures.push(fixture)
-  const scope = createReflectionRunScope({ runId: "run-1", worktreeDir: fixture.worktree.dir, transcriptPath: fixture.transcriptPath, agentId: REFLECTION_TEST_AGENT })
-  const [read, list, grep, memory] = createReflectionTools(sessionID => sessionID === "ses_reflection_1" ? scope : undefined)
+  const scope = createReflectionRunScope({
+    runId: "run-1",
+    worktreeDir: fixture.worktree.dir,
+    transcriptPath: fixture.transcriptPath,
+    agentId: REFLECTION_TEST_AGENT,
+  })
+  const [read, list, grep, memory] = createReflectionTools((sessionID) =>
+    sessionID === "ses_reflection_1" ? scope : undefined,
+  )
   return { fixture, scope, read, list, grep, memory, child: toolContext("ses_reflection_1") }
 }
 
@@ -35,11 +56,23 @@ describe("reflection tools", () => {
         refusal(runTool(read, { target: "transcript" }, foreign)),
         refusal(runTool(list, {}, foreign)),
         refusal(runTool(grep, { pattern: "tabs", target: "transcript" }, foreign)),
-        refusal(runTool(memory, { command: "create", reason: "chore(reflection): x", file_path: "reference/x.md", description: "x", file_text: "x" }, foreign)),
+        refusal(
+          runTool(
+            memory,
+            {
+              command: "create",
+              reason: "chore(reflection): x",
+              file_path: "reference/x.md",
+              description: "x",
+              file_text: "x",
+            },
+            foreign,
+          ),
+        ),
       ])
 
       // then
-      expect(messages).toEqual(REFLECTION_TOOL_NAMES.map(name => `${name}: ${REFLECTION_FOREIGN_SESSION_MESSAGE}`))
+      expect(messages).toEqual(REFLECTION_TOOL_NAMES.map((name) => `${name}: ${REFLECTION_FOREIGN_SESSION_MESSAGE}`))
       expect(existsSync(join(fixture.worktree.dir, "reference", "x.md"))).toBe(false)
     })
   })
@@ -93,16 +126,26 @@ describe("reflection tools", () => {
       const { fixture, scope, memory, read, child } = await setup()
 
       // when
-      const result = await runTool(memory, {
-        command: "create", reason: "feat(reflection): record indentation preference\n\nUpdates:\n- tabs preference",
-        file_path: "reference/preferences.md", description: "Coding style preferences of the user", file_text: "Prefers tabs.\n",
-      }, child)
+      const result = await runTool(
+        memory,
+        {
+          command: "create",
+          reason: "feat(reflection): record indentation preference\n\nUpdates:\n- tabs preference",
+          file_path: "reference/preferences.md",
+          description: "Coding style preferences of the user",
+          file_text: "Prefers tabs.\n",
+        },
+        child,
+      )
       const written = await runTool(read, { path: "reference/preferences.md" }, child)
 
       // then
       const exec = createNodeGitExec()
       const tip = await exec.run(["rev-parse", "HEAD"], { cwd: fixture.worktree.dir, timeoutMs: 30_000 })
-      const branch = await exec.run(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: fixture.worktree.dir, timeoutMs: 30_000 })
+      const branch = await exec.run(["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: fixture.worktree.dir,
+        timeoutMs: 30_000,
+      })
       expect(scope.commits()).toEqual([tip.stdout.trim()])
       expect(result.metadata).toEqual({ commit: tip.stdout.trim(), paths: ["reference/preferences.md"] })
       expect(branch.stdout.trim()).toBe(fixture.worktree.branch)
@@ -118,7 +161,19 @@ describe("reflection tools", () => {
       scope.deactivate()
 
       // when
-      const message = await refusal(runTool(memory, { command: "create", reason: "chore(reflection): late", file_path: "reference/late.md", description: "late", file_text: "x" }, child))
+      const message = await refusal(
+        runTool(
+          memory,
+          {
+            command: "create",
+            reason: "chore(reflection): late",
+            file_path: "reference/late.md",
+            description: "late",
+            file_text: "x",
+          },
+          child,
+        ),
+      )
 
       // then
       expect(message).toContain("no longer active")
@@ -129,32 +184,42 @@ describe("reflection tools", () => {
 describe("omo-reflection agent", () => {
   test("#given the agent permissions #then everything is denied except exactly the four reflection tools", () => {
     // given
-    const allowed = REFLECTION_PERMISSIONS.filter(rule => rule.effect === "allow").map(rule => rule.action)
+    const allowed = REFLECTION_PERMISSIONS.filter((rule) => rule.effect === "allow").map((rule) => rule.action)
 
     // then
     expect(REFLECTION_PERMISSIONS[0]).toEqual({ action: "*", resource: "*", effect: "deny" })
     expect(allowed.toSorted()).toEqual(["reflection_grep", "reflection_list", "reflection_memory", "reflection_read"])
-    expect(REFLECTION_PERMISSIONS.filter(rule => rule.effect === "deny")).toHaveLength(1)
+    expect(REFLECTION_PERMISSIONS.filter((rule) => rule.effect === "deny")).toHaveLength(1)
   })
 
   test("#given the agent domain #when the agents are registered #then reflection and dream are hidden subagents with their personas and the confined permissions", async () => {
     // given
     const agents = new Map<string, Record<string, unknown>>()
-    const editor = { update: (id: string, apply: (agent: Record<string, unknown>) => void) => { const agent = agents.get(id) ?? {}; apply(agent); agents.set(id, agent) } }
+    const editor = {
+      update: (id: string, apply: (agent: Record<string, unknown>) => void) => {
+        const agent = agents.get(id) ?? {}
+        apply(agent)
+        agents.set(id, agent)
+      },
+    }
 
     // when
     // The double implements only `update`, the one editor method the registration calls.
-    await registerReflectionAgent({ transform: async apply => { apply(editor as unknown as AgentEditor); return { dispose: async () => undefined } } })
+    await registerReflectionAgent({
+      transform: async (apply) => {
+        apply(editor as unknown as AgentEditor)
+        return { dispose: async () => undefined }
+      },
+    })
 
     // then
     const agent = agents.get(REFLECTION_AGENT_ID)
     expect(agent?.mode).toBe("subagent")
     expect(agent?.hidden).toBe(true)
     expect(agent?.system).toBe(REFLECTION_PERSONA)
-    expect(agent?.permissions).toEqual(REFLECTION_PERMISSIONS.map(rule => ({ ...rule })))
+    expect(agent?.permissions).toEqual(REFLECTION_PERMISSIONS.map((rule) => ({ ...rule })))
     const dream = agents.get(DREAM_AGENT_ID)
     expect(dream).toMatchObject({ mode: "subagent", hidden: true, system: DREAM_PERSONA })
-    expect(dream?.permissions).toEqual(REFLECTION_PERMISSIONS.map(rule => ({ ...rule })))
+    expect(dream?.permissions).toEqual(REFLECTION_PERMISSIONS.map((rule) => ({ ...rule })))
   })
 })
-

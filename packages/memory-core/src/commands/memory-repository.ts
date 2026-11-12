@@ -11,7 +11,11 @@ import { requireIdentity, respond, type MemoryCommandContext, type MemoryCommand
 
 const NOT_CONFIGURED = "no memory repository configured; set one with /memory-repository set <url>"
 
-export async function runMemoryRepositoryCommand(deps: MemoryCommandDeps, args: string, ctx: MemoryCommandContext): Promise<string> {
+export async function runMemoryRepositoryCommand(
+  deps: MemoryCommandDeps,
+  args: string,
+  ctx: MemoryCommandContext,
+): Promise<string> {
   const identity = requireIdentity(deps, ctx)
   if (typeof identity === "string") return respond(ctx, identity, "error")
 

@@ -2,9 +2,23 @@ import { describe, expect, test } from "bun:test"
 import type { RecallCandidate, RecallNudge } from "@oh-my-opencode/memory-core"
 import type { KibitzerWakeOutcome } from "./outcome"
 import { createKibitzerSidecar, type KibitzerSidecar } from "./sidecar"
-import { createCountingSlot, createManualTimers, createScriptedPort, deferred, flush, type CountingSlot, type ManualTimers, type ScriptedPort } from "./test-support"
+import {
+  createCountingSlot,
+  createManualTimers,
+  createScriptedPort,
+  deferred,
+  flush,
+  type CountingSlot,
+  type ManualTimers,
+  type ScriptedPort,
+} from "./test-support"
 
-const candidate = (path: string): RecallCandidate => ({ path, description: `note ${path}`, excerpt: `body of ${path}`, score: 1 })
+const candidate = (path: string): RecallCandidate => ({
+  path,
+  description: `note ${path}`,
+  excerpt: `body of ${path}`,
+  score: 1,
+})
 
 interface Harness {
   readonly sidecar: KibitzerSidecar
@@ -24,14 +38,32 @@ function harness(overrides: { toolBudget?: number } = {}): Harness {
   const outcomes: KibitzerWakeOutcome[] = []
   let waiter: ((outcome: KibitzerWakeOutcome) => void) | undefined
   const sidecar = createKibitzerSidecar({
-    sessionId: "root", port, wakeSlot: slot, timers, random: () => 0.5,
+    sessionId: "root",
+    port,
+    wakeSlot: slot,
+    timers,
+    random: () => 0.5,
     toolBudget: overrides.toolBudget ?? 8,
-    deliver: async nudges => { delivered.push([...nudges]) },
-    onWake: outcome => { outcomes.push(outcome); waiter?.(outcome); waiter = undefined },
+    deliver: async (nudges) => {
+      delivered.push([...nudges])
+    },
+    onWake: (outcome) => {
+      outcomes.push(outcome)
+      waiter?.(outcome)
+      waiter = undefined
+    },
   })
   return {
-    sidecar, port, slot, timers, delivered, outcomes,
-    nextOutcome: () => new Promise(resolve => { waiter = resolve }),
+    sidecar,
+    port,
+    slot,
+    timers,
+    delivered,
+    outcomes,
+    nextOutcome: () =>
+      new Promise((resolve) => {
+        waiter = resolve
+      }),
   }
 }
 
@@ -74,8 +106,10 @@ describe("kibitzer sidecar lifecycle", () => {
     const empty = await offer(h, [])
     // then
     expect([repeat, surfaced, system, empty]).toEqual([
-      { action: "buffered", reason: "no_new_candidate" }, { action: "buffered", reason: "no_new_candidate" },
-      { action: "buffered", reason: "no_new_candidate" }, { action: "buffered", reason: "no_candidates" },
+      { action: "buffered", reason: "no_new_candidate" },
+      { action: "buffered", reason: "no_new_candidate" },
+      { action: "buffered", reason: "no_new_candidate" },
+      { action: "buffered", reason: "no_candidates" },
     ])
     expect(h.port.children[0]?.followUps).toEqual([])
     expect(h.slot.acquired).toBe(1)
@@ -116,7 +150,9 @@ describe("kibitzer sidecar lifecycle", () => {
     // then
     expect(child?.aborts).toBe(1)
     expect(outcome.status).toBe("deadline")
-    expect(h.delivered).toEqual([[{ path: "reference/a.md", hint: "The note records that rollouts go through staging first." }]])
+    expect(h.delivered).toEqual([
+      [{ path: "reference/a.md", hint: "The note records that rollouts go through staging first." }],
+    ])
     expect(h.slot.live).toBe(0)
     await h.sidecar.shutdown()
   })
@@ -152,7 +188,7 @@ describe("kibitzer sidecar lifecycle", () => {
     expect(cancelled).toMatchObject({ status: "cancelled", cause: "shutdown" })
     expect([afterFailure, afterStart, h.slot.live]).toEqual([0, 0, 0])
     expect(h.slot.acquired).toBe(h.slot.released)
-    expect(h.port.children.every(child => child.disposed)).toBe(true)
+    expect(h.port.children.every((child) => child.disposed)).toBe(true)
     expect(h.port.closed).toBe(true)
     expect(h.sidecar.state()).toBe("disposed")
   })

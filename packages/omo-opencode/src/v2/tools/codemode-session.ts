@@ -14,7 +14,13 @@ export interface EvalToolDefinition {
   readonly description: string
   readonly parameters: unknown
   prepareArguments?(args: unknown): unknown
-  execute(toolCallId: string, params: unknown, signal: AbortSignal | undefined, onUpdate: ((update: unknown) => void) | undefined, ctx: unknown): Promise<unknown>
+  execute(
+    toolCallId: string,
+    params: unknown,
+    signal: AbortSignal | undefined,
+    onUpdate: ((update: unknown) => void) | undefined,
+    ctx: unknown,
+  ): Promise<unknown>
 }
 
 export interface EvalSessionRuntime {
@@ -60,9 +66,15 @@ function refuseCompletion(): Promise<never> {
 }
 
 /** Description and schema of `eval` for this machine, built without starting any kernel. */
-export async function buildEvalDefinition(modules: CodemodeModules, sandbox: boolean): Promise<{ readonly description: string; readonly parameters: unknown }> {
+export async function buildEvalDefinition(
+  modules: CodemodeModules,
+  sandbox: boolean,
+): Promise<{ readonly description: string; readonly parameters: unknown }> {
   const settings = buildCodemodeSettings(modules, sandbox)
-  const availability = await (modules.getInterpreterAvailability as Call)(settings, (modules.createInterpreterDetector as Call)())
+  const availability = await (modules.getInterpreterAvailability as Call)(
+    settings,
+    (modules.createInterpreterDetector as Call)(),
+  )
   const enabledLanguages = (modules.enabledLanguagesFrom as Call)(settings, availability)
   const tool = (modules.createEvalTool as Call)({
     ...evalToolOptions(modules, settings, enabledLanguages, availability),
@@ -73,7 +85,12 @@ export async function buildEvalDefinition(modules: CodemodeModules, sandbox: boo
   return { description: tool.description, parameters: tool.parameters }
 }
 
-function evalToolOptions(modules: CodemodeModules, settings: Record<string, unknown>, enabledLanguages: unknown, availability: unknown) {
+function evalToolOptions(
+  modules: CodemodeModules,
+  settings: Record<string, unknown>,
+  enabledLanguages: unknown,
+  availability: unknown,
+) {
   return {
     enabledLanguages,
     cellTimeoutSeconds: settings.cellTimeoutSeconds,
@@ -88,30 +105,50 @@ function evalToolOptions(modules: CodemodeModules, settings: Record<string, unkn
   }
 }
 
-export async function createEvalSessionRuntime(modules: CodemodeModules, input: EvalRuntimeInput): Promise<EvalSessionRuntime> {
+export async function createEvalSessionRuntime(
+  modules: CodemodeModules,
+  input: EvalRuntimeInput,
+): Promise<EvalSessionRuntime> {
   const artifactsDir = join(input.stateDir, "artifacts")
   mkdirSync(artifactsDir, { recursive: true })
   const settings = buildCodemodeSettings(modules, input.sandbox)
-  const availability = await (modules.getInterpreterAvailability as Call)(settings, (modules.createInterpreterDetector as Call)())
+  const availability = await (modules.getInterpreterAvailability as Call)(
+    settings,
+    (modules.createInterpreterDetector as Call)(),
+  )
   input.signal.throwIfAborted()
   const enabledLanguages = (modules.enabledLanguagesFrom as Call)(settings, availability)
-  const bridge = createOwnedHostToolBridge({ sessionID: input.sessionID, tools: input.ownedTools, readKernelTools: () => modules.kernelToolsStorage.getStore() })
-  const raw = await (modules.createCodemodeSessionManager as Call)({
-    sessionId: input.sessionID, ownerSessionId: input.sessionID, cwd: input.cwd, settings, availability, artifactsDir,
-    killGuard: false, executeTool: bridge.executeTool, listTools: bridge.listTools, complete: refuseCompletion,
-  }) as Record<string, unknown>
+  const bridge = createOwnedHostToolBridge({
+    sessionID: input.sessionID,
+    tools: input.ownedTools,
+    readKernelTools: () => modules.kernelToolsStorage.getStore(),
+  })
+  const raw = (await (modules.createCodemodeSessionManager as Call)({
+    sessionId: input.sessionID,
+    ownerSessionId: input.sessionID,
+    cwd: input.cwd,
+    settings,
+    availability,
+    artifactsDir,
+    killGuard: false,
+    executeTool: bridge.executeTool,
+    listTools: bridge.listTools,
+    complete: refuseCompletion,
+  })) as Record<string, unknown>
   const manager = new (modules.SessionManagerProxy as unknown as Construct)()
   let handles: Record<string, unknown> | undefined
   let cells: Record<string, unknown> | undefined
   let replaced = false
   try {
     input.signal.throwIfAborted()
-    replaced = await method(manager, "replace")(method(manager, "beginReplacement")(), raw) === true
+    replaced = (await method(manager, "replace")(method(manager, "beginReplacement")(), raw)) === true
     if (!replaced) throw Error("codemode session manager replacement was refused")
     handles = new (modules.HandleRegistry as unknown as Construct)({ ownerSessionId: input.sessionID })
     // No wake channel: a detached cell is read back with `action: "peek"`, never pushed into the session.
     cells = new (modules.EvalDetachedCellManager as unknown as Construct)({
-      artifactsDir, maxDetachedCells: (modules.resolveMaxDetachedCells as Call)(settings), notifier: { notify() {}, reset() {} },
+      artifactsDir,
+      maxDetachedCells: (modules.resolveMaxDetachedCells as Call)(settings),
+      notifier: { notify() {}, reset() {} },
     })
   } catch (error) {
     // Before a successful replace the proxy does not own the raw manager, so its kernels go directly.
@@ -120,35 +157,66 @@ export async function createEvalSessionRuntime(modules: CodemodeModules, input: 
   }
   const tool = (modules.createEvalTool as Call)({
     ...evalToolOptions(modules, settings, enabledLanguages, availability),
-    kernelManager: manager, executeTool: bridge.executeTool, listTools: bridge.listTools,
-    artifactsDir, cellManager: cells, handles, executionTracker: manager,
+    kernelManager: manager,
+    executeTool: bridge.executeTool,
+    listTools: bridge.listTools,
+    artifactsDir,
+    cellManager: cells,
+    handles,
+    executionTracker: manager,
   }) as EvalToolDefinition
-  const ownedHandles = handles, ownedCells = cells
+  const ownedHandles = handles,
+    ownedCells = cells
   let queue: Promise<unknown> = Promise.resolve()
   let disposal: Promise<void> | undefined
   const teardown = async () => {
     const errors: unknown[] = []
-    try { method(ownedHandles, "dispose")() } catch (error) { errors.push(error) }
-    try { await method(ownedCells, "dispose")() } catch (error) { errors.push(error) }
-    try { await method(manager, "dispose")() } catch (error) { errors.push(error) }
+    try {
+      method(ownedHandles, "dispose")()
+    } catch (error) {
+      errors.push(error)
+    }
+    try {
+      await method(ownedCells, "dispose")()
+    } catch (error) {
+      errors.push(error)
+    }
+    try {
+      await method(manager, "dispose")()
+    } catch (error) {
+      errors.push(error)
+    }
     if (errors.length) throw new AggregateError(errors, "eval session runtime cleanup incomplete")
   }
   return {
     tool,
     bridgeEndpoint() {
       const endpoint = typeof raw.bridgeEndpoint === "function" ? (raw.bridgeEndpoint as Call).call(raw) : undefined
-      return endpoint && typeof endpoint === "object" && typeof (endpoint as { port?: unknown }).port === "number" ? { port: (endpoint as { port: number }).port } : undefined
+      return endpoint && typeof endpoint === "object" && typeof (endpoint as { port?: unknown }).port === "number"
+        ? { port: (endpoint as { port: number }).port }
+        : undefined
     },
     exclusive(signal, work) {
-      const turn = queue.then(() => { signal.throwIfAborted(); if (disposal) throw Error("eval session runtime is closed"); return work() })
+      const turn = queue.then(() => {
+        signal.throwIfAborted()
+        if (disposal) throw Error("eval session runtime is closed")
+        return work()
+      })
       queue = turn.catch(() => {})
       return turn
     },
-    dispose() { disposal ??= teardown(); return disposal },
+    dispose() {
+      disposal ??= teardown()
+      return disposal
+    },
     abandon() {
       if (disposal) return
       // Kernel trees first: their synchronous kill paths must start before the process is gone.
-      disposal = Promise.allSettled([method(manager, "dispose")(), Promise.resolve().then(() => method(ownedHandles, "dispose")()), method(ownedCells, "dispose")()]).then(() => {})
+      disposal = Promise.allSettled([
+        method(manager, "dispose")(),
+        Promise.resolve().then(() => method(ownedHandles, "dispose")()),
+        method(ownedCells, "dispose")(),
+      ]).then(() => {})
     },
   }
 }

@@ -118,27 +118,42 @@ describe("the production device-session resolver, through the real memory compon
     const root = realpathSync.native(await mkdtemp(join(tmpdir(), "omo-memory-unbound-sync-")))
     roots.push(root)
     const handlers = new Map<string, Parameters<SyncRpcRegistration["handle"]>[1]>()
-    const pi = Object.assign(new MemoryFakeExtensionAPI(), { rpc: {
-      emit() {},
-      handle(name: string, handler: Parameters<SyncRpcRegistration["handle"]>[1]) { handlers.set(name, handler) },
-    } })
-    let enabled = true, sourceCalls = 0, cwd = join(root, "first-project")
+    const pi = Object.assign(new MemoryFakeExtensionAPI(), {
+      rpc: {
+        emit() {},
+        handle(name: string, handler: Parameters<SyncRpcRegistration["handle"]>[1]) {
+          handlers.set(name, handler)
+        },
+      },
+    })
+    let enabled = true,
+      sourceCalls = 0,
+      cwd = join(root, "first-project")
     const configReads: (string | undefined)[] = []
     const settings = memorySettings()
     createMemoryComponent({
       env: { OMO_MEMORY_HOME: join(root, "memory") },
       resolveCwd: () => cwd,
-      loadConfig: options => {
+      loadConfig: (options) => {
         configReads.push(options?.cwd)
         return loadedMemoryConfig(memorySettings({ sync: { ...settings.sync, enabled } }))
       },
-      deviceAccount: async () => { sourceCalls += 1; return null },
+      deviceAccount: async () => {
+        sourceCalls += 1
+        return null
+      },
       sweepTransientRuns: async () => ({ removedRuns: 0, removedIdentities: 0, promoted: 0, stranded: 0, kept: 0 }),
     }).register(pi, componentContext())
-    cleanups.push(async () => { await pi.dispatch("session_shutdown", { type: "session_shutdown" }, sessionEventContext()) })
+    cleanups.push(async () => {
+      await pi.dispatch("session_shutdown", { type: "session_shutdown" }, sessionEventContext())
+    })
     const status = handlers.get("omo.memory.sync.status")
     if (status === undefined) throw new Error("sync status RPC was not registered")
-    const owner: SyncRpcContext = { ownerId: "unbound-engine", disconnectSignal: new AbortController().signal, admit: dispatch => dispatch() }
+    const owner: SyncRpcContext = {
+      ownerId: "unbound-engine",
+      disconnectSignal: new AbortController().signal,
+      admit: (dispatch) => dispatch(),
+    }
     cwd = join(root, "current-project")
     for (const setting of [true, false, true]) {
       enabled = setting

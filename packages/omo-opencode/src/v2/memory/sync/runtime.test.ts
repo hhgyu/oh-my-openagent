@@ -38,8 +38,12 @@ function runtimeWith(root: string, seams: MemorySyncSeams, warn: (message: strin
 
 function bound(root: string, identity: string, settings: Record<string, unknown> = {}): BoundMemorySession {
   return {
-    sessionID: identity, identity, directory: root, metadata: {},
-    settings: OmoMemorySettingsSchema.parse(settings), paths: buildIdentityPaths(root, identity),
+    sessionID: identity,
+    identity,
+    directory: root,
+    metadata: {},
+    settings: OmoMemorySettingsSchema.parse(settings),
+    paths: buildIdentityPaths(root, identity),
   }
 }
 
@@ -56,7 +60,13 @@ async function bind(f: MemoryFixture, sessionID: string): Promise<void> {
 }
 
 const write = (f: MemoryFixture, sessionID: string) =>
-  f.runTool("memory", sessionID, { command: "create", reason: "r", file_path: `system/${sessionID}.md`, description: "Notes", file_text: "x" })
+  f.runTool("memory", sessionID, {
+    command: "create",
+    reason: "r",
+    file_path: `system/${sessionID}.md`,
+    description: "Notes",
+    file_text: "x",
+  })
 
 describe("V2 memory sync lifecycle", () => {
   test("#given a fresh device whose memory repos do not exist yet #when sessions bind, then write and settle #then each distinct repo is acquired only after its first write, and released at close", async () => {
@@ -147,13 +157,17 @@ describe("V2 memory sync lifecycle", () => {
         if (failures-- > 0) throw new Error("space resolution failed")
         record.acquired.push(paths.repo)
       },
-      release: async repo => { record.released.push(repo) },
+      release: async (repo) => {
+        record.released.push(repo)
+      },
       rpcSync: async () => undefined,
       call: async () => ({ kind: "unavailable" }),
       dispose: async () => undefined,
     }
     const warnings: string[] = []
-    const runtime = runtimeWith(root, { loadHost: async () => ({ createSyncHost: () => host }) }, message => { warnings.push(message) })
+    const runtime = runtimeWith(root, { loadHost: async () => ({ createSyncHost: () => host }) }, (message) => {
+      warnings.push(message)
+    })
     const session = bound(root, "one")
     seed(session)
 

@@ -27,30 +27,42 @@ const TaskStatusSchema = Type.Union(
   { description: "Task status." },
 )
 
-export const TeamTaskCreateParams = Type.Object({
-  team_run_id: Type.String({ description: "Team run id." }),
-  subject: Type.String({ description: "Short task subject." }),
-  description: Type.String({ description: "Full task description." }),
-  blocked_by: Type.Optional(Type.Array(Type.String(), { description: "Task ids that must complete first." })),
-}, { additionalProperties: false })
+export const TeamTaskCreateParams = Type.Object(
+  {
+    team_run_id: Type.String({ description: "Team run id." }),
+    subject: Type.String({ description: "Short task subject." }),
+    description: Type.String({ description: "Full task description." }),
+    blocked_by: Type.Optional(Type.Array(Type.String(), { description: "Task ids that must complete first." })),
+  },
+  { additionalProperties: false },
+)
 
-export const TeamTaskListParams = Type.Object({
-  team_run_id: Type.String({ description: "Team run id." }),
-  status: Type.Optional(TaskStatusSchema),
-  owner: Type.Optional(Type.String({ description: "Filter by owning member." })),
-}, { additionalProperties: false })
+export const TeamTaskListParams = Type.Object(
+  {
+    team_run_id: Type.String({ description: "Team run id." }),
+    status: Type.Optional(TaskStatusSchema),
+    owner: Type.Optional(Type.String({ description: "Filter by owning member." })),
+  },
+  { additionalProperties: false },
+)
 
-export const TeamTaskGetParams = Type.Object({
-  team_run_id: Type.String({ description: "Team run id (returned by team_create)." }),
-  task_id: Type.String({ description: "Team tasklist task id (not a child st_... id)." }),
-}, { additionalProperties: false })
+export const TeamTaskGetParams = Type.Object(
+  {
+    team_run_id: Type.String({ description: "Team run id (returned by team_create)." }),
+    task_id: Type.String({ description: "Team tasklist task id (not a child st_... id)." }),
+  },
+  { additionalProperties: false },
+)
 
-export const TeamTaskUpdateParams = Type.Object({
-  team_run_id: Type.String({ description: "Team run id (returned by team_create)." }),
-  task_id: Type.String({ description: "Team tasklist task id (not a child st_... id)." }),
-  status: TaskStatusSchema,
-  owner: Type.Optional(Type.String({ description: "Owning member (defaults to the lead)." })),
-}, { additionalProperties: false })
+export const TeamTaskUpdateParams = Type.Object(
+  {
+    team_run_id: Type.String({ description: "Team run id (returned by team_create)." }),
+    task_id: Type.String({ description: "Team tasklist task id (not a child st_... id)." }),
+    status: TaskStatusSchema,
+    owner: Type.Optional(Type.String({ description: "Owning member (defaults to the lead)." })),
+  },
+  { additionalProperties: false },
+)
 
 export type TeamTaskCreateInput = Static<typeof TeamTaskCreateParams>
 export type TeamTaskListInput = Static<typeof TeamTaskListParams>

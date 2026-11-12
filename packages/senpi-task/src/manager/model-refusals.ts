@@ -43,7 +43,11 @@ export function isModelTurnFailure(outcome: Outcome): boolean {
 }
 
 /** A model turn failure the manager may walk past: no tool call ran, so the next designated model can take the same prompt. */
-export function isChainWalkable(outcome: Outcome, runStats: TaskRunStats | undefined, coverage?: "partial" | "complete"): boolean {
+export function isChainWalkable(
+  outcome: Outcome,
+  runStats: TaskRunStats | undefined,
+  coverage?: "partial" | "complete",
+): boolean {
   if (coverage === "partial") return false
   return isModelTurnFailure(outcome) && (runStats?.tool_calls ?? 0) === 0
 }

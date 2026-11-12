@@ -12,19 +12,28 @@ import { dagWakeInputId } from "./wake-projection"
 setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
 
 const PARENT = "ses_dag_recovery_wake_root"
-const roots: string[] = [], cleanups: (() => Promise<void> | void)[] = []
+const roots: string[] = [],
+  cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-const settle = () => new Promise(resolve => setTimeout(resolve, 50))
-const node = (id: string, dependsOn?: readonly string[]) => ({ id, prompt: `do ${id}`, category: "quick", ...(dependsOn && { dependsOn }) })
+const settle = () => new Promise((resolve) => setTimeout(resolve, 50))
+const node = (id: string, dependsOn?: readonly string[]) => ({
+  id,
+  prompt: `do ${id}`,
+  category: "quick",
+  ...(dependsOn && { dependsOn }),
+})
 
 function generation(directory: string, inherited: ReturnType<typeof createWorkflowHarness>["fakes"] = []) {
   const lease = createNativeDagGenerationLease()
   const dag = createWorkflowHarness(directory, lease, PARENT, inherited)
-  cleanups.push(() => dag.wake.close(), () => lease.dispose())
+  cleanups.push(
+    () => dag.wake.close(),
+    () => lease.dispose(),
+  )
   return { lease, dag }
 }
 
@@ -36,14 +45,19 @@ async function reloadWithUnackedWake() {
   const directory = mkdtempSync(join(tmpdir(), "omo-v2-dag-recovery-wake-"))
   roots.push(directory)
   const first = generation(directory)
-  const { result, fake } = await first.dag.call({ action: "start", detach: true, definition: { key: "wake", name: "wake", nodes: [node("a"), node("b", ["a"])] } })
+  const { result, fake } = await first.dag.call({
+    action: "start",
+    detach: true,
+    definition: { key: "wake", name: "wake", nodes: [node("a"), node("b", ["a"])] },
+  })
   const runId = result.details.kind === "started" ? result.details.run_id : ""
   first.dag.state.failSynthetic = true
   fake.complete("a")
   await first.dag.wake.refresh()
   for (const earlier of first.dag.fakes) earlier.park()
   await first.dag.runtime.pauseForShutdown()
-  await first.dag.wake.close(); first.lease.dispose()
+  await first.dag.wake.close()
+  first.lease.dispose()
   const second = generation(directory, first.dag.fakes)
   for (const root of discoverDagRoots(directory)) {
     for (const run of second.dag.runtime.manager.list(root)) second.dag.wake.arm(root, run.runId)
@@ -56,8 +70,14 @@ describe("OpenCode 2 workflow wake across a reload", () => {
     // given
     const { directory, first, second, runId } = await reloadWithUnackedWake()
     const id = dagWakeInputId(runId, { settled: [{ nodeId: "a", taskId: "task-1", runEpoch: 1, status: "completed" }] })
-    const journal = openDagDeliveryJournal({ path: join(directory, "dag-wakes.sqlite"),
-      namespace: "opencode2-dag:" + createHash("sha256").update(JSON.stringify([directory, PARENT])).digest("hex") })
+    const journal = openDagDeliveryJournal({
+      path: join(directory, "dag-wakes.sqlite"),
+      namespace:
+        "opencode2-dag:" +
+        createHash("sha256")
+          .update(JSON.stringify([directory, PARENT]))
+          .digest("hex"),
+    })
     cleanups.push(() => journal.close())
     const before = journal.findInput(runId, id)
 
@@ -83,8 +103,8 @@ describe("OpenCode 2 workflow wake across a reload", () => {
     // then
     expect(discoverDagRoots(directory)).toEqual([PARENT])
     expect(second.dag.record(runId).status).toBe("paused")
-    expect(second.dag.fakes.flatMap(fake => fake.starts.map(start => start.nodeId))).toEqual(["a"])
-    expect(second.dag.fakes.flatMap(fake => fake.restored)).toEqual([])
+    expect(second.dag.fakes.flatMap((fake) => fake.starts.map((start) => start.nodeId))).toEqual(["a"])
+    expect(second.dag.fakes.flatMap((fake) => fake.restored)).toEqual([])
     expect(second.dag.runtime.driving()).toBe(0)
   })
 })

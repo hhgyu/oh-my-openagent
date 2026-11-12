@@ -9,6 +9,8 @@ const port = parentPort
 if (!port) throw Error("codemode-worker must run as a node:worker_threads Worker")
 
 attachCodemodeWorker({
-  postMessage: message => port.postMessage(message),
-  addEventListener: (_type, listener) => { port.on("message", (data: unknown) => listener({ data })) },
+  postMessage: (message) => port.postMessage(message),
+  addEventListener: (_type, listener) => {
+    port.on("message", (data: unknown) => listener({ data }))
+  },
 })

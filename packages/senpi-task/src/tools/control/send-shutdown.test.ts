@@ -98,9 +98,14 @@ describe("runTaskSend shutdown routing", () => {
     )
 
     for (const result of [missing, empty]) {
-      expect(result.details).toMatchObject({ kind: "invalid_arguments", diagnostic: {
-        code: "invalid_arguments", fields: ["message.reason"], expected_fields: ["to", "message", "team_run_id", "summary", "all_scope", "redispatch"],
-      } })
+      expect(result.details).toMatchObject({
+        kind: "invalid_arguments",
+        diagnostic: {
+          code: "invalid_arguments",
+          fields: ["message.reason"],
+          expected_fields: ["to", "message", "team_run_id", "summary", "all_scope", "redispatch"],
+        },
+      })
       expect(result.isError).toBe(true)
     }
     expect(service.calls).toEqual([])

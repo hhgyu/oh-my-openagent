@@ -25,8 +25,11 @@ describe("task_output polling guard", () => {
       makeRecord({ task_id: "st_reset_b", parent_session_id: neighbor }),
     ]
     const manager: OutputManager = {
-      get: id => records.find(record => record.task_id === id),
-      list: scope => records.filter(record => scope.scope === "all" || record.parent_session_id === scope.session_id).map(record => ({ record })),
+      get: (id) => records.find((record) => record.task_id === id),
+      list: (scope) =>
+        records
+          .filter((record) => scope.scope === "all" || record.parent_session_id === scope.session_id)
+          .map((record) => ({ record })),
     }
     const deps = { manager, stateDir: "/tmp/state" }
     const reads = new Map<string, string>()
@@ -35,15 +38,26 @@ describe("task_output polling guard", () => {
       const read = (index: number) => {
         const record = present(records[index])
         return useFactory
-          ? factory.execute("call", { task_id: record.task_id }, undefined, undefined, context(record.parent_session_id))
+          ? factory.execute(
+              "call",
+              { task_id: record.task_id },
+              undefined,
+              undefined,
+              context(record.parent_session_id),
+            )
           : runTaskOutput(deps, { task_id: record.task_id }, record.parent_session_id, reads)
       }
       for (const index of [0, 1]) {
         expect((await read(index)).details.kind).toBe("status")
         expect((await read(index)).details.kind).toBe("no_progress")
       }
-      if (useFactory) { factory.forgetSession(caller); factory.forgetSession(caller) }
-      else { forgetTaskOutputSessionReads(reads, caller); forgetTaskOutputSessionReads(reads, caller) }
+      if (useFactory) {
+        factory.forgetSession(caller)
+        factory.forgetSession(caller)
+      } else {
+        forgetTaskOutputSessionReads(reads, caller)
+        forgetTaskOutputSessionReads(reads, caller)
+      }
       expect((await read(0)).details.kind).toBe("status")
       expect((await read(1)).details.kind).toBe("no_progress")
     }

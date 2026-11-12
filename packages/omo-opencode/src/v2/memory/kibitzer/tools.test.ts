@@ -10,7 +10,11 @@ import { createKibitzerTools, wrapMemoryTool, type KibitzerToolsDeps } from "./t
 const corpus: RecallCorpus = {
   revision: "abc123",
   documents: [
-    { path: "reference/rollout.md", description: "Kubernetes rollout goes through staging first", body: "Staging cluster before production rollout." },
+    {
+      path: "reference/rollout.md",
+      description: "Kubernetes rollout goes through staging first",
+      body: "Staging cluster before production rollout.",
+    },
     { path: "system/persona.md", description: "persona", body: "hidden" },
   ],
 }
@@ -18,41 +22,71 @@ const corpus: RecallCorpus = {
 function binding(overrides: Partial<KibitzerToolBinding> = {}): KibitzerToolBinding {
   let used = 0
   return {
-    parentSessionId: "root", offered: new Set(["reference/rollout.md"]), searched: new Set(), surfaced: new Set(), maxItems: 2, accepted: [],
-    charge: () => { used += 1; return used <= 8 }, budgetLimit: 8, ...overrides,
+    parentSessionId: "root",
+    offered: new Set(["reference/rollout.md"]),
+    searched: new Set(),
+    surfaced: new Set(),
+    maxItems: 2,
+    accepted: [],
+    charge: () => {
+      used += 1
+      return used <= 8
+    },
+    budgetLimit: 8,
+    ...overrides,
   }
 }
 
 function deps(live: Record<string, KibitzerToolBinding>): KibitzerToolsDeps {
   const sidecar = { history: () => [] } as unknown as KibitzerSidecar
   return {
-    resolve: sessionID => (live[sessionID] === undefined ? undefined : { sidecar, binding: live[sessionID] }),
+    resolve: (sessionID) => (live[sessionID] === undefined ? undefined : { sidecar, binding: live[sessionID] }),
     corpus: async () => corpus,
   }
 }
 
 const context = (sessionID: string, id = "call-1") =>
-  ({ sessionID, agent: "kibitzer", messageID: "m1", id, signal: new AbortController().signal, progress: async () => undefined }) as unknown as ToolContext
+  ({
+    sessionID,
+    agent: "kibitzer",
+    messageID: "m1",
+    id,
+    signal: new AbortController().signal,
+    progress: async () => undefined,
+  }) as unknown as ToolContext
 
-function writer(calls: unknown[]): Info<z.ZodObject<{ command: z.ZodEnum<{ create: "create" }>; reason: z.ZodString }>> {
+function writer(
+  calls: unknown[],
+): Info<z.ZodObject<{ command: z.ZodEnum<{ create: "create" }>; reason: z.ZodString }>> {
   return {
-    name: "memory", description: "writer", input: z.object({ command: z.enum(["create"]), reason: z.string() }), options: { codemode: false },
-    execute: async input => { calls.push(input); return { content: "written" } },
+    name: "memory",
+    description: "writer",
+    input: z.object({ command: z.enum(["create"]), reason: z.string() }),
+    options: { codemode: false },
+    execute: async (input) => {
+      calls.push(input)
+      return { content: "written" }
+    },
   }
 }
 
-const run = (tool: Info, input: Record<string, unknown>, ctx: ToolContext): Promise<Result> => Reflect.apply(tool.execute, undefined, [input, ctx])
+const run = (tool: Info, input: Record<string, unknown>, ctx: ToolContext): Promise<Result> =>
+  Reflect.apply(tool.execute, undefined, [input, ctx])
 
 describe("kibitzer tools", () => {
   test("#given a session that is not a live Kibitzer child #when it calls session_entries, nudge or a read-only memory operation #then each call is refused", async () => {
     // given
-    const toolDeps = deps({ "ses_kibitzer_1": binding() })
+    const toolDeps = deps({ ses_kibitzer_1: binding() })
     const [entries, nudge] = createKibitzerTools(toolDeps)
     const memory = wrapMemoryTool(writer([]), toolDeps)
     // when
     const refusals = [
       run(entries, {}, context("root")),
-      run(nudge, { path: "reference/rollout.md", hint: "The note records that rollouts use staging." }, context("ses_other")),
+      run(
+        nudge,
+        { path: "reference/rollout.md", hint: "The note records that rollouts use staging." },
+        context("ses_other"),
+      ),
       run(memory, { operation: "search", query: "rollout" }, context("root")),
     ]
     // then
@@ -63,15 +97,21 @@ describe("kibitzer tools", () => {
     // given
     const calls: unknown[] = []
     const live = binding({ offered: new Set() })
-    const memory = wrapMemoryTool(writer(calls), deps({ "ses_kibitzer_1": live }))
+    const memory = wrapMemoryTool(writer(calls), deps({ ses_kibitzer_1: live }))
     // when
     const search = await run(memory, { operation: "search", query: "kubernetes rollout" }, context("ses_kibitzer_1"))
-    const read = await run(memory, { operation: "read", path: "reference/rollout.md" }, context("ses_kibitzer_1", "call-2"))
+    const read = await run(
+      memory,
+      { operation: "read", path: "reference/rollout.md" },
+      context("ses_kibitzer_1", "call-2"),
+    )
     const hidden = run(memory, { operation: "read", path: "system/persona.md" }, context("ses_kibitzer_1", "call-3"))
     const write = run(memory, { command: "create", reason: "sneaky" }, context("ses_kibitzer_1", "call-4"))
     const parentWrite = await run(memory, { command: "create", reason: "parent" }, context("root"))
     // then
-    expect(JSON.parse(String(search.content)).results.map((hit: { path: string }) => hit.path)).toEqual(["reference/rollout.md"])
+    expect(JSON.parse(String(search.content)).results.map((hit: { path: string }) => hit.path)).toEqual([
+      "reference/rollout.md",
+    ])
     expect([...live.searched]).toEqual(["reference/rollout.md"])
     expect(String(read.content)).toContain("Staging cluster")
     await expect(hidden).rejects.toThrow("system_path")
@@ -82,7 +122,7 @@ describe("kibitzer tools", () => {
 
   test("#given an exhausted wake budget #then a Kibitzer tool call is rejected as tool_budget_exceeded", async () => {
     // given
-    const [entries] = createKibitzerTools(deps({ "ses_kibitzer_1": binding({ charge: () => false }) }))
+    const [entries] = createKibitzerTools(deps({ ses_kibitzer_1: binding({ charge: () => false }) }))
     // when
     const call = run(entries, {}, context("ses_kibitzer_1"))
     // then
@@ -92,8 +132,11 @@ describe("kibitzer tools", () => {
 
 describe("kibitzer nudge validation", () => {
   const input = (accepted: RecallNudge[] = []) => ({
-    offered: new Set(["reference/rollout.md", "reference/old.md", "system/persona.md"]), searched: new Set(["reference/found.md"]),
-    surfaced: new Set(["reference/old.md"]), maxItems: 1, accepted,
+    offered: new Set(["reference/rollout.md", "reference/old.md", "system/persona.md"]),
+    searched: new Set(["reference/found.md"]),
+    surfaced: new Set(["reference/old.md"]),
+    maxItems: 1,
+    accepted,
   })
 
   test("#given invalid nudges #then each is rejected with its reason and nothing is recorded", () => {
@@ -103,14 +146,17 @@ describe("kibitzer nudge validation", () => {
       { path: "reference/fabricated.md", hint: "The note records a fact." },
       { path: "reference/old.md", hint: "The note records a fact." },
       { path: "system/persona.md", hint: "The note records a fact." },
-      { path: "reference/rollout.md", hint: "The note records the key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG." },
+      {
+        path: "reference/rollout.md",
+        hint: "The note records the key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG.",
+      },
       { path: "reference/rollout.md", hint: "You must deploy to staging first." },
     ]
     // when
-    const results = cases.map(params => applyNudge(params, { ...input(), accepted }))
+    const results = cases.map((params) => applyNudge(params, { ...input(), accepted }))
     // then
-    expect(results.map(result => result.ok)).toEqual([false, false, false, false, false])
-    expect(results.map(result => result.message)).toEqual([
+    expect(results.map((result) => result.ok)).toEqual([false, false, false, false, false])
+    expect(results.map((result) => result.message)).toEqual([
       expect.stringContaining("not one of the offered candidates"),
       expect.stringContaining("already surfaced"),
       expect.stringContaining("system/ path"),
@@ -124,11 +170,19 @@ describe("kibitzer nudge validation", () => {
     // given
     const accepted: RecallNudge[] = []
     // when
-    const first = applyNudge({ path: "reference/found.md", hint: "The note records that rollouts go through staging first." }, { ...input(), accepted })
-    const second = applyNudge({ path: "reference/rollout.md", hint: "The note records a second fact." }, { ...input(), accepted })
+    const first = applyNudge(
+      { path: "reference/found.md", hint: "The note records that rollouts go through staging first." },
+      { ...input(), accepted },
+    )
+    const second = applyNudge(
+      { path: "reference/rollout.md", hint: "The note records a second fact." },
+      { ...input(), accepted },
+    )
     // then
     expect(first).toMatchObject({ ok: true, capped: true })
     expect(second.ok).toBe(false)
-    expect(accepted).toEqual([{ path: "reference/found.md", hint: "The note records that rollouts go through staging first." }])
+    expect(accepted).toEqual([
+      { path: "reference/found.md", hint: "The note records that rollouts go through staging first." },
+    ])
   })
 })

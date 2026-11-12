@@ -7,15 +7,35 @@
 
 import { join } from "node:path"
 import {
-  applyFactsBatch, applyFactsRecovery, createLockRecord, findFactsBatchReceipt, LockContentionError, memoryWriterLockPath,
-  MemorySecretError, parseFactsExtractionJsonl, validateFactsRecovery, withLock,
-  type ApplyFactsBatchResult, type FactsBatch, type FactsPayload, type FactsPeopleRouting, type GitMemoryRepo,
+  applyFactsBatch,
+  applyFactsRecovery,
+  createLockRecord,
+  findFactsBatchReceipt,
+  LockContentionError,
+  memoryWriterLockPath,
+  MemorySecretError,
+  parseFactsExtractionJsonl,
+  validateFactsRecovery,
+  withLock,
+  type ApplyFactsBatchResult,
+  type FactsBatch,
+  type FactsPayload,
+  type FactsPeopleRouting,
+  type GitMemoryRepo,
 } from "@oh-my-opencode/memory-core"
 import { existsSync, readFile } from "@oh-my-opencode/memory-core/fs"
 import { describeError } from "./binding"
 import {
-  FACTS_EXTRACTION_FILE, FACTS_PAYLOAD_FILE, ledgerPath, outcomePath, readRunJson, writeRunJson,
-  type FactsRunLedger, type FactsRunOutcome, type FactsRunTerminal, type FactsTerminal,
+  FACTS_EXTRACTION_FILE,
+  FACTS_PAYLOAD_FILE,
+  ledgerPath,
+  outcomePath,
+  readRunJson,
+  writeRunJson,
+  type FactsRunLedger,
+  type FactsRunOutcome,
+  type FactsRunTerminal,
+  type FactsTerminal,
 } from "./facts-run-store"
 
 const WRITER_ATTEMPTS = 3
@@ -42,7 +62,12 @@ export async function finalizeFactsRun(deps: FactsFinalizeDeps, runDir: string):
   if (!existsSync(outcomePath(runDir))) return undefined
   const outcome = await readRunJson<FactsRunOutcome>(outcomePath(runDir))
   if (outcome.status !== "completed") {
-    await deps.terminal.fail(runDir, ledger, outcome.status === "deadline" ? "deadline_exceeded" : "child_exit", outcome.detail ?? "facts child did not settle successfully")
+    await deps.terminal.fail(
+      runDir,
+      ledger,
+      outcome.status === "deadline" ? "deadline_exceeded" : "child_exit",
+      outcome.detail ?? "facts child did not settle successfully",
+    )
     return "failed"
   }
   if (payload === undefined) {
@@ -51,7 +76,10 @@ export async function finalizeFactsRun(deps: FactsFinalizeDeps, runDir: string):
   }
   let batch: FactsBatch
   try {
-    batch = { batchId: ledger.batchId, records: parseFactsExtractionJsonl(await readFile(join(runDir, FACTS_EXTRACTION_FILE), "utf8")) }
+    batch = {
+      batchId: ledger.batchId,
+      records: parseFactsExtractionJsonl(await readFile(join(runDir, FACTS_EXTRACTION_FILE), "utf8")),
+    }
   } catch (error) {
     await deps.terminal.fail(runDir, ledger, "invalid_extraction", describeError(error))
     return "failed"
@@ -64,7 +92,12 @@ export async function finalizeFactsRun(deps: FactsFinalizeDeps, runDir: string):
   try {
     applied = await applyWithRetries(deps, runDir, batch)
   } catch (error) {
-    await deps.terminal.fail(runDir, ledger, error instanceof MemorySecretError ? "secret_like_content" : "invalid_extraction", describeError(error))
+    await deps.terminal.fail(
+      runDir,
+      ledger,
+      error instanceof MemorySecretError ? "secret_like_content" : "invalid_extraction",
+      describeError(error),
+    )
     return "failed"
   }
   if (applied === undefined) {
@@ -83,11 +116,17 @@ export async function finalizeFactsRun(deps: FactsFinalizeDeps, runDir: string):
   return "committed"
 }
 
-async function applyWithRetries(deps: FactsFinalizeDeps, runDir: string, batch: FactsBatch): Promise<ApplyFactsBatchResult | undefined> {
+async function applyWithRetries(
+  deps: FactsFinalizeDeps,
+  runDir: string,
+  batch: FactsBatch,
+): Promise<ApplyFactsBatchResult | undefined> {
   for (let attempt = 1; attempt <= WRITER_ATTEMPTS; attempt += 1) {
     try {
       const record = await createLockRecord("memory-write", { runId: batch.batchId })
-      return await withLock(memoryWriterLockPath(deps.locksDir), record, () => applyClaimed(deps, runDir, batch), { waitTimeoutMs: 2_000 })
+      return await withLock(memoryWriterLockPath(deps.locksDir), record, () => applyClaimed(deps, runDir, batch), {
+        waitTimeoutMs: 2_000,
+      })
     } catch (error) {
       if (!(error instanceof LockContentionError)) throw error
       if (attempt < WRITER_ATTEMPTS) await (deps.retryDelay ?? jitterDelay)(attempt)
@@ -96,7 +135,11 @@ async function applyWithRetries(deps: FactsFinalizeDeps, runDir: string, batch: 
   return undefined
 }
 
-async function applyClaimed(deps: FactsFinalizeDeps, runDir: string, batch: FactsBatch): Promise<ApplyFactsBatchResult> {
+async function applyClaimed(
+  deps: FactsFinalizeDeps,
+  runDir: string,
+  batch: FactsBatch,
+): Promise<ApplyFactsBatchResult> {
   const receipt = await findFactsBatchReceipt(deps.repo, batch.batchId)
   if (receipt !== undefined) return { outcome: "committed", sha: receipt.sha, affectedPaths: [] }
   const ledger = await readRunJson<FactsRunLedger>(ledgerPath(runDir))
@@ -113,5 +156,5 @@ async function applyClaimed(deps: FactsFinalizeDeps, runDir: string, batch: Fact
 }
 
 function jitterDelay(): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, 25 + Math.floor(Math.random() * 76)))
+  return new Promise((resolve) => setTimeout(resolve, 25 + Math.floor(Math.random() * 76)))
 }

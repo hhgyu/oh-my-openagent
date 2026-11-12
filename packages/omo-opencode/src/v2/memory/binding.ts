@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto"
 import {
-  buildIdentityPaths, isAutoAgentValue, resolveAutoIdentity, resolveMemoryIdentity, type MemoryIdentityPaths,
+  buildIdentityPaths,
+  isAutoAgentValue,
+  resolveAutoIdentity,
+  resolveMemoryIdentity,
+  type MemoryIdentityPaths,
 } from "@oh-my-opencode/memory-core"
 import type { OmoMemorySettings } from "@oh-my-opencode/omo-config-core"
 import { resolveSafeMemoryRoot, type MemoryEnv, type MemoryLogger } from "./config"
@@ -65,19 +69,37 @@ export function createMemoryBinder(deps: MemoryBinderDeps): MemoryBinder {
       ? resolveAutoIdentity(directory, env, settings.auto_identity)
       : resolveMemoryIdentity(settings.agent, directory, env)
     const metadata: Readonly<Record<string, unknown>> = info.metadata ?? {}
-    const adopted = adoptIdentity(readBinding(metadata), { id: resolved.id, paths: resolved.paths }, root.root, settings.agent)
+    const adopted = adoptIdentity(
+      readBinding(metadata),
+      { id: resolved.id, paths: resolved.paths },
+      root.root,
+      settings.agent,
+    )
     if (adopted === undefined) {
-      deps.logger.warn("memory binding failed closed: session is bound to another identity", { sessionID, resolved: resolved.id })
+      deps.logger.warn("memory binding failed closed: session is bound to another identity", {
+        sessionID,
+        resolved: resolved.id,
+      })
       return undefined
     }
     const binding: MemorySessionBinding = {
-      version: 1, identity: adopted.id, repoPathHash: hashRepoPath(adopted.paths.repo), boundAt: deps.now(),
+      version: 1,
+      identity: adopted.id,
+      repoPathHash: hashRepoPath(adopted.paths.repo),
+      boundAt: deps.now(),
     }
     const recorded = readBinding(metadata)
     if (recorded?.identity !== binding.identity || recorded.repoPathHash !== binding.repoPathHash) {
       await deps.metadata.write(sessionID, MEMORY_BINDING_KEY, { ...binding })
     }
-    const bound: BoundMemorySession = { sessionID, identity: adopted.id, paths: adopted.paths, settings, directory, metadata }
+    const bound: BoundMemorySession = {
+      sessionID,
+      identity: adopted.id,
+      paths: adopted.paths,
+      settings,
+      directory,
+      metadata,
+    }
     return bound
   }
 
@@ -85,34 +107,49 @@ export function createMemoryBinder(deps: MemoryBinderDeps): MemoryBinder {
     resolve(sessionID) {
       let pending = bound.get(sessionID)
       if (pending === undefined) {
-        pending = bind(sessionID).then(value => {
-          if (bound.get(sessionID) !== pending) return undefined
-          if (value !== undefined) deps.onBound?.(value)
-          return value
-        }).catch((error: unknown) => {
-          if (bound.get(sessionID) === pending) bound.delete(sessionID)
-          deps.logger.warn("memory session bind skipped", { sessionID, error: describeError(error) })
-          return undefined
-        })
+        pending = bind(sessionID)
+          .then((value) => {
+            if (bound.get(sessionID) !== pending) return undefined
+            if (value !== undefined) deps.onBound?.(value)
+            return value
+          })
+          .catch((error: unknown) => {
+            if (bound.get(sessionID) === pending) bound.delete(sessionID)
+            deps.logger.warn("memory session bind skipped", { sessionID, error: describeError(error) })
+            return undefined
+          })
         bound.set(sessionID, pending)
       }
       return pending
     },
-    forget: sessionID => { bound.delete(sessionID) },
-    clear: () => { bound.clear() },
+    forget: (sessionID) => {
+      bound.delete(sessionID)
+    },
+    clear: () => {
+      bound.clear()
+    },
   }
 }
 
-interface Identity { readonly id: string; readonly paths: MemoryIdentityPaths }
+interface Identity {
+  readonly id: string
+  readonly paths: MemoryIdentityPaths
+}
 
 /**
  * The recorded binding wins over a freshly resolved auto identity (one host serves many workspaces), as
  * in Senpi's identity adoption. An explicit `memory.agent` naming another identity, or a record whose
  * repository cannot be reproduced under the current root, fails closed.
  */
-function adoptIdentity(recorded: MemorySessionBinding | undefined, resolved: Identity, root: string, agent: string): Identity | undefined {
+function adoptIdentity(
+  recorded: MemorySessionBinding | undefined,
+  resolved: Identity,
+  root: string,
+  agent: string,
+): Identity | undefined {
   if (recorded === undefined) return resolved
-  if (recorded.identity === resolved.id) return recorded.repoPathHash === hashRepoPath(resolved.paths.repo) ? resolved : undefined
+  if (recorded.identity === resolved.id)
+    return recorded.repoPathHash === hashRepoPath(resolved.paths.repo) ? resolved : undefined
   if (!isAutoAgentValue(agent)) return undefined
   const adopted = { id: recorded.identity, paths: buildIdentityPaths(root, recorded.identity) }
   return recorded.repoPathHash === hashRepoPath(adopted.paths.repo) ? adopted : undefined

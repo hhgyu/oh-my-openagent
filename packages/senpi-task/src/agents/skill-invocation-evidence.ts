@@ -21,7 +21,8 @@ export interface SkillInputEvidence {
 
 function stripInjectedBlocks(text: string): string {
   const stack: string[] = []
-  let cursor = 0, visible = ""
+  let cursor = 0,
+    visible = ""
   for (const match of text.matchAll(INJECTED_TAG_PATTERN)) {
     const name = match[2]?.toLowerCase()
     if (name === undefined) continue
@@ -39,18 +40,27 @@ function stripInjectedBlocks(text: string): string {
 /** Only call for human input. Skill documentation and injected blocks are not human requests. */
 export function classifySkillInput(text: string): SkillInputEvidence {
   let visible = stripInjectedBlocks(text)
-  const invoked = new Set<string>(), requested = new Set<string>()
+  const invoked = new Set<string>(),
+    requested = new Set<string>()
   if (visible.startsWith(SKILL_COMMAND_PREFIX)) {
     const skill = visible.slice(SKILL_COMMAND_PREFIX.length).split(/\s/, 1)[0]?.trim()
-    if (skill) { invoked.add(skill); requested.add(skill) }
+    if (skill) {
+      invoked.add(skill)
+      requested.add(skill)
+    }
   }
-  let depth = 0, cursor = 0, ownWords = ""
+  let depth = 0,
+    cursor = 0,
+    ownWords = ""
   for (const match of visible.matchAll(EXPANDED_SKILL_TAG_PATTERN)) {
     if (match[1] !== undefined) {
       if (depth === 0) {
         ownWords += visible.slice(cursor, match.index)
         const skill = match[1].trim()
-        if (skill) { invoked.add(skill); requested.add(skill) }
+        if (skill) {
+          invoked.add(skill)
+          requested.add(skill)
+        }
       }
       depth++
     } else if (depth > 0) {
@@ -60,7 +70,7 @@ export function classifySkillInput(text: string): SkillInputEvidence {
   }
   visible = ownWords + (depth === 0 ? visible.slice(cursor) : "")
   for (const [skill, pattern] of Object.entries(USER_REQUEST_PATTERNS)) if (pattern.test(visible)) requested.add(skill)
-  if (OWN_WORDS_PLAN_REQUEST_PATTERNS.some(pattern => pattern.test(visible))) requested.add("ulw-plan")
+  if (OWN_WORDS_PLAN_REQUEST_PATTERNS.some((pattern) => pattern.test(visible))) requested.add("ulw-plan")
   return { invoked: [...invoked], requested: [...requested] }
 }
 

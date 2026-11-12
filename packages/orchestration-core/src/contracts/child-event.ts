@@ -15,4 +15,3 @@ export type ManagedChildEvent = {
 }
 
 export type ManagedChildListener = (event: ManagedChildEvent) => void
-

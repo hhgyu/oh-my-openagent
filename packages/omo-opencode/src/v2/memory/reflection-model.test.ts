@@ -15,31 +15,86 @@ function disabled(providerID: string, id: string): CatalogModel {
 
 const CONSENTED: ReadonlySet<string> = new Set(["acme", "anthropic"])
 
-const CATALOG = [catalogModel("acme", "large"), catalogModel("acme", "quick-model"), catalogModel("anthropic", "claude-haiku-4-5")]
+const CATALOG = [
+  catalogModel("acme", "large"),
+  catalogModel("acme", "quick-model"),
+  catalogModel("anthropic", "claude-haiku-4-5"),
+]
 
 describe("reflection model selection", () => {
   test("#given priced eligible models and a cheaper unconfigured provider #then the Native three-rung cost ladder excludes the unconfigured model", () => {
-    const priced = (provider: string, id: string, input: number, context = 200_000) => ({ ...catalogModel(provider, id), cost: [{ input, output: input, cache: { read: input, write: input } }], limit: { context, output: 8000 } })
-    const catalog = [priced("stranger", "free-mini", 0), priced("acme", "expensive-mini", 10), priced("acme", "cheap", 1), priced("acme", "equal-larger", 1, 300_000), priced("acme", "middle", 2)]
+    const priced = (provider: string, id: string, input: number, context = 200_000) => ({
+      ...catalogModel(provider, id),
+      cost: [{ input, output: input, cache: { read: input, write: input } }],
+      limit: { context, output: 8000 },
+    })
+    const catalog = [
+      priced("stranger", "free-mini", 0),
+      priced("acme", "expensive-mini", 10),
+      priced("acme", "cheap", 1),
+      priced("acme", "equal-larger", 1, 300_000),
+      priced("acme", "middle", 2),
+    ]
     const result = resolveReflectionModel("custom", config({}), catalog, undefined, new Set(["acme"]))
-    expect(result).toMatchObject({ model: "acme/equal-larger", source: "registry_fallback", fallbacks: [{ model: "acme/cheap" }, { model: "acme/middle" }] })
+    expect(result).toMatchObject({
+      model: "acme/equal-larger",
+      source: "registry_fallback",
+      fallbacks: [{ model: "acme/cheap" }, { model: "acme/middle" }],
+    })
   })
   test("#given configured thinking levels and fallbacks #then supported host variants survive on each rung", () => {
-    const catalog = ["primary", "backup"].map(id => ({ ...catalogModel("acme", id), reasoning: { source: "opencode.model.variants" as const, variants: ["high", "low"] } }))
-    const settings = config({ categories: { custom: { models: [{ model: "acme/primary", reasoning: "high" }, { model: "acme/backup", variant: "low" }] } } })
-    expect(resolveReflectionModel("custom", settings, catalog, undefined, CONSENTED)).toMatchObject({ model: "acme/primary", variant: "high", fallbacks: [{ model: "acme/backup", variant: "low" }] })
+    const catalog = ["primary", "backup"].map((id) => ({
+      ...catalogModel("acme", id),
+      reasoning: { source: "opencode.model.variants" as const, variants: ["high", "low"] },
+    }))
+    const settings = config({
+      categories: {
+        custom: {
+          models: [
+            { model: "acme/primary", reasoning: "high" },
+            { model: "acme/backup", variant: "low" },
+          ],
+        },
+      },
+    })
+    expect(resolveReflectionModel("custom", settings, catalog, undefined, CONSENTED)).toMatchObject({
+      model: "acme/primary",
+      variant: "high",
+      fallbacks: [{ model: "acme/backup", variant: "low" }],
+    })
   })
   test("#given an excluded fallback and an unsupported thinking level #then neither reaches the child selection", () => {
-    const settings = config({ categories: { custom: { models: [{ model: "acme/primary", reasoning: "high" }, "acme/excluded", "acme/backup"] } }, exclude_models: ["acme/excluded"] })
-    const catalog = ["primary", "excluded", "backup"].map(id => catalogModel("acme", id))
-    expect(resolveReflectionModel("custom", settings, catalog, undefined, CONSENTED)).toEqual({ kind: "resolved", category: "custom", model: "acme/primary", fallbacks: [{ model: "acme/backup" }] })
+    const settings = config({
+      categories: {
+        custom: { models: [{ model: "acme/primary", reasoning: "high" }, "acme/excluded", "acme/backup"] },
+      },
+      exclude_models: ["acme/excluded"],
+    })
+    const catalog = ["primary", "excluded", "backup"].map((id) => catalogModel("acme", id))
+    expect(resolveReflectionModel("custom", settings, catalog, undefined, CONSENTED)).toEqual({
+      kind: "resolved",
+      category: "custom",
+      model: "acme/primary",
+      fallbacks: [{ model: "acme/backup" }],
+    })
   })
   test("#given a cheaper small parent outside the registry size floor #then its model and supported thinking variant are inherited", () => {
     const price = (input: number) => [{ input, output: 1, cache: { read: 0, write: 0 } }]
-    const parent = { ...catalogModel("acme", "parent"), limit: { context: 64_000, output: 8000 }, cost: price(0.1), reasoning: { source: "opencode.model.variants" as const, variants: ["high"] } }
+    const parent = {
+      ...catalogModel("acme", "parent"),
+      limit: { context: 64_000, output: 8000 },
+      cost: price(0.1),
+      reasoning: { source: "opencode.model.variants" as const, variants: ["high"] },
+    }
     const fresh = { ...catalogModel("acme", "large"), cost: price(1) }
     const result = resolveReflectionModel("custom", config({}), [fresh, parent], "acme/parent", CONSENTED, "high")
-    expect(result).toEqual({ kind: "resolved", category: "custom", model: "acme/parent", variant: "high", source: "session_inherit" })
+    expect(result).toEqual({
+      kind: "resolved",
+      category: "custom",
+      model: "acme/parent",
+      variant: "high",
+      source: "session_inherit",
+    })
   })
   test("#given the quick category declares an available candidate #then that candidate is selected", () => {
     // given
@@ -55,7 +110,13 @@ describe("reflection model selection", () => {
     // given
     const settings = config({ categories: { writing: { model: "acme/pinned" } } })
     // when
-    const resolution = resolveReflectionModel("writing", settings, [...CATALOG, disabled("acme", "pinned")], "acme/large", CONSENTED)
+    const resolution = resolveReflectionModel(
+      "writing",
+      settings,
+      [...CATALOG, disabled("acme", "pinned")],
+      "acme/large",
+      CONSENTED,
+    )
     // then
     expect(resolution).toEqual({ kind: "resolved", category: "writing", model: "acme/pinned" })
   })
@@ -68,7 +129,13 @@ describe("reflection model selection", () => {
     const fresh = resolveReflectionModel("custom", settings, ranked, "acme/large", CONSENTED)
     const inherited = resolveReflectionModel("custom", settings, [], "acme/large", CONSENTED)
     // then
-    expect(fresh).toEqual({ kind: "resolved", category: "custom", model: "acme/large-mini", source: "registry_fallback", fallbacks: [{ model: "acme/large" }] })
+    expect(fresh).toEqual({
+      kind: "resolved",
+      category: "custom",
+      model: "acme/large-mini",
+      source: "registry_fallback",
+      fallbacks: [{ model: "acme/large" }],
+    })
     expect(inherited).toEqual({ kind: "resolved", category: "custom", model: "acme/large", source: "session_inherit" })
   })
 
@@ -103,7 +170,12 @@ describe("reflection model provider consent", () => {
     // when
     const resolution = resolveReflectionModel("custom", settings, catalog, undefined, new Set(["acme"]))
     // then
-    expect(resolution).toEqual({ kind: "resolved", category: "custom", model: "acme/large", source: "registry_fallback" })
+    expect(resolution).toEqual({
+      kind: "resolved",
+      category: "custom",
+      model: "acme/large",
+      source: "registry_fallback",
+    })
   })
 
   test("#given only unconfigured built-in models and no session model #when reflection resolves #then the category is unavailable", () => {
@@ -129,7 +201,9 @@ describe("reflection model provider consent", () => {
   test("#given the user pins or declares a built-in provider model #when reflection resolves #then the explicit choice is honored", () => {
     // given
     const pinned = config({ categories: { quick: { model: "opencode/mimo-v2.6-flash-free" } } })
-    const declared = config({ categories: { quick: { models: ["gone/model"], fallback_models: ["opencode/mimo-v2.6-flash-free"] } } })
+    const declared = config({
+      categories: { quick: { models: ["gone/model"], fallback_models: ["opencode/mimo-v2.6-flash-free"] } },
+    })
     // when
     const fromPin = resolveReflectionModel("quick", pinned, [BUILTIN_FREE], undefined, new Set())
     const fromDeclared = resolveReflectionModel("quick", declared, [BUILTIN_FREE], undefined, new Set())
@@ -142,8 +216,19 @@ describe("reflection model provider consent", () => {
     // given
     const settings = config({ categories: { custom: { model: "gone/model" } } })
     // when
-    const resolution = resolveReflectionModel("custom", settings, [BUILTIN_FREE], "opencode/mimo-v2.6-flash-free", new Set())
+    const resolution = resolveReflectionModel(
+      "custom",
+      settings,
+      [BUILTIN_FREE],
+      "opencode/mimo-v2.6-flash-free",
+      new Set(),
+    )
     // then
-    expect(resolution).toEqual({ kind: "resolved", category: "custom", model: "opencode/mimo-v2.6-flash-free", source: "session_inherit" })
+    expect(resolution).toEqual({
+      kind: "resolved",
+      category: "custom",
+      model: "opencode/mimo-v2.6-flash-free",
+      source: "session_inherit",
+    })
   })
 })

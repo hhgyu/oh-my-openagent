@@ -13,7 +13,11 @@ test("published roots preserve host SDK identity and load V1 without the optiona
   const root = resolve(import.meta.dir, "..")
   async function run(command: string, args: string[]) {
     const child = Bun.spawn([command, ...args], { cwd: root, stdout: "pipe", stderr: "pipe" })
-    const [status, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+    const [status, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
     return { status, stdout, stderr }
   }
   const evidence = join(root, ".omo/evidence/20261107-v2-native-foundation")
@@ -28,7 +32,11 @@ test("published roots preserve host SDK identity and load V1 without the optiona
   }
   const shim = await run(process.execPath, ["script/patch-node-require-shim.ts", output])
   expect(shim.status, shim.stdout + shim.stderr).toBe(0)
-  const patchedFiles = [output, join(output, "v2")].flatMap((directory) => readdirSync(directory).filter((name) => name.endsWith(".js")).map((name) => join(directory, name)))
+  const patchedFiles = [output, join(output, "v2")].flatMap((directory) =>
+    readdirSync(directory)
+      .filter((name) => name.endsWith(".js"))
+      .map((name) => join(directory, name)),
+  )
   const patchedBodies = patchedFiles.map((path) => readFileSync(path, "utf8"))
   for (const body of patchedBodies) expect(body.includes("var __require = import.meta.require;")).toBe(false)
   const repeat = await run(process.execPath, ["script/patch-node-require-shim.ts", output])
@@ -45,25 +53,42 @@ test("published roots preserve host SDK identity and load V1 without the optiona
     }
   }
   const loader = join(output, "deny-v2.mjs")
-  writeFileSync(loader, `export function resolve(specifier, context, next) {
+  writeFileSync(
+    loader,
+    `export function resolve(specifier, context, next) {
     if (specifier === "effect" || specifier.startsWith("effect/") || specifier.startsWith("@opencode/plugin")) throw new Error("V2 SDK intentionally unavailable");
     return next(specifier, context);
-  }`)
+  }`,
+  )
   const entry = pathToFileURL(join(output, "index.js")).href
-  const check = await run("node", ["--experimental-loader", pathToFileURL(loader).href, "--input-type=module", "-e", `
+  const check = await run("node", [
+    "--experimental-loader",
+    pathToFileURL(loader).href,
+    "--input-type=module",
+    "-e",
+    `
     const {default: plugin, omoPlugin} = await import(${JSON.stringify(entry)});
     if (plugin.server !== omoPlugin || typeof omoPlugin !== "function" || typeof plugin.setup !== "function") throw new Error("Root export contract changed");
     console.log("V1 root imports without V2 SDK");
-  `])
+  `,
+  ])
   expect(check.status, check.stdout + check.stderr).toBe(0)
   const trace = join(output, "trace-sdk.mjs")
-  writeFileSync(trace, `export async function resolve(specifier, context, next) {
+  writeFileSync(
+    trace,
+    `export async function resolve(specifier, context, next) {
     const resolved = await next(specifier, context);
     if (specifier !== "@opencode/plugin/promise/plugin") return resolved;
     const source = 'export * from ' + JSON.stringify(resolved.url) + '; import {define as hostDefine} from ' + JSON.stringify(resolved.url) + '; export function define(plugin) { globalThis.__hostDefines = (globalThis.__hostDefines ?? 0) + 1; return hostDefine(plugin); }';
     return {url: 'data:text/javascript,' + encodeURIComponent(source), shortCircuit:true};
-  }`)
-  const v2 = await run("node", ["--experimental-loader", pathToFileURL(trace).href, "--input-type=module", "-e", `
+  }`,
+  )
+  const v2 = await run("node", [
+    "--experimental-loader",
+    pathToFileURL(trace).href,
+    "--input-type=module",
+    "-e",
+    `
     const {default: plugin} = await import(${JSON.stringify(pathToFileURL(join(output, "v2/index.js")).href)});
     if (globalThis.__hostDefines !== 1) throw new Error("V2 did not use host SDK define");
     let active = 0;
@@ -77,6 +102,7 @@ test("published roots preserve host SDK identity and load V1 without the optiona
     await rootCleanup(); await rootCleanup();
     if(active!==0) throw new Error("Root V2 cleanup leaked");
     console.log("Both V2 routes use external SDK and dispose registrations");
-  `])
+  `,
+  ])
   expect(v2.status, v2.stdout + v2.stderr).toBe(0)
 }, 120_000)

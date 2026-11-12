@@ -6,31 +6,45 @@
 
 import { appendFile } from "@oh-my-opencode/memory-core/fs"
 import {
-  FactsExtractionValidationError, parseFactsExtractionRecord, resolveClaimReceipt, USER_QUOTE_RULE,
-  type ConsentExchange, type FactsPayload, type TranscriptEntry,
+  FactsExtractionValidationError,
+  parseFactsExtractionRecord,
+  resolveClaimReceipt,
+  USER_QUOTE_RULE,
+  type ConsentExchange,
+  type FactsPayload,
+  type TranscriptEntry,
 } from "@oh-my-opencode/memory-core"
 import { Error as ToolError, type Info, type Result } from "@opencode/plugin/promise/tool"
 import { z } from "zod"
 
 export const FACTS_RECORD_TOOL_NAME = "record_fact"
-const FOREIGN_SESSION_MESSAGE = "this tool is available only to a live facts extractor session issued by the memory component"
+const FOREIGN_SESSION_MESSAGE =
+  "this tool is available only to a live facts extractor session issued by the memory component"
 
-const factsRecordInput = z.object({
-  scope: z.enum(["person", "project"]),
-  person: z.object({ name: z.string(), aliases: z.array(z.string()) }).strict().optional()
-    .describe("Only for scope person. Omit this field for scope project."),
-  text: z.string(),
-  date: z.string(),
-  source: z.enum(["user", "agent", "inferred"]).optional()
-    .describe("Who the fact came from: user (the user said it), agent (an assistant suggestion or statement), inferred (a conclusion drawn from the conversation). Omitted means inferred."),
-  user_quote: z.string().optional().describe(USER_QUOTE_RULE),
-}).strict()
+const factsRecordInput = z
+  .object({
+    scope: z.enum(["person", "project"]),
+    person: z
+      .object({ name: z.string(), aliases: z.array(z.string()) })
+      .strict()
+      .optional()
+      .describe("Only for scope person. Omit this field for scope project."),
+    text: z.string(),
+    date: z.string(),
+    source: z
+      .enum(["user", "agent", "inferred"])
+      .optional()
+      .describe(
+        "Who the fact came from: user (the user said it), agent (an assistant suggestion or statement), inferred (a conclusion drawn from the conversation). Omitted means inferred.",
+      ),
+    user_quote: z.string().optional().describe(USER_QUOTE_RULE),
+  })
+  .strict()
 
 type FactsRecordParams = z.infer<typeof factsRecordInput>
 
 type FactsRecordOutcome =
-  | { readonly ok: true; readonly count: number }
-  | { readonly ok: false; readonly reason: string }
+  { readonly ok: true; readonly count: number } | { readonly ok: false; readonly reason: string }
 
 export interface FactsRecorder {
   record(params: FactsRecordParams): Promise<FactsRecordOutcome>
@@ -56,11 +70,14 @@ export function createFactsRecorder(input: {
   const refused = new Set<string>()
   return {
     count: () => count,
-    deactivate: () => { active = false },
+    deactivate: () => {
+      active = false
+    },
     async record(params) {
       if (!active) return { ok: false, reason: "the facts run is no longer active" }
       if (ended) return { ok: false, reason: "the facts run has ended; stop calling record_fact" }
-      if (input.maxCalls !== undefined && calls >= input.maxCalls) return { ok: false, reason: `the facts tool-call limit (${input.maxCalls}) has been reached` }
+      if (input.maxCalls !== undefined && calls >= input.maxCalls)
+        return { ok: false, reason: `the facts tool-call limit (${input.maxCalls}) has been reached` }
       calls += 1
       try {
         const { source, user_quote: userQuote, ...fact } = params
@@ -80,14 +97,19 @@ export function createFactsRecorder(input: {
           return { ok: false, reason: `${reason}. Fix this call or skip this fact; the same call will not be accepted` }
         }
         ended = true
-        return { ok: false, reason: `${reason}. This exact call was already refused, so the facts run ends here; facts recorded so far are kept` }
+        return {
+          ok: false,
+          reason: `${reason}. This exact call was already refused, so the facts run ends here; facts recorded so far are kept`,
+        }
       }
     },
   }
 }
 
 /** The one registered `record_fact` tool; `resolve` answers only for a live issued facts child. */
-export function createFactsRecordTool(resolve: (sessionID: string) => FactsRecorder | undefined): Info<typeof factsRecordInput> {
+export function createFactsRecordTool(
+  resolve: (sessionID: string) => FactsRecorder | undefined,
+): Info<typeof factsRecordInput> {
   return {
     name: FACTS_RECORD_TOOL_NAME,
     description: "Record one durable fact extracted from the supplied conversation payload.",
@@ -95,7 +117,8 @@ export function createFactsRecordTool(resolve: (sessionID: string) => FactsRecor
     options: { codemode: false, permission: FACTS_RECORD_TOOL_NAME },
     async execute(input, context): Promise<Result> {
       const recorder = resolve(context.sessionID)
-      if (recorder === undefined) throw new ToolError({ message: `${FACTS_RECORD_TOOL_NAME}: ${FOREIGN_SESSION_MESSAGE}` })
+      if (recorder === undefined)
+        throw new ToolError({ message: `${FACTS_RECORD_TOOL_NAME}: ${FOREIGN_SESSION_MESSAGE}` })
       const outcome = await recorder.record(input)
       if (!outcome.ok) throw new ToolError({ message: `Fact rejected: ${outcome.reason}` })
       return { content: `Fact recorded (${outcome.count}).` }
@@ -107,12 +130,13 @@ export function createFactsRecordTool(resolve: (sessionID: string) => FactsRecor
 // assistant message: that text is the proposal it answered. For the first user entry of a queue entry,
 // the one before it is the queue entry's lead (the previous delta's last entry).
 export function payloadExchanges(payload: FactsPayload): ConsentExchange[] {
-  return payload.entries.flatMap(entry => {
+  return payload.entries.flatMap((entry) => {
     const exchanges: ConsentExchange[] = []
     let proposal = proposalText(entry.lead)
     for (const item of entry.entries) {
       if (item.kind === "reasoning") continue
-      if (item.kind === "user" && proposal !== undefined && item.text.trim().length > 0) exchanges.push({ proposal, reply: item.text })
+      if (item.kind === "user" && proposal !== undefined && item.text.trim().length > 0)
+        exchanges.push({ proposal, reply: item.text })
       proposal = proposalText(item)
     }
     return exchanges

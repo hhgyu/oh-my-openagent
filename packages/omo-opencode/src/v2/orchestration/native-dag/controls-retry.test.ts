@@ -10,13 +10,19 @@ import { dagWakeInputId } from "./wake-projection"
 setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
 
 const PARENT = "ses_dag_root"
-const roots: string[] = [], cleanups: (() => Promise<void> | void)[] = []
+const roots: string[] = [],
+  cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-const node = (id: string, dependsOn?: readonly string[]) => ({ id, prompt: `do ${id}`, category: "quick", ...(dependsOn && { dependsOn }) })
+const node = (id: string, dependsOn?: readonly string[]) => ({
+  id,
+  prompt: `do ${id}`,
+  category: "quick",
+  ...(dependsOn && { dependsOn }),
+})
 
 function harness() {
   const directory = mkdtempSync(join(tmpdir(), "omo-v2-dag-retry-"))
@@ -37,7 +43,11 @@ describe("OpenCode 2 workflow retry and the run wake", () => {
   test("#given a failed run #when retry blocks (detach=false) #then this call re-admits the failed node and its skipped dependent and the run completes", async () => {
     // given
     const dag = harness()
-    const first = await dag.call({ action: "start", detach: true, definition: { key: "r", name: "r", nodes: [node("a"), node("b", ["a"])] } })
+    const first = await dag.call({
+      action: "start",
+      detach: true,
+      definition: { key: "r", name: "r", nodes: [node("a"), node("b", ["a"])] },
+    })
     const runId = runIdOf(first.result)
     first.fake.settle("a", "error")
     await dag.call({ action: "wait", run_id: runId, detach: false })
@@ -53,17 +63,21 @@ describe("OpenCode 2 workflow retry and the run wake", () => {
 
     // then
     expect(failed.status).toBe("failed")
-    expect(failed.nodes.map(entry => entry.state)).toEqual(["failed", "skipped"])
+    expect(failed.nodes.map((entry) => entry.state)).toEqual(["failed", "skipped"])
     expect(result.details.kind).toBe("retried")
     expect(result.details.kind === "retried" && result.details.snapshot.status).toBe("completed")
-    expect(retry.fake.starts.map(start => start.nodeId)).toEqual(["a", "b"])
+    expect(retry.fake.starts.map((start) => start.nodeId)).toEqual(["a", "b"])
     expect(dag.runtime.driving()).toBe(0)
   })
 
   test("#given a run that finished outside a call #when it is retried detached and finishes again #then the second terminal wake has its own id", async () => {
     // given
     const dag = harness()
-    const first = await dag.call({ action: "start", detach: true, definition: { key: "w", name: "w", nodes: [node("a")] } })
+    const first = await dag.call({
+      action: "start",
+      detach: true,
+      definition: { key: "w", name: "w", nodes: [node("a")] },
+    })
     const runId = runIdOf(first.result)
     first.fake.settle("a", "error")
     await dag.wake.refresh()
@@ -76,22 +90,31 @@ describe("OpenCode 2 workflow retry and the run wake", () => {
 
     // then
     expect(retry.result.details.kind === "retried" && retry.result.details.snapshot.status).toBe("running")
-    expect(retry.fake.starts.map(start => start.nodeId)).toEqual(["a"])
+    expect(retry.fake.starts.map((start) => start.nodeId)).toEqual(["a"])
     expect(dag.record(runId).generation).toBe(2)
-    expect(dag.posts).toEqual([dagWakeInputId(runId, { terminalGeneration: 1 }), dagWakeInputId(runId, { terminalGeneration: 2 })])
+    expect(dag.posts).toEqual([
+      dagWakeInputId(runId, { terminalGeneration: 1 }),
+      dagWakeInputId(runId, { terminalGeneration: 2 }),
+    ])
     expect(new Set(dag.posts).size).toBe(2)
   })
 
   test("#given a wake intent whose delivery failed #when a control folds its settle and a later node settles #then the stale wake is never delivered and only the current one is", async () => {
     // given
     const dag = harness()
-    const first = await dag.call({ action: "start", detach: true, definition: { key: "t", name: "t", nodes: [node("a"), node("b"), node("c")] } })
+    const first = await dag.call({
+      action: "start",
+      detach: true,
+      definition: { key: "t", name: "t", nodes: [node("a"), node("b"), node("c")] },
+    })
     const runId = runIdOf(first.result)
     first.fake.complete("a")
     dag.state.failSynthetic = true
     await dag.wake.refresh()
     const staleSeq = dag.record(runId).checkpointSeq
-    const stale = dagWakeInputId(runId, { settled: [{ nodeId: "a", taskId: "task-1", runEpoch: 1, status: "completed" }] })
+    const stale = dagWakeInputId(runId, {
+      settled: [{ nodeId: "a", taskId: "task-1", runEpoch: 1, status: "completed" }],
+    })
 
     // when
     const sent = await dag.call({ action: "send", run_id: runId, node_id: "b", message: "hurry" })
@@ -104,10 +127,14 @@ describe("OpenCode 2 workflow retry and the run wake", () => {
     // then
     expect(sent.result.details.kind === "sent" && sent.result.details.delivery).toBe("steer")
     expect(sent.fake.sent).toEqual([{ taskId: "task-2", message: "hurry" }])
-    expect(sent.result.content[0]?.text).toContain(`This call also recorded node(s) "a" (completed), which finished before it.`)
+    expect(sent.result.content[0]?.text).toContain(
+      `This call also recorded node(s) "a" (completed), which finished before it.`,
+    )
     expect(dag.record(runId).checkpointSeq).toBeGreaterThan(staleSeq)
     expect(afterSend).toEqual([])
-    expect(dag.posts).toEqual([dagWakeInputId(runId, { settled: [{ nodeId: "c", taskId: "task-3", runEpoch: 1, status: "completed" }] })])
+    expect(dag.posts).toEqual([
+      dagWakeInputId(runId, { settled: [{ nodeId: "c", taskId: "task-3", runEpoch: 1, status: "completed" }] }),
+    ])
     expect(dag.posts).not.toContain(stale)
   })
 })

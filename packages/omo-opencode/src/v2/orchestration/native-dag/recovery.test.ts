@@ -16,7 +16,12 @@ describe("OpenCode 2 workflow recovery after a reload", () => {
     const paused = await first.dispose(stop)
 
     // then
-    expect(await pending.then(() => "returned", () => "aborted")).toBe("aborted")
+    expect(
+      await pending.then(
+        () => "returned",
+        () => "aborted",
+      ),
+    ).toBe("aborted")
     expect(paused).toEqual([runId as DagRunId])
     const record: Leased = first.dag.record(runId)
     expect(record.status).toBe("paused")
@@ -49,19 +54,23 @@ describe("OpenCode 2 workflow recovery after a reload", () => {
     // then
     expect(fake.restored).toEqual(["task-1"])
     expect(parked?.owned).toBe(true)
-    expect(fake.starts.map(start => start.nodeId)).toEqual(["b"])
+    expect(fake.starts.map((start) => start.nodeId)).toEqual(["b"])
     expect(result.details.kind === "waited" && result.details.result.status).toBe("completed")
     const record: Leased = second.dag.record(runId)
     expect(record.generation).toBe(pausedGeneration + 1)
     expect(record.leaseHolderPid).toBeUndefined()
-    expect(first.dag.fakes.flatMap(earlier => earlier.cancelled)).toEqual([])
+    expect(first.dag.fakes.flatMap((earlier) => earlier.cancelled)).toEqual([])
   })
 
   test("#given a reload-paused run whose child had already settled before the reload #when the next generation's blocking wait runs #then Native recovery folds it without restoring it and the run completes", async () => {
     // given
     const directory = fresh()
     const first = generation(directory)
-    const { result: started, fake: starter } = await first.dag.call({ action: "start", detach: true, definition: { key: "settled", name: "settled", nodes: [node("a"), node("b", ["a"])] } })
+    const { result: started, fake: starter } = await first.dag.call({
+      action: "start",
+      detach: true,
+      definition: { key: "settled", name: "settled", nodes: [node("a"), node("b", ["a"])] },
+    })
     const runId = started.details.kind === "started" ? started.details.run_id : ""
     starter.complete("a")
     await first.dispose()
@@ -77,7 +86,7 @@ describe("OpenCode 2 workflow recovery after a reload", () => {
     // then
     expect(result.details.kind === "waited" && result.details.result.status).toBe("completed")
     expect(fake.restored).toEqual([])
-    expect(fake.starts.map(start => start.nodeId)).toEqual(["b"])
+    expect(fake.starts.map((start) => start.nodeId)).toEqual(["b"])
   })
 
   test("#given a run a reload paused #when the next generation's call cancels it #then that call restores the parked child, cancels it and the run is cancelled", async () => {

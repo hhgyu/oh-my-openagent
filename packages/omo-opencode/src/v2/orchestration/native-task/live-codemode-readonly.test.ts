@@ -22,9 +22,13 @@ type Info = ReturnType<ToolEditor["list"]>[number]
 type Context = Parameters<Info["execute"]>[1]
 type Request = typeof AssertInput.Encoded
 
-const CHILD = "ses_codemode_child", PARENT = "ses_parent", AGENT = "build"
+const CHILD = "ses_codemode_child",
+  PARENT = "ses_parent",
+  AGENT = "build"
 const cleanups: (() => Promise<void> | void)[] = []
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
+afterEach(async () => {
+  for (const close of cleanups.splice(0).reverse()) await close()
+})
 
 function defined<T>(value: T): NonNullable<T> {
   if (value === undefined || value === null) throw new Error("Expected value to be defined")
@@ -32,7 +36,9 @@ function defined<T>(value: T): NonNullable<T> {
 }
 function failureMessage(exit: Exit.Exit<unknown, unknown>): string {
   if (Exit.isSuccess(exit)) throw Error("Expected a failed tool call")
-  const error = exit.cause.reasons.map(reason => reason._tag === "Fail" ? reason.error : undefined).find(value => value instanceof ToolError)
+  const error = exit.cause.reasons
+    .map((reason) => (reason._tag === "Fail" ? reason.error : undefined))
+    .find((value) => value instanceof ToolError)
   if (!(error instanceof ToolError)) throw Error(`Expected a typed tool error, got ${String(exit.cause)}`)
   return error.message
 }
@@ -40,56 +46,146 @@ function text(exit: Exit.Exit<{ readonly content?: unknown }, unknown>): string 
   if (!Exit.isSuccess(exit)) throw Error(`Expected success, got ${String(exit.cause)}`)
   const content = exit.value.content
   if (!Array.isArray(content)) throw Error("Expected content parts")
-  return content.map(part => (part as { text?: string }).text ?? "").join("")
+  return content.map((part) => (part as { text?: string }).text ?? "").join("")
 }
 
 /** Controlled UNIT SDK-domain ports with the real permission owner, ls owner and owned-child guard,
  * registered in the component's order (counterpart BEFORE the guard, so the guard wraps it). */
 async function fixture() {
   const cwd = mkdtempSync(join(tmpdir(), "omo-codemode-ls-"))
-  mkdirSync(join(cwd, "Alpha")); writeFileSync(join(cwd, "b.txt"), "b"); writeFileSync(join(cwd, ".hidden"), "h")
+  mkdirSync(join(cwd, "Alpha"))
+  writeFileSync(join(cwd, "b.txt"), "b")
+  writeFileSync(join(cwd, ".hidden"), "h")
   cleanups.push(() => rmSync(cwd, { recursive: true, force: true }))
-  const scope = Scope.makeUnsafe(), tools = new Map<string, Info>()
-  const editor: ToolEditor = { list: () => [...tools.values()], get: id => tools.get(id), namespace() {}, remove: id => { tools.delete(id) },
-    add: value => { tools.set(value.name, { ...value, id: value.name }) },
-    update: (id, change) => { const value = tools.get(id); if (value) change(value) } }
+  const scope = Scope.makeUnsafe(),
+    tools = new Map<string, Info>()
+  const editor: ToolEditor = {
+    list: () => [...tools.values()],
+    get: (id) => tools.get(id),
+    namespace() {},
+    remove: (id) => {
+      tools.delete(id)
+    },
+    add: (value) => {
+      tools.set(value.name, { ...value, id: value.name })
+    },
+    update: (id, change) => {
+      const value = tools.get(id)
+      if (value) change(value)
+    },
+  }
   const tool: Pick<ToolDomain, "transform" | "list"> = {
-    transform: callback => Effect.sync(() => { callback(editor); return { dispose: Effect.void } }),
+    transform: (callback) =>
+      Effect.sync(() => {
+        callback(editor)
+        return { dispose: Effect.void }
+      }),
     list: () => Effect.sync(() => [...tools.values()]),
   }
   const requests: Request[] = []
-  const permission = await Effect.runPromise(Effect.provideService(acquireEffectPermissionApi({ assert: request => { requests.push(request); return Effect.void } }), Scope.Scope, scope))
-  const owner = await Effect.runPromise(Effect.provideService(acquireCodemodeReadonly({ tool }, permission), Scope.Scope, scope))
+  const permission = await Effect.runPromise(
+    Effect.provideService(
+      acquireEffectPermissionApi({
+        assert: (request) => {
+          requests.push(request)
+          return Effect.void
+        },
+      }),
+      Scope.Scope,
+      scope,
+    ),
+  )
+  const owner = await Effect.runPromise(
+    Effect.provideService(acquireCodemodeReadonly({ tool }, permission), Scope.Scope, scope),
+  )
   let hook: ((event: PermissionEvaluation) => Effect.Effect<void>) | undefined
-  const guardPermission: Pick<PermissionDomain, "hook"> = { hook: (_name, callback) => Effect.sync(() => { hook = callback; return { dispose: Effect.void } }) }
-  const guard = await Effect.runPromise(Effect.provideService(acquireOwnedChildToolGuard({ tool, permission: guardPermission }), Scope.Scope, scope))
+  const guardPermission: Pick<PermissionDomain, "hook"> = {
+    hook: (_name, callback) =>
+      Effect.sync(() => {
+        hook = callback
+        return { dispose: Effect.void }
+      }),
+  }
+  const guard = await Effect.runPromise(
+    Effect.provideService(acquireOwnedChildToolGuard({ tool, permission: guardPermission }), Scope.Scope, scope),
+  )
   const stages: ReturnType<typeof guard.beginStage>[] = []
   cleanups.push(async () => {
-    for (const stage of stages) { await Effect.runPromise(guard.join(stage)); guard.release(stage, () => {}) }
-    await Effect.runPromise(Scope.close(scope, Exit.succeed(undefined))); await permission.close()
+    for (const stage of stages) {
+      await Effect.runPromise(guard.join(stage))
+      guard.release(stage, () => {})
+    }
+    await Effect.runPromise(Scope.close(scope, Exit.succeed(undefined)))
+    await permission.close()
   })
   const context = (sessionID = CHILD): Context => {
-    const value = Schema.decodeUnknownSync(AssertInput)({ sessionID, agent: AGENT, action: "unit", resources: [], source: { type: "tool", messageID: "unit-message", id: "unit-call" } })
+    const value = Schema.decodeUnknownSync(AssertInput)({
+      sessionID,
+      agent: AGENT,
+      action: "unit",
+      resources: [],
+      source: { type: "tool", messageID: "unit-message", id: "unit-call" },
+    })
     if (!value.agent || value.source?.type !== "tool") throw Error("Invalid controlled UNIT source")
-    return { sessionID: value.sessionID, agent: value.agent, messageID: value.source.messageID as Context["messageID"], id: value.source.id as Context["id"], progress: () => Effect.void }
+    return {
+      sessionID: value.sessionID,
+      agent: value.agent,
+      messageID: value.source.messageID as Context["messageID"],
+      id: value.source.id as Context["id"],
+      progress: () => Effect.void,
+    }
   }
   /** Stage and bind one owned child exactly as the runner does, over the component's binder. */
   function stageChild(withListing: boolean) {
-    const nativeTools = ["read", "grep", ...(withListing ? ["ls"] : [])].map(name => ({ name }))
-    const selection = prepareHostTaskGrant({ spec: { prompt: "unit", parent_session_id: PARENT, depth: 1 }, plan: { model: "unit/model", agentType: "sisyphus-junior" },
-      includeTaskTools: true, nativeTools, catalog: childCatalog([...tools.values()]), customCounterparts: withListing ? [{ nativeName: "ls", hostID: owner.hostID }] : [],
-      canonical: { filterSharedParentTools } })
-    const spec: ManagedStartSpec = { taskId: "st_00000001", cwd, stateDir: "/state", prompt: "unit", depth: 1, parentSessionId: PARENT, rootSessionId: PARENT, agentType: "sisyphus-junior" }
-    const producer = createNativeChildGuardBinding({ assertGeneration() {}, codemodeReadonly: owner, network: { guard } })(spec, { buildAgentID: AGENT, selection })
-    const stage = guard.beginStage(guard.approve({}, { selection, buildAgentID: AGENT, assertCurrent() {} }), CHILD, () => {})
+    const nativeTools = ["read", "grep", ...(withListing ? ["ls"] : [])].map((name) => ({ name }))
+    const selection = prepareHostTaskGrant({
+      spec: { prompt: "unit", parent_session_id: PARENT, depth: 1 },
+      plan: { model: "unit/model", agentType: "sisyphus-junior" },
+      includeTaskTools: true,
+      nativeTools,
+      catalog: childCatalog([...tools.values()]),
+      customCounterparts: withListing ? [{ nativeName: "ls", hostID: owner.hostID }] : [],
+      canonical: { filterSharedParentTools },
+    })
+    const spec: ManagedStartSpec = {
+      taskId: "st_00000001",
+      cwd,
+      stateDir: "/state",
+      prompt: "unit",
+      depth: 1,
+      parentSessionId: PARENT,
+      rootSessionId: PARENT,
+      agentType: "sisyphus-junior",
+    }
+    const producer = createNativeChildGuardBinding({
+      assertGeneration() {},
+      codemodeReadonly: owner,
+      network: { guard },
+    })(spec, { buildAgentID: AGENT, selection })
+    const stage = guard.beginStage(
+      guard.approve({}, { selection, buildAgentID: AGENT, assertCurrent() {} }),
+      CHILD,
+      () => {},
+    )
     stages.push(stage)
-    guard.bind(stage, producer.bind({ locator: { sessionID: CHILD }, lease: {} } as unknown as ChildHandle, () => {}))
+    guard.bind(
+      stage,
+      producer.bind({ locator: { sessionID: CHILD }, lease: {} } as unknown as ChildHandle, () => {}),
+    )
     return selection
   }
-  const run = (input: unknown, ctx = context()) => Effect.runPromiseExit(defined(tools.get(CODEMODE_READONLY_TOOL_NAME)).execute(input, ctx))
+  const run = (input: unknown, ctx = context()) =>
+    Effect.runPromiseExit(defined(tools.get(CODEMODE_READONLY_TOOL_NAME)).execute(input, ctx))
   const fetch = (url: string, method: string): Promise<PermissionEvaluation> => {
-    const event: PermissionEvaluation = { sessionID: CHILD, agent: AGENT, action: "webfetch", resources: [url], metadata: { method, url },
-      source: { type: "tool", id: "unit-call", messageID: "unit-message" }, effect: "allow" }
+    const event: PermissionEvaluation = {
+      sessionID: CHILD,
+      agent: AGENT,
+      action: "webfetch",
+      resources: [url],
+      metadata: { method, url },
+      source: { type: "tool", id: "unit-call", messageID: "unit-message" },
+      effect: "allow",
+    }
     return Effect.runPromise(defined(hook)(event)).then(() => event)
   }
   return { cwd, tools, owner, requests, run, stageChild, fetch, context }
@@ -104,7 +200,7 @@ describe("#given the dedicated CodeMode ls counterpart registration", () => {
     // then
     expect(info.options).toEqual({ codemode: true, permission: CODEMODE_READONLY_PERMISSION })
     expect(f.owner.hostID).toBe(CODEMODE_READONLY_TOOL_NAME)
-    expect(childCatalog([...f.tools.values()]).map(tool => tool.id)).toContain(f.owner.hostID)
+    expect(childCatalog([...f.tools.values()]).map((tool) => tool.id)).toContain(f.owner.hostID)
   })
 
   test("#when a parent or unbound session calls it #then it is refused and hidden from its model context", async () => {
@@ -133,7 +229,9 @@ describe("#given an owned child granted Native ls under the deny-all network gua
     // then
     expect(selection.requirements).toEqual(["codemode-network-guard"])
     expect(text(exit)).toBe(".hidden\nAlpha/\nb.txt")
-    expect(f.requests.map(request => ({ action: request.action, resources: request.resources }))).toEqual([{ action: CODEMODE_READONLY_PERMISSION, resources: [f.cwd] }])
+    expect(f.requests.map((request) => ({ action: request.action, resources: request.resources }))).toEqual([
+      { action: CODEMODE_READONLY_PERMISSION, resources: [f.cwd] },
+    ])
     expect(Object.keys(child.tools)).toEqual([f.owner.hostID])
   })
 

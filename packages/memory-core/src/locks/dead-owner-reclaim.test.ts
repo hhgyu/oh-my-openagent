@@ -108,7 +108,9 @@ describe("dead-owner lock reclaim", () => {
     let failure: unknown
     try {
       await recoverStaleOwner(lockPath, snapshot, contender, Date.now(), 5_000)
-    } catch (error) { failure = error }
+    } catch (error) {
+      failure = error
+    }
 
     expect(calls()).toBe(1)
     expect(existsSync(lockPath)).toBe(false)
@@ -124,7 +126,9 @@ describe("dead-owner lock reclaim", () => {
     let failure: unknown
     try {
       await acquireWithoutDirectorySweep(lockPath, contender, { waitTimeoutMs: 0 })
-    } catch (error) { failure = error }
+    } catch (error) {
+      failure = error
+    }
 
     expect(calls()).toBe(1)
     expect(existsSync(`${lockPath}.recovery`)).toBe(false)
@@ -141,7 +145,9 @@ describe("dead-owner lock reclaim", () => {
     let failure: unknown
     try {
       await acquireWithoutDirectorySweep(lockPath, contender, { waitTimeoutMs: 0 })
-    } catch (error) { failure = error }
+    } catch (error) {
+      failure = error
+    }
 
     expect(calls()).toBe(1)
     expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(successor)
@@ -163,7 +169,9 @@ describe("dead-owner lock reclaim", () => {
     let failure: unknown
     try {
       await recoverStaleOwner(lockPath, snapshot, contender, Date.now(), 5_000)
-    } catch (error) { failure = error }
+    } catch (error) {
+      failure = error
+    }
 
     expect(failure).toBe(expected)
     expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(deadOwner)
@@ -187,7 +195,10 @@ describe("dead-owner lock reclaim", () => {
     const { lockPath, contender } = await disappearingPrimary()
     const originalRead = resilientFs.readFile
     let reads = 0
-    const intercepted = spyOn(resilientFs, "readFile").mockImplementation((async (candidate: string, ...rest: unknown[]) => {
+    const intercepted = spyOn(resilientFs, "readFile").mockImplementation((async (
+      candidate: string,
+      ...rest: unknown[]
+    ) => {
       // Sweep's initial owner read, acquisition snapshot, then recovery's current-owner read.
       if (String(candidate) === lockPath && ++reads === 3) await unlink(lockPath)
       return (originalRead as (...args: unknown[]) => unknown)(candidate, ...rest)
@@ -207,7 +218,10 @@ describe("dead-owner lock reclaim", () => {
     const actualOwner = await deadOwnerRecord("memory-write")
     const originalRead = resilientFs.readFile
     let reads = 0
-    const intercepted = spyOn(resilientFs, "readFile").mockImplementation((async (candidate: string, ...rest: unknown[]) => {
+    const intercepted = spyOn(resilientFs, "readFile").mockImplementation((async (
+      candidate: string,
+      ...rest: unknown[]
+    ) => {
       if (String(candidate) === lockPath && ++reads === 2) await writeRecord(lockPath, actualOwner)
       return (originalRead as (...args: unknown[]) => unknown)(candidate, ...rest)
     }) as typeof resilientFs.readFile)
@@ -236,45 +250,60 @@ describe("dead-owner lock reclaim", () => {
     vanishAtFinalUnlink(lockPath, successor)
 
     let failure: unknown
-    try { await acquireLock(lockPath, contender, { waitTimeoutMs: 0 }) } catch (error) { failure = error }
+    try {
+      await acquireLock(lockPath, contender, { waitTimeoutMs: 0 })
+    } catch (error) {
+      failure = error
+    }
 
     expect(failure).toBeInstanceOf(LockContentionError)
     expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(successor)
     expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
   })
 
-  test.each([false, true])("#given an intervening publisher remains=%s #when public acquisition loses its publish after a real takeover #then no proof crosses that publisher", async (remains) => {
-    const { lockPath, contender } = await disappearingPrimary()
-    const successor = await createLockRecord("memory-write")
-    const realLink = resilientFs.link
-    let publications = 0
-    const restore = setLockCandidateFsForTests({ link: async (from, to) => {
-      if (String(to) === lockPath && publications++ === 1) {
-        await writeRecord(lockPath, successor)
-        try { await realLink(from, to) } catch (error) {
-          if (!remains) await unlink(lockPath)
-          throw error
-        }
-        throw new Error("expected lost exclusive publish")
+  test.each([false, true])(
+    "#given an intervening publisher remains=%s #when public acquisition loses its publish after a real takeover #then no proof crosses that publisher",
+    async (remains) => {
+      const { lockPath, contender } = await disappearingPrimary()
+      const successor = await createLockRecord("memory-write")
+      const realLink = resilientFs.link
+      let publications = 0
+      const restore = setLockCandidateFsForTests({
+        link: async (from, to) => {
+          if (String(to) === lockPath && publications++ === 1) {
+            await writeRecord(lockPath, successor)
+            try {
+              await realLink(from, to)
+            } catch (error) {
+              if (!remains) await unlink(lockPath)
+              throw error
+            }
+            throw new Error("expected lost exclusive publish")
+          }
+          await realLink(from, to)
+        },
+      })
+      restoreFilesystem.push(restore)
+
+      let failure: unknown
+      try {
+        await acquireLock(lockPath, contender, { waitTimeoutMs: 0 })
+      } catch (error) {
+        failure = error
       }
-      await realLink(from, to)
-    } })
-    restoreFilesystem.push(restore)
 
-    let failure: unknown
-    try { await acquireLock(lockPath, contender, { waitTimeoutMs: 0 }) } catch (error) { failure = error }
-
-    expect(publications).toBeGreaterThanOrEqual(2)
-    expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
-    if (remains) {
-      expect(failure).toBeInstanceOf(LockContentionError)
-      expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(successor)
-    } else {
-      expect(failure).toBeUndefined()
-      expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(contender)
-      await releaseLock(lockPath, contender)
-    }
-  })
+      expect(publications).toBeGreaterThanOrEqual(2)
+      expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
+      if (remains) {
+        expect(failure).toBeInstanceOf(LockContentionError)
+        expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(successor)
+      } else {
+        expect(failure).toBeUndefined()
+        expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(contender)
+        await releaseLock(lockPath, contender)
+      }
+    },
+  )
 
   test("#given a sweeper's own release loses the primary #when release returns false #then no reclaim count or callback is fabricated", async () => {
     const { lockPath } = await disappearingPrimary()
@@ -290,7 +319,9 @@ describe("dead-owner lock reclaim", () => {
     })
     restoreFilesystem.push(() => intercepted.mockRestore())
 
-    const reclaimed = await sweepDeadOwnerLocks(path.dirname(lockPath), { onReclaimed: (_path, owner) => callbacks.push(owner) })
+    const reclaimed = await sweepDeadOwnerLocks(path.dirname(lockPath), {
+      onReclaimed: (_path, owner) => callbacks.push(owner),
+    })
 
     expect(calls).toBe(2)
     expect(existsSync(lockPath)).toBe(false)
@@ -304,7 +335,10 @@ describe("dead-owner lock reclaim", () => {
     const recoveryPath = `${lockPath}.recovery`
     const originalRead = resilientFs.readFile
     let reads = 0
-    const intercepted = spyOn(resilientFs, "readFile").mockImplementation((async (candidate: string, ...rest: unknown[]) => {
+    const intercepted = spyOn(resilientFs, "readFile").mockImplementation((async (
+      candidate: string,
+      ...rest: unknown[]
+    ) => {
       if (String(candidate) === recoveryPath && ++reads === 2) await writeRecord(recoveryPath, replacement)
       return (originalRead as (...args: unknown[]) => unknown)(candidate, ...rest)
     }) as typeof resilientFs.readFile)

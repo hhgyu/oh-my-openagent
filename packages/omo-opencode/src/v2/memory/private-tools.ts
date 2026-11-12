@@ -14,7 +14,10 @@ export type PrivateToolOwner = (value: PrivateToolRequest) => boolean
  * Applies every owner in order and stops at the first one that owns the session (its narrowing
  * already removed every other tool). Returns true when the request belongs to an owned child.
  */
-export function narrowPrivateTools(value: PrivateToolRequest, owners: readonly (PrivateToolOwner | undefined)[]): boolean {
+export function narrowPrivateTools(
+  value: PrivateToolRequest,
+  owners: readonly (PrivateToolOwner | undefined)[],
+): boolean {
   for (const owner of owners) if (owner?.(value) === true) return true
   return false
 }

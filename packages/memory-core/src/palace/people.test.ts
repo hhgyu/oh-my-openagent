@@ -189,7 +189,10 @@ describe("/people miss line", () => {
     // then
     expect(fewLine).toBe('no person matches "nobody-here"; known slugs: human, jane-doe, sam-rivers')
     expect(manyLine).toBe(
-      `no person matches "nobody-here"; known slugs: ${many.slice(0, 10).map((node) => node.slug).join(", ")} (+2 more)`,
+      `no person matches "nobody-here"; known slugs: ${many
+        .slice(0, 10)
+        .map((node) => node.slug)
+        .join(", ")} (+2 more)`,
     )
   })
 })

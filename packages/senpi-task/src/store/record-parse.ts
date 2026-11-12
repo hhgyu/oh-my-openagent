@@ -111,15 +111,27 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
   const ownedSession = parseOwnedSession(value.owned_session)
   // New writes retain R0's host-session enum. Only a valid owned reference restores
   // the adapter-specific kind; all existing mixing and custody checks still apply.
-  const runnerKind = storedRunnerKind === "host-session" && ownedSession !== undefined ? "owned-session" : storedRunnerKind
+  const runnerKind =
+    storedRunnerKind === "host-session" && ownedSession !== undefined ? "owned-session" : storedRunnerKind
   const observationUncertain = parseObservationUncertainty(value.observation_uncertain)
-  if ((ownedSession !== undefined) !== (runnerKind === "owned-session") || ownedSession !== undefined && (pid !== undefined || value.host_session !== undefined)) throw new Error("Owned session identity is inconsistent")
+  if (
+    (ownedSession !== undefined) !== (runnerKind === "owned-session") ||
+    (ownedSession !== undefined && (pid !== undefined || value.host_session !== undefined))
+  )
+    throw new Error("Owned session identity is inconsistent")
   const hostSession = parseOptionalHostSession(value)
   validateHostSessionConsistency(runnerKind, hostSession)
   const fallbackHandoffEpoch = readOptionalNumber(value, "fallback_handoff_epoch")
   const closingChild = parseOptionalClosingChild(value)
   const residencyClaim = readOptionalString(value, "residency_claim")
-  if (ownedSession && (ownedSession.runEpoch !== parseNotification(value).run_epoch || ownedSession.residencyClaim !== residencyClaim || ownedSession.parentID !== value.parent_session_id || ownedSession.sessionID !== value.child_session_id)) throw new Error("Owned session task fence is inconsistent")
+  if (
+    ownedSession &&
+    (ownedSession.runEpoch !== parseNotification(value).run_epoch ||
+      ownedSession.residencyClaim !== residencyClaim ||
+      ownedSession.parentID !== value.parent_session_id ||
+      ownedSession.sessionID !== value.child_session_id)
+  )
+    throw new Error("Owned session task fence is inconsistent")
   const cancelRequested = parseOptionalCancelRequest(value)
   const awaitingInput = parseOptionalAwaitingInput(value)
   const provisionalExit = parseOptionalProvisionalExit(value)

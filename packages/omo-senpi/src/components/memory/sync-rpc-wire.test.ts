@@ -3,7 +3,13 @@ import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createSyncRpcClaims } from "./sync-rpc-claims"
-import { registerSyncRpc, type SyncRpcAccount, type SyncRpcContext, type SyncRpcRegistration, type SyncRpcRuntime } from "@oh-my-opencode/memory-core/sync-runner"
+import {
+  registerSyncRpc,
+  type SyncRpcAccount,
+  type SyncRpcContext,
+  type SyncRpcRegistration,
+  type SyncRpcRuntime,
+} from "@oh-my-opencode/memory-core/sync-runner"
 import { creatorAnchor } from "../../../../memory-core/src/sync/crypto/anchor"
 import { appendEntries, emptyChain } from "../../../../memory-core/src/sync/crypto/chain"
 import { createRejectionCounter } from "../../../../memory-core/src/sync/crypto/rejection"

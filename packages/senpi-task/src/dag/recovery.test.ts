@@ -509,15 +509,33 @@ describe("DAG crash recovery", () => {
     // given
     const store = createDagFileStore({ project_dir: tempProject() })
     const manager = new RecoveryTaskManager()
-    store.writeCheckpoint(runId, recoverableRecord(definition([node("only")]), {
-      only: { state: "scheduled" },
-    }, { previousLeaseHolderPid: 9001 }))
+    store.writeCheckpoint(
+      runId,
+      recoverableRecord(
+        definition([node("only")]),
+        {
+          only: { state: "scheduled" },
+        },
+        { previousLeaseHolderPid: 9001 },
+      ),
+    )
     const probed: number[] = []
-    const lease = { holder: () => 5150, isAlive: (holder: number) => { probed.push(holder); return true } }
+    const lease = {
+      holder: () => 5150,
+      isAlive: (holder: number) => {
+        probed.push(holder)
+        return true
+      },
+    }
 
     // when
-    const outcomes = await createDagRecovery({ store, taskManager: manager, lease, hostPid: 101, isProcessAlive: () => false })
-      .resumePausedRuns(parentSessionId)
+    const outcomes = await createDagRecovery({
+      store,
+      taskManager: manager,
+      lease,
+      hostPid: 101,
+      isProcessAlive: () => false,
+    }).resumePausedRuns(parentSessionId)
 
     // then
     expect(outcomes).toEqual([{ runId, kind: "skipped", reason: "live_lease", holderPid: 9001 }])
@@ -530,15 +548,29 @@ describe("DAG crash recovery", () => {
     // given
     const store = createDagFileStore({ project_dir: tempProject() })
     const manager = new RecoveryTaskManager({ autoCompleteStarts: false })
-    store.writeCheckpoint(runId, recoverableRecord(definition([node("only")]), {
-      only: { state: "scheduled" },
-    }, { previousLeaseHolderPid: 9001 }))
+    store.writeCheckpoint(
+      runId,
+      recoverableRecord(
+        definition([node("only")]),
+        {
+          only: { state: "scheduled" },
+        },
+        { previousLeaseHolderPid: 9001 },
+      ),
+    )
     const lease = { holder: () => 5150, isAlive: () => false }
     const installed: Promise<unknown>[] = []
 
     // when
-    const outcomes = await createDagRecovery({ store, taskManager: manager, lease, hostPid: 101, isProcessAlive: () => true })
-      .installPausedRuns(parentSessionId, (run) => { installed.push(run.settled) })
+    const outcomes = await createDagRecovery({
+      store,
+      taskManager: manager,
+      lease,
+      hostPid: 101,
+      isProcessAlive: () => true,
+    }).installPausedRuns(parentSessionId, (run) => {
+      installed.push(run.settled)
+    })
     const claimed = store.readCheckpoint<DagRunRecordV1 & { readonly leaseHolderPid?: number }>(runId)
     manager.complete("task-only")
     await Promise.all(installed)
@@ -547,7 +579,9 @@ describe("DAG crash recovery", () => {
     expect(outcomes).toEqual([{ runId, kind: "resumed" }])
     expect(claimed?.leaseHolderPid).toBe(5150)
     expect(manager.startOwnedCalls).toEqual(["only"])
-    expect(store.readCheckpoint<DagRunRecordV1 & { readonly leaseHolderPid?: number }>(runId)?.leaseHolderPid).toBeUndefined()
+    expect(
+      store.readCheckpoint<DagRunRecordV1 & { readonly leaseHolderPid?: number }>(runId)?.leaseHolderPid,
+    ).toBeUndefined()
   })
 
   test("#given scheduled nodes with and without durable owners #when resumed #then the owner is attached and only never-dispatched work starts", async () => {

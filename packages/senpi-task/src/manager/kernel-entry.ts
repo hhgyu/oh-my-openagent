@@ -2,8 +2,22 @@
 export { createTaskManagerImplementation } from "./manager-implementation"
 export type { ReattachingTaskManager, TaskManagerPlanningPreparation } from "./manager-implementation"
 export type { TaskManagerImplOptions, TaskRecoveryRuntime, TaskRecoveryRequest } from "./recovery-runtime"
-export type { TaskManagerOptions, TaskManager, ManagedRunner, ManagedStartSpec, ManagerStartSpec, ChildPlanner, ResolvedChildPlan } from "./types"
-export type { ManagedChildHandle, ManagedChildEvent, ManagedChildListener, PreparedFollowUp, PreparedFollowUpResult } from "./child-handle"
+export type {
+  TaskManagerOptions,
+  TaskManager,
+  ManagedRunner,
+  ManagedStartSpec,
+  ManagerStartSpec,
+  ChildPlanner,
+  ResolvedChildPlan,
+} from "./types"
+export type {
+  ManagedChildHandle,
+  ManagedChildEvent,
+  ManagedChildListener,
+  PreparedFollowUp,
+  PreparedFollowUpResult,
+} from "./child-handle"
 export { ChildObservationUncertain } from "./observation-uncertain"
 export { InputUncertainError } from "../runners/input-effects"
 export { createTaskRecordStore } from "../store/record-store"

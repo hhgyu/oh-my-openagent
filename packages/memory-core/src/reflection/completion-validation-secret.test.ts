@@ -87,9 +87,16 @@ describe("reflection completion secret screening", () => {
 
     // Both real Git operations must settle before the existing fixture teardown removes the repository.
     const results = await Promise.allSettled([
-      findSecretLikeFailures((argv, stdin) => worktree.exec.run(argv, {
-        cwd: worktree.dir, timeoutMs: 30_000, ...(stdin === undefined ? {} : { stdin }),
-      }), worktree.baseSha, tip),
+      findSecretLikeFailures(
+        (argv, stdin) =>
+          worktree.exec.run(argv, {
+            cwd: worktree.dir,
+            timeoutMs: 30_000,
+            ...(stdin === undefined ? {} : { stdin }),
+          }),
+        worktree.baseSha,
+        tip,
+      ),
       commitCount(worktree.exec, worktree.dir, worktree.baseSha, tip),
     ])
     expect(results).toEqual([

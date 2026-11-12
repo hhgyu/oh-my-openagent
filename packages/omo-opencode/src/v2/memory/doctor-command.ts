@@ -6,7 +6,11 @@
 //   tree outside a memory commit (a dirty tree would fail the next reflection merge with `parent_dirty`).
 // The projection line reports the limits the V2 projection compiles with (`memory.projection`).
 
-import { readReflectionParkFile, REFLECTION_PARK_PROBE_INTERVAL_MS, type ReflectionParkState } from "@oh-my-opencode/memory-core"
+import {
+  readReflectionParkFile,
+  REFLECTION_PARK_PROBE_INTERVAL_MS,
+  type ReflectionParkState,
+} from "@oh-my-opencode/memory-core"
 import { runDoctor, type DoctorCheck } from "@oh-my-opencode/memory-core/doctor"
 import type { BoundMemorySession } from "./binding"
 import { coreCommandCall, INSIGHT_COMMAND_NAMES, UNBOUND_MEMORY_SESSION } from "./insight-commands"
@@ -26,16 +30,23 @@ async function reflectionParkHealth(reflectionDir: string): Promise<DoctorCheck>
   try {
     park = await readReflectionParkFile(reflectionDir)
   } catch (error) {
-    return { name: "reflection-health", level: "warn", detail: `park state unreadable: ${error instanceof Error ? error.message : String(error)}` }
+    return {
+      name: "reflection-health",
+      level: "warn",
+      detail: `park state unreadable: ${error instanceof Error ? error.message : String(error)}`,
+    }
   }
-  if (park.streak === 0 && park.parkedAt === undefined) return { name: "reflection-health", level: "ok", detail: "streak 0; no recorded failure" }
+  if (park.streak === 0 && park.parkedAt === undefined)
+    return { name: "reflection-health", level: "ok", detail: "streak 0; no recorded failure" }
   const failure = park.lastFailure
-  const last = failure === undefined
-    ? "no failure detail"
-    : `last failure ${failure.reason ?? "unknown"} at ${failure.at} (run ${failure.runId})${failure.detail === undefined ? "" : `: ${failure.detail}`}`
-  const paused = park.parkedAt === undefined
-    ? ""
-    : `; automatic reflection paused since ${park.parkedAt} (next probe ${nextProbeAt(park)}; run /reflect to retry now)`
+  const last =
+    failure === undefined
+      ? "no failure detail"
+      : `last failure ${failure.reason ?? "unknown"} at ${failure.at} (run ${failure.runId})${failure.detail === undefined ? "" : `: ${failure.detail}`}`
+  const paused =
+    park.parkedAt === undefined
+      ? ""
+      : `; automatic reflection paused since ${park.parkedAt} (next probe ${nextProbeAt(park)}; run /reflect to retry now)`
   return {
     name: "reflection-health",
     level: park.streak >= STREAK_WARN || park.parkedAt !== undefined ? "warn" : "ok",
@@ -50,16 +61,23 @@ export function createDoctorCommand(deps: { readonly now?: () => number } = {}):
     async run(bound: BoundMemorySession | undefined, args: string) {
       if (bound === undefined) return { text: UNBOUND_MEMORY_SESSION, level: "error" }
       const call = coreCommandCall(bound)
-      const text = await runDoctor({
-        ...call.deps,
-        ...(deps.now === undefined ? {} : { now: deps.now }),
-        skillRepair: false,
-        doctorSettings: () => ({
-          warnTokens: bound.settings.compile_warn_tokens,
-          projectionLimits: { maxEntriesPerDirectory: bound.settings.projection.max_entries_per_directory, maxBytes: bound.settings.projection.max_bytes },
-        }),
-        reflectionHealth: identity => reflectionParkHealth(identity.identityPaths.reflection),
-      }, call.ctx, args)
+      const text = await runDoctor(
+        {
+          ...call.deps,
+          ...(deps.now === undefined ? {} : { now: deps.now }),
+          skillRepair: false,
+          doctorSettings: () => ({
+            warnTokens: bound.settings.compile_warn_tokens,
+            projectionLimits: {
+              maxEntriesPerDirectory: bound.settings.projection.max_entries_per_directory,
+              maxBytes: bound.settings.projection.max_bytes,
+            },
+          }),
+          reflectionHealth: (identity) => reflectionParkHealth(identity.identityPaths.reflection),
+        },
+        call.ctx,
+        args,
+      )
       return { text, level: call.level() }
     },
   }

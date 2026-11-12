@@ -5,13 +5,23 @@ import { join } from "node:path"
 import { buildIdentityPaths, TranscriptJournal } from "@oh-my-opencode/memory-core"
 import { OmoMemorySettingsSchema } from "@oh-my-opencode/omo-config-core"
 import type { BoundMemorySession } from "./binding"
-import { createMemoryStatusRpc, MEMORY_STATUS_RPC_ID, MEMORY_UPDATED_EVENT, type MemoryStatusRpcPort } from "./status-rpc"
+import {
+  createMemoryStatusRpc,
+  MEMORY_STATUS_RPC_ID,
+  MEMORY_UPDATED_EVENT,
+  type MemoryStatusRpcPort,
+} from "./status-rpc"
 import type { MemoryRpcSync } from "./sync/ports"
 
 const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
 
-interface Emitted { readonly name: string; readonly data: Record<string, unknown> }
+interface Emitted {
+  readonly name: string
+  readonly data: Record<string, unknown>
+}
 
 function harness(sync: (repo: string) => MemoryRpcSync | undefined = () => undefined) {
   const root = mkdtempSync(join(tmpdir(), "omo-v2-status-rpc-"))
@@ -22,16 +32,40 @@ function harness(sync: (repo: string) => MemoryRpcSync | undefined = () => undef
     register: async (definition, handlers) => {
       expect(definition.id).toBe(MEMORY_STATUS_RPC_ID)
       status = handlers.status
-      return { dispose: async () => undefined, events: { emit: async (name, data) => { emitted.push({ name, data }) } } }
+      return {
+        dispose: async () => undefined,
+        events: {
+          emit: async (name, data) => {
+            emitted.push({ name, data })
+          },
+        },
+      }
     },
   }
-  const component = createMemoryStatusRpc({ syncStatus: async repo => sync(repo), logger: { warn: () => undefined }, debounceMs: 5 })
+  const component = createMemoryStatusRpc({
+    syncStatus: async (repo) => sync(repo),
+    logger: { warn: () => undefined },
+    debounceMs: 5,
+  })
   const bound = (sessionID: string, identity = "me"): BoundMemorySession => ({
-    sessionID, identity, directory: root, metadata: {}, settings: OmoMemorySettingsSchema.parse({}), paths: buildIdentityPaths(root, identity),
+    sessionID,
+    identity,
+    directory: root,
+    metadata: {},
+    settings: OmoMemorySettingsSchema.parse({}),
+    paths: buildIdentityPaths(root, identity),
   })
   const callStatus = (sessionID: string): Promise<Record<string, unknown>> => {
     if (status === undefined) throw new Error("status is not registered")
-    return status({ sessionID }, { signal: new AbortController().signal, error: () => { throw new Error("no declared errors") } })
+    return status(
+      { sessionID },
+      {
+        signal: new AbortController().signal,
+        error: () => {
+          throw new Error("no declared errors")
+        },
+      },
+    )
   }
   return { component, rpc, emitted, bound, callStatus }
 }
@@ -40,7 +74,13 @@ async function journal(session: BoundMemorySession, answers: number, state: Reco
   const journalDir = join(session.paths.transcripts, session.sessionID)
   const projections = Array.from({ length: answers }, (_, index) => [
     { kind: "user" as const, messageId: `u${index}`, text: `question ${index}` },
-    { kind: "assistant" as const, messageId: `a${index}`, textBlocks: [`answer ${index}`], reasoningBlocks: [], toolCalls: [] },
+    {
+      kind: "assistant" as const,
+      messageId: `a${index}`,
+      textBlocks: [`answer ${index}`],
+      reasoningBlocks: [],
+      toolCalls: [],
+    },
   ]).flat()
   await new TranscriptJournal({ journalDir }).reconcile(projections)
   writeFileSync(join(journalDir, "state.json"), JSON.stringify(state))
@@ -55,16 +95,28 @@ describe("omo.memory status RPC", () => {
     await h.component.register(h.rpc)
     const session = h.bound("s1")
     h.component.onBound(session)
-    await journal(session, 3, { reflected_completed_steps: 1, consecutive_failures: 2, pending_compaction: true, last_reflection_succeeded_at: "2026-11-11T10:00:00.000Z" })
+    await journal(session, 3, {
+      reflected_completed_steps: 1,
+      consecutive_failures: 2,
+      pending_compaction: true,
+      last_reflection_succeeded_at: "2026-11-11T10:00:00.000Z",
+    })
 
     // when
     const snapshot = await h.callStatus("s1")
 
     // then
     expect(snapshot).toEqual({
-      schemaVersion: 1, identity: "me", sessionID: "s1",
+      schemaVersion: 1,
+      identity: "me",
+      sessionID: "s1",
       journal: { sessionId: "s1", totalSteps: 3, reflectedSteps: 1 },
-      reflection: { backlogSteps: 2, pendingCompaction: true, consecutiveFailures: 2, lastConsolidationAtISO: "2026-11-11T10:00:00.000Z" },
+      reflection: {
+        backlogSteps: 2,
+        pendingCompaction: true,
+        consecutiveFailures: 2,
+        lastConsolidationAtISO: "2026-11-11T10:00:00.000Z",
+      },
       sync: { state: "synced", lastSyncedAtISO: "2026-11-12T00:00:00.000Z" },
     })
   })
@@ -93,13 +145,16 @@ describe("omo.memory status RPC", () => {
     h.component.refreshRepo(repo)
     await settle()
     await h.component.settled()
-    const first = h.emitted.map(event => [event.name, event.data.sessionID])
+    const first = h.emitted.map((event) => [event.name, event.data.sessionID])
     h.component.refreshRepo(repo)
     await settle()
     await h.component.settled()
 
     // then
-    expect(first.sort()).toEqual([[MEMORY_UPDATED_EVENT, "a"], [MEMORY_UPDATED_EVENT, "b"]])
+    expect(first.sort()).toEqual([
+      [MEMORY_UPDATED_EVENT, "a"],
+      [MEMORY_UPDATED_EVENT, "b"],
+    ])
     expect(h.emitted).toHaveLength(2)
   })
 
@@ -118,7 +173,7 @@ describe("omo.memory status RPC", () => {
     await h.component.settled()
 
     // then
-    expect(h.emitted.map(event => (event.data.journal as { totalSteps: number }).totalSteps)).toEqual([0, 1])
+    expect(h.emitted.map((event) => (event.data.journal as { totalSteps: number }).totalSteps)).toEqual([0, 1])
   })
 
   test("#given the component closed #when a repo change arrives #then nothing is published", async () => {

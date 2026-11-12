@@ -10,7 +10,12 @@
 import { randomUUID } from "node:crypto"
 import type { Context } from "@opencode/plugin/promise/plugin"
 import { openChildJournal, type DurableChildJournal } from "../host/child-journal"
-import { createSessionBackend, SessionBackendError, type ChildHandle, type SessionBackendApi } from "../host/session-backend"
+import {
+  createSessionBackend,
+  SessionBackendError,
+  type ChildHandle,
+  type SessionBackendApi,
+} from "../host/session-backend"
 import type { SessionLease, SessionScopes, SessionToolPolicy } from "../host/session-state"
 
 type Backend = ReturnType<typeof createSessionBackend>
@@ -28,7 +33,12 @@ export interface MemoryChildTurnReport {
   readonly model?: string
   readonly variant?: string
   /** Provider usage summed over the turn's assistant messages. */
-  readonly usage?: { readonly input: number; readonly output: number; readonly cacheRead: number; readonly cacheWrite: number }
+  readonly usage?: {
+    readonly input: number
+    readonly output: number
+    readonly cacheRead: number
+    readonly cacheWrite: number
+  }
   /** `input + cacheRead` of the newest assistant message. */
   readonly contextTokens?: number
   /** User texts the child transcript holds, so an owner can confirm which steers it read. */
@@ -113,7 +123,9 @@ export function createMemoryChildPort(deps: MemoryChildPortDeps): MemoryChildPor
   const closedError = () => new SessionBackendError("stopped", `${deps.label} child port closed`)
   const parentPolicy: SessionToolPolicy = {
     tools: [],
-    authorize: () => { throw new Error(`The ${deps.label} parent scope grants no tools`) },
+    authorize: () => {
+      throw new Error(`The ${deps.label} parent scope grants no tools`)
+    },
   }
   const childPolicy: SessionToolPolicy = { tools: [...deps.toolNames], authorize: () => undefined }
   let parent: SessionLease | undefined
@@ -129,10 +141,22 @@ export function createMemoryChildPort(deps: MemoryChildPortDeps): MemoryChildPor
     journal ??= await openChildJournal({ path: deps.journalPath })
     if (closed) throw closedError()
     parent ??= deps.scopes.open(deps.parentSessionId as SessionLease["sessionID"], parentPolicy)
-    backend = createSessionBackend({ app: deps.host.app, location: { directory: deps.directory }, session: deps.host.session }, {
-      backendID: deps.backendID, owner: journal.owner, parent, scopes: deps.scopes, policy: childPolicy, journal,
-      gate: { assertActive() { if (closed) throw closedError() } },
-    })
+    backend = createSessionBackend(
+      { app: deps.host.app, location: { directory: deps.directory }, session: deps.host.session },
+      {
+        backendID: deps.backendID,
+        owner: journal.owner,
+        parent,
+        scopes: deps.scopes,
+        policy: childPolicy,
+        journal,
+        gate: {
+          assertActive() {
+            if (closed) throw closedError()
+          },
+        },
+      },
+    )
     return backend
   }
 
@@ -140,7 +164,10 @@ export function createMemoryChildPort(deps: MemoryChildPortDeps): MemoryChildPor
     const owner = await ensure()
     const sessionID = `ses_${deps.prefix}_${newId()}` as SessionLease["sessionID"]
     const handle = await owner.stage({
-      key: `${deps.prefix}:${input.generation}:${sessionID}`, sessionID, agent: deps.agent, permissions: deps.permissions,
+      key: `${deps.prefix}:${input.generation}:${sessionID}`,
+      sessionID,
+      agent: deps.agent,
+      permissions: deps.permissions,
       ...(input.model === undefined ? {} : { model: input.model }),
     })
     deps.onIssued({ sessionID, lease: handle.lease })
@@ -163,10 +190,20 @@ export function createMemoryChildPort(deps: MemoryChildPortDeps): MemoryChildPor
       generation,
       async followUp(text: string) {
         turnStartedAt = Date.now()
-        await owner.promptContinuation(handle, { id: `msg_${deps.prefix}_${newId()}`, text, delivery: "queue", resume: true })
+        await owner.promptContinuation(handle, {
+          id: `msg_${deps.prefix}_${newId()}`,
+          text,
+          delivery: "queue",
+          resume: true,
+        })
       },
       async steer(text: string) {
-        await owner.promptContinuation(handle, { id: `msg_${deps.prefix}_${newId()}`, text, delivery: "steer", resume: true })
+        await owner.promptContinuation(handle, {
+          id: `msg_${deps.prefix}_${newId()}`,
+          text,
+          delivery: "steer",
+          resume: true,
+        })
       },
       async abort() {
         await owner.interrupt(handle)
@@ -176,7 +213,8 @@ export function createMemoryChildPort(deps: MemoryChildPortDeps): MemoryChildPor
           await owner.wait(handle)
           return turnReport(await owner.currentContext(handle), turnStartedAt)
         } catch (error) {
-          if (handle.lease.signal.aborted || disposal !== undefined || closed) return { status: "cancelled", userTexts: [] }
+          if (handle.lease.signal.aborted || disposal !== undefined || closed)
+            return { status: "cancelled", userTexts: [] }
           throw error
         }
       },
@@ -200,11 +238,20 @@ export function createMemoryChildPort(deps: MemoryChildPortDeps): MemoryChildPor
     close(): Promise<void> {
       closing ??= (async () => {
         const failures: unknown[] = []
-        for (const result of await Promise.allSettled([...live].map(child => child.dispose()))) if (result.status === "rejected") failures.push(result.reason)
+        for (const result of await Promise.allSettled([...live].map((child) => child.dispose())))
+          if (result.status === "rejected") failures.push(result.reason)
         closed = true
-        try { await backend?.dispose() } catch (error) { failures.push(error) }
+        try {
+          await backend?.dispose()
+        } catch (error) {
+          failures.push(error)
+        }
         if (parent !== undefined && !parent.signal.aborted) {
-          try { deps.scopes.retire(parent) } catch (error) { failures.push(error) }
+          try {
+            deps.scopes.retire(parent)
+          } catch (error) {
+            failures.push(error)
+          }
         }
         // A child whose cleanup stayed uncertain keeps its durable custody row for a later owner.
         journal?.close()
@@ -219,9 +266,15 @@ export function createMemoryChildPort(deps: MemoryChildPortDeps): MemoryChildPor
  * Waits for the child's current turn, bounded by `deadlineMs`. On the deadline the turn is
  * interrupted and `"deadline"` is returned; the caller still disposes the child.
  */
-export async function settleWithin(child: MemoryChild, deadlineMs: number, timers: MemoryChildTimers = runtimeMemoryChildTimers): Promise<MemoryChildTurnReport | "deadline"> {
+export async function settleWithin(
+  child: MemoryChild,
+  deadlineMs: number,
+  timers: MemoryChildTimers = runtimeMemoryChildTimers,
+): Promise<MemoryChildTurnReport | "deadline"> {
   let handle: unknown
-  const deadline = new Promise<"deadline">(resolve => { handle = timers.set(() => resolve("deadline"), Math.max(0, deadlineMs)) })
+  const deadline = new Promise<"deadline">((resolve) => {
+    handle = timers.set(() => resolve("deadline"), Math.max(0, deadlineMs))
+  })
   try {
     const settled = await Promise.race([child.waitForIdle(), deadline])
     if (settled === "deadline") await child.abort().catch(() => undefined)
@@ -241,21 +294,35 @@ export function turnReport(messages: readonly unknown[], turnStartedAt: number):
     if (message.type === "user" && typeof message.text === "string") userTexts.push(message.text)
     if (message.type !== "assistant") continue
     last = message
-    const created = isRecord(message.time) && typeof message.time.created === "number" ? message.time.created : Number.POSITIVE_INFINITY
+    const created =
+      isRecord(message.time) && typeof message.time.created === "number"
+        ? message.time.created
+        : Number.POSITIVE_INFINITY
     const tokens = message.tokens
     if (created < turnStartedAt || !isRecord(tokens)) continue
     const cache = isRecord(tokens.cache) ? tokens.cache : {}
     const previous = usage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
     usage = {
-      input: previous.input + numberOf(tokens.input), output: previous.output + numberOf(tokens.output),
-      cacheRead: previous.cacheRead + numberOf(cache.read), cacheWrite: previous.cacheWrite + numberOf(cache.write),
+      input: previous.input + numberOf(tokens.input),
+      output: previous.output + numberOf(tokens.output),
+      cacheRead: previous.cacheRead + numberOf(cache.read),
+      cacheWrite: previous.cacheWrite + numberOf(cache.write),
     }
   }
-  const model = last !== undefined && isRecord(last.model) && typeof last.model.providerID === "string" && typeof last.model.id === "string"
-    ? `${last.model.providerID}/${last.model.id}` : undefined
-  const variant = last !== undefined && isRecord(last.model) && typeof last.model.variant === "string" ? last.model.variant : undefined
+  const model =
+    last !== undefined &&
+    isRecord(last.model) &&
+    typeof last.model.providerID === "string" &&
+    typeof last.model.id === "string"
+      ? `${last.model.providerID}/${last.model.id}`
+      : undefined
+  const variant =
+    last !== undefined && isRecord(last.model) && typeof last.model.variant === "string"
+      ? last.model.variant
+      : undefined
   const tokens = last !== undefined && isRecord(last.tokens) ? last.tokens : undefined
-  const contextTokens = tokens === undefined ? undefined : numberOf(tokens.input) + numberOf(isRecord(tokens.cache) ? tokens.cache.read : 0)
+  const contextTokens =
+    tokens === undefined ? undefined : numberOf(tokens.input) + numberOf(isRecord(tokens.cache) ? tokens.cache.read : 0)
   const error = last?.error
   const failed = error !== undefined && error !== null
   return {

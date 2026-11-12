@@ -11,7 +11,13 @@ export type {
   PalaceReflectionOutcome,
 } from "./collectors"
 export { generatePalaceHtml } from "./generator"
-export type { GeneratePalaceOptions, GeneratePalaceResult, PalaceData, PalaceIdentityContext, PalaceMetadata } from "./generator"
+export type {
+  GeneratePalaceOptions,
+  GeneratePalaceResult,
+  PalaceData,
+  PalaceIdentityContext,
+  PalaceMetadata,
+} from "./generator"
 export type {
   PalacePeople,
   PalacePeopleDiagnostic,

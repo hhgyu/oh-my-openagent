@@ -40,9 +40,12 @@ function holderPid(holder: number): number | undefined {
  * the same pid is dead); a holder of another process is alive while that pid is, like Native's pid
  * lease, so a second OpenCode process refuses a run the first is still driving. A holder this
  * encoding never issued reads as stale. */
-export function createNativeDagGenerationLease(options: NativeDagGenerationLeaseOptions = {}): NativeDagGenerationLease {
+export function createNativeDagGenerationLease(
+  options: NativeDagGenerationLeaseOptions = {},
+): NativeDagGenerationLease {
   const pid = options.pid ?? process.pid
-  if (!Number.isSafeInteger(pid) || pid <= 0 || pid >= PID_LIMIT) throw Error(`Process id ${pid} cannot be encoded in a DAG generation lease`)
+  if (!Number.isSafeInteger(pid) || pid <= 0 || pid >= PID_LIMIT)
+    throw Error(`Process id ${pid} cannot be encoded in a DAG generation lease`)
   const isProcessAlive = options.isProcessAlive ?? ((other: number) => getPidLiveness(other) === "alive")
   const issue = () => HOLDER_BASE + pid * GENERATIONS + randomInt(0, GENERATIONS)
   let holder = issue()
@@ -56,7 +59,9 @@ export function createNativeDagGenerationLease(options: NativeDagGenerationLease
       if (owner === undefined) return false
       return owner === pid ? liveGenerations.has(recorded) : isProcessAlive(owner)
     },
-    dispose() { liveGenerations.delete(own) },
+    dispose() {
+      liveGenerations.delete(own)
+    },
   })
 }
 
@@ -74,7 +79,10 @@ export function fenceForeignTerminalRuns(store: DagFileStore, lease: DagLeasePor
     appendEvent(event) {
       const durable = store.readCheckpoint<LeasedRecord>(event.runId)
       if (durable !== null && TERMINAL_RUN.has(durable.status) && durable.leaseHolderPid !== lease.holder()) {
-        throw new NativeDagRefusal("run_still_active", `Dag run ${event.runId} was already settled ${durable.status} by another holder; this OpenCode 2 plugin generation does not write over it.`)
+        throw new NativeDagRefusal(
+          "run_still_active",
+          `Dag run ${event.runId} was already settled ${durable.status} by another holder; this OpenCode 2 plugin generation does not write over it.`,
+        )
       }
       store.appendEvent(event)
     },
@@ -102,16 +110,21 @@ export function claimDagRunLease(store: DagFileStore, runId: DagRunId, lease: Da
     const fresh = store.readCheckpoint<LeasedRecord>(runId)
     if (fresh === null) return
     const holder = liveForeignHolder(fresh, lease)
-    if (holder !== undefined) throw new NativeDagRefusal("run_still_active", `Dag run ${runId} is held by another live OpenCode 2 plugin generation (lease ${holder}); call workflow again once it has shut down.`)
+    if (holder !== undefined)
+      throw new NativeDagRefusal(
+        "run_still_active",
+        `Dag run ${runId} is held by another live OpenCode 2 plugin generation (lease ${holder}); call workflow again once it has shut down.`,
+      )
     if (fresh.status !== "paused" && fresh.leaseHolderPid !== lease.holder()) {
       displaced = fresh.leaseHolderPid
       store.writeCheckpoint(runId, { ...fresh, leaseHolderPid: lease.holder() })
     }
   })
-  return () => store.withRunLock(runId, () => {
-    const fresh = store.readCheckpoint<LeasedRecord>(runId)
-    if (fresh === null || fresh.leaseHolderPid !== lease.holder()) return
-    const { leaseHolderPid: _holder, previousLeaseHolderPid: _previous, ...released } = fresh
-    store.writeCheckpoint(runId, displaced === undefined ? released : { ...released, leaseHolderPid: displaced })
-  })
+  return () =>
+    store.withRunLock(runId, () => {
+      const fresh = store.readCheckpoint<LeasedRecord>(runId)
+      if (fresh === null || fresh.leaseHolderPid !== lease.holder()) return
+      const { leaseHolderPid: _holder, previousLeaseHolderPid: _previous, ...released } = fresh
+      store.writeCheckpoint(runId, displaced === undefined ? released : { ...released, leaseHolderPid: displaced })
+    })
 }

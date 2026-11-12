@@ -18,8 +18,11 @@ export async function endClosingFallbackChild(context: LifecycleContext, record:
   if (closing === undefined) return true
   if (closing.owned_session !== undefined) {
     if (!context.ownedSessions) throw new Error("Owned session lifecycle port required")
-    await context.ownedSessions.destroy({ ...record, owned_session: closing.owned_session, runner_kind: "owned-session" }, "fallback_handoff")
-    context.store.mutate(record.task_id, fresh => forgetClosedChild(fresh, closing))
+    await context.ownedSessions.destroy(
+      { ...record, owned_session: closing.owned_session, runner_kind: "owned-session" },
+      "fallback_handoff",
+    )
+    context.store.mutate(record.task_id, (fresh) => forgetClosedChild(fresh, closing))
     return true
   }
   if (closing.requires_confirmation === true && closing.host_session !== undefined) {

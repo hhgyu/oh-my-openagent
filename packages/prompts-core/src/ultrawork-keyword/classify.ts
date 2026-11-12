@@ -11,7 +11,10 @@ import {
 // "ulwfoo", "ulw_helper", "mass-ulw-refactor", "ulw-plan.md" and ".omo/ulw/" do not (#9738). Quoted,
 // injected, relayed and negated regions are blanked before this pattern runs.
 const ULTRAWORK_KEYWORD = /\b(?:ultrawork|ulw)\b/i
-const ULTRAWORK_CURRENT_PROMPT_PATTERN = new RegExp(String.raw`${NOT_AFTER_IDENTIFIER}\b(?:ultrawork|ulw)\b${NOT_INTO_IDENTIFIER}${NOT_BEFORE_PATH}`, "i")
+const ULTRAWORK_CURRENT_PROMPT_PATTERN = new RegExp(
+  String.raw`${NOT_AFTER_IDENTIFIER}\b(?:ultrawork|ulw)\b${NOT_INTO_IDENTIFIER}${NOT_BEFORE_PATH}`,
+  "i",
+)
 const ULTRAWORK_MODE_OPEN_TAG = "<ultrawork-mode>"
 const ULTRAWORK_MODE_CLOSE_TAG = "</ultrawork-mode>"
 const SKILL_COMMAND_PREFIX = "/skill:"
@@ -58,7 +61,10 @@ export function isUltraworkInput(text: string): boolean {
   return ULTRAWORK_CURRENT_PROMPT_PATTERN.test(stripQuotedRegions(text))
 }
 
-export function classifyUltraworkInput(input: UltraworkClassificationInput, snapshot: ArmingSnapshot): UltraworkClassification {
+export function classifyUltraworkInput(
+  input: UltraworkClassificationInput,
+  snapshot: ArmingSnapshot,
+): UltraworkClassification {
   const quotedText = stripQuotedSpans(input.text)
   const visibleText = maskNegatedInvocations(quotedText)
   const matches = [...visibleText.matchAll(new RegExp(ULTRAWORK_CURRENT_PROMPT_PATTERN.source, "gi"))]
@@ -109,9 +115,17 @@ export function classifyUltraworkInput(input: UltraworkClassificationInput, snap
   if (input.text.startsWith(SKILL_COMMAND_PREFIX)) {
     const spaceIndex = input.text.indexOf(" ")
     const skillName =
-      spaceIndex === -1 ? input.text.slice(SKILL_COMMAND_PREFIX.length) : input.text.slice(SKILL_COMMAND_PREFIX.length, spaceIndex)
+      spaceIndex === -1
+        ? input.text.slice(SKILL_COMMAND_PREFIX.length)
+        : input.text.slice(SKILL_COMMAND_PREFIX.length, spaceIndex)
     if (skillName === ULTRAWORK_SKILL_NAME) {
-      return { ...base, effective: false, stage: "none", route: "skill_expansion", suppressionReason: "skill_expansion" }
+      return {
+        ...base,
+        effective: false,
+        stage: "none",
+        route: "skill_expansion",
+        suppressionReason: "skill_expansion",
+      }
     }
 
     const argsStart = spaceIndex === -1 ? input.text.length : spaceIndex + 1

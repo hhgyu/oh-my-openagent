@@ -24,23 +24,27 @@ export const REFLECTION_PERMISSIONS: readonly PermissionRule[] = Object.freeze([
   ...REFLECTION_TOOL_NAMES.map((action): PermissionRule => ({ action, resource: "*", effect: "allow" })),
 ])
 
-export async function registerReflectionAgent(domain: Pick<AgentDomain, "transform">, persona: string = REFLECTION_PERSONA): Promise<Registration> {
-  return domain.transform(editor => {
-    editor.update(REFLECTION_AGENT_ID, agent => {
+export async function registerReflectionAgent(
+  domain: Pick<AgentDomain, "transform">,
+  persona: string = REFLECTION_PERSONA,
+): Promise<Registration> {
+  return domain.transform((editor) => {
+    editor.update(REFLECTION_AGENT_ID, (agent) => {
       agent.name = Agent.Name.make("Memory Reflection")
-      agent.description = "Reflects on settled conversations into memory; reads and edits only through the reflection tools."
+      agent.description =
+        "Reflects on settled conversations into memory; reads and edits only through the reflection tools."
       agent.mode = "subagent"
       agent.hidden = true
       agent.system = persona
-      agent.permissions = REFLECTION_PERMISSIONS.map(rule => ({ ...rule }))
+      agent.permissions = REFLECTION_PERMISSIONS.map((rule) => ({ ...rule }))
     })
-    editor.update(DREAM_AGENT_ID, agent => {
+    editor.update(DREAM_AGENT_ID, (agent) => {
       agent.name = Agent.Name.make("Memory Dream")
       agent.description = "Consolidates memory across conversations; reads and edits only through the reflection tools."
       agent.mode = "subagent"
       agent.hidden = true
       agent.system = DREAM_PERSONA
-      agent.permissions = REFLECTION_PERMISSIONS.map(rule => ({ ...rule }))
+      agent.permissions = REFLECTION_PERMISSIONS.map((rule) => ({ ...rule }))
     })
   })
 }

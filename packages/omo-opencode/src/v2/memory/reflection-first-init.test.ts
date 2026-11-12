@@ -2,7 +2,13 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { createLockRecord, GitMemoryRepo, initMemoryWithSeeds, memoryWriterLockPath, withLock } from "@oh-my-opencode/memory-core"
+import {
+  createLockRecord,
+  GitMemoryRepo,
+  initMemoryWithSeeds,
+  memoryWriterLockPath,
+  withLock,
+} from "@oh-my-opencode/memory-core"
 import type { BoundMemorySession } from "./binding"
 import { createScriptedFactsPorts } from "./facts.test-support"
 import { createManualTimers } from "./kibitzer/test-support"
@@ -14,7 +20,9 @@ import { createBoundIdentity } from "./reflection.test-support"
 setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
 
 const cleanups: (() => void)[] = []
-afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup() })
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup()
+})
 
 function identity(): BoundMemorySession {
   const created = createBoundIdentity()
@@ -37,9 +45,13 @@ function repoOf(bound: BoundMemorySession): GitMemoryRepo {
 async function holdSeedingLock(bound: BoundMemorySession) {
   mkdirSync(bound.paths.locks, { recursive: true })
   let release = (): void => undefined
-  const gate = new Promise<void>(resolve => { release = resolve })
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
   let entered = (): void => undefined
-  const holding = new Promise<void>(resolve => { entered = resolve })
+  const holding = new Promise<void>((resolve) => {
+    entered = resolve
+  })
   const seeding = withLock(memoryWriterLockPath(bound.paths.locks), await createLockRecord("test seeder"), async () => {
     initWithoutCommit(bound)
     entered()
@@ -52,13 +64,28 @@ async function holdSeedingLock(bound: BoundMemorySession) {
 
 function runner(bound: BoundMemorySession, lockWaitTimeoutMs: number) {
   const ports = createScriptedFactsPorts()
-  const hosting = createReflectionChildHosting({ host: { session: {} }, createPort: request => ports.createPort(request), timers: createManualTimers(), warn: () => undefined })
-  const reflection = createReflectionRunner({ launch: hosting.launch, warn: () => undefined, createRunId: () => "run-a", lockWaitTimeoutMs })
-  const run = () => reflection.runReflection(bound, { parentSessionId: "ses_root", request: { trigger: "manual", conversationIds: [], snapshots: [] } })
+  const hosting = createReflectionChildHosting({
+    host: { session: {} },
+    createPort: (request) => ports.createPort(request),
+    timers: createManualTimers(),
+    warn: () => undefined,
+  })
+  const reflection = createReflectionRunner({
+    launch: hosting.launch,
+    warn: () => undefined,
+    createRunId: () => "run-a",
+    lockWaitTimeoutMs,
+  })
+  const run = () =>
+    reflection.runReflection(bound, {
+      parentSessionId: "ses_root",
+      request: { trigger: "manual", conversationIds: [], snapshots: [] },
+    })
   return { ports, run }
 }
 
-const finalRecord = (bound: BoundMemorySession): Record<string, unknown> => JSON.parse(readFileSync(join(reflectionRunDir(bound, "run-a"), "final.json"), "utf8"))
+const finalRecord = (bound: BoundMemorySession): Record<string, unknown> =>
+  JSON.parse(readFileSync(join(reflectionRunDir(bound, "run-a"), "final.json"), "utf8"))
 
 describe("reflection on a memory identity whose repo is being created", () => {
   test("#given a repo with .git but no commit #when the run store opens it #then it takes the writer lock and returns a repo with a HEAD", async () => {
@@ -66,7 +93,10 @@ describe("reflection on a memory identity whose repo is being created", () => {
     const bound = identity()
     initWithoutCommit(bound)
     let locked = 0
-    const lock: WriterLock = async operation => { locked += 1; return operation() }
+    const lock: WriterLock = async (operation) => {
+      locked += 1
+      return operation()
+    }
     // when
     const repo = await openMemoryRepo(bound, lock)
     // then
@@ -79,7 +109,10 @@ describe("reflection on a memory identity whose repo is being created", () => {
     const bound = identity()
     await initMemoryWithSeeds(repoOf(bound), { authorName: bound.identity })
     let locked = 0
-    const lock: WriterLock = async operation => { locked += 1; return operation() }
+    const lock: WriterLock = async (operation) => {
+      locked += 1
+      return operation()
+    }
     // when
     await openMemoryRepo(bound, lock)
     // then
@@ -94,7 +127,7 @@ describe("reflection on a memory identity whose repo is being created", () => {
     // when
     const running = run()
     // Before the fix the run settles spawn_failed without the lock; after it, the run cannot pass the lock.
-    await Promise.race([running, new Promise(resolve => setTimeout(resolve, 1_500))])
+    await Promise.race([running, new Promise((resolve) => setTimeout(resolve, 1_500))])
     seeder.release()
     await seeder.seeding
     const child = await Promise.race([ports.started(1), running.then(() => undefined)])
@@ -102,7 +135,10 @@ describe("reflection on a memory identity whose repo is being created", () => {
     const report = await running
     // then
     expect(child).toBeDefined()
-    expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({ runId: "run-a", outcome: "no_changes" })
+    expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({
+      runId: "run-a",
+      outcome: "no_changes",
+    })
   })
 
   test("#given a seeder that holds the memory-write lock past the run's wait #when a reflection starts #then it settles spawn_failed and final.json records the cause", async () => {

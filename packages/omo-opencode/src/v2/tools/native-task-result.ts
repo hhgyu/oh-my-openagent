@@ -7,20 +7,34 @@ type JSONValue = null | string | boolean | number | JSONValue[] | { [key: string
  * Omit those object fields; all other values must survive JSON transport exactly.
  * Descriptor reads avoid invoking accessors or toJSON on producer-owned objects. */
 function snapshot(value: unknown, ancestors = new Set<object>()): JSONValue {
-  if (value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number" && Number.isFinite(value)) return value
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  )
+    return value
   if (!value || typeof value !== "object") throw Error("Non-JSON Native task result")
   if (ancestors.has(value)) throw Error("Cyclic Native task result")
   const array = Array.isArray(value)
-  if (!array && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) throw Error("Non-JSON Native task result")
+  if (!array && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)
+    throw Error("Non-JSON Native task result")
   ancestors.add(value)
   const copy: { [key: string]: JSONValue } | JSONValue[] = array ? [] : {}
-  const keys = Reflect.ownKeys(value).filter(key => !(array && key === "length"))
-  if (array && (keys.length !== value.length || keys.some((key, index) => key !== String(index)))) throw Error("Non-JSON Native task result array")
+  const keys = Reflect.ownKeys(value).filter((key) => !(array && key === "length"))
+  if (array && (keys.length !== value.length || keys.some((key, index) => key !== String(index))))
+    throw Error("Non-JSON Native task result array")
   for (const key of keys) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if (typeof key !== "string" || !descriptor || !("value" in descriptor) || !descriptor.enumerable) throw Error("Non-JSON Native task result field")
+    if (typeof key !== "string" || !descriptor || !("value" in descriptor) || !descriptor.enumerable)
+      throw Error("Non-JSON Native task result field")
     if (!array && descriptor.value === undefined) continue
-    Object.defineProperty(copy, key, { value: snapshot(descriptor.value, ancestors), enumerable: true, writable: true, configurable: true })
+    Object.defineProperty(copy, key, {
+      value: snapshot(descriptor.value, ancestors),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    })
   }
   ancestors.delete(value)
   return copy
@@ -30,9 +44,11 @@ function snapshot(value: unknown, ancestors = new Set<object>()): JSONValue {
  * helper does not register tools or retain a caller, context, or permission. */
 export function adaptNativeTaskResult(result: AgentToolResult<unknown>): Result {
   const native = snapshot(result)
-  if (!native || typeof native !== "object" || Array.isArray(native) || !Array.isArray(native.content)) throw Error("Invalid Native task result content")
-  if (native.isError !== undefined && typeof native.isError !== "boolean") throw Error("Invalid Native task result isError")
-  const content = native.content.map(part => {
+  if (!native || typeof native !== "object" || Array.isArray(native) || !Array.isArray(native.content))
+    throw Error("Invalid Native task result content")
+  if (native.isError !== undefined && typeof native.isError !== "boolean")
+    throw Error("Invalid Native task result isError")
+  const content = native.content.map((part) => {
     if (!part || typeof part !== "object" || Array.isArray(part)) throw Error("Invalid Native task result content part")
     if (part.type === "text" && typeof part.text === "string") {
       // SDK content has no model-only visibility channel; never expose it to UI.
@@ -46,7 +62,7 @@ export function adaptNativeTaskResult(result: AgentToolResult<unknown>): Result 
   })
   const metadata = { native }
   if (native.isError === true) {
-    const message = content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n")
+    const message = content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
     throw new ToolError({ message, metadata })
   }
   // These Native task tools declare no SDK output schema. Preserve the full
@@ -57,4 +73,3 @@ export function adaptNativeTaskResult(result: AgentToolResult<unknown>): Result 
   }
   return { content, metadata }
 }
-

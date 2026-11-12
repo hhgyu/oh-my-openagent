@@ -8,8 +8,17 @@ import { spawnTeamMembers } from "./spawn-members"
 
 const RUN = "11111111-1111-4111-8111-111111111111"
 const TEAM_CONFIG: TeamCoreConfig = {
-  enabled: true, tmux_visualization: false, max_parallel_members: 4, max_members: 8, max_messages_per_run: 10000, max_wall_clock_minutes: 120,
-  max_member_turns: 500, base_dir: "/teams", message_payload_max_bytes: 32768, recipient_unread_max_bytes: 262144, mailbox_poll_interval_ms: 3000,
+  enabled: true,
+  tmux_visualization: false,
+  max_parallel_members: 4,
+  max_members: 8,
+  max_messages_per_run: 10000,
+  max_wall_clock_minutes: 120,
+  max_member_turns: 500,
+  base_dir: "/teams",
+  message_payload_max_bytes: 32768,
+  recipient_unread_max_bytes: 262144,
+  mailbox_poll_interval_ms: 3000,
 }
 
 function recordingManager(captured: ManagerStartSpec[]): TeamRuntimeManagerPort {
@@ -28,10 +37,15 @@ function recordingManager(captured: ManagerStartSpec[]): TeamRuntimeManagerPort 
 
 function spawnInput(captured: ManagerStartSpec[]) {
   return {
-    spec: normalizeSenpiTeamSpec({ members: [
-      { name: "alpha", kind: "category", category: "quick", prompt: "lead work" },
-      { name: "beta", kind: "subagent_type", subagent_type: "sisyphus-junior", prompt: "work" },
-    ] }, "demo"),
+    spec: normalizeSenpiTeamSpec(
+      {
+        members: [
+          { name: "alpha", kind: "category", category: "quick", prompt: "lead work" },
+          { name: "beta", kind: "subagent_type", subagent_type: "sisyphus-junior", prompt: "work" },
+        ],
+      },
+      "demo",
+    ),
     teamRunId: RUN,
     manager: recordingManager(captured),
     leadSessionId: "lead-session",
@@ -62,7 +76,12 @@ describe("spawnTeamMembers member launch kind", () => {
       expect(spec.memberScopedTools?.map((tool) => tool.name)).toEqual(["task_send"])
     }
     expect(captured.map((spec) => spec.team_member_name)).toEqual(["alpha", "beta"])
-    expect(captured[1]).toMatchObject({ name: `team:${RUN}:beta`, subagent_type: "sisyphus-junior", run_in_background: true, parent_session_id: "lead-session" })
+    expect(captured[1]).toMatchObject({
+      name: `team:${RUN}:beta`,
+      subagent_type: "sisyphus-junior",
+      run_in_background: true,
+      parent_session_id: "lead-session",
+    })
   })
 
   test("#given process members #when spawned #then the start keeps the process shape with no member-scoped tools", async () => {

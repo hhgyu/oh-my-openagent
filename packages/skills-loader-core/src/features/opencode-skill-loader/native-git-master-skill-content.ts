@@ -35,4 +35,3 @@ export function resolveGitMasterSkillAdditions(settings: NativeGitMasterSettings
 export function carriesAttributionDirective(texts: readonly string[]): boolean {
   return texts.some((text) => text.includes(COMMIT_ATTRIBUTION_OPEN_TAG))
 }
-

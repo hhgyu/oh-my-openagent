@@ -10,8 +10,16 @@ test("#given sync is disabled #when every valid verb runs #then reads are local 
   for (const verb of ["status", "devices"]) {
     expect(await f.call(verb, a.context)).toMatchObject({ kind: "disabled", reason: expect.any(String) })
   }
-  for (const [verb, data] of [["enable", {}], ["pending", {}], ["approve", { action: "begin", pendingId: "p" }]] as const) {
-    expect(await f.call(verb, a.context, data)).toMatchObject({ kind: "refused", code: "sync_disabled", reason: expect.any(String) })
+  for (const [verb, data] of [
+    ["enable", {}],
+    ["pending", {}],
+    ["approve", { action: "begin", pendingId: "p" }],
+  ] as const) {
+    expect(await f.call(verb, a.context, data)).toMatchObject({
+      kind: "refused",
+      code: "sync_disabled",
+      reason: expect.any(String),
+    })
   }
   expect(f.effects()).toEqual({ credentials: 0, httpCalls: 0 })
   expect(f.counts()).toEqual({ begins: 0, closes: 0, joins: 0, approvals: 0 })

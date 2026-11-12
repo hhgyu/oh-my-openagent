@@ -16,12 +16,18 @@ test("old, moved and support paths share constructors/functions/constants", () =
     [oldCoordinator.IdleInjectionRetiredError, coordinator.IdleInjectionRetiredError],
     [support.IdleInjectionCoordinator, coordinator.IdleInjectionCoordinator],
     [support.IdleInjectionRetiredError, coordinator.IdleInjectionRetiredError],
-    [oldItems.withSuperseded, items.withSuperseded], [support.withSuperseded, items.withSuperseded],
-    [oldItems.admissionBatches, items.admissionBatches], [support.admissionBatches, items.admissionBatches],
-    [oldItems.failItems, items.failItems], [support.failItems, items.failItems],
-    [oldItems.settleItemReceipts, items.settleItemReceipts], [support.settleItemReceipts, items.settleItemReceipts],
-    [oldReceipts.runReceipts, receipts.runReceipts], [support.runReceipts, receipts.runReceipts],
-  ]) expect(pair[0]).toBe(pair[1])
+    [oldItems.withSuperseded, items.withSuperseded],
+    [support.withSuperseded, items.withSuperseded],
+    [oldItems.admissionBatches, items.admissionBatches],
+    [support.admissionBatches, items.admissionBatches],
+    [oldItems.failItems, items.failItems],
+    [support.failItems, items.failItems],
+    [oldItems.settleItemReceipts, items.settleItemReceipts],
+    [support.settleItemReceipts, items.settleItemReceipts],
+    [oldReceipts.runReceipts, receipts.runReceipts],
+    [support.runReceipts, receipts.runReceipts],
+  ])
+    expect(pair[0]).toBe(pair[1])
   expect(oldReceipts.NO_RECEIPT_ERRORS).toBe(receipts.NO_RECEIPT_ERRORS)
   expect(support.NO_RECEIPT_ERRORS).toBe(receipts.NO_RECEIPT_ERRORS)
   const error = new coordinator.IdleInjectionRetiredError()
@@ -31,23 +37,36 @@ test("old, moved and support paths share constructors/functions/constants", () =
 })
 
 test("default microtask/passive-only/rank/live keyed content and all superseded receipts stay exact", async () => {
-  const messages: coordinator.IdleInjectionMessage[] = [], done: string[] = []
-  const queue = new coordinator.IdleInjectionCoordinator(message => { messages.push(message) })
-  queue.enqueue({ key: "passive", source: "kibitzer", passive: true, content: "passive", onFlushed: () => done.push("passive") })
+  const messages: coordinator.IdleInjectionMessage[] = [],
+    done: string[] = []
+  const queue = new coordinator.IdleInjectionCoordinator((message) => {
+    messages.push(message)
+  })
+  queue.enqueue({
+    key: "passive",
+    source: "kibitzer",
+    passive: true,
+    content: "passive",
+    onFlushed: () => done.push("passive"),
+  })
   queue.scheduleFlush()
   expect(messages).toHaveLength(0)
   await Promise.resolve()
-  expect(messages).toHaveLength(0); expect(queue.pendingCount()).toBe(1)
+  expect(messages).toHaveLength(0)
+  expect(queue.pendingCount()).toBe(1)
   queue.enqueue({ key: "task", source: "task-completion", content: "old", onFlushed: () => done.push("old") })
   const latest = { key: "task", source: "task-completion" as const, content: "new", onFlushed: () => done.push("new") }
-  queue.enqueue(latest); latest.content = "live"
+  queue.enqueue(latest)
+  latest.content = "live"
   queue.enqueue({ key: "team", source: "team-message", content: "team" })
   queue.enqueue({ key: "dag", source: "dag-run", content: "dag" })
-  queue.scheduleFlush(); expect(messages).toHaveLength(0)
+  queue.scheduleFlush()
+  expect(messages).toHaveLength(0)
   await Promise.resolve()
   expect(messages).toHaveLength(1)
   expect(messages[0].content).toBe("live\n\nteam\n\ndag\n\npassive")
-  expect(messages[0].customType).toBe("omo-senpi:wake"); expect(messages[0].display).toBe(false)
+  expect(messages[0].customType).toBe("omo-senpi:wake")
+  expect(messages[0].display).toBe(false)
   expect(done).toEqual(["new", "old", "passive"])
   expect(queue.childWorkCount()).toBe(0)
 })
@@ -55,40 +74,120 @@ test("default microtask/passive-only/rank/live keyed content and all superseded 
 test("custody receipts preserve UTF16 ranges/held/missing semantics and falsy receipt errors", () => {
   const seen: string[] = []
   const entries: items.QueuedInjection[] = [
-    { key: "one", itemId: "one", source: "task-completion", content: "界", customType: "a", contextScoped: true, superseded: [], onHeld: receipt => seen.push(receipt.entryId) },
-    { key: "two", itemId: "two", source: "team-message", content: "👩‍💻", superseded: [], onDeliveryFailed: error => seen.push(String(error)) },
+    {
+      key: "one",
+      itemId: "one",
+      source: "task-completion",
+      content: "界",
+      customType: "a",
+      contextScoped: true,
+      superseded: [],
+      onHeld: (receipt) => seen.push(receipt.entryId),
+    },
+    {
+      key: "two",
+      itemId: "two",
+      source: "team-message",
+      content: "👩‍💻",
+      superseded: [],
+      onDeliveryFailed: (error) => seen.push(String(error)),
+    },
   ]
   const [batch] = items.admissionBatches(entries)
-  expect(batch.items.map(item => item.contentRange)).toEqual([[0, 1], [3, 8]])
+  expect(batch.items.map((item) => item.contentRange)).toEqual([
+    [0, 1],
+    [3, 8],
+  ])
   expect(batch.message.details[0].contentRange).toEqual([0, 1])
-  expect(items.settleItemReceipts(entries, [{ itemId: "one", disposition: "notice_persisted", entryId: "real-unit-custody" }]).threw).toBe(false)
+  expect(
+    items.settleItemReceipts(entries, [
+      { itemId: "one", disposition: "notice_persisted", entryId: "real-unit-custody" },
+    ]).threw,
+  ).toBe(false)
   expect(seen[0]).toBe("real-unit-custody")
   expect(seen[1]).toContain("missing custody receipt for two")
   const calls: number[] = []
-  const errors = receipts.runReceipts([1, 2, 3], value => { calls.push(value); if (value === 1) throw undefined; if (value === 2) throw 0 })
-  expect(calls).toEqual([1, 2, 3]); expect(errors.threw).toBe(true); expect(errors.first).toBeUndefined(); expect(errors.rest).toEqual([0])
+  const errors = receipts.runReceipts([1, 2, 3], (value) => {
+    calls.push(value)
+    if (value === 1) throw undefined
+    if (value === 2) throw 0
+  })
+  expect(calls).toEqual([1, 2, 3])
+  expect(errors.threw).toBe(true)
+  expect(errors.first).toBeUndefined()
+  expect(errors.rest).toEqual([0])
 })
 
 test("retire fails queued entries but does not join or cancel original delivery in flight", async () => {
-  const delivery = Promise.withResolvers<unknown>(), events: string[] = []
+  const delivery = Promise.withResolvers<unknown>(),
+    events: string[] = []
   const queue = new coordinator.IdleInjectionCoordinator(() => delivery.promise)
-  queue.enqueue({ key: "inflight", source: "task-completion", content: "inflight", onFlushed: () => events.push("original delivered") })
-  expect(queue.flushOnIdle()).toBe(1); expect(queue.childWorkCount()).toBe(1)
-  queue.enqueue({ key: "queued", source: "team-message", content: "queued", onDeliveryFailed: error => { expect(error).toBeInstanceOf(oldCoordinator.IdleInjectionRetiredError); events.push("queued failed") } })
+  queue.enqueue({
+    key: "inflight",
+    source: "task-completion",
+    content: "inflight",
+    onFlushed: () => events.push("original delivered"),
+  })
+  expect(queue.flushOnIdle()).toBe(1)
+  expect(queue.childWorkCount()).toBe(1)
+  queue.enqueue({
+    key: "queued",
+    source: "team-message",
+    content: "queued",
+    onDeliveryFailed: (error) => {
+      expect(error).toBeInstanceOf(oldCoordinator.IdleInjectionRetiredError)
+      events.push("queued failed")
+    },
+  })
   expect(queue.retire()).toBeUndefined()
-  expect(events).toEqual(["queued failed"]); expect(queue.pendingCount()).toBe(0); expect(queue.childWorkCount()).toBe(1)
-  expect(queue.enqueue({ key: "refused", source: "task-completion", content: "refused", onDeliveryFailed: () => events.push("wrong refused receipt") })).toBe(false)
-  delivery.resolve(undefined); await Promise.resolve()
-  expect(events).toEqual(["queued failed", "original delivered"]); expect(queue.childWorkCount()).toBe(0)
+  expect(events).toEqual(["queued failed"])
+  expect(queue.pendingCount()).toBe(0)
+  expect(queue.childWorkCount()).toBe(1)
+  expect(
+    queue.enqueue({
+      key: "refused",
+      source: "task-completion",
+      content: "refused",
+      onDeliveryFailed: () => events.push("wrong refused receipt"),
+    }),
+  ).toBe(false)
+  delivery.resolve(undefined)
+  await Promise.resolve()
+  expect(events).toEqual(["queued failed", "original delivered"])
+  expect(queue.childWorkCount()).toBe(0)
 })
 
 test("async failure attempts every producer receipt and reports falsy errors without escaping", async () => {
-  const delivery = Promise.withResolvers<void>(), failed: string[] = [], errors: unknown[] = []
-  const queue = new coordinator.IdleInjectionCoordinator(() => delivery.promise, { onReceiptError: error => errors.push(error) })
-  queue.enqueue({ key: "first", source: "task-completion", content: "first", onDeliveryFailed() { failed.push("first"); throw undefined } })
-  queue.enqueue({ key: "second", source: "team-message", content: "second", onDeliveryFailed() { failed.push("second"); throw 0 } })
-  queue.flushOnIdle(); delivery.reject(Error("actual controlled rejection")); await Promise.resolve()
-  expect(failed).toEqual(["first", "second"]); expect(errors).toEqual([undefined, 0]); expect(queue.childWorkCount()).toBe(0)
+  const delivery = Promise.withResolvers<void>(),
+    failed: string[] = [],
+    errors: unknown[] = []
+  const queue = new coordinator.IdleInjectionCoordinator(() => delivery.promise, {
+    onReceiptError: (error) => errors.push(error),
+  })
+  queue.enqueue({
+    key: "first",
+    source: "task-completion",
+    content: "first",
+    onDeliveryFailed() {
+      failed.push("first")
+      throw undefined
+    },
+  })
+  queue.enqueue({
+    key: "second",
+    source: "team-message",
+    content: "second",
+    onDeliveryFailed() {
+      failed.push("second")
+      throw 0
+    },
+  })
+  queue.flushOnIdle()
+  delivery.reject(Error("actual controlled rejection"))
+  await Promise.resolve()
+  expect(failed).toEqual(["first", "second"])
+  expect(errors).toEqual([undefined, 0])
+  expect(queue.childWorkCount()).toBe(0)
 })
 
 test("fresh process executes shared coordinator/items/receipts without SDK/UI/adapter runtime", () => {

@@ -7,7 +7,12 @@
 // worker, which calls the real capability. Staleness stays codemode's: after a kernel reset the real
 // `invoke` refuses with `kernel_tool_stale`, and that code reaches the caller unchanged.
 
-import { CODEMODE_RPC, type CapabilityRef, type KernelToolInvokeRequest, type KernelToolScope } from "./codemode-worker-protocol"
+import {
+  CODEMODE_RPC,
+  type CapabilityRef,
+  type KernelToolInvokeRequest,
+  type KernelToolScope,
+} from "./codemode-worker-protocol"
 import type { RpcPeer } from "./codemode-rpc"
 
 type LiveCapability = {
@@ -17,9 +22,12 @@ type LiveCapability = {
 }
 
 function isLiveCapability(value: unknown): value is LiveCapability {
-  return typeof value === "object" && value !== null
-    && typeof (value as { describe?: unknown }).describe === "function"
-    && typeof (value as { invoke?: unknown }).invoke === "function"
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { describe?: unknown }).describe === "function" &&
+    typeof (value as { invoke?: unknown }).invoke === "function"
+  )
 }
 
 /** Refusal for an id the worker no longer holds (session released, worker restarted). */
@@ -41,7 +49,10 @@ export function createKernelCapabilityTable() {
   let next = 0
   const live = (id: string): LiveCapability => {
     const entry = byId.get(id)
-    if (!entry) throw new KernelCapabilityReleasedError(`kernel tools capability ${id} is no longer held; its eval session was released`)
+    if (!entry)
+      throw new KernelCapabilityReleasedError(
+        `kernel tools capability ${id} is no longer held; its eval session was released`,
+      )
     return entry.capability
   }
   return {
@@ -68,7 +79,9 @@ export function createKernelCapabilityTable() {
     releaseSession(sessionID: string): void {
       for (const [id, entry] of byId) if (entry.sessionID === sessionID) byId.delete(id)
     },
-    clear(): void { byId.clear() },
+    clear(): void {
+      byId.clear()
+    },
     size: () => byId.size,
   }
 }
@@ -88,11 +101,21 @@ export interface KernelToolsCapabilityProxy {
  * From then on every call, including one already in flight, fails with `kernel_capability_released`
  * instead of whatever transport error the closed channel produced.
  */
-export function createKernelToolsCapabilityProxy(peer: RpcPeer, ref: CapabilityRef, ownerSessionID: string, lifetime?: AbortSignal): KernelToolsCapabilityProxy {
-  const released = () => new KernelCapabilityReleasedError(`kernel tools capability ${ref.id} is no longer held; its eval session ${ownerSessionID} was released or eval stopped`)
+export function createKernelToolsCapabilityProxy(
+  peer: RpcPeer,
+  ref: CapabilityRef,
+  ownerSessionID: string,
+  lifetime?: AbortSignal,
+): KernelToolsCapabilityProxy {
+  const released = () =>
+    new KernelCapabilityReleasedError(
+      `kernel tools capability ${ref.id} is no longer held; its eval session ${ownerSessionID} was released or eval stopped`,
+    )
   const guarded = async (work: () => Promise<unknown>): Promise<unknown> => {
     if (lifetime?.aborted) throw released()
-    try { return await work() } catch (error) {
+    try {
+      return await work()
+    } catch (error) {
       if (lifetime?.aborted) throw released()
       throw error
     }
@@ -102,11 +125,24 @@ export function createKernelToolsCapabilityProxy(peer: RpcPeer, ref: CapabilityR
     ownerSessionID,
     capabilities: Object.freeze({ invokeScope: ref.invokeScope }),
     describe(names: readonly string[], options: { readonly signal?: AbortSignal } = {}) {
-      return guarded(() => peer.call(CODEMODE_RPC.capabilityDescribe, { capabilityId: ref.id, names: [...names] }, options.signal ? { signal: options.signal } : {}))
+      return guarded(() =>
+        peer.call(
+          CODEMODE_RPC.capabilityDescribe,
+          { capabilityId: ref.id, names: [...names] },
+          options.signal ? { signal: options.signal } : {},
+        ),
+      )
     },
     invoke(request: KernelToolInvokeRequest, options: KernelToolInvokeOptions = {}) {
-      const params = { capabilityId: ref.id, request, ...(options.scope && { scope: options.scope }), ...(options.invoker && { invoker: options.invoker }) }
-      return guarded(() => peer.call(CODEMODE_RPC.capabilityInvoke, params, options.signal ? { signal: options.signal } : {}))
+      const params = {
+        capabilityId: ref.id,
+        request,
+        ...(options.scope && { scope: options.scope }),
+        ...(options.invoker && { invoker: options.invoker }),
+      }
+      return guarded(() =>
+        peer.call(CODEMODE_RPC.capabilityInvoke, params, options.signal ? { signal: options.signal } : {}),
+      )
     },
   })
 }

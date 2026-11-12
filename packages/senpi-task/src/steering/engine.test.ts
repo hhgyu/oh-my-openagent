@@ -21,48 +21,139 @@ import { InputUncertainError } from "../runners/input-effects"
 
 afterEach(cleanupSteering)
 
-test("prepared follow-up completes preparation before any epoch publication and bypasses legacy dispatch",async()=>{
- const h=makeHarness(),r=h.seedRecord();toCompleted(h,r);const fake=makeFakeHandle(r.task_id,"in-process"),order:string[]=[]
- Object.assign(fake.handle,{prepareFollowUp:async(prior:TaskRecord,epoch:number)=>{
-  expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(0);expect(epoch).toBe(1);order.push("prepare")
-  return {stamp:(next:TaskRecord)=>{order.push("stamp");return next},dispatch:async()=>{expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(1);order.push("dispatch");return {kind:"accepted" as const}},
-   restoreOwnedReference:()=>prior.owned_session,retainFailure:()=>{},release:async()=>{order.push("release")}}
- }})
- h.setLive(r.task_id,fake.handle);expect((await h.engine.sendToTask({idOrName:r.task_id,message:"next"})).kind).toBe("revived")
- expect(order).toEqual(["prepare","stamp","dispatch"]);expect(fake.followUpCalls).toEqual([])
+test("prepared follow-up completes preparation before any epoch publication and bypasses legacy dispatch", async () => {
+  const h = makeHarness(),
+    r = h.seedRecord()
+  toCompleted(h, r)
+  const fake = makeFakeHandle(r.task_id, "in-process"),
+    order: string[] = []
+  Object.assign(fake.handle, {
+    prepareFollowUp: async (prior: TaskRecord, epoch: number) => {
+      expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(0)
+      expect(epoch).toBe(1)
+      order.push("prepare")
+      return {
+        stamp: (next: TaskRecord) => {
+          order.push("stamp")
+          return next
+        },
+        dispatch: async () => {
+          expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(1)
+          order.push("dispatch")
+          return { kind: "accepted" as const }
+        },
+        restoreOwnedReference: () => prior.owned_session,
+        retainFailure: () => {},
+        release: async () => {
+          order.push("release")
+        },
+      }
+    },
+  })
+  h.setLive(r.task_id, fake.handle)
+  expect((await h.engine.sendToTask({ idOrName: r.task_id, message: "next" })).kind).toBe("revived")
+  expect(order).toEqual(["prepare", "stamp", "dispatch"])
+  expect(fake.followUpCalls).toEqual([])
 })
 
-test("preparation rejection changes no epoch and sends no legacy input",async()=>{
- const h=makeHarness(),r=h.seedRecord();toCompleted(h,r);const fake=makeFakeHandle(r.task_id,"in-process")
- Object.assign(fake.handle,{prepareFollowUp:async()=>{throw Error("real preparation refused")}});h.setLive(r.task_id,fake.handle)
- const before=h.store.load(r.task_id)
- expect((await h.engine.sendToTask({idOrName:r.task_id,message:"next"})).kind).toBe("not_continuable")
- expect(h.store.load(r.task_id)).toEqual(before);expect(fake.followUpCalls).toEqual([]);expect(h.reviveCalls).toEqual([])
+test("preparation rejection changes no epoch and sends no legacy input", async () => {
+  const h = makeHarness(),
+    r = h.seedRecord()
+  toCompleted(h, r)
+  const fake = makeFakeHandle(r.task_id, "in-process")
+  Object.assign(fake.handle, {
+    prepareFollowUp: async () => {
+      throw Error("real preparation refused")
+    },
+  })
+  h.setLive(r.task_id, fake.handle)
+  const before = h.store.load(r.task_id)
+  expect((await h.engine.sendToTask({ idOrName: r.task_id, message: "next" })).kind).toBe("not_continuable")
+  expect(h.store.load(r.task_id)).toEqual(before)
+  expect(fake.followUpCalls).toEqual([])
+  expect(h.reviveCalls).toEqual([])
 })
 
-test.each(["stamp","invoked"] as const)("canonical uncertainty at %s respects the actual dispatch boundary",async boundary=>{
- const h=makeHarness(),r=h.seedRecord();toCompleted(h,r);const fake=makeFakeHandle(r.task_id,"in-process");let releases=0,restores=0
- fake.handle.prepareFollowUp=async()=>({stamp:next=>{if(boundary==="stamp")throw new InputUncertainError("private-effect",new Error("unacknowledged"));return next},
-  dispatch:async()=>{throw new InputUncertainError("private-effect",new Error("unacknowledged"))},restoreOwnedReference:()=>{restores++;return undefined},retainFailure:()=>{},release:async()=>{releases++}})
- h.setLive(r.task_id,fake.handle);const answer=await h.engine.sendToTask({idOrName:r.task_id,message:"new"})
- expect(answer.kind).toBe(boundary==="stamp"?"not_continuable":"uncertain")
- expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(boundary==="stamp"?0:1)
- expect(h.reviveCalls).toHaveLength(boundary==="stamp"?0:1);expect(releases).toBe(boundary==="stamp"?1:0);expect(restores).toBe(0)
+test.each(["stamp", "invoked"] as const)(
+  "canonical uncertainty at %s respects the actual dispatch boundary",
+  async (boundary) => {
+    const h = makeHarness(),
+      r = h.seedRecord()
+    toCompleted(h, r)
+    const fake = makeFakeHandle(r.task_id, "in-process")
+    let releases = 0,
+      restores = 0
+    fake.handle.prepareFollowUp = async () => ({
+      stamp: (next) => {
+        if (boundary === "stamp") throw new InputUncertainError("private-effect", new Error("unacknowledged"))
+        return next
+      },
+      dispatch: async () => {
+        throw new InputUncertainError("private-effect", new Error("unacknowledged"))
+      },
+      restoreOwnedReference: () => {
+        restores++
+        return undefined
+      },
+      retainFailure: () => {},
+      release: async () => {
+        releases++
+      },
+    })
+    h.setLive(r.task_id, fake.handle)
+    const answer = await h.engine.sendToTask({ idOrName: r.task_id, message: "new" })
+    expect(answer.kind).toBe(boundary === "stamp" ? "not_continuable" : "uncertain")
+    expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(boundary === "stamp" ? 0 : 1)
+    expect(h.reviveCalls).toHaveLength(boundary === "stamp" ? 0 : 1)
+    expect(releases).toBe(boundary === "stamp" ? 1 : 0)
+    expect(restores).toBe(0)
+  },
+)
+
+test("cancel during preparation wins before stamp or epoch publication", async () => {
+  const h = makeHarness(),
+    r = h.seedRecord()
+  toCompleted(h, r)
+  const fake = makeFakeHandle(r.task_id, "in-process")
+  let stamps = 0,
+    dispatches = 0,
+    releases = 0
+  fake.handle.prepareFollowUp = async () => {
+    h.store.mutate(r.task_id, (f) => ({ ...f, status: "cancelled" }))
+    return {
+      stamp: (next) => {
+        stamps++
+        return next
+      },
+      dispatch: async () => {
+        dispatches++
+        return { kind: "accepted" }
+      },
+      restoreOwnedReference: () => undefined,
+      retainFailure: () => {},
+      release: async () => {
+        releases++
+      },
+    }
+  }
+  h.setLive(r.task_id, fake.handle)
+  expect((await h.engine.sendToTask({ idOrName: r.task_id, message: "new" })).kind).toBe("not_continuable")
+  expect(h.store.load(r.task_id)?.status).toBe("cancelled")
+  expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(0)
+  expect(stamps).toBe(0)
+  expect(dispatches).toBe(0)
+  expect(releases).toBe(1)
 })
 
-test("cancel during preparation wins before stamp or epoch publication",async()=>{
- const h=makeHarness(),r=h.seedRecord();toCompleted(h,r);const fake=makeFakeHandle(r.task_id,"in-process");let stamps=0,dispatches=0,releases=0
- fake.handle.prepareFollowUp=async()=>{h.store.mutate(r.task_id,f=>({...f,status:"cancelled"}));return {stamp:next=>{stamps++;return next},dispatch:async()=>{dispatches++;return {kind:"accepted"}},restoreOwnedReference:()=>undefined,retainFailure:()=>{},release:async()=>{releases++}}}
- h.setLive(r.task_id,fake.handle);expect((await h.engine.sendToTask({idOrName:r.task_id,message:"new"})).kind).toBe("not_continuable")
- expect(h.store.load(r.task_id)?.status).toBe("cancelled");expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(0)
- expect(stamps).toBe(0);expect(dispatches).toBe(0);expect(releases).toBe(1)
-})
-
-test("absent prepared ticket preserves synchronous legacy follow-up invocation without an extra await tick",async()=>{
- const h=makeHarness(),r=h.seedRecord();toCompleted(h,r);const fake=makeFakeHandle(r.task_id,"in-process");h.setLive(r.task_id,fake.handle)
- const sending=h.engine.sendToTask({idOrName:r.task_id,message:"legacy immediate"})
- expect(fake.followUpCalls).toEqual(["legacy immediate"])
- expect((await sending).kind).toBe("revived")
+test("absent prepared ticket preserves synchronous legacy follow-up invocation without an extra await tick", async () => {
+  const h = makeHarness(),
+    r = h.seedRecord()
+  toCompleted(h, r)
+  const fake = makeFakeHandle(r.task_id, "in-process")
+  h.setLive(r.task_id, fake.handle)
+  const sending = h.engine.sendToTask({ idOrName: r.task_id, message: "legacy immediate" })
+  expect(fake.followUpCalls).toEqual(["legacy immediate"])
+  expect((await sending).kind).toBe("revived")
 })
 
 function toRunning(harness: SteeringHarness, record: TaskRecord): void {

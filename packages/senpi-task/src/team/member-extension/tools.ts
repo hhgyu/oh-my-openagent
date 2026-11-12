@@ -95,9 +95,7 @@ export async function runMemberTaskSend(
   })
 }
 
-export function createMemberTaskSendTool(
-  deps: MemberTaskSendDeps,
-): MemberTaskSendTool {
+export function createMemberTaskSendTool(deps: MemberTaskSendDeps): MemberTaskSendTool {
   // Returned as a plain literal: senpi's defineTool is an identity helper for type inference
   // (pinned by the senpi API tripwire), so wrapping here would only statically bind this module
   // to the engine barrel.

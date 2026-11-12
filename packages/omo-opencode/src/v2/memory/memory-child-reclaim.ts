@@ -44,7 +44,7 @@ const MEMO_FILE = "children-reclaim.json"
 async function readMemo(path: string): Promise<ReclaimMemo> {
   try {
     const value: unknown = JSON.parse(await readFile(path, "utf8"))
-    return value !== null && typeof value === "object" && !Array.isArray(value) ? value as ReclaimMemo : {}
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as ReclaimMemo) : {}
   } catch {
     return {}
   }
@@ -52,15 +52,28 @@ async function readMemo(path: string): Promise<ReclaimMemo> {
 
 async function writeMemo(path: string, memo: ReclaimMemo): Promise<void> {
   const temp = `${path}.${randomUUID()}.tmp`
-  await writeFile(temp, `${JSON.stringify(memo, null, 2)}
-`, { encoding: "utf8", mode: 0o600 })
+  await writeFile(
+    temp,
+    `${JSON.stringify(memo, null, 2)}
+`,
+    { encoding: "utf8", mode: 0o600 },
+  )
   await rename(temp, path)
 }
 
-const PARENT_POLICY: SessionToolPolicy = { tools: [], authorize: () => { throw new Error("The memory child reclaim parent scope grants no tools") } }
+const PARENT_POLICY: SessionToolPolicy = {
+  tools: [],
+  authorize: () => {
+    throw new Error("The memory child reclaim parent scope grants no tools")
+  },
+}
 
 /** Re-opens the parent until its lease generation is at least `minimum` (never lowers a locator). */
-function openParentAtLeast(scopes: ReturnType<typeof createSessionScopes>, parentID: string, minimum: number): SessionLease {
+function openParentAtLeast(
+  scopes: ReturnType<typeof createSessionScopes>,
+  parentID: string,
+  minimum: number,
+): SessionLease {
   let lease = scopes.open(parentID as SessionLease["sessionID"], PARENT_POLICY)
   while (lease.generation < minimum) lease = scopes.open(parentID as SessionLease["sessionID"], PARENT_POLICY)
   return lease
@@ -82,19 +95,31 @@ interface MemoryChildBackend {
   readonly label: string
 }
 
-export async function reclaimStrandedMemoryChildren(input: MemoryChildReclaimInput, kind: MemoryChildBackend): Promise<MemoryChildReclaimReport> {
+export async function reclaimStrandedMemoryChildren(
+  input: MemoryChildReclaimInput,
+  kind: MemoryChildBackend,
+): Promise<MemoryChildReclaimReport> {
   const report = { removed: [] as string[], closed: [] as string[], left: [] as string[], skipped: [] as string[] }
   if (!existsSync(input.journalPath)) return report
   const childPolicy: SessionToolPolicy = { tools: [...kind.toolNames], authorize: () => undefined }
-  const journal = await openChildJournal({ path: input.journalPath, ...(input.probeOwner === undefined ? {} : { probeOwner: input.probeOwner }) })
+  const journal = await openChildJournal({
+    path: input.journalPath,
+    ...(input.probeOwner === undefined ? {} : { probeOwner: input.probeOwner }),
+  })
   const memoPath = join(dirname(input.journalPath), MEMO_FILE)
   const memo = await readMemo(memoPath)
   let memoChanged = false
   try {
-    const open = (await journal.list()).filter(record => record.phase !== "closed" && record.locator.backendID === kind.backendID && record.owner !== journal.owner)
+    const open = (await journal.list()).filter(
+      (record) =>
+        record.phase !== "closed" && record.locator.backendID === kind.backendID && record.owner !== journal.owner,
+    )
     const byParent = new Map<string, ChildRecord[]>()
     for (const record of open) {
-      if (memo[record.key]?.revision === record.revision) { report.skipped.push(record.locator.sessionID); continue }
+      if (memo[record.key]?.revision === record.revision) {
+        report.skipped.push(record.locator.sessionID)
+        continue
+      }
       byParent.set(record.locator.parentID, [...(byParent.get(record.locator.parentID) ?? []), record])
     }
     for (const [parentID, records] of byParent) {
@@ -102,12 +127,25 @@ export async function reclaimStrandedMemoryChildren(input: MemoryChildReclaimInp
       if (location === undefined) continue
       const scopes = createSessionScopes()
       const failed: { readonly record: ChildRecord; readonly reason: string }[] = []
-      const parent = openParentAtLeast(scopes, parentID, Math.max(...records.map(record => record.locator.generation)))
-      const backend = createSessionBackend({ app: input.host.app, location: { directory: location }, session: input.host.session }, {
-        backendID: kind.backendID, owner: journal.owner, parent, scopes, policy: childPolicy, journal, gate: { assertActive() {} },
-      })
+      const parent = openParentAtLeast(
+        scopes,
+        parentID,
+        Math.max(...records.map((record) => record.locator.generation)),
+      )
+      const backend = createSessionBackend(
+        { app: input.host.app, location: { directory: location }, session: input.host.session },
+        {
+          backendID: kind.backendID,
+          owner: journal.owner,
+          parent,
+          scopes,
+          policy: childPolicy,
+          journal,
+          gate: { assertActive() {} },
+        },
+      )
       try {
-        const listed = new Set((await backend.list()).data.map(session => session.id))
+        const listed = new Set((await backend.list()).data.map((session) => session.id))
         for (const record of records) {
           const sessionID = record.locator.sessionID
           try {
@@ -126,9 +164,14 @@ export async function reclaimStrandedMemoryChildren(input: MemoryChildReclaimInp
         }
       } catch (error) {
         for (const record of records) report.left.push(record.locator.sessionID)
-        input.warn(`stranded ${kind.label} children of a parent could not be listed`, { parentID, error: describeError(error) })
+        input.warn(`stranded ${kind.label} children of a parent could not be listed`, {
+          parentID,
+          error: describeError(error),
+        })
       } finally {
-        await backend.dispose().catch((error: unknown) => { input.warn(`${kind.label} reclaim backend cleanup incomplete`, { parentID, error: describeError(error) }) })
+        await backend.dispose().catch((error: unknown) => {
+          input.warn(`${kind.label} reclaim backend cleanup incomplete`, { parentID, error: describeError(error) })
+        })
         scopes.dispose()
       }
       // Read after disposal, which may still advance the row. Only a row this pass took custody of
@@ -138,11 +181,17 @@ export async function reclaimStrandedMemoryChildren(input: MemoryChildReclaimInp
         if (after === undefined || after.owner !== journal.owner || after.phase === "closed") continue
         memo[record.key] = { revision: after.revision, reason, at: new Date().toISOString() }
         memoChanged = true
-        input.warn(`stranded ${kind.label} child could not be reclaimed; not retried until its custody changes`, { sessionID: record.locator.sessionID, error: reason })
+        input.warn(`stranded ${kind.label} child could not be reclaimed; not retried until its custody changes`, {
+          sessionID: record.locator.sessionID,
+          error: reason,
+        })
       }
     }
     for (const key of Object.keys(memo)) {
-      if (!open.some(record => record.key === key)) { Reflect.deleteProperty(memo, key); memoChanged = true }
+      if (!open.some((record) => record.key === key)) {
+        Reflect.deleteProperty(memo, key)
+        memoChanged = true
+      }
     }
     if (memoChanged) await writeMemo(memoPath, memo)
   } finally {

@@ -17,7 +17,10 @@ import type { ReflectionDecision } from "./reflection-failure"
 const MEMORY_PRESSURE_SOFT_RATIO = 0.8
 
 /** The configured `compile_warn_tokens` advisory and its soft-pressure target. */
-export function dreamTokenBudget(bound: Pick<BoundMemorySession, "settings">): { readonly budget: number; readonly target: number } {
+export function dreamTokenBudget(bound: Pick<BoundMemorySession, "settings">): {
+  readonly budget: number
+  readonly target: number
+} {
   const budget = bound.settings.compile_warn_tokens
   return { budget, target: Math.floor(MEMORY_PRESSURE_SOFT_RATIO * budget) }
 }
@@ -28,23 +31,37 @@ async function committedSystemTokens(repoDir: string, identity: string): Promise
   const repo = new GitMemoryRepo({ dir: repoDir, agentId: identity })
   const head = await repo.head()
   if (head === null) return null
-  const paths = (await repo.lsTree(head)).filter(path => path.startsWith("system/") && path.endsWith(".md"))
-  const contents = await Promise.all(paths.map(path => repo.show(head, path)))
+  const paths = (await repo.lsTree(head)).filter((path) => path.startsWith("system/") && path.endsWith(".md"))
+  const contents = await Promise.all(paths.map((path) => repo.show(head, path)))
   return Math.floor(contents.reduce((sum, content) => sum + Buffer.byteLength(content, "utf8"), 0) / 4)
 }
 
 /** True when the committed `system/` tree reached soft pressure (the bind-time `pressure` origin). */
-export async function underSystemTokenPressure(bound: Pick<BoundMemorySession, "settings" | "paths" | "identity">): Promise<boolean> {
+export async function underSystemTokenPressure(
+  bound: Pick<BoundMemorySession, "settings" | "paths" | "identity">,
+): Promise<boolean> {
   const estimate = await committedSystemTokens(bound.paths.repo, bound.identity)
   return estimate !== null && estimate >= dreamTokenBudget(bound).target
 }
 
 /** Records the post-merge budget check of a merged dream on its decision; other runs pass through. */
-export async function applyDreamTokenBudget(bound: BoundMemorySession, run: ReservedRun, decision: ReflectionDecision): Promise<ReflectionDecision> {
+export async function applyDreamTokenBudget(
+  bound: BoundMemorySession,
+  run: ReservedRun,
+  decision: ReflectionDecision,
+): Promise<ReflectionDecision> {
   const origin = run.request.origin
   if (run.request.trigger !== "dream" || origin === undefined || decision.outcome !== "merged") return decision
   const estimate = await estimateSystemTokens(bound.paths.repo)
-  const validation = validateDreamTokenBudget({ origin, totalTokens: estimate.totalTokens, targetTokens: dreamTokenBudget(bound).target })
-  if (validation.status === "budget_not_met") return { ...decision, reason: "budget_not_met", detail: validation.detail }
-  return { ...decision, detail: `Committed system/ estimate is ${validation.totalTokens} tokens; dream target is below ${validation.targetTokens} tokens` }
+  const validation = validateDreamTokenBudget({
+    origin,
+    totalTokens: estimate.totalTokens,
+    targetTokens: dreamTokenBudget(bound).target,
+  })
+  if (validation.status === "budget_not_met")
+    return { ...decision, reason: "budget_not_met", detail: validation.detail }
+  return {
+    ...decision,
+    detail: `Committed system/ estimate is ${validation.totalTokens} tokens; dream target is below ${validation.targetTokens} tokens`,
+  }
 }
