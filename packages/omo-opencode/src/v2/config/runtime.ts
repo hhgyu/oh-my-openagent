@@ -49,7 +49,7 @@ export function loadRuntimeConfig(options: LoadOmoConfigOptions = {}): RuntimeCo
   const disabled = z.array(z.string()).safeParse(resolved.disabled_agents)
   return {
     config: expanded.view,
-    agents: { agents, disabled_agents: disabled.success ? disabled.data : [] },
+    agents: { agents, disabled_agents: disabled.success ? disabled.data : [], nativeAgents: expanded.view.agents },
     ...(loaded.profile === undefined ? {} : { profile: loaded.profile }),
     sources: loaded.sources, layers: loaded.layers, diagnostics,
   }

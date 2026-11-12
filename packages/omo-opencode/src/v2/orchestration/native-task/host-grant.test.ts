@@ -11,6 +11,14 @@ import { createToolRegistry } from "../../host/tool-registry"
 import { createSessionScopes } from "../../host/session-state"
 import { createPolicyPipeline } from "../../host/policy-pipeline"
 import { createAcceptedOperationRegistry } from "./accepted-operation"
+import { resolve } from "node:path"
+import { resolveTaskAgents } from "@oh-my-opencode/senpi-task/task-operations"
+import { applyAgents } from "../../agents"
+import { recordingEditor } from "../../agents/test-support"
+import { loadRuntimeConfig } from "../../config/runtime"
+import { withOwnedRuntimeUnit } from "./runtime.test"
+import { acquireOwnedChildToolGuard } from "../../host/owned-child-tool-guard"
+import { evaluateInvocationGuard, type SkillInvocationState } from "@oh-my-opencode/senpi-task"
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes }); return { promise, resolve } }
 function selection(extra: Partial<HostGrantPreparationInput> = {}): HostGrantPreparationInput {
@@ -102,18 +110,20 @@ test("pure later binding coverage resolves required slots without clearing requi
 
 /** Controlled UNIT SDK domain/roster/caller, but actual kernel issuance,
  * genuine joined API/Effect fibers and original operation registry. No actual host proof. */
-async function authorization(work: () => Effect.Effect<void, unknown, Scope.Scope> = () => Effect.void) {
+async function authorization(work: () => Effect.Effect<void, unknown, Scope.Scope> = () => Effect.void, options: {
+  agents?: Parameters<typeof createHostBuildAuthorizer>[0]["agents"]; sessionID?: string
+} = {}) {
   const scope = Scope.makeUnsafe(), scopes = createSessionScopes(), controller = new AbortController(), requests: unknown[] = []
   let current = true, rosters = 0
   const permission = await Effect.runPromise(Effect.provideService(acquireEffectPermissionApi({ assert: request => {
     requests.push(request); return Effect.scoped(work()) as Effect.Effect<void, ToolError>
   } }), Scope.Scope, scope))
-  const context = { sessionID: "ses_grant_unit", agent: "actual-unit-parent", messageID: "unit-message", id: "unit-call", signal: controller.signal, progress: async () => {} } as unknown as ToolContext
+  const context = { sessionID: options.sessionID ?? "ses_grant_unit", agent: "actual-unit-parent", messageID: "unit-message", id: "unit-call", signal: controller.signal, progress: async () => {} } as unknown as ToolContext
   const lease = scopes.open(context.sessionID, { tools: ["entry"], authorize() {} })
   let run: (caller: ToolContext) => Promise<unknown> = async () => ({})
   const registry = createToolRegistry([{ id: "entry", name: "entry", input: Schema.Unknown, description: "unit entry", execute: async (_value, caller) => { await run(caller); return {} } }], { entry: () => [{ action: "unit-entry", resources: ["unit"] }] })
   const kernel = createToolKernel({ scopes, registry, pipeline: createPolicyPipeline(), permission: { assert: async () => {} } })
-  const agents = { async list() { rosters++; return { data: ["build", "explore", "librarian", "first", "worker"].map(id => ({ id })) } } } as unknown as Parameters<typeof createHostBuildAuthorizer>[0]["agents"]
+  const agents = options.agents ?? { async list() { rosters++; return { data: ["build", "explore", "librarian", "first", "worker"].map(id => ({ id })) } } } as unknown as Parameters<typeof createHostBuildAuthorizer>[0]["agents"]
   const authorizer = createHostBuildAuthorizer({ callAuthority: kernel.callAuthority, permission, agents, assertCurrent() { if (!current) throw Error("catalog retired") } })
   const bound = kernel.bind(context, lease)
   return { permission, authorizer, requests, controller, context, bound, kernel,
@@ -178,6 +188,68 @@ test("an unavailable named persona fails closed before any build delegation appr
     // then no approval can silently bypass a rule keyed to the missing persona
     expect(f.requests).toEqual([])
   } finally { await f.close() }
+})
+
+test("every enabled Native builtin and omo.json custom persona is registered, approved and staged as itself", async () => {
+  // given the real config loader, Native resolver and V2 registrar, not a copied host roster
+  const home = resolve("virtual-native-roster"), cwd = resolve(home, "project")
+  const snapshot = loadRuntimeConfig({ cwd, env: { HOME: home }, fileSystem: {
+    existsSync: path => path === resolve(cwd, ".omo/omo.json"),
+    readFileSync: () => JSON.stringify({ agents: {
+      "custom-auditor": { prompt: "Inspect the assigned input", tools: { read: true } }, "disabled-custom": { disable: true },
+      "plan-consultant": { tools: { read: true }, permission: { read: "deny", shell: "allow", edit: "allow" } },
+      "plan-reviewer": { tools: { read: true }, permission: { read: "deny", shell: "allow", edit: "allow" } },
+    } }),
+  } })
+  const native = resolveTaskAgents(snapshot.config), accepted = Object.keys(native).filter(name => !native[name]?.disable)
+  const { editor } = recordingEditor()
+  applyAgents(editor, snapshot.agents)
+  const hostAgents = { async list() { return { data: editor.list() } } } as unknown as Parameters<typeof createHostBuildAuthorizer>[0]["agents"]
+  const f = await authorization(undefined, { agents: hostAgents })
+  const approvals: string[] = []
+  const admittedPlan: SkillInvocationState = {
+    hasInvoked: skill => skill === "ulw-plan", hasUserRequested: skill => skill === "ulw-plan",
+    hasPlanArtifact: () => true, planArtifactReferences: () => [{ path: resolve(cwd, ".omo/plans/review.md"), count: 1, lastTouchedAt: 1 }],
+  }
+  const scope = Scope.makeUnsafe()
+  const guard = await Effect.runPromise(Effect.provideService(acquireOwnedChildToolGuard({
+    tool: { transform: () => Effect.succeed({ dispose: Effect.void }) },
+    permission: { hook: () => Effect.succeed({ dispose: Effect.void }) },
+  }), Scope.Scope, scope))
+  try {
+    f.setRun(async caller => {
+      await withOwnedRuntimeUnit(async (runtime, state) => {
+        // when the Native invocation guard admits the workflow and the owned runner stages each target
+        for (const name of accepted) {
+          expect(evaluateInvocationGuard(name, admittedPlan).kind).toBe("allow")
+          const started = await runtime.start({ subagent_type: name, model: "qa/model", prompt: "Inspect input" })
+          if (started.kind !== "started") throw Error(`${name}: ${JSON.stringify(started)}`)
+          await runtime.wait(started.task_id)
+          if (name === "plan-consultant" || name === "plan-reviewer") {
+            const childID = runtime.get(started.task_id)?.child_session_id
+            expect(childID).toBeDefined()
+            expect((state.session(defined(childID)) as { agent: string }).agent).toBe(name)
+            for (const action of ["read", "shell", "edit"]) {
+              const rule = editor.get(name)?.permissions.findLast(rule => (rule.action === "*" || rule.action === action) && rule.resource === "*")
+              expect(rule?.effect).toBe("deny")
+            }
+          }
+          await runtime.end(started.task_id)
+        }
+        // then permission approval and the real staging boundary preserve each resolved identity
+        expect(approvals).toEqual(accepted)
+        expect(state.createdAgents).toEqual(accepted)
+        expect(editor.get("disabled-custom")).toBeUndefined()
+      }, { agents: native, config: () => snapshot.config, childToolGuard: guard,
+        childGuardBinding: (_spec, prepared) => ({ assertCurrent() {}, bind(child, assertCurrent) { return { child, agent: prepared.buildAgentID, assertCurrent } } }),
+        authorizePlannedStart: async (spec, plan) => {
+        const result = await f.authorizer.forCall(caller).authorize(selection({ spec, plan, nativeTools: [{ name: "read" }] }), caller.signal)
+        approvals.push(result.buildAgentID)
+        return result
+      } }, [], "ses_grant_unit")
+    })
+    await f.bound.invoke("entry", {})
+  } finally { await Effect.runPromise(Scope.close(scope, Exit.succeed(undefined))); await f.close() }
 })
 
 test("retained closure, fake joined owner and foreign parent cannot authorize", async () => {

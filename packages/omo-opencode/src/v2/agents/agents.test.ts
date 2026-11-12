@@ -61,7 +61,7 @@ describe("native v2 agents", () => {
     expect(editor.get("plan")?.hidden).toBe(false)
     expect(editor.get("build")?.mode).toBe("primary")
     expect(editor.get("plan")?.mode).toBe("primary")
-    expect(editor.list()).toHaveLength(2)
+    expect(editor.list().filter(agent => !agent.hidden)).toHaveLength(2)
   })
 
   it("uses only selectable enabled replacements to decide builtin visibility", () => {
@@ -102,7 +102,7 @@ describe("native v2 agents", () => {
     const { editor } = recordingEditor()
     applyAgents(editor, { agents: { oracle: { model: "not-provider-qualified" } }, disabled_agents: [] })
     expect(editor.get("oracle")?.model).toBeUndefined()
-    expect(editor.list()).toHaveLength(12)
+    for (const id of AGENT_IDS) expect(editor.get(id)).toBeDefined()
   })
   it("removes disabled OmO agents but preserves an unrelated host id in the denylist", () => {
     const { editor } = recordingEditor()
@@ -134,18 +134,34 @@ describe("native v2 agents", () => {
   })
 
   it("exposes only curated broker defaults before user rules, never overriding a user deny", () => {
-    // given the host's builtin Explore wildcard deny
-    for (const userDeny of [false, true]) {
+    // given a host wildcard deny for each Native curated identity
+    for (const id of ["explore", "librarian", "plan-consultant", "plan-reviewer"]) for (const userDeny of [false, true]) {
       const { editor } = recordingEditor()
-      editor.update("explore", agent => { agent.permissions = [{ action: "*", resource: "*", effect: "deny" }] })
+      editor.update(id, agent => { agent.permissions = [{ action: "*", resource: "*", effect: "deny" }] })
       // when OmO registers the real child agent with or without an explicit user restriction
-      applyAgents(editor, { agents: { explore: userDeny ? { permission: { omo_native_readonly: "deny", omo_native_ls: "deny" } } : {} }, disabled_agents: [] })
+      applyAgents(editor, { agents: { [id]: userDeny ? { permission: { omo_native_readonly: "deny", omo_native_ls: "deny" } } : {} }, disabled_agents: [] })
       // then stock mutation remains denied and user broker denies win over plugin defaults
-      expect(effective(editor, "explore", "omo_native_readonly")).toBe(userDeny ? "deny" : "allow")
-      expect(effective(editor, "explore", "omo_native_ls")).toBe(userDeny ? "deny" : "allow")
-      expect(effective(editor, "explore", "shell")).toBe("deny")
-      expect(effective(editor, "explore", "edit")).toBe("deny")
+      expect(effective(editor, id, "omo_native_readonly")).toBe(userDeny ? "deny" : "allow")
+      expect(effective(editor, id, "omo_native_ls")).toBe(userDeny ? "deny" : "allow")
+      expect(effective(editor, id, "shell")).toBe("deny")
+      expect(effective(editor, id, "edit")).toBe("deny")
     }
+  })
+
+  it("keeps Native-only builtins and custom identities out of the primary picker while preserving custom denies", () => {
+    // given an enabled custom Native persona with a host-only primary-mode override
+    const { editor } = recordingEditor()
+    applyAgents(editor, { agents: { "custom-auditor": { mode: "primary", permission: { read: "deny" } } }, disabled_agents: [],
+      nativeAgents: { "custom-auditor": { tools: { read: true } }, "disabled-custom": { disable: true } } })
+    // then the actual registrar creates callable subagent identities, not new primary choices
+    for (const id of ["plan-consultant", "plan-reviewer", "omo-native-code-reviewer", "omo-native-qa-executor", "omo-native-gate-reviewer", "custom-auditor"]) {
+      expect(editor.get(id)?.mode).toBe("subagent")
+      expect(editor.get(id)?.hidden).toBe(true)
+    }
+    expect(editor.get("disabled-custom")).toBeUndefined()
+    expect(effective(editor, "custom-auditor", "read")).toBe("deny")
+    expect(editor.get("sisyphus")?.mode).toBe("primary")
+    expect(editor.get("sisyphus")?.hidden).toBe(false)
   })
 
   it("projects legacy tool permissions onto native shell, edit and subagent actions", () => {

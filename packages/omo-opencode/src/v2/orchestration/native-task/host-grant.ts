@@ -173,7 +173,7 @@ export function createHostBuildAuthorizer(options: {
       current(); operationSignal.throwIfAborted()
       const matches = roster.data.filter(agent => agent.id === agentID)
       const [agent] = matches
-      if (matches.length !== 1 || !agent) throw Error(`Actual child agent ${agentID} is unavailable or ambiguous`)
+      if (matches.length !== 1 || !agent) throw Error(`Actual child agent ${agentID} is unavailable or ambiguous. Check agents.${agentID} configuration diagnostics and reload OmO, or register that exact agent ID in OpenCode.`)
       const buildAgentID = agent.id
       const signal = AbortSignal.any([callerSignal, operationSignal, token.admissionSignal])
       await options.permission.assert({ sessionID: source.sessionID, agent: source.agent, action: "subagent", resources: [buildAgentID],
