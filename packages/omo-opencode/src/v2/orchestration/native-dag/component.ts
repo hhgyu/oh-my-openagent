@@ -1,6 +1,7 @@
 import type { ToolDomain } from "@opencode/plugin/promise/tool"
 import { OmoTaskSettingsSchema, type OmoConfig } from "@oh-my-opencode/omo-config-core"
 import type { DagNodeSpawnPolicy } from "@oh-my-opencode/senpi-task/dag"
+import type { SkillInvocationState } from "@oh-my-opencode/senpi-task"
 import { evaluateSpawnPolicy } from "@oh-my-opencode/senpi-task/task-operations"
 import { createTaskRecordStore } from "@oh-my-opencode/senpi-task/manager-kernel"
 import { join } from "node:path"
@@ -31,6 +32,7 @@ export interface NativeDagHost {
   readonly kernel: ReturnType<typeof createToolKernel>
   readonly service: ReturnType<typeof createNativeTaskService>
   readonly assertCurrent: () => void
+  readonly resolveSkillInvocations?: (sessionID: string) => SkillInvocationState
   /** Trusted ports of the component-owned run wake (S6d). */
   readonly delivery: Pick<DagWakeOptions, "session" | "assertGeneration">
   /** Hands the workflow target to the shared registry; resolves with its issued permission once the
@@ -93,9 +95,8 @@ export function registerNativeDagComponent(host: NativeDagHost): NativeDagCompon
         workflow(caller, call) {
           assertRootWorkflowCaller(caller.sessionID, call)
           const runtime = runtimeFor(caller.sessionID)
-          // The V2 task tool's own spawn policy deps: no skill-invocation resolver, so plan-gated agents fail closed.
           const spawnPolicy: DagNodeSpawnPolicy = node => evaluateSpawnPolicy({ manager: call.operation.task, omoConfig: host.prepared.config,
-            agents: host.prepared.agents }, node.subagentType, node.prompt, node.parentSessionId)
+            agents: host.prepared.agents, resolveSkillInvocations: host.resolveSkillInvocations }, node.subagentType, node.prompt, node.parentSessionId)
           // S2 per-call skill authorization for THIS caller (the root session and its agent), at call time.
           const skillSignal = AbortSignal.any([caller.signal, call.signal])
           const skills = nativeDagSkillAuthority({ store: runtime.store, cwd: host.directory,
