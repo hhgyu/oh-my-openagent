@@ -80,9 +80,9 @@ export function catalogModel(providerID: string, id: string): CatalogModel {
 }
 
 /** Polls until the predicate holds; fails the test after `ms`. */
-export async function until(predicate: () => boolean, ms = 5_000): Promise<void> {
+export async function until(predicate: () => boolean | Promise<boolean>, ms = 5_000): Promise<void> {
   const started = Date.now()
-  while (!predicate()) {
+  while (!await predicate()) {
     if (Date.now() - started > ms) throw new Error("condition not reached in time")
     await new Promise(resolve => setTimeout(resolve, 10))
   }

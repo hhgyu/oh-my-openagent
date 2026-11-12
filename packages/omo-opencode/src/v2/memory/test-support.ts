@@ -49,7 +49,7 @@ export interface MemoryFixture {
   toolAfter(sessionID: string, tool: string, input: unknown, output: string, id?: string): Promise<void>
   /** Runs the `compaction` hook; `tools` is the request's tool map, narrowed in place. */
   compaction(sessionID: string, messages?: { id?: string }[], tools?: Record<string, { description: string; input: Record<string, unknown> }>): Promise<void>
-  emitEvent(type: "session.compaction.ended" | "session.compaction.failed" | "session.execution.interrupted", sessionID: string): Promise<void>
+  emitEvent(type: "session.compaction.ended" | "session.compaction.failed" | "session.execution.interrupted" | "location.shutdown", sessionID: string): Promise<void>
   /** Runs the `context` hook over these model-request messages and returns them as the hook left them. */
   requestMessages(sessionID: string, messages: { id?: string }[]): Promise<{ id?: string }[]>
   idle(sessionID: string): Promise<void>

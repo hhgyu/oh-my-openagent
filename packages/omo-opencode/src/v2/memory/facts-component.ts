@@ -8,7 +8,7 @@
 import { loadFactsPersona } from "@oh-my-opencode/memory-core"
 import type { OmoConfig, OmoMemorySettings } from "@oh-my-opencode/omo-config-core"
 import { createModelCatalog, type CatalogModel } from "../host/model-catalog"
-import { describeError, type MemoryBinder } from "./binding"
+import { describeError, type BoundMemorySession, type MemoryBinder } from "./binding"
 import type { MemoryLogger } from "./config"
 import { createMemoryFacts, type MemoryFacts } from "./facts"
 import { createFactsChildHosting, type FactsChildHosting, type FactsPortRequest } from "./facts-child"
@@ -38,6 +38,7 @@ export function createFactsComponent(context: MemoryHost, deps: {
   readonly logger: MemoryLogger
   readonly now: () => number
   readonly loadSettings: (cwd: string) => OmoMemorySettings
+  readonly flushJournal: (bound: BoundMemorySession, signal: AbortSignal) => Promise<unknown>
   readonly seams?: MemoryFactsSeams
 }): FactsComponentParts | undefined {
   const seams = deps.seams
@@ -61,7 +62,7 @@ export function createFactsComponent(context: MemoryHost, deps: {
     ...(seams?.timers === undefined ? {} : { timers: seams.timers }),
   })
   const facts = createMemoryFacts({
-    binder: deps.binder, session: context.session, logger: deps.logger, now: deps.now, loadSettings: deps.loadSettings, hosting,
+    binder: deps.binder, session: context.session, logger: deps.logger, now: deps.now, loadSettings: deps.loadSettings, hosting, flushJournal: deps.flushJournal,
     ...(catalog === undefined ? {} : { catalog }),
     ...(seams?.deadlineMs === undefined ? {} : { deadlineMs: seams.deadlineMs }),
     ...(seams?.loadConfig === undefined ? {} : { loadConfig: seams.loadConfig }),
