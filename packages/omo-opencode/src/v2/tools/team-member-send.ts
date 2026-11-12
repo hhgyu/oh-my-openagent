@@ -1,10 +1,10 @@
 import type { AgentToolResult } from "@code-yeongyu/senpi"
-import { createMemberTaskSendTool, type MemberTaskSendInput } from "@oh-my-opencode/senpi-task/task-operations"
+import { createMemberTaskSendTool, createToolArgumentValidator, MemberTaskSendParams, type MemberTaskSendInput } from "@oh-my-opencode/senpi-task/task-operations"
 import type { ToolDomain } from "@opencode/plugin/effect/tool"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import { Effect } from "effect"
-import { Compile } from "typebox/compile"
 import { adaptNativeTaskResult } from "./native-task-result"
+import { strictPublicInput } from "./native-task"
 
 type ToolInfo = Awaited<Effect.Success<ReturnType<ToolDomain["list"]>>>[number]
 
@@ -27,11 +27,7 @@ type TeamMemberSendDispatch = (call: TeamMemberSendCall, input: MemberTaskSendIn
 const native = createMemberTaskSendTool({ teamRunId: "template", memberName: "template", taskId: "template", members: [],
   config: { enabled: false, tmux_visualization: false, max_parallel_members: 1, max_members: 1, max_messages_per_run: 1, max_wall_clock_minutes: 1,
     max_member_turns: 1, message_payload_max_bytes: 1024, recipient_unread_max_bytes: 1024, mailbox_poll_interval_ms: 500 } })
-const checkInput = Compile(native.parameters)
-
-function isMemberTaskSendInput(input: unknown): input is MemberTaskSendInput {
-  return checkInput.Check(input)
-}
+const validateInput = createToolArgumentValidator(MemberTaskSendParams)
 
 function toToolError(error: unknown): ToolError {
   if (error instanceof ToolError) return error
@@ -44,13 +40,13 @@ export function createTeamMemberSendToolInfo(dispatch: TeamMemberSendDispatch): 
     name: TEAM_MEMBER_SEND_TOOL_NAME,
     description: `Team member task_send. ${native.description}`,
     // The SAME original static schema object; decoding is checked below, never assumed.
-    input: native.parameters as unknown as ToolInfo["input"],
+    input: strictPublicInput(native.parameters),
     options: { codemode: false, permission: TEAM_MEMBER_SEND_PERMISSION },
     execute: (input, context) => Effect.tryPromise({
       try: async () => {
-        if (!isMemberTaskSendInput(input)) throw new ToolError({ message: "Invalid team member send input" })
+        const params = validateInput(input)
         const call: TeamMemberSendCall = Object.freeze({ sessionID: context.sessionID, agent: context.agent, messageID: context.messageID, id: context.id })
-        return adaptNativeTaskResult(await dispatch(call, input))
+        return adaptNativeTaskResult(await dispatch(call, params))
       },
       catch: toToolError,
     }),

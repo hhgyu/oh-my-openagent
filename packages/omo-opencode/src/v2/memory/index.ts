@@ -36,6 +36,8 @@ import { createMemoryStatusRpc } from "./status-rpc"
 import { createMemorySyncRuntime } from "./sync/runtime"
 import { registerMemorySyncRpc } from "./sync/rpc"
 import type { MemorySyncSeams } from "./sync/ports"
+import { observeAcceptedCompactions } from "./compaction-events"
+import { createAcceptedTurns } from "./accepted-turns"
 
 export { MEMORY_BINDING_KEY } from "./binding"
 export { MEMORY_PART_MARKER, PROJECTION_PIN_KEY } from "./projection"
@@ -43,7 +45,7 @@ export { RECALL_PART_MARKER } from "./recall-delivery"
 export { MEMORY_COMMAND_NAMES, MEMORY_COMMAND_OUTPUT_KEY } from "./commands"
 export { MEMORY_COMMAND_OUTPUT_ID_PREFIX } from "./command-output"
 
-export type MemoryHost = Pick<Plugin.Context, "session" | "tool" | "options" | "location"> & Partial<Pick<Plugin.Context, "app" | "agent" | "command" | "rpc" | "model" | "provider" | "integration">>
+export type MemoryHost = Pick<Plugin.Context, "session" | "tool" | "options" | "location" | "event"> & Partial<Pick<Plugin.Context, "app" | "agent" | "command" | "rpc" | "model" | "provider" | "integration">>
 
 export interface MemoryComponentOptions {
   /** Environment for `OMO_MEMORY_HOME` and identity resolution; defaults to `process.env`. */
@@ -90,7 +92,7 @@ export interface MemoryComponentOptions {
  *   next bind enqueues a final delta and recovers stranded runs (see `./facts`).
  * - reflection worker -> an owned hidden `omo-reflection` child editing through four private tools, a parent
  *   runner that validates and merges its branch, and bind-time crash recovery (see `./reflection-component`);
- *   step-count and compaction triggers on `experimental.idle` / `compaction` (see `./reflection-triggers`)
+ *   step-count and compaction triggers on `experimental.idle` / `session.compaction.ended` (see `./reflection-triggers`)
  *   and `/reflect` (see `./reflect-command`); dreams through the same runner with the hidden `omo-dream` agent,
  *   an idle timer and a bind-time pressure origin (see `./dream-triggers`) and `/dream` (see `./dream-command`);
  *   the read-side commands `/doctor`, `/sleeptime`, `/people` (no `--ask`) and `/palace` over the memory-core
@@ -147,10 +149,9 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
   const isOwnedSession = (sessionID: string): boolean => kibitzer?.isKibitzerSession(sessionID) === true || facts?.isFactsSession(sessionID) === true || isReflectionSession(sessionID)
   const collector = createRecallCollector({ binder, stores, corpusCache, logger, ...(kibitzer === undefined ? {} : { judge: kibitzer }) })
   const delivery = createRecallDelivery({ binder, stores, collector, logger })
-  // Senpi persists this counter as a session entry; here it is process-local and restarts at 0 on reload.
-  const userTurns = new Map<string, number>()
+  const userTurns = createAcceptedTurns(binder, logger)
   const journal = createMemoryJournal({ binder, session: context.session, logger, isOwnedSession })
-  const hasUserActivity = (sessionID: string): boolean => (userTurns.get(sessionID) ?? 0) > 0
+  const hasUserActivity = userTurns.hasActivity
   const triggers = reflection === undefined ? undefined : createReflectionTriggers({
     resolve: sessionID => binder.resolve(sessionID), session: context.session, logger, hasUserActivity, isOwnedSession,
     evaluate: (bound, event) => reflection.evaluate(bound, event),
@@ -195,7 +196,7 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
     ],
   })
   const tools = createMemoryTools({
-    binder, userTurns: sessionID => userTurns.get(sessionID) ?? 0,
+    binder, userTurns: userTurns.turns,
     ...(options.lockWaitTimeoutMs === undefined ? {} : { lockWaitTimeoutMs: options.lockWaitTimeoutMs }),
     ...(options.lockRetryDelayMs === undefined ? {} : { lockRetryDelayMs: options.lockRetryDelayMs }),
   })
@@ -207,6 +208,7 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       closed = true
       const results = await Promise.allSettled(registrations.map(registration => registration.dispose()))
       await collector.idle()
+      await userTurns.settled()
       await Promise.allSettled([journal.settled(), commands?.settled()])
       if (facts !== undefined) results.push(...await Promise.allSettled([facts.close()]))
       // Triggers stop before the component closes, so no evaluation reserves a run after its children die.
@@ -224,19 +226,25 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       projection.clear()
       journal.clear()
       collector.clear()
-      userTurns.clear()
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
       if (failures.length > 0) throw new AggregateError(failures.map(failure => failure.reason), "Memory component cleanup failed")
     })()
     return disposal
   }
   try {
+    if (context.event !== undefined) registrations.push(userTurns.register(context.event))
+    registrations.push(observeAcceptedCompactions(context.event, async sessionID => {
+      if (closed || isOwnedSession(sessionID)) return
+      triggers?.onCompaction(sessionID)
+      const bound = await binder.resolve(sessionID)
+      // V2 holds accepted Kibitzer nudges only in this pending store; the resident sidecar survives.
+      if (bound !== undefined && !closed) await stores.pending(bound).delete(sessionID)
+    }, logger))
     registrations.push(await context.session.hook("prompt", input => {
       if (closed) return
       if (isOwnedSession(input.sessionID)) return
       dreams?.onPrompt(input.sessionID)
       facts?.onPrompt(input.sessionID)
-      userTurns.set(input.sessionID, (userTurns.get(input.sessionID) ?? 0) + 1)
       kibitzer?.onPrompt(input.sessionID, input.prompt.text)
       collector.observePrompt(input.sessionID, input.prompt.text)
     }))
@@ -270,6 +278,7 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       try {
         await projection.onContext(value)
         await delivery.onContext(value)
+        await userTurns.onContext(value)
       } catch (error) {
         logger.warn("memory context injection skipped", { sessionID: value.sessionID, error: describeError(error) })
       }
@@ -279,7 +288,6 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
       // A compaction request offers `tools` too: the same child-only exposure rules as the context hook.
       narrowRequestTools(value)
       projection.markCompacted(value.sessionID)
-      if (!closed) triggers?.onCompaction(value.sessionID)
       dreams?.onCompaction(value.sessionID)
     }))
     registrations.push(await context.session.hook("experimental.idle", async value => {

@@ -98,7 +98,9 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
         rpc: { handle: rpcHandle }, source: deviceAccount, memoryRoot, pinDir, signal: syncLifetime.signal,
         enabled: () => {
           const state = syncSessionId === undefined ? undefined : sessions.get(syncSessionId)
-          return state?.context !== undefined && state.syncEnabled === true
+          return state?.context === undefined
+            ? resolveMemoryConfig(loadConfig({ cwd: resolveCwd() })).sync.enabled
+            : state.syncEnabled === true
         },
         syncStatus: async () => {
           const repo = syncSessionId === undefined ? undefined : sessions.get(syncSessionId)?.context?.identityPaths.repo

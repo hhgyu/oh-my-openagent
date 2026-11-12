@@ -603,7 +603,8 @@
            },
            "description": "Batch of child tasks to spawn in one call. Empty provider padding is normalized before validation. Mutually exclusive with prompt; top-level category/subagent_type/model/load_skills are inherited by items that omit them. An item whose effective target is a category must not carry a model (own or inherited). run_in_background is batch-wide: set it once at the top level; item-level copies must agree."
           }
-         }
+         },
+         "additionalProperties": false
         }
        }
       },
@@ -644,7 +645,8 @@
                  "type": "string",
                  "description": "Optional shutdown request reason."
                 }
-               }
+               },
+               "additionalProperties": false
               },
               {
                "type": "object",
@@ -669,7 +671,8 @@
                  "type": "string",
                  "description": "Required when approve is false."
                 }
-               }
+               },
+               "additionalProperties": false
               }
              ]
             }
@@ -691,7 +694,8 @@
            "type": "boolean",
            "description": "Re-dispatch a flagged 'resumed, waiting for input' task onto a fresh live session, replaying its persisted prompt. Off by default; message is forbidden with it."
           }
-         }
+         },
+         "additionalProperties": false
         }
        }
       },
@@ -725,7 +729,8 @@
            "minimum": 1,
            "description": "Lines to keep in tail mode. Defaults to 60."
           }
-         }
+         },
+         "additionalProperties": false
         }
        }
       },
@@ -1551,7 +1556,8 @@
            },
            "description": "Batch of child tasks to spawn in one call. Empty provider padding is normalized before validation. Mutually exclusive with prompt; top-level category/subagent_type/model/load_skills are inherited by items that omit them. An item whose effective target is a category must not carry a model (own or inherited). run_in_background is batch-wide: set it once at the top level; item-level copies must agree."
           }
-         }
+         },
+         "additionalProperties": false
         }
        }
       },
@@ -1592,7 +1598,8 @@
                  "type": "string",
                  "description": "Optional shutdown request reason."
                 }
-               }
+               },
+               "additionalProperties": false
               },
               {
                "type": "object",
@@ -1617,7 +1624,8 @@
                  "type": "string",
                  "description": "Required when approve is false."
                 }
-               }
+               },
+               "additionalProperties": false
               }
              ]
             }
@@ -1639,7 +1647,8 @@
            "type": "boolean",
            "description": "Re-dispatch a flagged 'resumed, waiting for input' task onto a fresh live session, replaying its persisted prompt. Off by default; message is forbidden with it."
           }
-         }
+         },
+         "additionalProperties": false
         }
        }
       },
@@ -1673,7 +1682,8 @@
            "minimum": 1,
            "description": "Lines to keep in tail mode. Defaults to 60."
           }
-         }
+         },
+         "additionalProperties": false
         }
        }
       },
@@ -2512,7 +2522,8 @@
            },
            "description": "Batch of child tasks to spawn in one call. Empty provider padding is normalized before validation. Mutually exclusive with prompt; top-level category/subagent_type/model/load_skills are inherited by items that omit them. An item whose effective target is a category must not carry a model (own or inherited). run_in_background is batch-wide: set it once at the top level; item-level copies must agree."
           }
-         }
+         },
+         "additionalProperties": false
         }
        }
       },
@@ -2553,7 +2564,8 @@
                  "type": "string",
                  "description": "Optional shutdown request reason."
                 }
-               }
+               },
+               "additionalProperties": false
               },
               {
                "type": "object",
@@ -2578,7 +2590,8 @@
                  "type": "string",
                  "description": "Required when approve is false."
                 }
-               }
+               },
+               "additionalProperties": false
               }
              ]
             }
@@ -2600,7 +2613,8 @@
            "type": "boolean",
            "description": "Re-dispatch a flagged 'resumed, waiting for input' task onto a fresh live session, replaying its persisted prompt. Off by default; message is forbidden with it."
           }
-         }
+         },
+         "additionalProperties": false
         }
        }
       },
@@ -2634,7 +2648,8 @@
            "minimum": 1,
            "description": "Lines to keep in tail mode. Defaults to 60."
           }
-         }
+         },
+         "additionalProperties": false
         }
        }
       },
@@ -3412,7 +3427,8 @@
          },
          "description": "Batch of child tasks to spawn in one call. Empty provider padding is normalized before validation. Mutually exclusive with prompt; top-level category/subagent_type/model/load_skills are inherited by items that omit them. An item whose effective target is a category must not carry a model (own or inherited). run_in_background is batch-wide: set it once at the top level; item-level copies must agree."
         }
-       }
+       },
+       "additionalProperties": false
       }
      }
     },
@@ -3453,7 +3469,8 @@
                "type": "string",
                "description": "Optional shutdown request reason."
               }
-             }
+             },
+             "additionalProperties": false
             },
             {
              "type": "object",
@@ -3478,7 +3495,8 @@
                "type": "string",
                "description": "Required when approve is false."
               }
-             }
+             },
+             "additionalProperties": false
             }
            ]
           }
@@ -3500,7 +3518,8 @@
          "type": "boolean",
          "description": "Re-dispatch a flagged 'resumed, waiting for input' task onto a fresh live session, replaying its persisted prompt. Off by default; message is forbidden with it."
         }
-       }
+       },
+       "additionalProperties": false
       }
      }
     },
@@ -3534,7 +3553,8 @@
          "minimum": 1,
          "description": "Lines to keep in tail mode. Defaults to 60."
         }
-       }
+       },
+       "additionalProperties": false
       }
      }
     },
@@ -4291,7 +4311,8 @@
          },
          "description": "Batch of child tasks to spawn in one call. Empty provider padding is normalized before validation. Mutually exclusive with prompt; top-level category/subagent_type/model/load_skills are inherited by items that omit them. An item whose effective target is a category must not carry a model (own or inherited). run_in_background is batch-wide: set it once at the top level; item-level copies must agree."
         }
-       }
+       },
+       "additionalProperties": false
       }
      }
     },
@@ -4332,7 +4353,8 @@
                "type": "string",
                "description": "Optional shutdown request reason."
               }
-             }
+             },
+             "additionalProperties": false
             },
             {
              "type": "object",
@@ -4357,7 +4379,8 @@
                "type": "string",
                "description": "Required when approve is false."
               }
-             }
+             },
+             "additionalProperties": false
             }
            ]
           }
@@ -4379,7 +4402,8 @@
          "type": "boolean",
          "description": "Re-dispatch a flagged 'resumed, waiting for input' task onto a fresh live session, replaying its persisted prompt. Off by default; message is forbidden with it."
         }
-       }
+       },
+       "additionalProperties": false
       }
      }
     },
@@ -4413,7 +4437,8 @@
          "minimum": 1,
          "description": "Lines to keep in tail mode. Defaults to 60."
         }
-       }
+       },
+       "additionalProperties": false
       }
      }
     },
@@ -5170,7 +5195,8 @@
          },
          "description": "Batch of child tasks to spawn in one call. Empty provider padding is normalized before validation. Mutually exclusive with prompt; top-level category/subagent_type/model/load_skills are inherited by items that omit them. An item whose effective target is a category must not carry a model (own or inherited). run_in_background is batch-wide: set it once at the top level; item-level copies must agree."
         }
-       }
+       },
+       "additionalProperties": false
       }
      }
     },
@@ -5211,7 +5237,8 @@
                "type": "string",
                "description": "Optional shutdown request reason."
               }
-             }
+             },
+             "additionalProperties": false
             },
             {
              "type": "object",
@@ -5236,7 +5263,8 @@
                "type": "string",
                "description": "Required when approve is false."
               }
-             }
+             },
+             "additionalProperties": false
             }
            ]
           }
@@ -5258,7 +5286,8 @@
          "type": "boolean",
          "description": "Re-dispatch a flagged 'resumed, waiting for input' task onto a fresh live session, replaying its persisted prompt. Off by default; message is forbidden with it."
         }
-       }
+       },
+       "additionalProperties": false
       }
      }
     },
@@ -5292,7 +5321,8 @@
          "minimum": 1,
          "description": "Lines to keep in tail mode. Defaults to 60."
         }
-       }
+       },
+       "additionalProperties": false
       }
      }
     },

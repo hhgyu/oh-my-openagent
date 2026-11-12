@@ -5,7 +5,7 @@
 //   through `session.context`, the journal's own source: an error (aborted or failed), a `finish` of
 //   `error`, a retry still in flight, or no assistant answer after the last user message all skip the
 //   settle exactly as Senpi's `aborted` / `willRetry` / missing-outcome checks do;
-// - accepted `session_compact` -> `session.hook("compaction")` records `pendingCompaction`; nothing launches
+// - accepted `session_compact` -> `session.compaction.ended` records `pendingCompaction`; nothing launches
 //   from it. The NEXT successful settle evaluates `compaction_accepted` (memory-core persists
 //   `pending_compaction`), clears the flag, then evaluates `settled`;
 // - disabled reflection clears the flag and evaluates nothing, as Senpi's `enabled === false` branch does.
@@ -36,7 +36,7 @@ export interface ReflectionTriggerDeps {
 export interface ReflectionTriggers {
   /** `experimental.idle`, called after the journal reconcile of that idle; never blocks. */
   onIdle(sessionID: string): void
-  /** `session.hook("compaction")`: records the pending compaction for the next settle. */
+  /** `session.compaction.ended`: records the pending compaction for the next settle. */
   onCompaction(sessionID: string): void
   /** Resolves once every evaluation started so far has finished. */
   settled(): Promise<void>

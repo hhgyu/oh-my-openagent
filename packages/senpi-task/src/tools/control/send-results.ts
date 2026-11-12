@@ -1,6 +1,8 @@
 import type { SendManager, SendToolResult } from "./types"
 import { toolErrorResult, toolResult } from "./tool-result"
 import type { RedispatchOutcome } from "../../steering"
+import { TaskSendParams } from "./send-schema"
+import type { ToolArgumentDiagnostic } from "../argument-validation"
 
 export function mapRedispatchOutcome(manager: SendManager, outcome: RedispatchOutcome, callerSessionId: string | undefined): SendToolResult {
   switch (outcome.kind) {
@@ -28,7 +30,14 @@ export function mapRedispatchOutcome(manager: SendManager, outcome: RedispatchOu
   }
 }
 
-export function invalidArguments(reason: string): SendToolResult {
+export function invalidArguments(reason: string, fields?: readonly string[]): SendToolResult {
+  if (fields !== undefined) {
+    const diagnostic: ToolArgumentDiagnostic = {
+      code: "invalid_arguments", fields, expected_fields: Object.keys(TaskSendParams.properties),
+      issues: fields.map(field => ({ code: "invalid_field", path: `/${field.replaceAll(".", "/")}`, fields: [field] })),
+    }
+    return toolErrorResult(JSON.stringify({ reason, ...diagnostic }), { kind: "invalid_arguments", reason, diagnostic })
+  }
   return toolResult(reason, { kind: "invalid_arguments", reason })
 }
 export function notFound(manager: SendManager, reason: string, callerSessionId: string | undefined): SendToolResult {

@@ -3,6 +3,7 @@ import type * as Plugin from "@opencode/plugin/promise/plugin"
 import type { SessionContext, SessionPrompt } from "@opencode/plugin/promise/session"
 import { ULTRAWORK_DEFAULT_PROMPT, ULTRAWORK_GPT_PROMPT } from "@oh-my-opencode/prompts-core"
 import { registerUltrawork } from "./index"
+import { registerTodoFanoutReminder } from "../todo-fanout-reminder"
 
 type Host = Pick<Plugin.Context, "session" | "options">
 
@@ -19,6 +20,16 @@ function fixture(options: { children?: string[]; hostOptions?: Record<string, un
       },
       get: async ({ sessionID }: { sessionID: string }) => ({ id: sessionID, parentID: options.children?.includes(sessionID) ? "parent" : undefined }),
     },
+    tool: { hook: async (name: string, callback: (input: unknown) => unknown) => {
+      hooks.set(`tool:${name}`, callback)
+      return { dispose: async () => { hooks.delete(`tool:${name}`) } }
+    } },
+    event: { subscribe: ({ signal }: { signal: AbortSignal }) => ({ [Symbol.asyncIterator]() { return {
+      async next() {
+        await new Promise<void>(resolve => { if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true }) })
+        return { done: true, value: undefined }
+      },
+    } } }) },
   } as unknown as Host
   async function prompt(sessionID: string, text: string, skills?: { id: string }[]) {
     const input = { sessionID, messageID: "m", delivery: "queue", prompt: { text, ...(skills ? { skills } : {}) } } as unknown as SessionPrompt
@@ -102,6 +113,37 @@ describe("registerUltrawork", () => {
   })
 
   describe("#given registration lifecycle", () => {
+    test("#when ultrawork arms the session #then fanout consumes the same ledger and does not repeat its reminder after a generation handover", async () => {
+      const f = fixture()
+      const first = await registerUltrawork(f.host)
+      await f.prompt("shared", "ulw work")
+      const fanoutHost = f.host as unknown as Parameters<typeof registerTodoFanoutReminder>[0]
+      const fanout = await registerTodoFanoutReminder(fanoutHost)
+      const result = () => ({ tool: "todowrite", sessionID: "shared", input: { todos: [{ content: "work" }] }, status: "completed", result: { content: [{ type: "text", text: "ok" }] } })
+      const initial = result()
+      await f.hooks.get("tool:execute.after")?.(initial)
+      expect(initial.result.content).toHaveLength(2)
+      await first(); await fanout()
+      const next = await registerUltrawork(f.host)
+      const nextFanout = await registerTodoFanoutReminder(fanoutHost)
+      const repeated = result()
+      await f.hooks.get("tool:execute.after")?.(repeated)
+      expect(f.request("shared")).toHaveLength(1)
+      expect(repeated.result.content).toHaveLength(1)
+      await next(); await nextFanout()
+    })
+
+    test("#when a plugin generation is replaced #then the same session retains its directive without repeating the keyword", async () => {
+      const f = fixture()
+      const first = await registerUltrawork(f.host)
+      await f.prompt("handover", "ulw work")
+      await first()
+      const second = await registerUltrawork(f.host)
+      await f.prompt("handover", "continue")
+      expect(f.request("handover")).toHaveLength(1)
+      await second()
+    })
+
     test("#when cleanup runs twice #then both hooks are disposed once and injection stops", async () => {
       const f = fixture()
       const cleanup = await registerUltrawork(f.host)

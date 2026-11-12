@@ -1,6 +1,7 @@
 import type { defineTool, ToolDefinition } from "@code-yeongyu/senpi"
 import { log } from "@oh-my-opencode/utils"
 import type { TSchema } from "typebox"
+import { createToolArgumentValidator } from "../argument-validation"
 
 import { settledWithin } from "../../manager/settled-within"
 import { runTeamSend } from "../team/messaging"
@@ -149,17 +150,17 @@ async function sendNow(
 
   if (params.message !== undefined) return routeStructuredMessage(params.to, params.message, params, teamRouting)
 
-  return invalidArguments("message is required")
+  return invalidArguments("message is required", ["message"])
 }
 
 function validateParams(params: TaskSendInput): SendToolResult | undefined {
   if (params.redispatch === true && params.message !== undefined) {
-    return invalidArguments("redispatch replays the task's persisted prompt; message is forbidden with redispatch:true")
+    return invalidArguments("redispatch replays the task's persisted prompt; message is forbidden with redispatch:true", ["message", "redispatch"])
   }
   const message = params.message
-  if (message === undefined && params.redispatch !== true) return invalidArguments("message is required")
+  if (message === undefined && params.redispatch !== true) return invalidArguments("message is required", ["message"])
   if (isShutdownRejectWithoutReason(message)) {
-    return invalidArguments("reason is required when rejecting a shutdown")
+    return invalidArguments("reason is required when rejecting a shutdown", ["message.reason"])
   }
   return undefined
 }
@@ -185,6 +186,7 @@ export function createTaskSendTool(deps: TaskSendDeps): ToolDefinition<typeof Ta
     label: "Task Send",
     description: DESCRIPTION,
     parameters: TaskSendParams,
+    prepareArguments: createToolArgumentValidator(TaskSendParams),
     execute: (_toolCallId, params, signal, _onUpdate, ctx) => runTaskSend(deps.manager, params, resolveCaller(ctx), deps.teamRouting, {
       ...(signal === undefined ? {} : { signal }),
       ...(deps.deliverLateOutcome === undefined ? {} : { deliverLateOutcome: deps.deliverLateOutcome }),
@@ -220,6 +222,7 @@ export function createMemberScopedTaskSendTool(
     label: "Task Send",
     description: MEMBER_SCOPED_DESCRIPTION,
     parameters: MemberScopedTaskSendParams,
+    prepareArguments: createToolArgumentValidator(MemberScopedTaskSendParams),
     execute: (_toolCallId, params: MemberScopedTaskSendInput, signal, _onUpdate, ctx) =>
       runTaskSend(deps.manager, params, resolveCaller(ctx), {
         service: deps.service,

@@ -49,6 +49,7 @@ export interface MemoryFixture {
   toolAfter(sessionID: string, tool: string, input: unknown, output: string, id?: string): Promise<void>
   /** Runs the `compaction` hook; `tools` is the request's tool map, narrowed in place. */
   compaction(sessionID: string, messages?: { id?: string }[], tools?: Record<string, { description: string; input: Record<string, unknown> }>): Promise<void>
+  emitEvent(type: "session.compaction.ended" | "session.compaction.failed" | "session.execution.interrupted", sessionID: string): Promise<void>
   /** Runs the `context` hook over these model-request messages and returns them as the hook left them. */
   requestMessages(sessionID: string, messages: { id?: string }[]): Promise<{ id?: string }[]>
   idle(sessionID: string): Promise<void>
@@ -73,11 +74,40 @@ export function createMemoryFixture(settings: Record<string, unknown> = {}): Mem
   const rpcs = new Map<string, RegisteredRpc>()
   const sync: SyncRecord = { loads: 0, acquired: [], released: [], disposed: 0 }
   const failures: { synthetic: ((input: SyntheticPost) => Error | undefined) | undefined } = { synthetic: undefined }
+  type FixtureEvent = { type: string; data: { sessionID: string; inboxID?: string; item?: { type: string } } }
+  const subscribers = new Set<(event: FixtureEvent) => Promise<void>>()
   let disposed = 0
   const registration = (key: string) => ({ dispose: async () => { disposed++; hooks.delete(key) } })
   const host = {
     options: {},
     location: { directory: project },
+    event: {
+      subscribe({ signal }: { signal: AbortSignal }) {
+        return (async function* () {
+          const queued: { event: FixtureEvent; done: () => void }[] = []
+          let wake: (() => void) | undefined
+          const send = (event: FixtureEvent) => new Promise<void>(done => {
+            queued.push({ event, done })
+            wake?.()
+          })
+          const abort = () => wake?.()
+          subscribers.add(send)
+          signal.addEventListener("abort", abort)
+          try {
+            while (!signal.aborted) {
+              if (queued.length === 0) await new Promise<void>(resolve => { wake = resolve })
+              const next = queued.shift()
+              if (next === undefined) continue
+              try { yield next.event } finally { next.done() }
+            }
+          } finally {
+            subscribers.delete(send)
+            signal.removeEventListener("abort", abort)
+            for (const next of queued) next.done()
+          }
+        })()
+      },
+    },
     session: {
       get: async ({ sessionID }: { sessionID: string }) => {
         const session = sessions.get(sessionID)
@@ -143,12 +173,19 @@ export function createMemoryFixture(settings: Record<string, unknown> = {}): Mem
     addSession(id: string, extra: Partial<FakeSession> = {}) {
       sessions.set(id, { id, directory: project, ...extra })
     },
-    prompt: (sessionID: string, text: string) => call("session:prompt", { sessionID, messageID: "m1", prompt: { text }, delivery: "immediate" }),
+    async prompt(sessionID: string, text: string) {
+      const messageID = crypto.randomUUID()
+      await call("session:prompt", { sessionID, messageID, prompt: { text }, delivery: "immediate" })
+      await Promise.all([...subscribers].map(send => send({ type: "session.inbox.enqueued", data: { sessionID, inboxID: messageID, item: { type: "user" } } })))
+    },
     toolBefore: (sessionID: string, tool: string, input: unknown, id = "c1") => call("tool:execute.before", { tool, sessionID, agent: "build", messageID: "m1", id, input }),
     toolAfter: (sessionID: string, tool: string, input: unknown, output: string, id = "c1") =>
       call("tool:execute.after", { tool, sessionID, agent: "build", messageID: "m1", id, input, status: "completed", result: { content: output } }),
     compaction: (sessionID: string, messages: { id?: string }[] = [], tools: Record<string, { description: string; input: Record<string, unknown> }> = {}) =>
       call("session:compaction", { sessionID, system: [], tools, messages }),
+    async emitEvent(type, sessionID) {
+      await Promise.all([...subscribers].map(send => send({ type, data: { sessionID } })))
+    },
     async requestMessages(sessionID: string, messages: { id?: string }[]) {
       await call("session:context", { sessionID, system: [], tools: {}, messages })
       return messages

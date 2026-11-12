@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "@code-yeongyu/senpi"
 import { Type } from "typebox"
 import type { Static } from "typebox"
+import { createToolArgumentValidator } from "../argument-validation"
 
 import { TASK_SUMMARY_MAX_LENGTH } from "../../task-summary"
 import { SenpiTeamRuntimeError, SenpiTeamSpecError } from "../../team"
@@ -54,12 +55,12 @@ export const TeamCreateParams = Type.Object({
       description: "Inline team spec, e.g. { name, members: [{ name, category|subagent_type, prompt? }] }. A JSON string of the same object is also accepted and parsed automatically. Takes precedence when team_name is also provided.",
     }),
   ),
-})
+}, { additionalProperties: false })
 
 export const TeamDeleteParams = Type.Object({
   team_run_id: Type.String({ description: "Team run id to delete." }),
   force: Type.Optional(Type.Boolean({ description: "Tear the run down even while members are still active." })),
-})
+}, { additionalProperties: false })
 
 export type TeamCreateInput = Static<typeof TeamCreateParams>
 export type TeamDeleteInput = Static<typeof TeamDeleteParams>
@@ -202,6 +203,7 @@ export function createTeamCreateTool(deps: TeamToolDeps): ToolDefinition<typeof 
     label: "Team Create",
     description: CREATE_DESCRIPTION,
     parameters: TeamCreateParams,
+    prepareArguments: createToolArgumentValidator(TeamCreateParams),
     ...teamSearchMeta("create a named team of cooperating agents from an inline spec, run several agents in parallel as a team", ["create team", "team run", "start a team", "cooperating agents", "inline team spec"]),
     execute: (_toolCallId: string, params: TeamCreateInput) => runTeamCreate(deps.service, params),
     renderCall: (args, theme) => renderTeamCreateCall(args, theme),
@@ -215,6 +217,7 @@ export function createTeamDeleteTool(deps: TeamToolDeps): ToolDefinition<typeof 
     label: "Team Delete",
     description: DELETE_DESCRIPTION,
     parameters: TeamDeleteParams,
+    prepareArguments: createToolArgumentValidator(TeamDeleteParams),
     ...teamSearchMeta("tear down a finished team run and cancel its members", ["delete team", "end the team run", "teardown team"]),
     execute: (_toolCallId: string, params: TeamDeleteInput) => runTeamDelete(deps.service, params),
     renderCall: (args, theme) => renderTeamDeleteCall(args, theme),

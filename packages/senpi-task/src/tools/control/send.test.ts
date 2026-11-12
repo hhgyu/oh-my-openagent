@@ -94,7 +94,10 @@ describe("runTaskSend", () => {
 
     const result = await runTaskSend(manager, { to: "alpha" }, "lead-session")
 
-    expect(result.details).toEqual({ kind: "invalid_arguments", reason: "message is required" })
+    expect(result.details).toMatchObject({ kind: "invalid_arguments", diagnostic: {
+      code: "invalid_arguments", fields: ["message"], expected_fields: ["to", "message", "team_run_id", "summary", "all_scope", "redispatch"],
+    } })
+    expect(result.isError).toBe(true)
     expect(sendCalls).toEqual([])
   })
 

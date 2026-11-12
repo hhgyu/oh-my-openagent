@@ -46,7 +46,7 @@ export interface MemoryToolsDeps {
   readonly lockWaitTimeoutMs?: number
   readonly lockRetryDelayMs?: number
   /** User turns observed for this session; becomes the Omo-Session/Omo-Turn commit trailers. */
-  readonly userTurns?: (sessionID: string) => number
+  readonly userTurns?: (sessionID: string) => number | Promise<number>
 }
 
 export function createMemoryTools(deps: MemoryToolsDeps): readonly [Info<typeof memoryInput>, Info<typeof applyPatchInput>] {
@@ -55,7 +55,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): readonly [Info<typeof 
     if (bound === undefined) throw new ToolError({ message: `${tool}: ${UNBOUND_MEMORY_MESSAGE}` })
     try {
       const { repo, lock } = await prepareWrite(bound, caller.sessionID, deps)
-      const provenance = deps.userTurns ? { provenance: { sessionId: caller.sessionID, userTurns: deps.userTurns(caller.sessionID) } } : {}
+      const provenance = deps.userTurns ? { provenance: { sessionId: caller.sessionID, userTurns: await deps.userTurns(caller.sessionID) } } : {}
       const result = await runMemoryTool({ repo, lock, params: { ...params, author: { agentId: bound.identity, authorName: bound.identity }, ...provenance } })
       return { content: result.message, metadata: result.commit === undefined ? {} : { commit: result.commit.sha, paths: [...result.commit.affectedPaths] } }
     } catch (error) {

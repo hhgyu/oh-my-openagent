@@ -11,7 +11,7 @@ import { join } from "node:path"
 import { GitMemoryRepo, resolveMemoryIdentity } from "@oh-my-opencode/memory-core"
 
 import { ensureIdentityRuntimeDirs } from "./context"
-import type { DeviceAccountSource } from "@oh-my-opencode/memory-core/sync-runner"
+import type { DeviceAccountSource, SyncRpcContext, SyncRpcRegistration } from "@oh-my-opencode/memory-core/sync-runner"
 import { createMemoryComponent } from "./index"
 import { MemoryFakeExtensionAPI, componentContext, loadedMemoryConfig, memorySettings } from "./memory.test-support"
 import { SYNC_IDLE_NO_DEVICE_SESSION, SYNC_IDLE_NOT_JOINED } from "@oh-my-opencode/memory-core/sync-runner"
@@ -80,6 +80,41 @@ async function syncLinesAfterBind(source: DeviceAccountSource): Promise<{ readon
 }
 
 describe("the production device-session resolver, through the real memory component", () => {
+  test("#given an unbound engine #when sync config changes #then status follows current engine-cwd config before resolving the source", async () => {
+    const root = realpathSync.native(await mkdtemp(join(tmpdir(), "omo-memory-unbound-sync-")))
+    roots.push(root)
+    const handlers = new Map<string, Parameters<SyncRpcRegistration["handle"]>[1]>()
+    const pi = Object.assign(new MemoryFakeExtensionAPI(), { rpc: {
+      emit() {},
+      handle(name: string, handler: Parameters<SyncRpcRegistration["handle"]>[1]) { handlers.set(name, handler) },
+    } })
+    let enabled = true, sourceCalls = 0, cwd = join(root, "first-project")
+    const configReads: (string | undefined)[] = []
+    const settings = memorySettings()
+    createMemoryComponent({
+      env: { OMO_MEMORY_HOME: join(root, "memory") },
+      resolveCwd: () => cwd,
+      loadConfig: options => {
+        configReads.push(options?.cwd)
+        return loadedMemoryConfig(memorySettings({ sync: { ...settings.sync, enabled } }))
+      },
+      deviceAccount: async () => { sourceCalls += 1; return null },
+      sweepTransientRuns: async () => ({ removedRuns: 0, removedIdentities: 0, promoted: 0, stranded: 0, kept: 0 }),
+    }).register(pi, componentContext())
+    cleanups.push(async () => { await pi.dispatch("session_shutdown", { type: "session_shutdown" }, sessionEventContext()) })
+    const status = handlers.get("omo.memory.sync.status")
+    if (status === undefined) throw new Error("sync status RPC was not registered")
+    const owner: SyncRpcContext = { ownerId: "unbound-engine", disconnectSignal: new AbortController().signal, admit: dispatch => dispatch() }
+    cwd = join(root, "current-project")
+    for (const setting of [true, false, true]) {
+      enabled = setting
+      const before = sourceCalls
+      expect(await status({}, owner)).toMatchObject({ kind: setting ? "unavailable" : "disabled" })
+      expect(sourceCalls - before).toBe(setting ? 1 : 0)
+      expect(configReads.at(-1)).toBe(cwd)
+    }
+  })
+
   test("#given a signed-in device that never joined the account's memory #when a session binds #then sync reports not-joined, not 'no device session'", async () => {
     const lines = await syncLinesAfterBind(signedIn)
     expect(lines.map((line) => line.message)).toEqual([SYNC_IDLE_NOT_JOINED])
