@@ -96,6 +96,10 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
       const rpcHandle = pi.rpc?.handle?.bind(pi.rpc)
       const syncRpc = rpcHandle === undefined ? undefined : wireSyncRpc({
         rpc: { handle: rpcHandle }, source: deviceAccount, memoryRoot, pinDir, signal: syncLifetime.signal,
+        enabled: () => {
+          const state = syncSessionId === undefined ? undefined : sessions.get(syncSessionId)
+          return state?.context !== undefined && state.syncEnabled === true
+        },
         syncStatus: async () => {
           const repo = syncSessionId === undefined ? undefined : sessions.get(syncSessionId)?.context?.identityPaths.repo
           return repo === undefined ? undefined : readMemoryRpcSync((path) => syncRunner.status(path), repo)

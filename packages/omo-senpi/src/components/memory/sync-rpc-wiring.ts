@@ -11,6 +11,7 @@ export function wireSyncRpc(options: {
   readonly pinDir: string
   readonly signal: AbortSignal
   readonly syncStatus: () => Promise<MemoryRpcSync | undefined>
+  readonly enabled?: () => boolean
 }) {
   return registerSyncRpc(options.rpc, {
     source: async () => {
@@ -28,5 +29,6 @@ export function wireSyncRpc(options: {
     pinDir: options.pinDir,
     signal: options.signal,
     syncStatus: options.syncStatus,
+    enabled: options.enabled,
   })
 }
