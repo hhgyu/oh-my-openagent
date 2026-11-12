@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { resolveMemoryIdentity } from "@oh-my-opencode/memory-core"
 import { registerMemoryComponent } from "../index"
 import { createMemoryFixture, type MemoryFixture } from "../test-support"
 import { MEMORY_SYNC_RPC_ID } from "./rpc"
@@ -8,8 +9,8 @@ const kindOf = (answer: unknown): unknown => typeof answer === "object" && answe
 afterEach(() => { for (const fixture of fixtures.splice(0)) fixture.cleanup() })
 
 /** The real lazily loaded sync host and memory-core coordinator over a signed-out device: no keyring, no network. */
-async function signedOut() {
-  const f = createMemoryFixture()
+async function signedOut(settings: Record<string, unknown> = {}) {
+  const f = createMemoryFixture(settings)
   fixtures.push(f)
   const cleanup = await registerMemoryComponent(f.host, f.options({ sync: { accountSource: async () => null } }))
   const registered = f.rpcs.get(MEMORY_SYNC_RPC_ID)
@@ -23,6 +24,19 @@ async function signedOut() {
 }
 
 describe("omo.memory.sync RPC", () => {
+  for (const settings of [{ sync: { enabled: false } }, { agent: "me", agents: { [resolveMemoryIdentity("me", ".", {}).id]: { sync: { enabled: false } } } }]) {
+    test(`#given disabled sync ${JSON.stringify(settings)} #when RPCs run before and after binding #then the real coordinator answers disabled and sync_disabled`, async () => {
+      const { f, cleanup, call } = await signedOut(settings)
+      try {
+        for (const bind of [false, true]) {
+          if (bind) { f.addSession("a"); await f.prompt("a", "hello"); await f.context("a") }
+          expect(await call("status", {})).toMatchObject({ kind: "disabled" })
+          expect(await call("devices", {})).toMatchObject({ kind: "disabled" })
+          expect(await call("enable", {})).toMatchObject({ kind: "refused", code: "sync_disabled" })
+        }
+      } finally { await cleanup() }
+    })
+  }
   test("#given the memory component #when it registers #then omo.memory.sync carries Senpi's five methods and no events", async () => {
     // given
     const { cleanup, registered } = await signedOut()

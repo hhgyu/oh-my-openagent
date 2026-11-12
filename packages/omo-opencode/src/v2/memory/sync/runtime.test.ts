@@ -104,7 +104,7 @@ describe("V2 memory sync lifecycle", () => {
     expect(f.sync.acquired).toEqual([])
   })
 
-  test("#given memory.sync.enabled is false #when an omo.memory.sync verb is called #then it is still served, as on Native", async () => {
+  test("#given memory.sync.enabled is false #when an omo.memory.sync verb is called #then the coordinator remains reachable without acquiring sync", async () => {
     // given
     const f = fixture({ sync: { enabled: false } })
     const cleanup = await registerMemoryComponent(f.host, f.options())

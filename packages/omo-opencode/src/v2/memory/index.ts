@@ -1,4 +1,4 @@
-import { RecallCorpusCache } from "@oh-my-opencode/memory-core"
+import { RecallCorpusCache, isAutoAgentValue, resolveAutoIdentity, resolveMemoryIdentity } from "@oh-my-opencode/memory-core"
 import type { OmoMemorySettings } from "@oh-my-opencode/omo-config-core"
 import type * as Plugin from "@opencode/plugin/promise/plugin"
 import type { Registration } from "@opencode/plugin/promise/registration"
@@ -109,7 +109,8 @@ export interface MemoryComponentOptions {
  */
 export async function registerMemoryComponent(context: MemoryHost, options: MemoryComponentOptions = {}): Promise<() => Promise<void>> {
   const loadSettings = options.loadSettings ?? loadMemorySettings
-  if (!memoryComponentEnabled(loadSettings(context.location.directory), context.options)) return async () => {}
+  const initialSettings = loadSettings(context.location.directory)
+  if (!memoryComponentEnabled(initialSettings, context.options)) return async () => {}
   const logger = options.logger ?? consoleMemoryLogger
   const now = options.now ?? Date.now
   const metadata = createSessionMetadataStore(context.session)
@@ -167,6 +168,12 @@ export async function registerMemoryComponent(context: MemoryHost, options: Memo
   const memoryRoot = resolveSafeMemoryRoot(env, context.location.directory, options.home)
   const statusRpc = createMemoryStatusRpc({ syncStatus: async repo => sync?.status(repo), logger })
   const sync = !memoryRoot.ok ? undefined : createMemorySyncRuntime({
+    initialBinding: {
+      settings: initialSettings,
+      identity: (isAutoAgentValue(initialSettings.agent)
+        ? resolveAutoIdentity(context.location.directory, { ...env }, initialSettings.auto_identity)
+        : resolveMemoryIdentity(initialSettings.agent, context.location.directory, { ...env })).id,
+    },
     env, memoryRoot: memoryRoot.root, logger, onRepoChanged: repo => statusRpc.refreshRepo(repo),
     ...(options.sync === undefined ? {} : { seams: options.sync }),
   })

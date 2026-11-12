@@ -1,9 +1,11 @@
 import type { ApproveOutcome } from "../engine"
-import type { SyncEnableResponse, SyncRpcProblem } from "./sync-rpc-contract"
+import type { SyncEnableResponse, SyncRpcProblem, SyncRpcDisabled } from "./sync-rpc-contract"
 import type { SyncRpcAccount, SyncRpcAuthority, SyncRpcClaim, SyncRpcContext, SyncRpcOperation, SyncRpcOptions } from "./sync-rpc-ports"
 
 export const unavailable = (): SyncRpcProblem => ({ kind: "unavailable", reason: "Memory sync authority is unavailable." })
 export const refused = (): SyncRpcProblem => ({ kind: "refused", reason: "This sync operation is no longer available to this connection." })
+export const disabled = (): SyncRpcDisabled => ({ kind: "disabled", reason: "Memory sync is disabled for this identity." })
+export const syncDisabled = (): SyncRpcProblem => ({ kind: "refused", code: "sync_disabled", reason: "Turn on memory.sync.enabled (and this identity's agents.<id>.sync.enabled override) to use memory sync." })
 export function serviceProblem(error: unknown): SyncRpcProblem {
   return error instanceof Error && error.name === "AccountHttpError" && "status" in error
     && typeof error.status === "number" && error.status >= 400 && error.status < 500

@@ -25,6 +25,7 @@ export interface SyncHostOptions {
   readonly onHeadChange: (repo: string) => void
   /** The `sync` field the `omo.memory.sync` status verb reports. */
   readonly syncStatus: () => Promise<MemoryRpcSync | undefined>
+  readonly enabled?: () => boolean
   /** The signed-in device; defaults to the CLI account source over the service-auth credential store. */
   readonly source?: DeviceAccountSource
 }
