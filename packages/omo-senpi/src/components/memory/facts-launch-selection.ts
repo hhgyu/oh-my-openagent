@@ -5,7 +5,7 @@
 // "no failures recorded" would relaunch every parked batch forever, which is precisely the
 // incident (1088 attempts on one digest) the ledger exists to prevent.
 
-import { FactsFailuresCorruptError, type FactsFailuresFile } from "@oh-my-opencode/memory-core"
+import { FactsFailuresCorruptError, LockContentionError, type FactsFailuresFile } from "@oh-my-opencode/memory-core"
 
 /** The read slice of `FactsFailureStore`; test doubles implement just this. */
 export interface FactsFailureReadPort {
@@ -24,7 +24,7 @@ export function hasFailureReader(candidate: unknown): candidate is FactsFailureR
   )
 }
 
-/** Reads the ledger ONCE per launch attempt. A corrupt ledger returns `ok: false`. */
+/** Reads once per launch attempt. Busy defers to the next launch edge; unreadable data refuses. */
 export async function readLaunchableFailures(
   port: FactsFailureReadPort,
   warn: (message: string, fields: Readonly<Record<string, unknown>>) => void,
@@ -32,7 +32,9 @@ export async function readLaunchableFailures(
   try {
     return { ok: true, failures: await port.readFailures() }
   } catch (error) {
-    warn("facts failure ledger is unreadable; refusing to launch", {
+    warn(error instanceof LockContentionError
+      ? "facts failure ledger is busy; launch deferred"
+      : "facts failure ledger is unreadable; refusing to launch", {
       error: error instanceof Error ? error.name : "unknown",
       detail: error instanceof Error ? error.message : String(error),
       corrupt: error instanceof FactsFailuresCorruptError,
