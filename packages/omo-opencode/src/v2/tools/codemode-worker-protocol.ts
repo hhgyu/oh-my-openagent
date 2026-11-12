@@ -49,6 +49,8 @@ export interface HostToolParams {
   readonly name: string
   readonly params: unknown
   readonly capability?: CapabilityRef
+  /** The eval call whose cell is running in this session right now; absent for a detached cell. */
+  readonly toolCallId?: string
 }
 
 export interface KernelToolScope { readonly tools?: { readonly allow?: readonly string[]; readonly deny?: readonly string[] } }

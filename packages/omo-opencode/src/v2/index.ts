@@ -104,18 +104,22 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
       })
       cleanups.push(await runtime.register(context))
     }
+    // An eval cell's `tools.task` reaches the Native task component through this port (S9d).
+    const evalTask = owners.nativeTask && context.options?.["omo-native-eval-enabled"] !== false
+      ? await import("./tools/eval-task-host-tool").then(module => ({ port: module.createEvalTaskPort(), tool: module.createEvalTaskHostTool }))
+      : undefined
     if (context.options?.["omo-native-eval-enabled"] !== false) {
       // Native `eval`, on by default like Native. Registers the tool only; senpi-codemode itself
       // is imported on the first call.
       const { registerNativeEval } = await import("./tools/native-eval")
-      cleanups.push(await registerNativeEval(context))
+      cleanups.push(await registerNativeEval(context, evalTask ? { ownedTools: [evalTask.tool(evalTask.port)] } : {}))
     }
     if (owners.nativeTask) {
       const { registerNativeTaskComponent } = await import("./orchestration/native-task/component")
       // The lead team tools share the Native task component's registry, kernel and service.
       const team = nativeTeamEnabled(context.options) ? (await import("./orchestration/native-team/component")).registerNativeTeamComponent : undefined
       const dag = nativeDagEnabled(context.options) ? (await import("./orchestration/native-dag/component")).registerNativeDagComponent : undefined
-      cleanups.push(await registerNativeTaskComponent(context, owners.nativeTask, { ...(team && { team }), ...(dag && { dag }) }))
+      cleanups.push(await registerNativeTaskComponent(context, owners.nativeTask, { ...(team && { team }), ...(dag && { dag }), ...(evalTask && { evalTask: evalTask.port }) }))
     }
     cleanups.push(await registerBootstrap(context.rpc))
   } catch (error) {
