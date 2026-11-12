@@ -194,6 +194,92 @@ describe("facts extractor child", () => {
 })
 
 describe("facts reload recovery", () => {
+  test.each(["close", "location.shutdown"] as const)("#given final turns without idle #when %s runs #then every bound root is queued once without extraction", async edge => {
+    // given
+    const f = fixture({ facts: { debounce_settles: 10 } })
+    f.addSession("root")
+    f.addSession("other")
+    f.addSession("child", { parentID: "root" })
+    const { ports, cleanup } = await register(f)
+    for (const id of ["root", "other", "child"]) {
+      await f.context(id)
+      await f.idle(id)
+      await f.prompt(id, `Final preference ${id}`)
+      const session = f.sessions.get(id)
+      if (session !== undefined) session.messages = conversation(`Final preference ${id}`, "Noted.", id)
+    }
+    const queue = new FactsQueue({ identityPaths: identityPaths(f) })
+    expect(await queue.listPending()).toHaveLength(0)
+    // when
+    if (edge === "location.shutdown") {
+      await f.emitEvent(edge, "root")
+      await until(async () => (await queue.listPending()).length === 2)
+    }
+    await cleanup()
+    await cleanup()
+    // then
+    const pending = await queue.listPending()
+    expect(pending.map(entry => entry.sessionId).sort()).toEqual(["other", "root"])
+    expect(pending.flatMap(entry => entry.entries.flatMap(row => row.kind === "user" ? [row.text] : [])).sort()).toEqual(["Final preference other", "Final preference root"])
+    expect(ports.requests).toHaveLength(0)
+    // A rebind reconciles locally; the next accepted turn's settle launches the retained batches.
+    const next = await register(f)
+    await settle(f, "root", "Continue", "next")
+    const child = await next.ports.started(1)
+    expect(child.start.prompt).toContain("Final preference root")
+    expect(child.start.prompt).toContain("Final preference other")
+    child.finish()
+  })
+
+  test("#given a live extractor and an un-settled final turn #when close runs #then the child is cancelled and the final delta stays queued", async () => {
+    // given
+    const f = fixture()
+    f.addSession("root")
+    const { ports, cleanup } = await register(f)
+    await settle(f, "root")
+    const child = await ports.started(1)
+    await f.prompt("root", "Last turn")
+    const session = f.sessions.get("root")
+    if (session !== undefined) session.messages = [...(session.messages ?? []), ...conversation("Last turn", "Noted.", "last")]
+    // when
+    await cleanup()
+    // then
+    expect(child.disposed).toBe(true)
+    expect(ports.requests).toHaveLength(1)
+    const pending = await new FactsQueue({ identityPaths: identityPaths(f) }).listPending()
+    expect(pending.flatMap(entry => entry.entries).some(entry => entry.kind === "user" && entry.text === "Last turn")).toBe(true)
+  })
+
+  test("#given a final context read that stalls #when close exhausts its budget #then it warns and the next bind recovers without a late enqueue", async () => {
+    // given
+    const f = fixture({ facts: { debounce_settles: 10 } })
+    f.addSession("root")
+    const warnings: string[] = []
+    const ports = createScriptedFactsPorts()
+    const cleanup = await registerMemoryComponent(f.host, f.options({ logger: { warn: message => { warnings.push(message) } }, facts: { createPort: request => ports.createPort(request) } }))
+    cleanups.push(cleanup)
+    await f.context("root")
+    await f.idle("root")
+    const session = f.sessions.get("root")
+    if (session !== undefined) session.messages = conversation("Survives the deadline", "Noted.")
+    let release: () => void = () => undefined
+    const held = new Promise<void>(resolve => { release = resolve })
+    const original = f.host.session.context.bind(f.host.session)
+    const read = spyOn(f.host.session, "context").mockImplementation(async input => { await held; return original(input) })
+    // when
+    try { await cleanup() } finally { release(); read.mockRestore() }
+    // then
+    expect(warnings).toContain("facts shutdown drain hit its budget")
+    const queue = new FactsQueue({ identityPaths: identityPaths(f) })
+    expect(await queue.listPending()).toHaveLength(0)
+    const next = await register(f)
+    await settle(f, "root", "Continue after deadline", "next")
+    const recovered = await next.ports.started(1)
+    expect((await queue.listPending()).flatMap(entry => entry.entries).some(entry => entry.kind === "user" && entry.text === "Survives the deadline")).toBe(true)
+    recovered.finish()
+    expect(ports.requests).toHaveLength(0)
+  })
+
   async function strandedRun(f: MemoryFixture) {
     const first = await register(f)
     await settle(f, "root")
@@ -302,9 +388,10 @@ describe("facts skips", () => {
     // given
     const f = fixture({ facts: { enabled: false, debounce_settles: 1 } })
     f.addSession("root")
-    const { ports } = await register(f)
+    const { ports, cleanup } = await register(f)
     // when
     await settle(f, "root")
+    await cleanup()
     // then
     expect(await new FactsQueue({ identityPaths: identityPaths(f) }).listPending()).toHaveLength(0)
     expect(ports.requests).toHaveLength(0)
