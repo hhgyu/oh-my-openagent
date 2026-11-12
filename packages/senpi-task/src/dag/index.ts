@@ -126,6 +126,8 @@ export type { DagRecovery, DagRecoveryOptions, DagRecoveryOutcome, InstalledDagR
 export { createDagLeaseWatch, DAG_LEASE_WATCH_INTERVAL_MS } from "./recovery-lease-watch"
 export type { DagLeaseWatch, DagLeaseWatchOptions, DagLeaseWatchTimerHandle, DagLeaseWatchTimers } from "./recovery-lease-watch"
 
+export { createDagSkillMaterializer } from "./skills"
+
 export { resolveDagNodeExecutionMode } from "./execution-mode"
 export type { DagExecutionModeSources } from "./execution-mode"
 

@@ -8,12 +8,14 @@ import type { createToolKernel } from "../../host/tool-kernel"
 import type { ToolRegistry } from "../../host/tool-registry"
 import { createNativeDagBridge, type NativeDagTargets } from "../../tools/native-dag"
 import type { NativeTaskOperationCall } from "../../tools/native-task"
+import type { PreparedNativeTaskRuntime } from "../../tools/native-task-preparation"
 import { nativeTaskStateDir } from "../native-task/component"
 import type { NativeTaskTargetPermissionAssociation, createNativeTaskService } from "../native-task/service"
 import { discoverDagRoots } from "./discovery"
 import { createNativeDagGenerationLease } from "./lease"
 import type { NativeDagExecutionSources } from "./refusals"
 import { createNativeDagRuntime, type NativeDagRuntime } from "./runtime"
+import { nativeDagSkillAuthority } from "./skills"
 import { nativeDagCallPort } from "./task-port"
 import { createNativeDagWakeOwner, type DagWakeOptions } from "./wake"
 import { runNativeWorkflow } from "./workflow-call"
@@ -24,7 +26,7 @@ const TERMINAL_RUN: ReadonlySet<string> = new Set(["completed", "failed", "cance
 export interface NativeDagHost {
   readonly tool: ToolDomain
   readonly directory: string
-  readonly prepared: { readonly config: OmoConfig; readonly agents: NativeDagExecutionSources["agents"] }
+  readonly prepared: { readonly config: OmoConfig; readonly agents: NativeDagExecutionSources["agents"]; readonly authorizeSkills: PreparedNativeTaskRuntime["authorizeSkills"] }
   readonly registry: ToolRegistry
   readonly kernel: ReturnType<typeof createToolKernel>
   readonly service: ReturnType<typeof createNativeTaskService>
@@ -94,7 +96,11 @@ export function registerNativeDagComponent(host: NativeDagHost): NativeDagCompon
           // The V2 task tool's own spawn policy deps: no skill-invocation resolver, so plan-gated agents fail closed.
           const spawnPolicy: DagNodeSpawnPolicy = node => evaluateSpawnPolicy({ manager: call.operation.task, omoConfig: host.prepared.config,
             agents: host.prepared.agents }, node.subagentType, node.prompt, node.parentSessionId)
-          return params => runNativeWorkflow({ runtime, parentSessionID: caller.sessionID, executionMode,
+          // S2 per-call skill authorization for THIS caller (the root session and its agent), at call time.
+          const skillSignal = AbortSignal.any([caller.signal, call.signal])
+          const skills = nativeDagSkillAuthority({ store: runtime.store, cwd: host.directory,
+            authorize: names => host.prepared.authorizeSkills(caller, names, skillSignal) })
+          return params => runNativeWorkflow({ runtime, parentSessionID: caller.sessionID, executionMode, skills,
             call: { port: nativeDagCallPort(call.operation), signal: call.signal, spawnPolicy } }, params)
         },
         // The registry, scopes and service are released by the Native task component.

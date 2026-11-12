@@ -160,18 +160,6 @@ describe("OpenCode 2 workflow controls", () => {
     expect(dag.record(runId).definition.nodes.map(entry => entry.effectivePrompt)).toEqual(["amended prompt"])
   })
 
-  test("#given an amend whose node names skills #when called #then it is refused like start (S6g)", async () => {
-    // given
-    const dag = harness()
-    const runId = runIdOf((await dag.call({ action: "start", detach: true, definition: { key: "k", name: "k", nodes: [node("a")] } })).result)
-
-    // when
-    const { result } = await dag.call({ action: "amend", run_id: runId, definition: { key: "k", name: "k", nodes: [{ ...node("a"), load_skills: ["git-master"] }] } })
-
-    // then
-    expect(errorOf(result).code).toBe("invalid_definition")
-  })
-
   test("#given no live call path #when a control runs #then nothing acts: a returned call refuses and a run another call drives is refused", async () => {
     // given
     const dag = harness()

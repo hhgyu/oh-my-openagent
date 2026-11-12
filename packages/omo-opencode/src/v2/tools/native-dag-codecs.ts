@@ -38,6 +38,6 @@ export const NATIVE_DAG_DESCRIPTION = [
   "On OpenCode 2, nodes start only while a workflow call is in progress. start blocks until the run settles and returns its final snapshot; wait with detach=false blocks the same way.",
   "start with detach=true and wait (detach defaults to true) admit every node that can start now inside the call and return at once. A background run then advances ONLY on your next workflow call: when an admitted node finishes, the session is woken once, and you must call workflow with action=wait and that run_id to admit the next ready nodes or record the result. If a call is interrupted, the same wake applies.",
   "cancel, retry, send and amend act inside the call that names them. retry and amend re-enter the run: like wait, they admit the nodes that can start now and return (detach defaults to true), or block until the run settles with detach=false. cancel_node applies only to a run the user stopped, which OpenCode 2 does not have yet; use cancel for the whole run.",
-  "On OpenCode 2 these are not available yet and are refused: nodes that name load_skills, and nodes that resolve to process execution mode.",
+  "On OpenCode 2 a node's load_skills are checked against this session's skill permissions when start, amend or a retry with prompt runs: a denied skill fails that call and changes nothing. Nodes that resolve to process execution mode are refused.",
   "snapshot carries each settled node's own output plus outputBytes, and each running node's lastActivityAt.",
 ].join(" ")
