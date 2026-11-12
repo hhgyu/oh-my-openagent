@@ -169,7 +169,7 @@ export function renderTeamDeleteResult(
   const details = result.details
   if (details.kind === "deleted") {
     return component(
-      [{ color: "success", text: `team deleted run:${normalizeRendererText(details.team_run_id)} cancelled:${details.cancelled_task_ids.length}` }],
+      [{ color: "success", text: `team deleted run:${normalizeRendererText(details.team_run_id)} cancelled:${details.cancelled_task_ids.length} released:${details.released_task_ids.length}` }],
       theme,
     )
   }

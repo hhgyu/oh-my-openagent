@@ -69,6 +69,7 @@ interface ExecutedRun {
 export function createReflectionRunner(deps: ReflectionRunnerDeps) {
   async function execute(bound: BoundMemorySession, run: ReservedRun, input: Omit<ReflectionRunInput, "request">): Promise<ExecutedRun> {
     let model = input.model
+    let selection: Pick<ReflectionChildLaunch, "variant" | "fallbacks"> = {}
     if (model === undefined && deps.resolveModel !== undefined) {
       let resolution: ReflectionModelResolution
       try {
@@ -83,6 +84,7 @@ export function createReflectionRunner(deps: ReflectionRunnerDeps) {
         return settle(bound, run, { outcome: "failed", reason: "category_unavailable", detail }, true)
       }
       model = resolution.model
+      selection = { variant: resolution.variant, fallbacks: resolution.fallbacks }
     }
     const withWriterLock = memoryWriterLock(bound, deps.lockWaitTimeoutMs)
     let worktree: ReflectionWorktree | undefined
@@ -105,10 +107,12 @@ export function createReflectionRunner(deps: ReflectionRunnerDeps) {
         ...(prompt === undefined ? {} : { prompt }),
         deadlineMs: deps.deadlineMs ?? reflectionSettings(bound).timeout_minutes * 60_000,
         ...(model === undefined ? {} : { model }),
+        ...selection,
         ...(input.onCancel === undefined ? {} : { onCancel: input.onCancel }),
       }
       const child = await deps.launch(bound, launch)
       decision = await decideReflection({ run, worktree, child, withWriterLock, warn: deps.warn })
+      if (child.attemptedModels?.length) decision = { ...decision, detail: [decision.detail, `attempted models: ${child.attemptedModels.join(" -> ")}`].filter(Boolean).join("; ") }
     } catch (error) {
       decision = { outcome: "failed", reason: "runner_failed", detail: errorMessage(error) }
     }

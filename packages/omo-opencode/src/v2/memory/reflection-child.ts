@@ -12,7 +12,7 @@
 import { join } from "node:path"
 import { Model } from "@opencode/plugin"
 import type { Context } from "@opencode/plugin/promise/plugin"
-import type { SessionContext } from "@opencode/plugin/promise/session"
+import type { SessionContext, SessionRetry } from "@opencode/plugin/promise/session"
 import type { Info } from "@opencode/plugin/promise/tool"
 import type { ReflectionRequest } from "@oh-my-opencode/memory-core"
 import { createSessionScopes, type SessionLease } from "../host/session-state"
@@ -20,13 +20,15 @@ import type { SessionBackendApi } from "../host/session-backend"
 import { hasJoinedSessionCancellation } from "../host/session-cancellation"
 import type { BoundMemorySession } from "./binding"
 import {
-  createMemoryChildPort, settleWithin, type IssuedMemoryChild, type MemoryChildPermissions, type MemoryChildPort, type MemoryChildTimers,
+  createMemoryChildPort, type IssuedMemoryChild, type MemoryChildPermissions, type MemoryChildPort, type MemoryChildTimers,
   type MemoryChildTurnReport,
 } from "./memory-child-port"
 import { DREAM_AGENT_ID, REFLECTION_AGENT_ID, REFLECTION_PERMISSIONS } from "./reflection-agent"
 import { buildReflectionTaskPrompt } from "./reflection-persona"
 import { createReflectionRunScope, type ReflectionRunScope } from "./reflection-run-scope"
 import { createReflectionTools, REFLECTION_TOOL_NAMES } from "./reflection-tools"
+import type { ReflectionModelCandidate } from "./reflection-model-ladder"
+import { reflectionAttempt, retryableReflectionModelFailure } from "./reflection-model-retry"
 
 /** Backend identity of every reflection child locator; S7f's reclaim lists rows under it. */
 export const REFLECTION_BACKEND_ID = "omo-reflection-opencode"
@@ -62,15 +64,18 @@ export interface ReflectionChildLaunch {
   readonly prompt?: string
   /** `provider/model`; absent keeps the agent's own model. */
   readonly model?: string
+  readonly variant?: string
+  readonly fallbacks?: readonly ReflectionModelCandidate[]
   readonly deadlineMs: number
   /** Registers the parent's cancel; it closes the port (the child is interrupted and removed). */
   onCancel?(cancel: () => void): void
 }
 
-export type ReflectionChildResult =
+export type ReflectionChildResult = (
   | { readonly status: "completed"; readonly commits: readonly string[]; readonly report: MemoryChildTurnReport }
   | { readonly status: "failed" | "deadline"; readonly commits: readonly string[]; readonly detail: string }
   | { readonly status: "cancelled"; readonly commits: readonly string[] }
+  ) & { readonly attemptedModels?: readonly string[] }
 
 interface ReflectionChildHost {
   readonly app?: Context["app"]
@@ -90,7 +95,7 @@ function isBackendSession(session: object): session is SessionBackendApi {
 
 export function createReflectionChildHosting(deps: ReflectionChildHostingDeps) {
   const scopes = createSessionScopes()
-  const children = new Map<string, { readonly scope: ReflectionRunScope; readonly lease: SessionLease }>()
+  const children = new Map<string, { readonly scope: ReflectionRunScope; readonly lease: SessionLease; priorAssistant: boolean; retries: number; boundedRetry: boolean }>()
   let closed = false
 
   function resolve(sessionID: string): ReflectionRunScope | undefined {
@@ -121,27 +126,55 @@ export function createReflectionChildHosting(deps: ReflectionChildHostingDeps) {
     const request: ReflectionPortRequest = {
       bound, parentSessionId: input.parentSessionId, journalPath: reflectionChildJournalPath(bound),
       agent: input.request.trigger === "dream" ? DREAM_AGENT_ID : REFLECTION_AGENT_ID, permissions: REFLECTION_PERMISSIONS.map(rule => ({ ...rule })), toolNames: [...REFLECTION_TOOL_NAMES], scopes,
-      onIssued: child => { children.set(child.sessionID, { scope, lease: child.lease }) },
+      onIssued: child => { children.set(child.sessionID, { scope, lease: child.lease, priorAssistant: false, retries: 0, boundedRetry: (input.fallbacks?.length ?? 0) > 0 }) },
       onRetired: sessionID => { children.delete(sessionID) },
     }
-    const model = input.model === undefined ? undefined : Model.Ref.parse(input.model)
-    const port = deps.createPort?.(request) ?? productionPort(request)
+    const candidates = input.model === undefined ? [undefined] : [{ model: input.model, variant: input.variant }, ...(input.fallbacks ?? [])]
+    const attemptedModels: string[] = []
+    let port: MemoryChildPort | undefined
     let stopped = false
     input.onCancel?.(() => {
       stopped = true
       scope.deactivate()
-      void port.close().catch((error: unknown) => { deps.warn("reflection child cancel incomplete", { runId: input.runId, error: String(error) }) })
+      void port?.close().catch((error: unknown) => { deps.warn("reflection child cancel incomplete", { runId: input.runId, error: String(error) }) })
     })
+    const startedAt = Date.now()
     try {
-      const child = await port.start({ generation: 1, prompt: input.prompt ?? buildReflectionTaskPrompt(input.request), ...(model === undefined ? {} : { model }) })
-      const settled = await settleWithin(child, input.deadlineMs, deps.timers)
-      if (settled === "deadline") return { status: "deadline", commits: scope.commits(), detail: `reflection child did not settle within ${input.deadlineMs} ms` }
-      if (settled.status === "cancelled" || stopped) return { status: "cancelled", commits: scope.commits() }
-      if (settled.status === "error") return { status: "failed", commits: scope.commits(), detail: settled.message ?? "reflection child turn failed" }
-      return { status: "completed", commits: scope.commits(), report: settled }
+      for (const candidate of candidates) {
+        if (stopped || closed) return { status: "cancelled", commits: scope.commits(), attemptedModels }
+        if (candidate !== undefined && attemptedModels.includes(candidate.model)) continue
+        const remaining = input.deadlineMs - (Date.now() - startedAt)
+        if (remaining <= 0) return { status: "deadline", commits: scope.commits(), detail: "reflection model chain exhausted its deadline", attemptedModels }
+        if (candidate !== undefined) attemptedModels.push(candidate.model)
+        port = deps.createPort?.(request) ?? productionPort(request)
+        let failure: unknown
+        let detail = "reflection child turn failed"
+        let initial = true
+        try {
+          const model = candidate === undefined ? undefined : { ...Model.Ref.parse(candidate.model), ...(candidate.variant === undefined ? {} : { variant: candidate.variant as NonNullable<ReturnType<typeof Model.Ref.parse>["variant"]> }) }
+          const settled = await reflectionAttempt(port, { generation: attemptedModels.length || 1, prompt: input.prompt ?? buildReflectionTaskPrompt(input.request), ...(model === undefined ? {} : { model }) }, remaining, deps.timers)
+          if (settled === "deadline") return { status: "deadline", commits: scope.commits(), detail: `reflection child did not settle within ${input.deadlineMs} ms`, attemptedModels }
+          if (settled.status === "cancelled" || stopped) return { status: "cancelled", commits: scope.commits(), attemptedModels }
+          if (settled.status === "completed") return { status: "completed", commits: scope.commits(), report: settled, attemptedModels }
+          failure = settled.error ?? settled.message
+          detail = settled.message ?? detail
+        } catch (error) {
+          failure = error
+          detail = error instanceof Error ? error.message : String(error)
+        } finally {
+          initial = [...children.values()].filter(entry => entry.scope === scope).every(entry => !entry.priorAssistant)
+          await port.close()
+          port = undefined
+        }
+        if (!initial || scope.commits().length > 0 || !retryableReflectionModelFailure(failure)) return { status: "failed", commits: scope.commits(), detail, attemptedModels }
+        if (candidate === candidates.at(-1)) return { status: "failed", commits: scope.commits(), detail, attemptedModels }
+      }
+      return { status: "failed", commits: scope.commits(), detail: "reflection model candidates exhausted", attemptedModels }
+    } catch (error) {
+      return { status: "failed", commits: scope.commits(), detail: error instanceof Error ? error.message : String(error), attemptedModels }
     } finally {
       scope.deactivate()
-      await port.close().catch((error: unknown) => { deps.warn("reflection child cleanup incomplete", { runId: input.runId, error: String(error) }) })
+      await port?.close().catch((error: unknown) => { deps.warn("reflection child cleanup incomplete", { runId: input.runId, error: String(error) }) })
     }
   }
 
@@ -150,13 +183,23 @@ export function createReflectionChildHosting(deps: ReflectionChildHostingDeps) {
     isReflectionSession: (sessionID: string): boolean => children.has(sessionID),
     /** The four reflection tools, to add once through `tool.transform`. */
     tools: (): readonly Info[] => createReflectionTools(resolve),
+    /** Native memory-child chains allow one same-model retry before rotating to another rung. */
+    onRetry(value: SessionRetry): void {
+      const child = children.get(value.sessionID)
+      if (child === undefined || !child.boundedRetry || child.priorAssistant) return
+      child.retries += 1
+      if (child.retries > 1 || !retryableReflectionModelFailure(value.error)) value.decision = { retry: false }
+      else value.decision = { retry: true, delay: value.decision.retry ? Math.min(value.decision.delay, 2000) : 2000 }
+    },
     /** True when the request belongs to a reflection child (narrowed to its four tools; nothing else applies). */
-    onContext(value: Pick<SessionContext, "sessionID" | "tools">): boolean {
+    onContext(value: Pick<SessionContext, "sessionID" | "tools"> & Partial<Pick<SessionContext, "messages">>): boolean {
       const names = new Set<string>(REFLECTION_TOOL_NAMES)
       if (!children.has(value.sessionID)) {
         for (const name of names) Reflect.deleteProperty(value.tools, name)
         return false
       }
+      const child = children.get(value.sessionID)
+      if (child !== undefined && value.messages?.some(message => message.role === "assistant")) child.priorAssistant = true
       for (const name of Object.keys(value.tools)) if (!names.has(name)) Reflect.deleteProperty(value.tools, name)
       return true
     },

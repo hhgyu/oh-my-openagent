@@ -96,13 +96,13 @@ describe("team tool renderers", () => {
   })
 
   test("#given a deleted run and an invalid_state failure #when rendering the results #then success and error colors follow the kind", () => {
-    const deleted: TeamDeleteDetails = { kind: "deleted", team_run_id: "run-1", cancelled_task_ids: ["st_a", "st_b"] }
+    const deleted: TeamDeleteDetails = { kind: "deleted", team_run_id: "run-1", cancelled_task_ids: ["st_a", "st_b"], released_task_ids: ["st_c"] }
     const invalid: TeamDeleteDetails = { kind: "invalid_state", team_run_id: "run-1", code: "invalid_delete_state", reason: "cannot delete" }
 
     const [ok] = lines(renderTeamDeleteResult(toolResult("Deleted", deleted), RESULT_OPTIONS, TEST_THEME))
     const [bad] = lines(renderTeamDeleteResult(toolErrorResult("cannot delete", invalid), RESULT_OPTIONS, TEST_THEME))
 
-    expect(ok).toBe("[success]team deleted run:run-1 cancelled:2[/success]")
+    expect(ok).toBe("[success]team deleted run:run-1 cancelled:2 released:1[/success]")
     expect(bad).toBe("[error]team delete invalid_state code:invalid_delete_state reason:cannot delete[/error]")
   })
 

@@ -1,5 +1,7 @@
-import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
+import { afterEach, describe, expect, setDefaultTimeout, spyOn, test } from "bun:test"
 import { join } from "node:path"
+import { Model } from "@opencode/plugin"
+import type { SessionRetry } from "@opencode/plugin/promise/session"
 import { createScriptedFactsPorts } from "./facts.test-support"
 import { createManualTimers, flush } from "./kibitzer/test-support"
 import { REFLECTION_AGENT_ID, REFLECTION_PERMISSIONS } from "./reflection-agent"
@@ -30,6 +32,96 @@ async function setup() {
 const createInput = { command: "create", reason: "feat(reflection): tabs", file_path: "reference/tabs.md", description: "Indentation preference", file_text: "Tabs.\n" }
 
 describe("reflection child launcher", () => {
+  test("#given a retryable first request failure #then the next variant starts after cleanup and attempts are reported", async () => {
+    const { ports, launch } = await setup()
+    const running = launch({ model: "test/first", variant: "high", fallbacks: [{ model: "test/second", variant: "low" }] })
+    const first = await ports.started(1)
+    first.finish({ status: "error", message: "503: provider unavailable" })
+    await flush()
+    expect(ports.children).toHaveLength(2)
+    const second = ports.children[1]
+    expect(first.disposed).toBe(true)
+    expect(first.start.model).toMatchObject({ variant: "high" })
+    expect(second.start.model).toMatchObject({ id: "second", variant: "low" })
+    second.finish()
+    expect(await running).toMatchObject({ status: "completed", attemptedModels: ["test/first", "test/second"] })
+  })
+  test("#given a chained owned child #then only one same-model host retry is admitted and unrelated sessions are untouched", async () => {
+    const { hosting, ports, launch } = await setup()
+    const running = launch({ model: "test/first", fallbacks: [{ model: "test/second" }] })
+    const first = await ports.started(1)
+    const event = (sessionID: string) => ({ sessionID, agent: REFLECTION_AGENT_ID, model: Model.Ref.parse("test/first"), error: { name: "APIError", data: { statusCode: 503, message: "provider unavailable" } }, attempt: 1, decision: { retry: true, delay: 10_000 } }) as SessionRetry
+    const firstRetry = event(first.sessionID)
+    const nextRetry = event(first.sessionID)
+    const unrelated = event("ses_root")
+    hosting.onRetry(firstRetry)
+    hosting.onRetry(nextRetry)
+    hosting.onRetry(unrelated)
+    expect(firstRetry.decision).toEqual({ retry: true, delay: 2000 })
+    expect(nextRetry.decision).toEqual({ retry: false })
+    expect(unrelated.decision).toEqual({ retry: true, delay: 10_000 })
+    first.finish()
+    await running
+  })
+  test.each(["401: unauthorized", "400: invalid request", "403: rate limit permission denied"])("#given %s #then the next model is never started", async message => {
+    const { ports, launch } = await setup()
+    const running = launch({ model: "test/first", fallbacks: [{ model: "test/second" }] })
+    const first = await ports.started(1)
+    first.finish({ status: "error", message })
+    expect(await running).toMatchObject({ status: "failed", attemptedModels: ["test/first"] })
+    expect(ports.children).toHaveLength(1)
+    expect(first.disposed).toBe(true)
+  })
+  test("#given a model unavailable rejection at start #then cleanup precedes the next model", async () => {
+    const { ports, launch } = await setup()
+    const create = ports.createPort
+    let closed = false
+    let calls = 0
+    ports.createPort = request => {
+      if (calls++ > 0) { expect(closed).toBe(true); return create(request) }
+      return { start: async () => { throw Object.assign(new Error("model not found"), { statusCode: 404 }) }, close: async () => { closed = true } }
+    }
+    const running = launch({ model: "test/gone", fallbacks: [{ model: "test/second" }] })
+    const child = await ports.started(1)
+    child.finish()
+    expect(await running).toMatchObject({ status: "completed", attemptedModels: ["test/gone", "test/second"] })
+  })
+  test("#given a child start that never answers #then the run deadline still closes the port", async () => {
+    const { ports, timers, launch } = await setup()
+    let closed = false
+    ports.createPort = () => ({ start: () => new Promise(() => undefined), close: async () => { closed = true } })
+    const running = launch({ model: "test/first", deadlineMs: 1000, fallbacks: [{ model: "test/second" }] })
+    await flush()
+    timers.fire(1000)
+    expect(await running).toMatchObject({ status: "deadline", attemptedModels: ["test/first"] })
+    expect(closed).toBe(true)
+  })
+  test("#given time spent on the first rung #then the fallback only gets the remaining deadline", async () => {
+    const { ports, timers, launch } = await setup()
+    const now = spyOn(Date, "now").mockReturnValue(1000)
+    try {
+      const running = launch({ model: "test/first", deadlineMs: 1000, fallbacks: [{ model: "test/second" }] })
+      const first = await ports.started(1)
+      now.mockReturnValue(1700)
+      first.finish({ status: "error", message: "503: unavailable" })
+      const second = await ports.started(2)
+      await flush()
+      timers.fire(300)
+      expect(await running).toMatchObject({ status: "deadline", attemptedModels: ["test/first", "test/second"] })
+      expect(second.disposed).toBe(true)
+    } finally {
+      now.mockRestore()
+    }
+  })
+  test("#given a retryable failure after the first request #then no fallback replays prior work", async () => {
+    const { hosting, ports, launch } = await setup()
+    const running = launch({ model: "test/first", fallbacks: [{ model: "test/second" }] })
+    const first = await ports.started(1)
+    hosting.onContext({ sessionID: first.sessionID, tools: {}, messages: [{ role: "assistant", content: [{ type: "text", text: "Prior work" }] }] })
+    first.finish({ status: "error", message: "503: provider unavailable" })
+    expect(await running).toMatchObject({ status: "failed", attemptedModels: ["test/first"] })
+    expect(ports.children).toHaveLength(1)
+  })
   test("#given a prepared run #when the child is launched #then the hidden agent is staged with the four tools, the task prompt and the identity journal", async () => {
     // given
     const { fixture, ports, launch } = await setup()
@@ -127,7 +219,7 @@ describe("reflection child launcher", () => {
     const result = await running
 
     // then
-    expect(result).toEqual({ status: "cancelled", commits: [] })
+    expect(result).toMatchObject({ status: "cancelled", commits: [] })
     expect(child.disposed).toBe(true)
   })
 

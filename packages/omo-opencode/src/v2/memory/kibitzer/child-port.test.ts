@@ -135,10 +135,11 @@ describe("kibitzer child port over the owned session backend", () => {
 describe("kibitzer turn report", () => {
   test("#given an assistant error #then the turn is an error carrying its message", () => {
     // given
-    const messages = [{ type: "assistant", time: { created: 5 }, error: { message: "provider 503" } }]
+    const error = { name: "APIError", data: { statusCode: 503, message: "provider 503" } }
+    const messages = [{ type: "assistant", time: { created: 5 }, error }]
     // when
     const report = turnReport(messages, 0)
     // then
-    expect(report).toEqual({ status: "error", message: "provider 503", userTexts: [] })
+    expect(report).toEqual({ status: "error", message: "provider 503", error, userTexts: [] })
   })
 })

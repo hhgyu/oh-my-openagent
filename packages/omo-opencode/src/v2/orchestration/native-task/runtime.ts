@@ -31,6 +31,7 @@ import { createParentBindings, type VerifiedParentBinding } from "./parent-bindi
 import { createAcceptedOperationRegistry, createAcceptedOperationLifetime } from "./accepted-operation"
 import { createNativeOperationPorts, type AcceptedTaskProof, type NativeOperationResolution } from "./operation-ports"
 import type { createHostBuildAuthorizer } from "./host-grant"
+import type { NativeChildGuardOrigin } from "./child-guard-binding"
 import { createOwnedCompletionStore, type OpenStartCreationScope, type ParentCompletionChannel, type TaskBirth } from "./completion-store"
 import { createParentNotificationOwner, type ParentNotificationOwner } from "./parent-notification-owner"
 import { createParentNotificationAuthorityIssuer, type AcceptedNotificationTask, type ProvisionalNotificationGrant,
@@ -96,8 +97,8 @@ export interface NativeOwnedTaskRuntimeOptions {
    * bindings must come from original approved live producers, never catalog DATA. */
   readonly childToolGuard?: OwnedChildToolGuard
   readonly childGuardBinding?: (spec: ManagedStartSpec, prepared: Awaited<ReturnType<NonNullable<NativeOwnedTaskRuntimeOptions["authorizePlannedStart"]>>>,
-    /** Team identity of the ORIGINAL approved ManagerStartSpec; absent on recovery. */
-    origin?: { readonly team?: { readonly runId: string; readonly memberName: string } }) => {
+    /** Original task store appender and approved or recovered team identity. */
+    origin?: NativeChildGuardOrigin) => {
     readonly coverage?: ChildGuardBinding["coverage"]
     assertCurrent(): void
     bind(child: ChildHandle, assertBackendCurrent: () => void): ChildGuardBinding
@@ -439,7 +440,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
   /** Guarded child bindings from ONE original producer: planned admission or fresh recovery. */
   function guardFor(spec: ManagedStartSpec, approval: ChildGuardApproval, prepared: Planned, assertLifetime: () => void, assertStageAdmission?: () => void, team?: ApprovedTeam) {
     if (!options.childGuardBinding) throw Error("Child tool guard requires original planned authorization and live binding producer")
-    const producer = options.childGuardBinding(spec, prepared, team ? { team } : {}), footprint = JSON.stringify(producer.coverage)
+    const producer = options.childGuardBinding(spec, prepared, { ...(team && { team }), appendTaskEvent: event => store.appendEvent(spec.taskId, event) }), footprint = JSON.stringify(producer.coverage)
     const assertProducer = () => { assertLifetime(); producer.assertCurrent(); if (JSON.stringify(producer.coverage) !== footprint) throw Error("Original child binding targets changed") }
     assertProducer()
     return { approval, selection: prepared.selection, coverage: producer.coverage, buildAgentID: prepared.buildAgentID, assertLifetime: assertProducer,

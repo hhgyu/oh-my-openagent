@@ -28,7 +28,7 @@ export interface MemoryJournal {
   /** Settlement (`experimental.idle`): reconciles the session's transcript into its journal. */
   onIdle(sessionID: string): Promise<AppendResult>
   /** First bind of a root session: catches up rows missed while the host was down (Senpi `session_start`). */
-  onBound(bound: BoundMemorySession): Promise<AppendResult>
+  onBound(bound: BoundMemorySession, signal?: AbortSignal): Promise<AppendResult>
   /** Resolves once every reconcile started so far has finished. */
   settled(): Promise<void>
   clear(): void
@@ -56,10 +56,12 @@ export function createMemoryJournal(deps: MemoryJournalDeps): MemoryJournal {
     return journal
   }
 
-  async function reconcile(bound: BoundMemorySession): Promise<AppendResult> {
+  async function reconcile(bound: BoundMemorySession, signal?: AbortSignal): Promise<AppendResult> {
     try {
+      signal?.throwIfAborted()
       const messages = await deps.session.context({ sessionID: bound.sessionID })
-      return await journalFor(bound).reconcile(projectSessionMessages(messages))
+      signal?.throwIfAborted()
+      return await journalFor(bound).reconcile(projectSessionMessages(messages), signal)
     } catch (error) {
       // Best-effort bookkeeping: the next settlement or bind reconciles idempotently.
       const reason = error instanceof JournalLockTimeoutError ? "lock contention" : describeError(error)
@@ -85,9 +87,9 @@ export function createMemoryJournal(deps: MemoryJournalDeps): MemoryJournal {
         return bound === undefined ? NOOP : reconcile(bound)
       })
     },
-    onBound(bound) {
+    onBound(bound, signal) {
       if (deps.isOwnedSession?.(bound.sessionID) === true) return Promise.resolve(NOOP)
-      return serialized(bound.sessionID, () => reconcile(bound))
+      return serialized(bound.sessionID, () => reconcile(bound, signal))
     },
     async settled() {
       await Promise.allSettled([...chains.values()])

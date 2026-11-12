@@ -1,28 +1,14 @@
-// Native reflection model selection (omo-senpi `worker/resolve-model.ts` `resolveReflectionModel`) over the
-// V2 public model catalog. The category is `memory.reflection.category` (per identity, default `quick`):
-// 1. senpi-task `resolveCategory` over the catalog (user `categories.<name>` first, then the builtin chain);
-// 2. a pinned `categories.<name>.model` the catalog lists is authoritative even when not enabled;
-// 3. unless the category is disabled, the beyond-category ladder: the first ranked available model
-//    (`registry-fallback.ts`), else the root session's own model (`model-cost.ts` picks "fresh" whenever
-//    either side lacks pricing; the V2 catalog carries none);
-// 4. otherwise unavailable: the run settles `failed`/`category_unavailable` without launching.
-// Provider consent (privacy parity): Native's registry lists only providers the user holds credentials
-// for, while the V2 catalog also lists host built-ins the user never set up (OpenCode's `opencode`
-// provider with free models). Every rung therefore sees only models of a consented provider
-// (`reflection-consent.ts`: configured or authenticated) plus the candidates the user wrote in
-// `categories.<name>` (`model`, `models`, `fallback_models`), which stay eligible on any provider as the
-// user's explicit choice. The builtin chain and the ladder never reach an unconsented provider. The
-// root session's own model stays eligible for the session rung, as the user is already talking to it.
-// `exclude_models` reaches every rung and the inherited session model. Not ported: thinking levels and
-// fallback candidates, because the V2 child launches one model per run with no attempt chain.
+// Native reflection selection over V2's public catalog. Every category, pin and fallback sees only
+// consented providers or explicit user candidates. The parent model remains an explicit choice.
 
 import { canonicalCategoryName, isExcludedModel, type OmoConfig } from "@oh-my-opencode/omo-config-core"
-import { resolveCategory, withoutExcludedModels, type SenpiModelRegistryPort } from "@oh-my-opencode/senpi-task"
+import { builtinCategoryChainCandidates, resolveCategory, withoutExcludedModels, type SenpiModelRegistryPort } from "@oh-my-opencode/senpi-task"
 import type { CatalogModel } from "../host/model-catalog"
 import { availableFactsModels, declaredCategoryModels } from "./facts-model"
+import { reflectionCandidate, reflectionInputPrice, reflectionRegistryLadder, type ReflectionModelCandidate } from "./reflection-model-ladder"
 
 export type ReflectionModelResolution =
-  | { readonly kind: "resolved"; readonly category: string; readonly model: string; readonly source?: "registry_fallback" | "session_inherit" }
+  | ({ readonly kind: "resolved"; readonly category: string; readonly fallbacks?: readonly ReflectionModelCandidate[]; readonly source?: "registry_fallback" | "session_inherit" } & ReflectionModelCandidate)
   | {
     readonly kind: "unavailable"
     readonly category: string
@@ -31,10 +17,6 @@ export type ReflectionModelResolution =
   }
 
 type RegistryModel = { readonly provider: string; readonly id: string; readonly contextWindow: number }
-
-const NON_CHAT_ID = /embed|image|audio|tts|whisper|rerank|moderation/i
-const FAST_TIER_ID = /fast|flash|mini|lite|haiku|turbo|highspeed/i
-const MIN_CONTEXT_WINDOW = 131_072
 
 function registryOver(models: readonly CatalogModel[], config: Pick<OmoConfig, "exclude_models">, eligible: (model: CatalogModel) => boolean): SenpiModelRegistryPort<RegistryModel> {
   const chat = models.filter(model => model.type === "chat" && eligible(model))
@@ -49,22 +31,16 @@ function registryOver(models: readonly CatalogModel[], config: Pick<OmoConfig, "
   }, config.exclude_models)
 }
 
-/** Native `selectRegistryFallbackModels` without pricing: fast-tier names first, then catalog order. */
-function freshCandidate(registry: SenpiModelRegistryPort<RegistryModel> | undefined): string | undefined {
-  const available = registry?.getAvailable()
-  if (!Array.isArray(available)) return undefined
-  const ranked = (available as readonly RegistryModel[])
-    .map((model, order) => ({ model, order, fast: FAST_TIER_ID.test(model.id) }))
-    .filter(({ model }) => !NON_CHAT_ID.test(model.id) && model.contextWindow >= MIN_CONTEXT_WINDOW)
-    .sort((left, right) => left.fast === right.fast ? left.order - right.order : (left.fast ? -1 : 1))
-  const first = ranked[0]?.model
-  return first === undefined ? undefined : `${first.provider}/${first.id}`
-}
-
-function beyondCategory(category: string, registry: SenpiModelRegistryPort<RegistryModel> | undefined, session: string | undefined): ReflectionModelResolution | undefined {
-  const fresh = freshCandidate(registry)
-  if (fresh !== undefined) return { kind: "resolved", category, model: fresh, source: "registry_fallback" }
-  return session === undefined ? undefined : { kind: "resolved", category, model: session, source: "session_inherit" }
+function beyondCategory(category: string, models: readonly CatalogModel[], session: string | undefined, catalog = models, sessionVariant?: string): ReflectionModelResolution | undefined {
+  const candidates = reflectionRegistryLadder(models)
+  const fresh = candidates[0]
+  const price = (selector: string) => reflectionInputPrice(catalog.find(model => `${model.providerID}/${model.id}` === selector))
+  const freshPrice = fresh === undefined ? undefined : price(fresh.model)
+  const sessionPrice = session === undefined ? undefined : price(session)
+  if (fresh !== undefined && !(sessionPrice !== undefined && freshPrice !== undefined && sessionPrice < freshPrice)) {
+    return { kind: "resolved", category, ...fresh, source: "registry_fallback", ...(candidates.length < 2 ? {} : { fallbacks: candidates.slice(1) }) }
+  }
+  return session === undefined ? undefined : { kind: "resolved", category, ...reflectionCandidate(session, sessionVariant, catalog), source: "session_inherit" }
 }
 
 export function resolveReflectionModel(
@@ -73,23 +49,41 @@ export function resolveReflectionModel(
   catalog: readonly CatalogModel[] | undefined,
   sessionModel: string | undefined,
   consented: ReadonlySet<string>,
+  sessionVariant?: string,
 ): ReflectionModelResolution {
   const session = sessionModel !== undefined && !isExcludedModel(sessionModel, config.exclude_models) ? sessionModel : undefined
-  if (catalog === undefined) return beyondCategory(category, undefined, session) ?? { kind: "unavailable", category, cause: "no_registry" }
+  if (catalog === undefined) return beyondCategory(category, [], session) ?? { kind: "unavailable", category, cause: "no_registry" }
   // The same key `resolveCategory` reads: a user entry under the requested name, else the canonical name of a retired one.
   const key = config.categories !== undefined && Object.hasOwn(config.categories, category) ? category : canonicalCategoryName(category)
   const userCategory = config.categories !== undefined && Object.hasOwn(config.categories, key) ? config.categories[key] : undefined
   const declared = new Set(declaredCategoryModels(userCategory))
-  const registry = registryOver(catalog, config, model => consented.has(model.providerID) || declared.has(`${model.providerID}/${model.id}`))
+  const eligible = catalog.filter(model => consented.has(model.providerID) || declared.has(`${model.providerID}/${model.id}`))
+  const registry = registryOver(eligible, config, () => true)
   const resolution = resolveCategory(category, config, registry)
-  if (resolution.kind === "resolved") return { kind: "resolved", category: resolution.category, model: `${resolution.spec.provider}/${resolution.spec.modelId}` }
+  function selected(model: string, thinking?: string): ReflectionModelResolution {
+    const specFallbacks = resolution.kind === "resolved" ? (resolution.spec.fallback_models ?? []).map(entry => reflectionCandidate(`${entry.provider}/${entry.model_id}`, entry.reasoning_effort ?? entry.variant, eligible)) : []
+    const configured = userCategory?.models?.length ? userCategory.models : [model, ...(typeof userCategory?.fallback_models === "string" ? [userCategory.fallback_models] : userCategory?.fallback_models ?? [])]
+    const index = configured.findIndex(entry => (typeof entry === "string" ? entry : entry.model) === model)
+    const ordered = index < 0 ? [] : [...configured.slice(index + 1), ...configured.slice(0, index)]
+    const candidates = [...specFallbacks, ...ordered.map(entry => reflectionCandidate(typeof entry === "string" ? entry : entry.model, typeof entry === "string" ? undefined : entry.reasoning ?? entry.reasoningEffort ?? entry.variant, eligible)), ...builtinCategoryChainCandidates(category, registry).map(entry => reflectionCandidate(entry.model, entry.variant, eligible))]
+    const seen = new Set([model])
+    const fallbacks = candidates.filter(entry => {
+      const slash = entry.model.indexOf("/")
+      if (seen.has(entry.model) || registry.find(entry.model.slice(0, slash), entry.model.slice(slash + 1)) === undefined) return false
+      seen.add(entry.model)
+      return true
+    })
+    return { kind: "resolved", category: resolution.kind === "resolved" ? resolution.category : category, ...reflectionCandidate(model, thinking, eligible), ...(fallbacks.length === 0 ? {} : { fallbacks }) }
+  }
+  if (resolution.kind === "resolved") return selected(`${resolution.spec.provider}/${resolution.spec.modelId}`, resolution.spec.reasoning ?? resolution.spec.reasoningEffort ?? resolution.spec.variant)
   const pinned = userCategory?.model
   const slash = typeof pinned === "string" ? pinned.indexOf("/") : -1
   if (resolution.kind === "model_unavailable" && typeof pinned === "string" && slash > 0) {
-    if (registry.find(pinned.slice(0, slash), pinned.slice(slash + 1)) !== undefined) return { kind: "resolved", category, model: pinned }
+    if (registry.find(pinned.slice(0, slash), pinned.slice(slash + 1)) !== undefined) return selected(pinned, userCategory?.reasoning ?? userCategory?.reasoningEffort ?? userCategory?.variant)
   }
   if (resolution.kind !== "disabled") {
-    const fallback = beyondCategory(category, registry, session)
+    const available = new Set(availableFactsModels(eligible, config))
+    const fallback = beyondCategory(category, eligible.filter(model => model.type === "chat" && available.has(`${model.providerID}/${model.id}`)), session, catalog, sessionVariant)
     if (fallback !== undefined) return fallback
   }
   const missing = resolution.kind === "model_unavailable" ? resolution.missing_providers : undefined
