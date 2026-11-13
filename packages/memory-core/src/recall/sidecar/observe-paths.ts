@@ -9,9 +9,7 @@ import {
   KIBITZER_SIDECAR_OWNER_LOCK_PURPOSE,
   kibitzerSidecarOwnerLockPathFor,
   kibitzerSidecarsRoot,
-} from "../../retention/sidecars"
-
-export { kibitzerSidecarsRoot }
+} from "../../retention"
 
 export const KIBITZER_WAKES_FILENAME = "wakes.ndjson"
 export const OWNER_LOCK_PURPOSE = KIBITZER_SIDECAR_OWNER_LOCK_PURPOSE

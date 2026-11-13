@@ -10,7 +10,7 @@ import { LockContentionError, createLockRecord, memoryMaintenanceLockPath, withL
 import { existsSync, mkdir } from "../fs/resilient"
 import type { MemoryIdentityPaths } from "../identity/layout"
 import { readHostSweepState } from "../reflection/host-sweep"
-import { RETENTION_STAMP_CONFIG_KEY, retentionCursorPath } from "../retention/stamp"
+import { RETENTION_STAMP_CONFIG_KEY, retentionCursorPath } from "../retention"
 import { readMaintenanceJson, writeMaintenanceJsonAtomic } from "./stamp-file"
 
 /** The identity slice the scheduler reads; a host passes its own richer context. */

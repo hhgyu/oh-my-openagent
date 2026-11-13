@@ -5,4 +5,4 @@ export {
   pruneKibitzerSidecars,
   type PruneKibitzerSidecarsOptions,
   type PruneKibitzerSidecarsResult,
-} from "../../retention/sidecars"
+} from "../../retention"

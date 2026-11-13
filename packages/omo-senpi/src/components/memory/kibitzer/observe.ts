@@ -62,7 +62,6 @@ export {
   kibitzerSidecarSessionDir,
   kibitzerWakesFile,
 } from "./observe-paths"
-export { kibitzerSidecarsRoot } from "@oh-my-opencode/memory-core"
 export {
   KIBITZER_SIDECAR_RETENTION_MS,
   pruneKibitzerSidecars,
