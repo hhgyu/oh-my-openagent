@@ -117,6 +117,49 @@ describe("model refusals", () => {
     expect(text).not.toContain("its chain needs")
   })
 
+  test.each([
+    {
+      name: "a models list",
+      category: { models: ["qa/missing-a", { model: "qa/missing-b" }, "other/missing-c"] },
+      key: "categories.quick.models",
+    },
+    {
+      name: "a model with fallback models",
+      category: { model: "qa/missing-a", fallback_models: ["qa/missing-b", { model: "other/missing-c" }] },
+      key: "categories.quick.model",
+    },
+  ])(
+    "#given a category pinned through $name none of which is served #when refused #then every designated model is named in order",
+    ({ category, key }) => {
+      // given
+      const error = { code: "model_unavailable" as const, message: "resolver text", category: "quick" }
+
+      // when
+      const text = categoryModelFailureText(error, { categories: { quick: category } } as never, undefined) ?? ""
+
+      // then
+      const positions = ["qa/missing-a", "qa/missing-b", "other/missing-c"].map((model) => text.indexOf(`"${model}"`))
+      expect(positions.every((position) => position >= 0)).toBe(true)
+      expect(positions).toEqual([...positions].sort((a, b) => a - b))
+      expect(text).toContain(key)
+      expect(text).toContain("No child was spawned")
+    },
+  )
+
+  test("#given an agent pinned through a models list none of which is served #when refused #then every pinned model is named", () => {
+    // given
+    const agents = { reviewer: { models: ["qa/missing-a", { model: "qa/missing-b" }] } }
+    const resolution = { agent: "reviewer", attemptedModel: undefined }
+
+    // when
+    const text = agentModelFailureText("reviewer", resolution, agents as never)
+
+    // then
+    expect(text).toContain('"qa/missing-a"')
+    expect(text).toContain('"qa/missing-b"')
+    expect(text).toContain("agents.reviewer.models")
+  })
+
   test("#given a pinned agent reached through a retired alias #when rendered #then the pin is named under the canonical agent", () => {
     // given: the resolver reports the canonical name, and the config key holds the pin
     const agents = { "omo-native-code-reviewer": { models: [{ model: "custom-proxy/gpt-6-astra" }] } }
