@@ -1,6 +1,7 @@
 import type { DelegateFallbackEntry } from "@oh-my-opencode/delegate-core"
 import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
 import type { AgentDefinition } from "../agents/types"
+import { categoryModelCandidates } from "../category/user-candidates"
 import type { PlanResolutionError } from "../manager/types"
 
 export type ChainFailureTarget = { readonly category: string } | { readonly agent: string }
@@ -73,10 +74,15 @@ export function chainUnavailableText(
  */
 export function pinnedModelUnavailableText(
   target: ChainFailureTarget,
-  pinnedModel: string,
+  pinned: string | readonly string[],
   pinKey: "model" | "models" = "model",
 ): string {
-  return `${targetKind(target)} "${targetName(target)}" is pinned to "${pinnedModel}", which this machine's model registry does not serve: that provider is not connected, or it does not list that model id. Fix: connect the provider, or re-pick ${pinFixKey(target, pinKey)} in Settings. No child was spawned.`
+  const models = typeof pinned === "string" ? [pinned] : pinned
+  if (models.length > 1) {
+    const named = models.map((model) => `"${model}"`).join(", then ")
+    return `${targetKind(target)} "${targetName(target)}" is pinned to ${named}, and this machine's model registry serves none of them: their providers are not connected, or they do not list those model ids. Fix: connect one of those providers, or re-pick ${pinFixKey(target, pinKey)} in Settings. No child was spawned.`
+  }
+  return `${targetKind(target)} "${targetName(target)}" is pinned to "${models[0]}", which this machine's model registry does not serve: that provider is not connected, or it does not list that model id. Fix: connect the provider, or re-pick ${pinFixKey(target, pinKey)} in Settings. No child was spawned.`
 }
 
 export type AgentUnavailable = {
@@ -105,9 +111,12 @@ export function categoryModelFailureText(
       error.unlisted_provider_model,
     )
   }
-  // A pin can be written either way the schema allows: a scalar model or a models list.
-  const pin = firstConfiguredPin(omoConfig.categories?.[category])
-  return pin === undefined ? undefined : pinnedModelUnavailableText({ category }, pin.model, pin.key)
+  // Every designated model is named, in the resolver's own order: models[] wins, else model then fallback_models.
+  const config = omoConfig.categories?.[category]
+  if (config === undefined) return undefined
+  const models = [...new Set(categoryModelCandidates(config).map((candidate) => candidate.model))]
+  if (models.length === 0) return undefined
+  return pinnedModelUnavailableText({ category }, models, (config.models?.length ?? 0) > 0 ? "models" : "model")
 }
 
 type ModelPinConfig = {
@@ -116,13 +125,12 @@ type ModelPinConfig = {
 }
 
 // Which field held the pin matters to the reader: the fix names that field, not one they never wrote.
-function firstConfiguredPin(
+function configuredPins(
   config: ModelPinConfig | undefined,
-): { readonly model: string; readonly key: "model" | "models" } | undefined {
-  if (config?.model !== undefined) return { model: config.model, key: "model" }
-  const entry = config?.models?.[0]
-  if (entry === undefined) return undefined
-  return { model: typeof entry === "string" ? entry : entry.model, key: "models" }
+): { readonly models: readonly string[]; readonly key: "model" | "models" } | undefined {
+  if (config?.model !== undefined) return { models: [config.model], key: "model" }
+  const models = (config?.models ?? []).map((entry) => (typeof entry === "string" ? entry : entry.model))
+  return models.length === 0 ? undefined : { models, key: "models" }
 }
 
 export function agentModelFailureText(
@@ -136,8 +144,8 @@ export function agentModelFailureText(
   const definition = Object.hasOwn(agents, agent) ? agents[agent] : undefined
   // A pin is the cause of the failure, so it wins over the chain that the pin replaced: refusing
   // with the chain text told a pinned agent's caller to set the key it had already set.
-  const pinned = firstConfiguredPin(definition)
-  if (pinned !== undefined) return pinnedModelUnavailableText({ agent }, pinned.model, pinned.key)
+  const pinned = configuredPins(definition)
+  if (pinned !== undefined) return pinnedModelUnavailableText({ agent }, pinned.models, pinned.key)
   if (resolution.attempted_chain !== undefined) {
     return chainUnavailableText({ agent }, resolution.attempted_chain, resolution.missing_providers ?? [], undefined)
   }
