@@ -20,6 +20,12 @@ import { checkHostGrantTarget, type PreparedHostTaskGrant } from "./host-grant"
 import type { createOwnedTaskPlanner } from "./planner"
 import { createOwnedTaskHandle, type OwnedTaskControl } from "./owned-handle"
 import { createGuardCustody, type GuardClaim } from "./owned-guard-custody"
+import {
+  followParentPermissions,
+  watchParentPermissions,
+  type ChildPermissionFollow,
+  type ParentPermissionWatch,
+} from "./parent-permission-follow"
 
 export type OwnedTaskHost = Omit<Context, "session"> & {
   readonly session: Context["session"] & EffectSessionBackendApi
@@ -77,6 +83,23 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
   const guardClaims = custody.claims,
     stopGuard = custody.stop,
     releaseGuard = custody.release
+  const parentWatches = new Map<string, ParentPermissionWatch>()
+  function parentWatch(parent: SessionLease): ParentPermissionWatch {
+    const existing = parentWatches.get(parent.sessionID)
+    if (existing) return existing
+    const watch = watchParentPermissions(options.ctx, parent.sessionID, parent.signal)
+    if (parent.signal.aborted) return watch
+    parentWatches.set(parent.sessionID, watch)
+    parent.signal.addEventListener(
+      "abort",
+      () => {
+        watch.dispose()
+        if (parentWatches.get(parent.sessionID) === watch) parentWatches.delete(parent.sessionID)
+      },
+      { once: true },
+    )
+    return watch
+  }
   const retainedCleanup = new Map<
     string,
     {
@@ -295,6 +318,7 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
     let restoring = false
     let instructions: { dispose(): Promise<void> | void } | undefined
     let observer: Awaited<ReturnType<typeof createOwnedChildObserver>> | undefined
+    let follow: ChildPermissionFollow | undefined
     try {
       // Refuse a missing/mismatched run selection BEFORE claiming or touching the retained child.
       const selectedRow = recoveringKey ? await options.journal.read(journalKey) : undefined
@@ -428,6 +452,22 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
         recovered: recoveringKey !== undefined,
         firstInputAccepted: () => spec.admission?.hostAccepted?.(),
       })
+      const following = followParentPermissions({
+        host: options.ctx,
+        watch: parentWatch(parent),
+        taskId: spec.taskId,
+        childID: ownedChild.locator.sessionID,
+        fresh: recoveringKey === undefined,
+        assertCurrent: backend.observationGuard(ownedChild),
+        onWarning(message) {
+          console.warn(`[oh-my-openagent/v2] ${message}`)
+          options.store.appendEvent(spec.taskId, { type: "task_parent_mode_follow_failed", payload: { message } })
+        },
+        onRecovered() {
+          options.store.appendEvent(spec.taskId, { type: "task_parent_mode_followed", payload: {} })
+        },
+      })
+      follow = following
       const detach = control.detach,
         end = control.end,
         prepareEnd = control.prepareEnd
@@ -456,6 +496,7 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
         }
       const originalDispose = control.handle.dispose
       control.handle.dispose = async () => {
+        await following.stop()
         await stopGuard(guardClaim)
         await originalDispose()
         await closeHooks()
@@ -463,6 +504,7 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
         await custody.retireParked(guardClaim)
       }
       control.detach = async () => {
+        await following.stop()
         await stopGuard(guardClaim)
         await detach()
         await closeHooks()
@@ -470,6 +512,7 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
         await custody.retireParked(guardClaim)
       }
       control.end = async () => {
+        await following.stop()
         await stopGuard(guardClaim)
         await end()
         endCompleted = true
@@ -524,7 +567,7 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
       options.installed(control)
       return control
     } catch (error) {
-      const guardCleanup = await Promise.allSettled([stopGuard(guardClaim)])
+      const guardCleanup = await Promise.allSettled([follow?.stop(), stopGuard(guardClaim)])
       const cleanup = await Promise.allSettled([
         Promise.resolve().then(() => instructions?.dispose()),
         Promise.resolve().then(() => observer?.dispose()),
@@ -584,6 +627,8 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
     closeRetained,
     recover: (spec: ManagedStartSpec, key: string) => stage(spec, key),
     async dispose() {
+      for (const watch of parentWatches.values()) watch.dispose()
+      parentWatches.clear()
       const stopping = await Promise.allSettled([...guardClaims.values()].map(stopGuard))
       const results = await Promise.allSettled([...backends].map((backend) => backend.dispose()))
       const released = await Promise.allSettled([...guardClaims.values()].map(custody.finish))
