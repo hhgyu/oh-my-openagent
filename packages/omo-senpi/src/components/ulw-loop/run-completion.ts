@@ -1,3 +1,6 @@
+import type { LoopPlanSnapshot as PlanSnapshot } from "../../../../omo-codex/plugin/components/ulw-loop/src/session-sdk/loop-continuation.js"
+export type { LoopPlanSnapshot as PlanSnapshot } from "../../../../omo-codex/plugin/components/ulw-loop/src/session-sdk/loop-continuation.js"
+
 /**
  * Tells the engine's session lifecycle (senpi#3864) when this session's ulw-loop plan reaches its stop condition,
  * `aggregateCompletion.status === "complete"`, so the epoch's `done` reads `completion.kind = "run"` (#10782 item 5).
@@ -9,10 +12,6 @@
  * run and is not this epoch's completion. A plan is identified by its `createdAt`, which a reset replaces. Each plan is
  * reported once per session; the engine also ignores a repeated run id.
  */
-export interface PlanSnapshot {
-  readonly createdAt: string | undefined
-  readonly aggregateComplete: boolean
-}
 
 export interface RunCompletionTracker {
   /**
