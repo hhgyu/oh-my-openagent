@@ -9,7 +9,7 @@ import {
   renderKibitzerSeedPrompt,
   renderKibitzerWakePrompt,
 } from "@oh-my-opencode/memory-core/recall-sidecar"
-import type { KibitzerChild, KibitzerChildTurnReport, KibitzerOfferResult } from "./contract"
+import type { KibitzerChild, KibitzerChildTurnReport, KibitzerModelPick, KibitzerOfferResult } from "./contract"
 import { classifyWakeEnd, startFailureEnd } from "./outcome"
 import { describe, type Child, type Envelope, type Payload, type SidecarCore, type Turn } from "./sidecar-core"
 import { envelopeInput, merge, payloadOf } from "./sidecar-envelope"
@@ -56,7 +56,29 @@ export function createWakeTransitions(core: SidecarCore, turns: TurnLifecycle): 
       )
   }
 
+  async function pickModel(): Promise<KibitzerModelPick | undefined> {
+    const resolveModel = core.options.port.resolveModel
+    if (resolveModel === undefined) return undefined
+    try {
+      return await resolveModel()
+    } catch (error) {
+      return { kind: "unavailable", category: "unknown", detail: describe(error) }
+    }
+  }
+
   async function seed(fresh: readonly RecallCandidate[], maxItems: number): Promise<KibitzerOfferResult> {
+    const pick = await pickModel()
+    if (pick?.kind === "unavailable") {
+      if (!core.modelUnavailableWarned) {
+        core.modelUnavailableWarned = true
+        core.warn("kibitzer wake skipped: no model resolves inside the recall category", {
+          category: pick.category,
+          detail: pick.detail,
+        })
+      }
+      return { action: "buffered", reason: "model_unavailable" }
+    }
+    core.modelUnavailableWarned = false
     const admitted = await turns.admit()
     if (admitted.status !== "acquired") return turns.refused(admitted, core.generations + 1, maxItems, fresh.length)
     const payload = merge([...core.carry, payloadOf(core.stream.drain(), fresh)])
@@ -78,7 +100,12 @@ export function createWakeTransitions(core: SidecarCore, turns: TurnLifecycle): 
     })
     let handle: KibitzerChild
     try {
-      handle = await core.options.port.start({ sessionId: core.sessionId, generation, prompt })
+      handle = await core.options.port.start({
+        sessionId: core.sessionId,
+        generation,
+        prompt,
+        ...(pick === undefined ? {} : { model: pick.model }),
+      })
     } catch (error) {
       if (turn.abort === "deadline") return abandoned(payload)
       turns.clearDeadline(turn)

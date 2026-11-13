@@ -27,6 +27,7 @@ interface Harness {
   readonly timers: ManualTimers
   readonly delivered: RecallNudge[][]
   readonly outcomes: KibitzerWakeOutcome[]
+  readonly warnings: { message: string; details?: Record<string, unknown> }[]
   nextOutcome(): Promise<KibitzerWakeOutcome>
 }
 
@@ -36,6 +37,7 @@ function harness(overrides: { toolBudget?: number } = {}): Harness {
   const timers = createManualTimers()
   const delivered: RecallNudge[][] = []
   const outcomes: KibitzerWakeOutcome[] = []
+  const warnings: Harness["warnings"] = []
   let waiter: ((outcome: KibitzerWakeOutcome) => void) | undefined
   const sidecar = createKibitzerSidecar({
     sessionId: "root",
@@ -52,6 +54,9 @@ function harness(overrides: { toolBudget?: number } = {}): Harness {
       waiter?.(outcome)
       waiter = undefined
     },
+    warn: (message, details) => {
+      warnings.push({ message, ...(details === undefined ? {} : { details }) })
+    },
   })
   return {
     sidecar,
@@ -60,6 +65,7 @@ function harness(overrides: { toolBudget?: number } = {}): Harness {
     timers,
     delivered,
     outcomes,
+    warnings,
     nextOutcome: () =>
       new Promise((resolve) => {
         waiter = resolve
@@ -196,7 +202,7 @@ describe("kibitzer sidecar lifecycle", () => {
   test("#given a start that never returns #when the deadline fires #then the wake ends as deadline with the lease back and the late child is disposed", async () => {
     // given
     const h = harness()
-    const hold = deferred<void>()
+    const hold = deferred<undefined>()
     h.port.holdNextStart = hold.promise
     const settled = h.nextOutcome()
     const pending = offer(h, ["reference/a.md"])
@@ -205,7 +211,7 @@ describe("kibitzer sidecar lifecycle", () => {
     h.timers.fire(90_000)
     const outcome = await settled
     const leaseAfterDeadline = h.slot.live
-    hold.resolve()
+    hold.resolve(undefined)
     const result = await pending
     await h.sidecar.whenIdle()
     // then
@@ -213,6 +219,33 @@ describe("kibitzer sidecar lifecycle", () => {
     expect(leaseAfterDeadline).toBe(0)
     expect(result).toEqual({ action: "buffered", reason: "backoff" })
     expect(h.port.children[0]?.disposed).toBe(true)
+    await h.sidecar.shutdown()
+  })
+
+  test("#given no model resolves inside the recall category #when wakes arrive #then each is skipped without a slot, child or backoff, one warning is logged, and the first wake after a model resolves seeds on it", async () => {
+    // given
+    const h = harness()
+    h.port.pick = { kind: "unavailable", category: "quick", detail: "no consented provider" }
+    // when
+    const first = await offer(h, ["reference/a.md"])
+    const second = await offer(h, ["reference/b.md"])
+    h.port.pick = { kind: "resolved", model: { model: "acme/quick", variant: "low" } }
+    const seeded = await offer(h, ["reference/c.md"])
+    // then
+    expect([first, second]).toEqual([
+      { action: "buffered", reason: "model_unavailable" },
+      { action: "buffered", reason: "model_unavailable" },
+    ])
+    expect(h.warnings).toEqual([
+      {
+        message: "kibitzer wake skipped: no model resolves inside the recall category",
+        details: { sessionId: "root", category: "quick", detail: "no consented provider" },
+      },
+    ])
+    expect(h.outcomes).toEqual([])
+    expect(seeded).toEqual({ action: "seeded", wake: 1 })
+    expect(h.slot.acquired).toBe(1)
+    expect(h.port.children.map((child) => child.model)).toEqual([{ model: "acme/quick", variant: "low" }])
     await h.sidecar.shutdown()
   })
 
