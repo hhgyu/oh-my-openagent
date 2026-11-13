@@ -88,7 +88,7 @@ export function evalStateDir(projectDirectory: string, sessionID: string, home: 
 const AGENT_TOOLKIT_SDK_DIRECTORY = "agent-toolkit-sdk"
 
 /** The build stages the ulw-loop agent-toolkit SDK next to the V2 chunks (script/build-agent-toolkit-sdk.ts). */
-export function locateAgentToolkitSdkRoot(directory: string = import.meta.dir): string | undefined {
+function locateAgentToolkitSdkRoot(directory: string = import.meta.dir): string | undefined {
   const root = join(directory, AGENT_TOOLKIT_SDK_DIRECTORY)
   return existsSync(join(root, "sdk.js")) ? root : undefined
 }

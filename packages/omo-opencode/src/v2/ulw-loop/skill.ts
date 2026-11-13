@@ -19,7 +19,7 @@ export function locateUlwLoopSkillFile(directory: string = import.meta.dir): str
   return existsSync(file) ? file : undefined
 }
 
-export function ulwLoopSkillInfo(file: string): Skill.Info {
+function ulwLoopSkillInfo(file: string): Skill.Info {
   const { data, body } = parseFrontmatter<{ description?: unknown }>(readFileSync(file, "utf8"))
   return {
     id: Skill.ID.make(ULW_LOOP_SKILL_NAME),

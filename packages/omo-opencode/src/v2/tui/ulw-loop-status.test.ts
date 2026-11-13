@@ -20,7 +20,9 @@ function harness(loaded: Record<string, boolean>) {
   })
   return {
     view,
-    push: (data: unknown) => handlers.forEach((handler) => handler(data)),
+    push: (data: unknown) => {
+      for (const handler of handlers) handler(data)
+    },
     tick: () => ticks.at(-1)?.(),
     cleared: () => cleared,
   }

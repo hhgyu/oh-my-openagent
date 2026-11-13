@@ -431,6 +431,11 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) poisonField, isRecord
       "packages/omo-codex/plugin/components/ulw-loop/src/quality-gate-fields.ts": ["poisonField", "isRecord"],
       // pre-existing at origin dev 4686e425b5: unused export(s) SURFACE_MARKER_FILENAME
+      // pre-existing at origin dev 4686e425b5 (moved from packages/omo-senpi/src/extension/agent-toolkit-sdk.ts): the eval SDK
+      // surface cells import at runtime from OMO_AGENT_TOOLKIT_SDK_ROOT/sdk.js, which no source file imports
+      "packages/omo-codex/plugin/components/ulw-loop/src/session-sdk/index.ts": ["ULW_LOOP_MANIFEST", "ULW_LOOP_OPERATIONS", "toolkitContextFromEnv", "agentToolkit"],
+      // pre-existing at origin dev 4686e425b5 (moved from packages/omo-senpi/src/components/ulw-loop/sdk/session-toolkit.ts): unused export(s) SESSION_HELP_USAGE
+      "packages/omo-codex/plugin/components/ulw-loop/src/session-sdk/session-toolkit.ts": ["SESSION_HELP_USAGE"],
       "packages/omo-codex/plugin/components/ulw-loop/src/surface.ts": ["SURFACE_MARKER_FILENAME"],
       // pre-existing at origin dev 4686e425b5: unused export(s) batchOf
       "packages/omo-codex/plugin/components/ulw-loop/src/validation-batch.ts": ["batchOf"],
@@ -1346,8 +1351,6 @@
       "packages/omo-senpi/src/components/ulw-execute-continuation/index.ts": ["__testInternals"],
       // pre-existing at origin dev 4686e425b5: unused export(s) goalPathsFromContext
       "packages/omo-senpi/src/components/ulw-loop/footer-status.ts": ["goalPathsFromContext"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) SESSION_HELP_USAGE
-      "packages/omo-senpi/src/components/ulw-loop/sdk/session-toolkit.ts": ["SESSION_HELP_USAGE"],
       // pre-existing at origin dev 4686e425b5: unused export(s) withEnv, withEnvAsync
       "packages/omo-senpi/src/components/ulw-loop/ulw-loop.test-support.ts": ["withEnv", "withEnvAsync"],
       // pre-existing at origin dev 4686e425b5: unused export(s) X_SEARCH_ENDPOINT, X_SEARCH_MAX_OUTPUT_TOKENS
@@ -1356,8 +1359,9 @@
       "packages/omo-senpi/src/components/x-search/index.ts": ["createXSearchTool", "X_SEARCH_TOOL_NAME", "X_SEARCH_TOOL_DESCRIPTION", "X_SEARCH_COMPONENT_NAME"],
       // pre-existing at origin dev 4686e425b5: unused export(s) X_SEARCH_TOOL_NAME, X_SEARCH_MODEL_ENV, X_SEARCH_TOOL_DESCRIPTION
       "packages/omo-senpi/src/components/x-search/tool.ts": ["X_SEARCH_TOOL_NAME", "X_SEARCH_MODEL_ENV", "X_SEARCH_TOOL_DESCRIPTION"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) agentToolkit, toolkitContextFromEnv, ULW_LOOP_MANIFEST, ULW_LOOP_OPERATIONS, SDK_VERSION
-      "packages/omo-senpi/src/extension/agent-toolkit-sdk.ts": ["agentToolkit", "toolkitContextFromEnv", "ULW_LOOP_MANIFEST", "ULW_LOOP_OPERATIONS", "SDK_VERSION"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) SDK_VERSION (the rest of this eval SDK entry now re-exports
+      // packages/omo-codex/plugin/components/ulw-loop/src/session-sdk/index.ts)
+      "packages/omo-senpi/src/extension/agent-toolkit-sdk.ts": ["SDK_VERSION"],
       // pre-existing at origin dev 4686e425b5: unused export(s) FIRST_PAINT_BACKSTOP_MS
       "packages/omo-senpi/src/extension/startup-deferral.ts": ["FIRST_PAINT_BACKSTOP_MS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) WAKE_QUEUE_STATE_EVENT
@@ -2088,6 +2092,8 @@
         "script/verify-npm-payload.mjs",
         // run by path as the "v2-personas" node of script/build-nodes.ts (bun run build)
         "script/stage-v2-personas.ts",
+        // run by path as the "v2-ulw-loop" node of script/build-nodes.ts (bun run build)
+        "script/stage-v2-ulw-loop.ts",
         "script/wait-registry-versions.mjs",
         "script/senpi-worker-compile.ts",
         "test-support/remove-tree.ts",
@@ -3719,6 +3725,7 @@
         "src/v2/memory/kibitzer/test-support.ts",
         "src/v2/orchestration/native-dag/test-support.ts",
         "src/v2/tools/test-support.ts",
+        "src/v2/ulw-loop/test-support.ts",
         // The Native eval Worker entry: started by file name (`new Worker(...)` in codemode-worker-client.ts), never imported.
         "src/v2/tools/codemode-worker.ts",
         // spawned by path from account-source-freshness.test.ts: a credential writer in its own process, never imported

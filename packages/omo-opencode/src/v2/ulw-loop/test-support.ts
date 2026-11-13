@@ -68,7 +68,13 @@ export function fakeUlwLoopHost() {
     skills,
     idle: (sessionID: string) => call("experimental.idle", { sessionID, background: [] }),
     prompt: async (sessionID: string, text: string, metadata?: Record<string, unknown>) => {
-      const input = { sessionID, messageID: "msg_user", prompt: { text }, delivery: "steer", ...(metadata && { metadata }) }
+      const input = {
+        sessionID,
+        messageID: "msg_user",
+        prompt: { text },
+        delivery: "steer",
+        ...(metadata && { metadata }),
+      }
       await call("prompt", input)
       return input.prompt.text
     },
