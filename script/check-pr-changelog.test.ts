@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { UPSTREAM_SYNC } from "./changelog-gate.config.ts"
 
 const roots: string[] = []
 const runner = fileURLToPath(new URL("./check-pr-changelog.ts", import.meta.url))
@@ -154,6 +155,74 @@ describe("changelog gate CLI", () => {
     expect(result.status, result.stdout + result.stderr).toBe(status)
     if (status === 0) expect(result.stdout).toMatch(/changelog-gate: PASS[\s\S]*package logs PASS/)
     else expect(result.stdout).toMatch(/only the release PR may edit the changelog[\s\S]*package logs FAIL/)
+  })
+})
+
+// A fork merging upstream receives upstream's release commits; the upstream-sync label lets those changelog and log
+// edits through only when they are upstream's bytes, so a fork edit hidden inside the merge still fails (#46).
+describe("changelog gate upstream-sync label", () => {
+  type Change = Record<string, string | null>
+  const upstreamRelease: Change = {
+    "CHANGELOG.md": changelog.replace("## [Unreleased]\n", "## [Unreleased]\n\n## [5.1.64] - 2026-11-10\n\nOld. (#1)\n"),
+    "packages/fixture/changes.md": "# fixture\n\n## 2026-11-10 - Upstream entry\n",
+    "changes/unreleased/1.md": null,
+    "changes/unreleased/2.md": "Upstream fragment. (#2)\n",
+    "packages/fixture/src/index.ts": "export const value = 2\n",
+  }
+
+  function syncFixture({ merge, after }: { merge: boolean; after: Change }) {
+    const { root, git, write } = fixture()
+    const apply = (change: Change) => {
+      for (const [path, content] of Object.entries(change)) {
+        if (content === null) git("rm", "-q", path)
+        else write(path, content)
+      }
+      git("add", "-A")
+    }
+    // given: a sync point both sides share, an upstream release after it, and fork work on the base branch
+    apply({ "packages/fixture/changes.md": "# fixture\n", "changes/unreleased/1.md": "Old. (#1)\n" })
+    git("commit", "-qm", "sync point")
+    const syncPoint = git("rev-parse", "HEAD")
+    git("checkout", "-qb", UPSTREAM_SYNC.branch)
+    apply(upstreamRelease)
+    git("commit", "-qm", "release: v5.1.64")
+    git("checkout", "-qb", "fork", syncPoint)
+    apply({ "changes/unreleased/40.md": "Fork fragment. (#40)\n" })
+    git("commit", "-qm", "fork work")
+    const forkBase = git("rev-parse", "HEAD")
+    git("checkout", "-qb", "sync")
+    if (merge) git("merge", "-q", "--no-ff", "--no-edit", UPSTREAM_SYNC.branch)
+    else apply(upstreamRelease)
+    apply(after)
+    git("commit", "-q", "--allow-empty", "-m", "sync follow-up")
+    // the gate fetches the configured upstream URL; git resolves it to this repository, no network and no test seam
+    git("config", `url.${root.replaceAll("\\", "/")}.insteadOf`, UPSTREAM_SYNC.url)
+    return { root, forkBase }
+  }
+
+  const own: Change = { "changes/unreleased/7.md": "Sync upstream. (#7)\n" }
+  const verdicts = (stdout: string) => stdout.split("\n").filter((line) => /^changelog-gate: (?:PASS|FAIL|package logs)/.test(line))
+
+  test.each([
+    { name: "upstream's changelog bytes plus the PR's own fragment pass", labels: [UPSTREAM_SYNC.label], merge: true, after: own, status: 0, verdict: /changelog-gate: PASS - added fragment #7[\s\S]*package logs PASS/ },
+    { name: "one changed byte in an upstream log names the path and keeps today's verdict", labels: [UPSTREAM_SYNC.label], merge: true, after: { ...own, "packages/fixture/changes.md": "# fixture\n\n## 2026-11-10 - Upstream entry!\n" }, status: 1, verdict: /upstream-sync not applied - [^\n]*packages\/fixture\/changes\.md/, today: true },
+    { name: "a fork fragment deleted inside the merge names the path and keeps today's verdict", labels: [UPSTREAM_SYNC.label], merge: true, after: { ...own, "changes/unreleased/40.md": null }, status: 1, verdict: /upstream-sync not applied - [^\n]*changes\/unreleased\/40\.md/, today: true },
+    { name: "the same diff without the label fails as today", labels: [], merge: true, after: own, status: 1, verdict: /changelog-gate: FAIL - only the release PR may edit the changelog/ },
+    { name: "the label on a PR that merges no upstream commit keeps today's verdict", labels: [UPSTREAM_SYNC.label], merge: false, after: own, status: 1, verdict: /upstream-sync not applied/, today: true },
+    { name: "the label still requires the PR's own fragment", labels: [UPSTREAM_SYNC.label], merge: true, after: {}, status: 1, verdict: /changelog-gate: FAIL - a user-facing PR adds exactly one fragment \(found 0\)/ },
+  ])("$name", ({ labels, merge, after, status, verdict, today = false }) => {
+    const { root, forkBase } = syncFixture({ merge, after })
+
+    // when: the workflow's real entry point judges the sync PR with and without the label
+    const result = runGate(root, { CHANGELOG_GATE_BASE: forkBase, CHANGELOG_GATE_PR: "7", CHANGELOG_GATE_LABELS: JSON.stringify(labels) })
+
+    // then: the label passes only upstream's exact bytes; anything else is the unlabelled verdict
+    expect(result.status, result.stdout + result.stderr).toBe(status)
+    expect(result.stdout).toMatch(verdict)
+    if (today) {
+      const unlabelled = runGate(root, { CHANGELOG_GATE_BASE: forkBase, CHANGELOG_GATE_PR: "7" })
+      expect(verdicts(result.stdout)).toEqual(verdicts(unlabelled.stdout))
+    }
   })
 })
 

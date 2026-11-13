@@ -47,6 +47,22 @@ The `changelog-gate` workflow runs `script/check-pr-changelog.ts` from the base 
   continuation lines) under `### ` headings, before any log block. A fragment with only log blocks
   fails. A merged fragment cannot be edited, so this is checked before merge.
 
+### Upstream sync (fork only)
+
+A pull request that merges upstream (`UPSTREAM_SYNC` in `script/changelog-gate.config.ts`, the
+`code-yeongyu/oh-my-openagent` `dev` branch) receives upstream's own release edits to `CHANGELOG.md`, the
+`changes.md` logs and `changes/unreleased/`. With the `upstream-sync` label the gate fetches upstream and
+lets such a path through only when all of these hold:
+
+- the pull request brings upstream commits the base branch lacks, joined by a merge commit;
+- the path's content at the head (or its absence) is byte-identical to the latest upstream commit the
+  head contains;
+- upstream itself changed the path since the base branch's last upstream sync, so a fork file reverted or
+  deleted inside the merge does not count as upstream's.
+
+If any changelog path fails a check, the gate names it and gives the verdict it would give without the
+label. The pull request still adds its own `changes/unreleased/<pr-number>.md`, which is checked as usual.
+
 The rules live in `script/changelog-gate-rules.ts`, vendored byte-identical from
 `sisyphuslabs/common-infra` (`bun script/check-gate-sync.ts` compares them).
 
