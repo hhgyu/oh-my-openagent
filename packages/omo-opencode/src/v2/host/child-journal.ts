@@ -169,8 +169,43 @@ export function resolveTrustedChildStatePath(path: string) {
  * locator's generation go down; the caller raises its scope above this floor before the first lease.
  * Read-only: no owner row is registered and nothing is created. */
 export function readStoredLocatorGenerationFloor(path: string): number {
+  let floor = 0
+  for (const row of readStoredChildRows(path)) {
+    // A corrupt row stays for inspection; it cannot lower the floor of the readable ones.
+    let body: unknown
+    try {
+      body = JSON.parse(row.body)
+    } catch {
+      continue
+    }
+    const parsed = recordSchema.safeParse(body)
+    if (parsed.success && parsed.data.locator.generation > floor) floor = parsed.data.locator.generation
+  }
+  return floor
+}
+
+/** Every child session a journal ever claimed. A claim is written before the host session exists and
+ * is never deleted, so this is the durable ownership index. Read-only; a row that does not parse
+ * leaves ownership unknown, so it throws instead of answering. */
+export function readStoredChildSessionIDs(path: string): ReadonlySet<string> {
+  const sessions = new Set<string>()
+  for (const row of readStoredChildRows(path)) {
+    let body: unknown
+    try {
+      body = JSON.parse(row.body)
+    } catch (cause) {
+      throw new SessionBackendError("conflict", "Unreadable child journal row", undefined, { cause })
+    }
+    const parsed = recordSchema.safeParse(body)
+    if (!parsed.success) fail("Unreadable child journal row")
+    sessions.add(parsed.data.locator.sessionID)
+  }
+  return sessions
+}
+
+function readStoredChildRows(path: string): Row[] {
   if (!isAbsolute(path)) fail("Child journal requires an absolute trusted state path")
-  if (!existsSync(path)) return 0
+  if (!existsSync(path)) return []
   const absolute = resolveTrustedChildStatePath(path)
   if (typeof constants.SQLITE_OPEN_NOFOLLOW !== "number") fail("SQLite no-follow open support is unavailable")
   const db = new Database(absolute, constants.SQLITE_OPEN_READWRITE | constants.SQLITE_OPEN_NOFOLLOW)
@@ -178,19 +213,7 @@ export function readStoredLocatorGenerationFloor(path: string): number {
     db.exec("PRAGMA busy_timeout=2000")
     const app = (db.query("PRAGMA application_id").get() as { application_id: number }).application_id
     if (app !== applicationID) fail("Foreign child journal database")
-    let floor = 0
-    for (const row of db.query<Row, []>("SELECT body FROM children").all()) {
-      // A corrupt row stays for inspection; it cannot lower the floor of the readable ones.
-      let body: unknown
-      try {
-        body = JSON.parse(row.body)
-      } catch {
-        continue
-      }
-      const parsed = recordSchema.safeParse(body)
-      if (parsed.success && parsed.data.locator.generation > floor) floor = parsed.data.locator.generation
-    }
-    return floor
+    return db.query<Row, []>("SELECT body FROM children").all()
   } finally {
     db.close()
   }

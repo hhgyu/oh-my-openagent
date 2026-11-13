@@ -494,9 +494,13 @@ async function host(dir: string, closers: (() => Promise<void> | void)[]) {
     syntheticRelease.resolve()
     observerUpdateRelease.resolve()
   })
-  function raw(id = "parent") {
+  function raw(id = "parent", hostSubagent?: { parentID?: string; directory?: string }) {
     const controller = new AbortController()
-    sessions.set(id, { id, location: { directory: dir } })
+    sessions.set(id, {
+      id,
+      ...(hostSubagent?.parentID !== undefined && { parentID: hostSubagent.parentID }),
+      location: { directory: hostSubagent?.directory ?? dir },
+    })
     const caller = {
       sessionID: id,
       agent: "build",
