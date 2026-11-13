@@ -94,7 +94,14 @@ export async function permissionOwner(sessionContext?: Readonly<Record<string, s
                     String(spec.depth ?? 1),
                   ],
                   cwd,
-                  env: { HOME: cwd, PATH: process.env.PATH ?? "" },
+                  // Without its own agent dir and USERPROFILE the child's engine falls back to the account's real
+                  // ~/.senpi/agent on Windows and writes its goal store there.
+                  env: {
+                    HOME: cwd,
+                    USERPROFILE: cwd,
+                    PI_CODING_AGENT_DIR: join(cwd, "agent"),
+                    PATH: process.env.PATH ?? "",
+                  },
                 }),
               }),
             ),
