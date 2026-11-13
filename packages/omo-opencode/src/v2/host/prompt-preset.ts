@@ -7,12 +7,14 @@ import type {
 } from "@code-yeongyu/senpi/prompt-presets"
 
 export type PromptOptions = BuildDynamicSystemPromptOptions & {
-  /** 2026.11.5-1 runtime supports this field, omitted by its public Pick type.
+  /** The 2026.11.12 runtime supports these fields, omitted by its public Pick type.
    * Keep the structural extension here and pin byte parity in tests. */
   readonly fullToolPrompt?: {
     readonly toolSnippets: Record<string, string>
     readonly promptGuidelines: string[]
   }
+  /** A provider-native search tool is on the request even without the builtin `web_search` (senpi#2935). */
+  readonly nativeSearchAvailable?: boolean
 }
 
 export type PromptRenderInput = {
