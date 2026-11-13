@@ -5,7 +5,8 @@ import { assertCanonicalNativeDagTarget } from "../../tools/native-dag"
 import { isNativeDagToolName } from "../../tools/native-dag-codecs"
 import { AsyncLocalStorage } from "node:async_hooks"
 import { join } from "node:path"
-import { readStoredLocatorGenerationFloor } from "../../host/child-journal"
+import { readStoredChildSessionIDs, readStoredLocatorGenerationFloor } from "../../host/child-journal"
+import { assertHostSubagentRoot } from "./host-subagent-root"
 import type { ToolContext } from "@opencode/plugin/promise/tool"
 import type { ListedTool } from "../../host/tool-registry"
 import { hasJoinedPermissionCancellation } from "../../host/effect-permission-api"
@@ -110,6 +111,7 @@ type Options = Omit<
 interface Entry {
   readonly lease: SessionLease
   readonly root?: Entry
+  readonly hostSubagentParent?: string
   readonly binding?: VerifiedParentBinding
   readonly stop: AbortController
   state: "open" | "closing" | "closed"
@@ -215,6 +217,7 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
       stateDir: options.stateDirFor(entry.lease.sessionID),
       scopes: options.scopes,
       parent: entry.lease,
+      ...(entry.hostSubagentParent !== undefined && { rootHostParent: entry.hostSubagentParent }),
       policy: options.policy,
       metadataSource: options.metadataSource,
       config: options.config,
@@ -428,6 +431,7 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
       caller.signal.throwIfAborted()
       if (actual.id !== caller.sessionID || actual.location.directory !== ctx.location.directory)
         throw Error("Foreign actual task caller")
+      const hostParent = actual.parentID ?? undefined
       for (;;) {
         const previous = entries.get(caller.sessionID)
         if (!previous) break
@@ -443,7 +447,8 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
             const runtime = await initialize(previous.root)
             const binding = await runtime.verifyParent(caller.sessionID, caller.signal)
             if (binding !== previous.binding) throw Error("Borrowed caller generation changed")
-          } else if (actual.parentID) throw Error("Root caller acquired an unexpected ancestor")
+          } else if (hostParent !== previous.hostSubagentParent)
+            throw Error("Root caller acquired an unexpected ancestor")
           open(previous)
           return previous.lease
         }
@@ -452,14 +457,15 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
         caller.signal.throwIfAborted()
         if (closing) throw Error("Task service is closing")
       }
-      if (actual.parentID) {
-        const roots = [...entries.values()].filter(
-          (entry) => !entry.root && entry.state === "open" && entry.runtime?.ownsSession(caller.sessionID),
-        )
-        if (roots.length !== 1) throw Error("Nested caller has no unique owned root manager")
-        const root = roots[0],
-          runtime = root.runtime
-        if (!runtime) throw Error("Nested caller has no unique owned root manager")
+      const owningRoots = () =>
+        [...entries.values()].filter((entry) => !entry.root && entry.runtime?.ownsSession(caller.sessionID))
+      const owners = hostParent === undefined ? [] : owningRoots()
+      if (owners.length > 1 || (owners.length === 1 && owners[0]?.state !== "open"))
+        throw Error("Nested caller has no unique owned root manager")
+      if (owners.length === 1) {
+        const root = owners[0],
+          runtime = root?.runtime
+        if (!root || !runtime) throw Error("Nested caller has no unique owned root manager")
         const binding = await runtime.verifyParent(caller.sessionID, caller.signal),
           parent = runtime.parentInfo(binding, true)
         caller.signal.throwIfAborted()
@@ -479,9 +485,28 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
         })
         return parent.lease
       }
-      // No await between final lookup and root mint; owned children NEVER pass this branch.
+      if (hostParent !== undefined) {
+        await assertHostSubagentRoot({
+          caller: caller.sessionID,
+          parentID: hostParent,
+          directory: ctx.location.directory,
+          signal: caller.signal,
+          get: (sessionID, signal) => ctx.session.get({ sessionID }, { signal }),
+          journaledChildren: (ancestor) =>
+            readStoredChildSessionIDs(
+              join(options.stateDirFor(ancestor as ToolContext["sessionID"]), "owned-children.sqlite"),
+            ),
+        })
+        caller.signal.throwIfAborted()
+        if (closing) throw Error("Task service is closing")
+        if (owningRoots().length) throw Error("Nested caller has no unique owned root manager")
+      }
+      // No await between final lookup and root mint; owned children NEVER pass this branch: a live
+      // owner adopted them above and assertHostSubagentRoot refused every journaled one.
       const concurrent = entries.get(caller.sessionID)
       if (concurrent) {
+        if (concurrent.root || concurrent.hostSubagentParent !== hostParent)
+          throw Error("Competing root parent adoption")
         open(concurrent)
         return concurrent.lease
       }
@@ -491,7 +516,12 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
         readStoredLocatorGenerationFloor(join(options.stateDirFor(caller.sessionID), "owned-children.sqlite")),
       )
       const lease = options.scopes.open(caller.sessionID, options.policy)
-      entries.set(caller.sessionID, { lease, stop: new AbortController(), state: "open" })
+      entries.set(caller.sessionID, {
+        lease,
+        ...(hostParent !== undefined && { hostSubagentParent: hostParent }),
+        stop: new AbortController(),
+        state: "open",
+      })
       return lease
     },
     async forCall(caller: ToolContext) {

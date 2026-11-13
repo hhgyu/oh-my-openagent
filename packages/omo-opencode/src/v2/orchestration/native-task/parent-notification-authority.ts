@@ -113,6 +113,7 @@ export interface ParentNotificationAuthorityOptions {
   readonly bindings: ReturnType<typeof createParentBindings>
   readonly receiver: VerifiedParentBinding
   readonly root: SessionLease
+  readonly rootHostParent?: string
   readonly registryGeneration: number
   readonly directory: string
   readonly rootDirectory: string
@@ -174,6 +175,7 @@ export function createParentNotificationAuthorityIssuer(options: ParentNotificat
     bindings,
     receiver,
     root,
+    rootHostParent,
     registryGeneration,
     directory,
     rootDirectory,
@@ -855,10 +857,11 @@ export function createParentNotificationAuthorityIssuer(options: ParentNotificat
           }
           notificationSourceCurrent(run, source)
           snapshot = chain(run.task.token, snapshot, run.task.rootBasis)
+          const expectedParent = target.id === root.sessionID ? rootHostParent : target.parent
           if (
             actual.id !== target.id ||
             actual.location.directory !== target.directory ||
-            (target.parent ? actual.parentID !== target.parent : !!actual.parentID)
+            (expectedParent ? actual.parentID !== expectedParent : !!actual.parentID)
           )
             fail("Actual notification receiver identity differs")
         }
