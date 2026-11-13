@@ -1,4 +1,4 @@
-// Bounded activity probe for the transient sweep (issue #7765).
+// Bounded activity probe for the transient sweep (issue #7765; moved from omo-senpi transient-age.ts).
 //
 // A directory's own mtime only tracks its direct entries, so a run whose transcript grows in a
 // leaf would otherwise look untouched since it started. The probe therefore walks the tree, and
@@ -12,11 +12,12 @@
 // The filesystem is a parameter so the walk's cost - not only its verdict - is testable:
 // `nodeAgeProbeFs` is the only production implementation.
 
-import { readdir, stat } from "@oh-my-opencode/memory-core/fs"
 import { join } from "node:path"
 
+import { readdir, stat } from "../fs/resilient"
+
 /** Six levels reach a run root's transcript leaves (`agents/<id>/runtime/transcripts/<session>/*`). */
-export const MAX_AGE_DEPTH = 6
+const MAX_AGE_DEPTH = 6
 export const MAX_AGE_ENTRIES = 512
 
 export interface AgeProbeEntry {
@@ -36,7 +37,7 @@ export interface AgeProbeFs {
  */
 export type TreeActivity = "active" | "idle" | "unknown"
 
-export const nodeAgeProbeFs: AgeProbeFs = {
+const nodeAgeProbeFs: AgeProbeFs = {
   async list(path: string): Promise<readonly AgeProbeEntry[]> {
     const entries = await readdir(path, { withFileTypes: true })
     return entries.map((entry) => ({ name: entry.name, directory: entry.isDirectory() }))

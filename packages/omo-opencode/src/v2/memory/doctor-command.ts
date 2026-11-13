@@ -4,11 +4,18 @@
 //   writes no Senpi completion records, child logs or remediation hints;
 // - the skill `name:` frontmatter repair is not run, so `/doctor` never writes the memory repo's working
 //   tree outside a memory commit (a dirty tree would fail the next reflection merge with `parent_dirty`).
-// The projection line reports the limits the V2 projection compiles with (`memory.projection`).
+// The projection line reports the limits the V2 projection compiles with (`memory.projection`); the
+// runtime-size line reads the bound settings' `memory.runtime` cap and windows.
 
 import {
+  formatStaleLockFixLines,
   readReflectionParkFile,
+  reclaimDeadOwnerLocks,
   REFLECTION_PARK_PROBE_INTERVAL_MS,
+  resolveRuntimeMaxBytes,
+  resolveRuntimeReflectionEnabled,
+  resolveRuntimeRetentionPolicy,
+  runStaleLockReaper,
   type ReflectionParkState,
 } from "@oh-my-opencode/memory-core"
 import { runDoctor, type DoctorCheck } from "@oh-my-opencode/memory-core/doctor"
@@ -54,10 +61,21 @@ async function reflectionParkHealth(reflectionDir: string): Promise<DoctorCheck>
   }
 }
 
+/**
+ * `/doctor --fix [--dry-run]`: the shared stale reflection-lock reaper with its minimal settle (the one
+ * `omo doctor --fix` runs), then the dead-owner lock reclaim. A live holder, a young launch or a run whose
+ * owner is not provably gone is kept and reported.
+ */
+async function reflectionLockFix(bound: BoundMemorySession, dryRun: boolean): Promise<readonly string[]> {
+  const report = await runStaleLockReaper({ runtimeDir: bound.paths.runtime, dryRun })
+  const locks = dryRun ? undefined : await reclaimDeadOwnerLocks(bound.paths.locks)
+  return formatStaleLockFixLines(bound.identity, report, locks)
+}
+
 export function createDoctorCommand(deps: { readonly now?: () => number } = {}): ExtraMemoryCommand {
   return {
     name: INSIGHT_COMMAND_NAMES.doctor,
-    description: "Run deterministic memory health checks (read-only).",
+    description: "Run deterministic memory health checks; --fix [--dry-run] reclaims stale reflection locks.",
     async run(bound: BoundMemorySession | undefined, args: string) {
       if (bound === undefined) return { text: UNBOUND_MEMORY_SESSION, level: "error" }
       const call = coreCommandCall(bound)
@@ -74,6 +92,12 @@ export function createDoctorCommand(deps: { readonly now?: () => number } = {}):
             },
           }),
           reflectionHealth: (identity) => reflectionParkHealth(identity.identityPaths.reflection),
+          runtimeSize: (identity) => ({
+            maxBytes: resolveRuntimeMaxBytes(bound.settings, identity.identity),
+            policy: resolveRuntimeRetentionPolicy(bound.settings, identity.identity),
+            reflectionEnabled: resolveRuntimeReflectionEnabled(bound.settings, identity.identity),
+          }),
+          reflectionLockFix: (_sessionId, options) => reflectionLockFix(bound, options.dryRun),
         },
         call.ctx,
         args,
