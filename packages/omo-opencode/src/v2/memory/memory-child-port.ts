@@ -39,7 +39,7 @@ export interface MemoryChildTurnReport {
     readonly cacheRead: number
     readonly cacheWrite: number
   }
-  /** `input + cacheRead` of the newest assistant message. */
+  /** `input + cacheRead + cacheWrite` of the newest assistant message. */
   readonly contextTokens?: number
   /** User texts the child transcript holds, so an owner can confirm which steers it read. */
   readonly userTexts: readonly string[]
@@ -321,8 +321,10 @@ export function turnReport(messages: readonly unknown[], turnStartedAt: number):
       ? last.model.variant
       : undefined
   const tokens = last !== undefined && isRecord(last.tokens) ? last.tokens : undefined
+  const lastCache = tokens !== undefined && isRecord(tokens.cache) ? tokens.cache : {}
+  // A cold prompt cache reports most of the prompt as cache.write, so it counts toward the context too.
   const contextTokens =
-    tokens === undefined ? undefined : numberOf(tokens.input) + numberOf(isRecord(tokens.cache) ? tokens.cache.read : 0)
+    tokens === undefined ? undefined : numberOf(tokens.input) + numberOf(lastCache.read) + numberOf(lastCache.write)
   const error = last?.error
   const failed = error !== undefined && error !== null
   return {
