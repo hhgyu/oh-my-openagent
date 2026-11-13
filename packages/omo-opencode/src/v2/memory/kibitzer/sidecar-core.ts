@@ -95,6 +95,8 @@ export interface SidecarCore {
   generations: number
   consecutiveFailures: number
   backoffTimer: unknown
+  /** A skipped wake already warned that no model resolves; cleared once one does. */
+  modelUnavailableWarned: boolean
   closing: boolean
   admission: AbortController | undefined
   pendingReseed: Omit<KibitzerReseedInput, "maxItems" | "toolBudget"> | undefined
@@ -149,6 +151,7 @@ export function createSidecarCore(options: KibitzerSidecarOptions): SidecarCore 
     generations: 0,
     consecutiveFailures: 0,
     backoffTimer: undefined,
+    modelUnavailableWarned: false,
     closing: false,
     admission: undefined,
     pendingReseed: undefined,

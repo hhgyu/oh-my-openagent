@@ -3,7 +3,7 @@ import { homedir } from "node:os"
 import { isAbsolute, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-// A port of the senpi 2026.11.5-1 `ls` tool (`core/tools/ls.js` over the local machine, no
+// A port of the senpi 2026.11.12 `ls` tool (`core/tools/ls.js` over the local machine, no
 // filesystem policy). The senpi runtime is never bundled into V2, so its value code is mirrored here.
 const DEFAULT_LIMIT = 500
 const MAX_BYTES = 50 * 1024

@@ -5,7 +5,11 @@ import { createConnection } from "node:net"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { systemAccountFacts, useAccountFacts } from "./packages/omo-opencode/src/cli/service-auth/account-home"
-import { markTestInfrastructureDir, runTestTempRootTeardown } from "./test-temp-root"
+import { resolveAgentHome } from "./packages/senpi-task/src/agent-home"
+import { resolveProjectStateDirectory } from "./packages/senpi-task/src/store/project-state-directory"
+import { installLiveEnvironmentSpawn } from "./test-support/live-environment-spawn"
+import { isInside, testProjectStateCreatedIn } from "./test-support/real-agent-dir-guard"
+import { markTestInfrastructureDir, runTestTempRootTeardown, testTempRoots } from "./test-temp-root"
 
 const AGENT_DIR_ENV_NAMES = ["OMO_CODING_AGENT_DIR", "SENPI_CODING_AGENT_DIR", "PI_CODING_AGENT_DIR"] as const
 
@@ -41,6 +45,8 @@ export function installHermeticHome(): HermeticHome {
   delete process.env.CLAUDE_CONFIG_DIR
   installHermeticSecrets()
   installHermeticGitConfig(home)
+  installLiveEnvironmentSpawn()
+  assertAgentStateIsHermetic(home)
   // Loaded now, not at teardown: a cold engine import costs about a second under load, which must not come out
   // of the stop deadline (#11630).
   const engine = preloadTaskHostEngine()
@@ -51,10 +57,12 @@ export function installHermeticHome(): HermeticHome {
     await runCheckThenTeardown(async () => {
       const failures: unknown[] = []
       await stopRunTaskHosts(agentDir, { loadEngine: () => engine }).catch((error: unknown) => failures.push(error))
-      try {
-        failOnShardsInRealAgentDir()
-      } catch (error) {
-        failures.push(error)
+      for (const check of [failOnShardsInRealAgentDir, failOnProjectStateInRealAgentDir]) {
+        try {
+          check()
+        } catch (error) {
+          failures.push(error)
+        }
       }
       if (failures.length === 1) throw failures[0]
       if (failures.length > 1) throw new AggregateError(failures, failures.map(describeError).join("\n"))
@@ -331,6 +339,26 @@ function failOnShardsInRealAgentDir(): void {
   throw new Error(
     `test process ${process.pid} registered task host shards in the real agent dir (#9578): ${leaked.join(", ")}`,
   )
+}
+
+// Task records, DAG runs and team state for a test project go under the agent dir's projects folder. A
+// folder there for a project under this process's temp roots was written by a test (or a child it
+// started) that escaped the hermetic agent dir.
+function failOnProjectStateInRealAgentDir(): void {
+  const leaked = REAL_AGENT_DIRS.flatMap((agentDir) =>
+    testProjectStateCreatedIn(join(agentDir, "projects"), testTempRoots()),
+  )
+  if (leaked.length === 0) return
+  throw new Error(`a test wrote project state into the real agent dir: ${leaked.join(", ")}`)
+}
+
+function assertAgentStateIsHermetic(home: string): void {
+  const resolved = [
+    resolveAgentHome({ env: process.env }),
+    resolveProjectStateDirectory(join(home, "agent-dir-probe"), "senpi-task"),
+  ]
+  const escaped = resolved.filter((path) => !isInside(home, path))
+  if (escaped.length > 0) throw new Error(`the hermetic agent dir resolves outside ${home}: ${escaped.join(", ")}`)
 }
 
 // A pid is reused, so a shard left by an earlier process that held this pid names it as creator too.

@@ -3,6 +3,8 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { loadOmoConfig } from "@oh-my-opencode/omo-config-core"
+
 import { parseJsonc } from "../../shared/jsonc-parser"
 import type { InstallConfig } from "../types"
 import { resetConfigContext } from "./config-context"
@@ -74,10 +76,32 @@ describe("writeOmoConfig", () => {
     const document = parseJsonc<Record<string, unknown>>(readFileSync(path, "utf-8"))
     const config = record(document["[opencode]"])
 
+    const sisyphus = record(record(config.agents).sisyphus)
+    const primary = Array.isArray(sisyphus.models) ? sisyphus.models[0] : sisyphus.model
     expect(result).toEqual({ success: true, configPath: path })
-    expect(record(record(config.agents).sisyphus).model).toBe("custom/provider-model")
+    expect(typeof primary === "string" ? primary : record(primary).model).toBe("custom/provider-model")
     expect(config.disabled_hooks).toEqual(["comment-checker"])
     for (const key of Object.keys(generateOmoConfig(installConfig))) expect(config).toHaveProperty(key)
+  })
+
+  it("#given a multi-provider install #when the written block loads through the canonical opencode view #then every generated agent and category survives with its fallback chain and nothing is dropped", () => {
+    const result = writeOmoConfig(installConfig)
+    const generated = generateOmoConfig(installConfig)
+    const loaded = loadOmoConfig({ cwd: homeDirectory, env: { HOME: homeDirectory }, harness: "opencode" })
+    const sisyphus = record(record(generated.agents).sisyphus)
+    const generatedChain = [
+      sisyphus.model,
+      ...(Array.isArray(sisyphus.fallback_models) ? sisyphus.fallback_models : []),
+    ]
+
+    expect(result.success).toBe(true)
+    expect(generatedChain.length).toBeGreaterThan(1)
+    expect(loaded.diagnostics).toEqual([])
+    expect(Object.keys(loaded.config.agents ?? {}).sort()).toEqual(Object.keys(record(generated.agents)).sort())
+    expect(Object.keys(loaded.config.categories ?? {}).sort()).toEqual(Object.keys(record(generated.categories)).sort())
+    expect(
+      (loaded.config.agents?.sisyphus?.models ?? []).map((entry) => (typeof entry === "string" ? entry : entry.model)),
+    ).toEqual(generatedChain.map((entry) => (typeof entry === "string" ? entry : record(entry).model)))
   })
 
   it("#given no user config #when writing #then creates the user omo document", () => {

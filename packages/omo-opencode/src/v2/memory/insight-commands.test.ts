@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { spawn } from "node:child_process"
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { hostname } from "node:os"
 import { dirname, join } from "node:path"
 import { GitMemoryRepo } from "@oh-my-opencode/memory-core"
 import { OmoMemorySettingsSchema } from "@oh-my-opencode/omo-config-core"
@@ -41,6 +43,16 @@ async function seeded(settings: Record<string, unknown> = {}): Promise<BoundMemo
     ],
   })
   return bound
+}
+
+async function deadPid(): Promise<number> {
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60_000)"], { stdio: "ignore" })
+  const pid = child.pid
+  if (pid === undefined) throw new Error("child did not start")
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()))
+  child.kill("SIGKILL")
+  await exited
+  return pid
 }
 
 describe("/doctor (S7c)", () => {
@@ -109,10 +121,56 @@ describe("/doctor (S7c)", () => {
     const bound = await seeded()
 
     // when
-    const result = await createDoctorCommand().run(bound, "--fix")
+    const result = await createDoctorCommand().run(bound, "--repair")
 
     // then
-    expect(result).toEqual({ text: "unknown flag --fix", level: "error" })
+    expect(result).toEqual({ text: "unknown flag --repair", level: "error" })
+  })
+
+  test("#given memory.runtime settings #when /doctor --json runs #then the report carries the runtime-size check and the runtimeSize object", async () => {
+    // given
+    const bound = await seeded({ runtime: { max_bytes: 1 } })
+
+    // when
+    const result = await createDoctorCommand().run(bound, "--json")
+
+    // then
+    const report = JSON.parse(result.text) as {
+      checks: { name: string; level: string }[]
+      runtimeSize?: { maxBytes?: number } | null
+    }
+    expect(report.checks.find((check) => check.name === "runtime-size")).toBeDefined()
+    expect(report.runtimeSize).toMatchObject({ maxBytes: 1 })
+  })
+
+  test("#given a reflection lock whose launcher on this host is dead #when /doctor --fix --dry-run then /doctor --fix run #then the dry run lists it and keeps it, and the fix removes it", async () => {
+    // given
+    const bound = await seeded()
+    const lock = join(bound.paths.reflection, "active.lock")
+    mkdirSync(bound.paths.reflection, { recursive: true })
+    writeFileSync(
+      lock,
+      JSON.stringify({
+        runId: "reflection-run-64",
+        request: { trigger: "manual", conversationIds: ["conversation-a"], snapshots: [] },
+        reservedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        launcherPid: await deadPid(),
+        launcherHostname: hostname(),
+        launcherProcessStart: null,
+      }),
+    )
+    const doctor = createDoctorCommand()
+
+    // when
+    const dryRun = await doctor.run(bound, "--fix --dry-run")
+    const keptByDryRun = existsSync(lock)
+    const fixed = await doctor.run(bound, "--fix")
+
+    // then
+    expect(dryRun.text).toContain(`[fix] WOULD FIX ${bound.identity} active.lock run reflection-run-64`)
+    expect(keptByDryRun).toBe(true)
+    expect(fixed.text).toContain(`[fix] FIXED ${bound.identity} active.lock run reflection-run-64`)
+    expect(existsSync(lock)).toBe(false)
   })
 })
 

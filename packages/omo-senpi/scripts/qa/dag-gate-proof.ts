@@ -9,6 +9,8 @@ import { createDagFileStore, createDagManager } from "@oh-my-opencode/senpi-task
 import { runDagTool } from "../../src/components/task/dag-tool"
 
 const projectDir = mkdtempSync(join(tmpdir(), "dag-gate-proof-"))
+// The DAG store lives in the agent dir, so the proof gets its own and never writes the real ~/.omo/agent.
+process.env.OMO_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "dag-gate-proof-agent-"))
 const store = createDagFileStore({ project_dir: projectDir })
 const manager = createDagManager({ store })
 const deps = { manager, parentSessionId: () => "ses-proof", rootSessionId: () => "ses-proof" }

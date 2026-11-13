@@ -69,6 +69,7 @@ async function fixture(
       releaseInputAck(): void
       finishFrame(sessionID: string): void
       emit(type: string, sessionID: string, data?: object): void
+      stateDir: string
       session(sessionID: string): unknown
       changeSession(sessionID: string, patch: object): void
       removeByHost(sessionID: string): void
@@ -158,10 +159,19 @@ async function fixture(
     }
   }
   const api = {
-    async create(input: { id: string; parentID?: string; location?: unknown; agent: string }) {
+    async create(input: { id: string; parentID?: string; location?: unknown; agent: string; permissions?: unknown }) {
       calls.push("create")
       createdAgents.push(input.agent)
-      const value = { id: input.id, parentID: input.parentID, location: input.location, agent: input.agent }
+      // Controlled host semantics: a child created without rules gets a copy of its parent's rules.
+      const inherited =
+        input.permissions ?? (sessions.get(input.parentID ?? "") as { permissions?: unknown } | undefined)?.permissions
+      const value = {
+        id: input.id,
+        parentID: input.parentID,
+        location: input.location,
+        agent: input.agent,
+        ...(inherited === undefined ? {} : { permissions: structuredClone(inherited) }),
+      }
       sessions.set(input.id, value)
       if (heldCreate) {
         createEntered.resolve()
@@ -220,6 +230,8 @@ async function fixture(
         session.permissions = structuredClone(input.permissions)
       }
       if (session && input.metadata) session.metadata = structuredClone(input.metadata)
+      if (session && input.permissions)
+        emit("session.permissions", input.sessionID, { permissions: session.permissions })
       emit("session.renamed", input.sessionID)
     },
     async prompt(
@@ -484,6 +496,7 @@ async function fixture(
               },
               releaseCreate: () => createGate.resolve(),
               emit,
+              stateDir: join(dir, "state"),
               calls,
               contexts,
               createdAgents,

@@ -92,6 +92,10 @@ export function markTestInfrastructureDir(path: string): void {
   infrastructureEntries.add(basename(path))
 }
 
+export function testTempRoots(): readonly string[] {
+  return [osTempDir, runRoot, processScopedDir]
+}
+
 function leftoverEntries(): string[] {
   try {
     return readdirSync(runRoot)
