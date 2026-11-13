@@ -7,6 +7,7 @@ import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { CodemodeModules } from "./codemode-loader"
 import { createOwnedHostToolBridge, type OwnedEvalHostTool } from "./codemode-host-tools"
+import type { KernelPreludeContribution } from "./codemode-worker-protocol"
 
 /** The senpi `ToolDefinition` slice V2 drives. */
 export interface EvalToolDefinition {
@@ -35,7 +36,13 @@ export interface EvalSessionRuntime {
   abandon(): void
 }
 
-export interface EvalRuntimeInput {
+export interface PreludeOptions {
+  /** Read at the start of every cell, as Native reads the active tools' preludes. */
+  readonly kernelPreludes?: () => readonly KernelPreludeContribution[]
+  readonly promptKernelPreludes?: readonly KernelPreludeContribution[]
+}
+
+export interface EvalRuntimeInput extends PreludeOptions {
   readonly sessionID: string
   readonly cwd: string
   /** Per-session directory for spilled artifacts and the synthetic session-file path. */
@@ -69,6 +76,7 @@ function refuseCompletion(): Promise<never> {
 export async function buildEvalDefinition(
   modules: CodemodeModules,
   sandbox: boolean,
+  promptKernelPreludes: readonly KernelPreludeContribution[] = [],
 ): Promise<{ readonly description: string; readonly parameters: unknown }> {
   const settings = buildCodemodeSettings(modules, sandbox)
   const availability = await (modules.getInterpreterAvailability as Call)(
@@ -77,7 +85,7 @@ export async function buildEvalDefinition(
   )
   const enabledLanguages = (modules.enabledLanguagesFrom as Call)(settings, availability)
   const tool = (modules.createEvalTool as Call)({
-    ...evalToolOptions(modules, settings, enabledLanguages, availability),
+    ...evalToolOptions(modules, settings, enabledLanguages, availability, { promptKernelPreludes }),
     kernelManager: new (modules.SessionManagerProxy as unknown as Construct)(),
     executeTool: Object.assign(() => Promise.reject(Error("no session")), { isToolAvailable: () => false }),
     listTools: () => [],
@@ -90,8 +98,11 @@ function evalToolOptions(
   settings: Record<string, unknown>,
   enabledLanguages: unknown,
   availability: unknown,
+  preludes: PreludeOptions = {},
 ) {
   return {
+    ...(preludes.kernelPreludes && { kernelPreludes: preludes.kernelPreludes }),
+    ...(preludes.promptKernelPreludes?.length && { promptKernelPreludes: preludes.promptKernelPreludes }),
     enabledLanguages,
     cellTimeoutSeconds: settings.cellTimeoutSeconds,
     foregroundWindowSeconds: (modules.resolveForegroundWindowSeconds as Call)(settings),
@@ -156,7 +167,7 @@ export async function createEvalSessionRuntime(
     throw error
   }
   const tool = (modules.createEvalTool as Call)({
-    ...evalToolOptions(modules, settings, enabledLanguages, availability),
+    ...evalToolOptions(modules, settings, enabledLanguages, availability, input),
     kernelManager: manager,
     executeTool: bridge.executeTool,
     listTools: bridge.listTools,

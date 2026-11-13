@@ -74,7 +74,7 @@ describe("computer settings schema", () => {
     expect(parsed.computer).toEqual({ enabled: false })
   })
 
-  test("#given every computer key #when checking harness support #then each is native-only", () => {
+  test("#given every computer key #when checking harness support #then each is native and opencode", () => {
     // given
     const keys = Object.keys(OmoComputerSettingsSchema.shape)
 
@@ -84,6 +84,6 @@ describe("computer settings schema", () => {
     )
 
     // then
-    expect(supported).toEqual(keys.map(() => ["native"]))
+    expect(supported).toEqual(keys.map(() => ["native", "opencode"]))
   })
 })

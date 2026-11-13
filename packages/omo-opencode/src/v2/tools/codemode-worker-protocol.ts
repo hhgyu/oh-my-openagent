@@ -31,11 +31,33 @@ export interface EvalDefinition {
   readonly parameters: unknown
 }
 
+/** senpi `KernelPreludeContribution`: kernel globals a plugin-owned host tool installs into eval cells. */
+export interface KernelPreludeContribution {
+  readonly javascript: string
+  readonly python: string
+  readonly documentation: string
+  readonly exports: readonly string[]
+}
+
+/** One prelude, named by the owned host tool its globals call. */
+export interface KernelPreludeEntry {
+  readonly name: string
+  readonly contribution: KernelPreludeContribution
+}
+
+/** Main-thread view: the catalog, and the names a session's next eval call installs. */
+export interface EvalKernelPreludes {
+  readonly catalog: readonly KernelPreludeEntry[]
+  active(sessionID: string): readonly string[]
+}
+
 export interface WorkerInit {
   readonly cwd: string
   readonly sandbox: boolean
   /** Catalog of the plugin-owned host tools; their executors stay on the main thread. */
   readonly tools: readonly { readonly name: string; readonly description: string; readonly parameters: unknown }[]
+  /** Kernel preludes the eval description documents; each call names the ones its cells install. */
+  readonly preludes?: readonly KernelPreludeEntry[]
   readonly createTimeoutMs?: number
   readonly disposeTimeoutMs?: number
 }
@@ -50,6 +72,8 @@ export interface SessionParams {
 export interface ExecuteParams extends SessionParams {
   readonly toolCallId: string
   readonly params: unknown
+  /** Names of the `WorkerInit.preludes` this call's cells install; the others are removed. */
+  readonly preludes?: readonly string[]
 }
 
 /** A live kernel-tools capability registered in the worker; only its id crosses the thread boundary. */

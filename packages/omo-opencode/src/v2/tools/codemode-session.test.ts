@@ -142,4 +142,41 @@ describe("eval session runtime", () => {
     expect(((await skipped) as Error).message).toBe("gone")
     await runtime.dispose()
   })
+
+  test("#given owned kernel preludes #when the eval tool is built #then codemode gets the per-cell reader and the documented preludes", async () => {
+    // given
+    const { createEvalSessionRuntime } = await import("./codemode-session")
+    const modules = fakeModules([])
+    const seen: Record<string, unknown>[] = []
+    Object.assign(modules, {
+      createEvalTool: (options: Record<string, unknown>) => {
+        seen.push(options)
+        return { name: "eval", description: "d", parameters: {}, execute: async () => ({ content: [] }) }
+      },
+    })
+    const computer = {
+      javascript: "globalThis.computer = {}",
+      python: "computer = None",
+      documentation: "computer.*",
+      exports: ["computer"],
+    }
+    let installed = [computer]
+
+    // when
+    const runtime = await createEvalSessionRuntime(modules, {
+      ...input(new AbortController().signal),
+      kernelPreludes: () => installed,
+      promptKernelPreludes: [computer],
+    })
+    const options = seen[0] as { kernelPreludes?: () => unknown; promptKernelPreludes?: unknown }
+    const first = options.kernelPreludes?.()
+    installed = []
+    const second = options.kernelPreludes?.()
+
+    // then
+    expect(first).toEqual([computer])
+    expect(second).toEqual([])
+    expect(options.promptKernelPreludes).toEqual([computer])
+    await runtime.dispose()
+  })
 })

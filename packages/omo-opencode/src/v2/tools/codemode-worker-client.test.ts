@@ -37,6 +37,40 @@ describe("codemode worker client", () => {
     fake.close()
   })
 
+  test("#given owned kernel preludes #when a session's calls change which are active #then each call's cells read exactly its own set and the description documents the catalog", async () => {
+    // given
+    const computer = {
+      javascript: "globalThis.computer = {}",
+      python: "computer = None",
+      documentation: "computer.*",
+      exports: ["computer"],
+    }
+    let active: string[] = ["computer"]
+    const fake = connectFakeWorker({
+      kernelPreludes: { catalog: [{ name: "computer", contribution: computer }], active: () => active },
+      execute: async (input) => ({
+        content: [{ type: "text", text: JSON.stringify(input.kernelPreludes?.() ?? null) }],
+      }),
+    })
+    await fake.backend.load()
+    const session = await fake.backend.acquire("ses_1", new AbortController().signal)
+    const run = async () =>
+      ((await session.run("call", {}, new AbortController().signal, () => {})) as { content: { text: string }[] })
+        .content[0]?.text
+
+    // when
+    const installed = await run()
+    active = []
+    const removed = await run()
+
+    // then
+    expect(JSON.parse(installed ?? "null")).toEqual([computer])
+    expect(JSON.parse(removed ?? "null")).toEqual([])
+    expect(fake.state.definitionPreludes).toEqual([[computer]])
+    await fake.backend.dispose()
+    fake.close()
+  })
+
   test("#given a running cell #when the tool signal aborts #then the abort reaches the worker as a message and the cell's own answer returns", async () => {
     // given
     const seen: string[] = []

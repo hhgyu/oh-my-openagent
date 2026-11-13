@@ -19,7 +19,7 @@ import { AGENT_DEFINITIONS } from "../agents/definitions"
 import type { OwnedEvalHostTool } from "./codemode-host-tools"
 import type { ProcessEvents } from "./codemode-session-registry"
 import { createCodemodeWorkerBackend } from "./codemode-worker-client"
-import type { EvalBackend } from "./codemode-worker-protocol"
+import type { EvalBackend, EvalKernelPreludes } from "./codemode-worker-protocol"
 import { adaptEvalResult, progressText, toToolError } from "./native-eval-result"
 
 export const NATIVE_EVAL_TOOL_NAME = "eval"
@@ -70,6 +70,8 @@ export interface NativeEvalOptions {
    * calling eval call's own SDK context as `caller` (the owned `task` executor, eval-task-host-tool.ts). */
   readonly ownedTools?: readonly OwnedEvalHostTool[]
   readonly processEvents?: ProcessEvents
+  /** Kernel globals of the owned host tools (the `computer` facade); installed per call. */
+  readonly kernelPreludes?: EvalKernelPreludes
   readonly home?: string
   readonly createTimeoutMs?: number
   readonly disposeTimeoutMs?: number
@@ -145,6 +147,7 @@ export async function registerNativeEval(
       ...(options.createTimeoutMs !== undefined && { createTimeoutMs: options.createTimeoutMs }),
       ...(options.disposeTimeoutMs !== undefined && { disposeTimeoutMs: options.disposeTimeoutMs }),
       ...(options.processEvents && { processEvents: options.processEvents }),
+      ...(options.kernelPreludes && { kernelPreludes: options.kernelPreludes }),
     })
 
   /** Root session in this plugin's directory; cached, since a session's parent never changes. */

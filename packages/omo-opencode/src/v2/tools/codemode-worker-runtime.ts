@@ -23,6 +23,7 @@ import {
   type CapabilityInvokeParams,
   type EvalDefinition,
   type ExecuteParams,
+  type KernelPreludeContribution,
   type LoadReply,
   type SessionParams,
   type WorkerInit,
@@ -35,7 +36,11 @@ const NO_PROCESS_EVENTS = { on() {}, off() {} }
 export interface CodemodeWorkerDeps {
   readonly loader?: CodemodeLoader
   readonly createRuntime?: (modules: CodemodeModules, input: EvalRuntimeInput) => Promise<EvalSessionRuntime>
-  readonly buildDefinition?: (modules: CodemodeModules, sandbox: boolean) => Promise<EvalDefinition>
+  readonly buildDefinition?: (
+    modules: CodemodeModules,
+    sandbox: boolean,
+    promptKernelPreludes: readonly KernelPreludeContribution[],
+  ) => Promise<EvalDefinition>
 }
 
 function kernelPids(modules: CodemodeModules | undefined): number[] {
@@ -81,7 +86,13 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
   const stateDirs = new Map<string, string>()
   /** The eval call whose cell runs in each session now (calls are exclusive per session). */
   const running = new Map<string, string>()
+  const activePreludes = new Map<string, readonly string[]>()
   let init: WorkerInit = { cwd: process.cwd(), sandbox: true, tools: [] }
+  const preludeCatalog = () => (init.preludes ?? []).map((entry) => entry.contribution)
+  const sessionPreludes = (sessionID: string) => {
+    const names = activePreludes.get(sessionID) ?? []
+    return (init.preludes ?? []).filter((entry) => names.includes(entry.name)).map((entry) => entry.contribution)
+  }
   let registry: EvalSessionRegistry | undefined
   let definition: Promise<EvalDefinition | undefined> | undefined
   let lastReport = ""
@@ -138,6 +149,8 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
           sandbox: init.sandbox,
           ownedTools: hostTools(),
           signal,
+          kernelPreludes: () => sessionPreludes(sessionID),
+          promptKernelPreludes: preludeCatalog(),
         })
       },
     }))
@@ -156,7 +169,7 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
     {
       async [CODEMODE_RPC.load](): Promise<LoadReply> {
         const modules = await loader.load()
-        definition ??= buildDefinition(modules, init.sandbox).catch((error: unknown) => {
+        definition ??= buildDefinition(modules, init.sandbox, preludeCatalog()).catch((error: unknown) => {
           console.warn("[oh-my-openagent/v2] eval description unavailable; keeping the placeholder", error)
           return undefined
         })
@@ -188,6 +201,7 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
           return wireResult(
             await runtime.exclusive(call.signal, async () => {
               running.set(input.sessionID, input.toolCallId)
+              activePreludes.set(input.sessionID, input.preludes ?? [])
               try {
                 const args = runtime.tool.prepareArguments ? runtime.tool.prepareArguments(input.params) : input.params
                 return await runtime.tool.execute(
@@ -211,6 +225,7 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
         capabilities.releaseSession(sessionID)
         stateDirs.delete(sessionID)
         running.delete(sessionID)
+        activePreludes.delete(sessionID)
         try {
           await registry?.release(sessionID)
         } finally {
