@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
-import { TRANSIENT_RUN_MAX_AGE_MS } from "./transient-sweep"
-import { scheduleTransientSweepOnce } from "./transient-sweep-once"
+import { TRANSIENT_RUN_MAX_AGE_MS } from "./sweep"
+import { scheduleTransientSweepOnce } from "./sweep-once"
 
 function uniqueRoot(): string {
   return `/memory-root-${crypto.randomUUID()}`

@@ -19,18 +19,24 @@ export {
   type PruneKibitzerSidecarsResult,
 } from "./sidecars"
 export {
-  createRetentionHostSweepStep,
   resolveForeignIdentityDiscardUnreflected,
   type ForeignMemoryRuntimeSettings,
   type ForeignRuntimeLayer,
   type RetentionHostSweepStepOptions,
 } from "./host-step"
 export {
-  runRuntimeRetention,
-  summarizeRuntimeRetention,
-  type RuntimeRetentionOptions,
-  type RuntimeRetentionReport,
-} from "./pass"
+  resolveRuntimeMaxBytes,
+  resolveRuntimeReflectionEnabled,
+  resolveRuntimeRetentionPolicy,
+  type RuntimeMemorySettings,
+} from "./runtime-settings"
+export {
+  runMaintenanceHostSweep,
+  runMaintenanceRetention,
+  type MaintenanceHostSweepInput,
+  type MaintenanceRetentionInput,
+} from "./maintenance-pass"
+export { runRuntimeRetention, type RuntimeRetentionOptions, type RuntimeRetentionReport } from "./pass"
 export {
   describeRuntimeCapExcess,
   measureRuntimeCapEvictableBytes,
@@ -44,7 +50,6 @@ export {
 } from "./cap"
 export { countRuntimePastRetention, measureUnreflectedJournalBytes, type RuntimePastRetention } from "./past-retention"
 export {
-  DEFAULT_RUNTIME_MAX_BYTES,
   formatRuntimeBytes,
   measureRuntimeSize,
   measureRuntimeSizeWithinBudget,

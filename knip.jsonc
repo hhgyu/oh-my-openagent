@@ -1191,7 +1191,6 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) parseNumstat
       "packages/omo-senpi/src/components/memory/tools.ts": ["parseNumstat"],
       // pre-existing at origin dev 4686e425b5: unused export(s) MAX_AGE_DEPTH, nodeAgeProbeFs
-      "packages/omo-senpi/src/components/memory/transient-age.ts": ["MAX_AGE_DEPTH", "nodeAgeProbeFs"],
       // pre-existing at origin dev 4686e425b5: unused export(s) reflectionHeadline
       "packages/omo-senpi/src/components/memory/worker/completion-renderers.ts": ["reflectionHeadline"],
       // pre-existing at origin dev 4686e425b5: unused export(s) FIELD_SEPARATOR, fit, runLabel, joinRendererTokens
