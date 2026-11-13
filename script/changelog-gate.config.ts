@@ -23,3 +23,12 @@ export const GATE_CONFIG = {
     /^packages\/[^/]+\/changes\.md$/,
   ],
 } as const;
+
+/** The upstream this fork merges. A PR labelled `label` that merges new upstream commits may carry upstream's own
+ * changelog and log edits, but only byte-for-byte as upstream wrote them (check-pr-changelog.ts). */
+export const UPSTREAM_SYNC = {
+  label: "upstream-sync",
+  url: "https://github.com/code-yeongyu/oh-my-openagent",
+  branch: "dev",
+  ref: "refs/changelog-gate/upstream",
+} as const;
