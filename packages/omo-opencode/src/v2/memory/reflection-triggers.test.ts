@@ -43,8 +43,12 @@ function setup(
   const results: (ReservationResult | null)[] = []
   let contextReads = 0
   let runs = 0
+  const turns: string[] = []
   const deps: ReflectionTriggerDeps = {
     resolve: async (sessionID) => (options.child === true || sessionID !== bound.sessionID ? undefined : bound),
+    onTurnSettled: async (target) => {
+      turns.push(target.sessionID)
+    },
     session: {
       context: async () => {
         contextReads++
@@ -87,7 +91,7 @@ function setup(
     triggers.onIdle(bound.sessionID)
     await triggers.settled()
   }
-  return { bound, transcript, events, results, triggers, journal, idle, contextReads: () => contextReads }
+  return { bound, transcript, events, results, triggers, journal, idle, turns, contextReads: () => contextReads }
 }
 
 describe("reflection triggers", () => {
@@ -194,6 +198,23 @@ describe("reflection triggers", () => {
     // then
     expect([owned.events, child.events, silent.events]).toEqual([[], [], []])
     expect([owned.contextReads(), child.contextReads(), silent.contextReads()]).toEqual([0, 0, 0])
+    expect([owned.turns, child.turns, silent.turns]).toEqual([[], [], []])
+  })
+
+  test("#given a bound root session with user input #when turns settle, failed or with reflection disabled #then the stale reflection-lock check runs once per settled turn", async () => {
+    // given
+    const enabled = setup()
+    const disabled = setup({ reflection: { enabled: false } })
+    enabled.transcript.messages = [user("u1"), answer("a1", { finish: "error" })]
+    disabled.transcript.messages = [user("u1"), answer("a1")]
+    // when
+    await enabled.idle()
+    await enabled.idle()
+    await disabled.idle()
+    // then
+    expect(enabled.turns).toEqual([enabled.bound.sessionID, enabled.bound.sessionID])
+    expect(disabled.turns).toEqual([disabled.bound.sessionID])
+    expect([enabled.events, disabled.events]).toEqual([[], []])
   })
 
   test("#given a closed trigger set #when the session goes idle #then nothing is scheduled", async () => {
