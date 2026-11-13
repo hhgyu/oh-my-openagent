@@ -49,6 +49,7 @@
     "docs/reference/omo-ai-publishing.md: omo doctor",
     "docs/reference/omo-daemon.md: omo doctor x4",
     "docs/reference/omo-json.md: omo doctor x2",
+    "docs/reference/opencode-v2-parity.md: omo doctor x2",
     "packages/get-worker/scripts/install.sh: command -v omo",
     "packages/get-worker/scripts/install.sh: omo install x3",
     "packages/omo-codex/README.md: omo get-local-version",

@@ -5,7 +5,7 @@
 //   child session in the host's table: reclaimed at bind by the shared memory child reclaim, exactly as
 //   facts children are (dead-owner takeover, generation raised to the stored floor, bounded retry memo);
 // - a held `active.lock`: decided by memory-core's one stale reflection-lock reaper (`runStaleLockReaper`,
-//   the table Senpi's session and `omo doctor --fix` share). The reaper moves an old torn lock aside by
+//   the table Senpi's session and the Native CLI doctor fix share). The reaper moves an old torn lock aside by
 //   itself; every other provably gone holder is settled here, re-decided under the run's finalize lock:
 //   `launch-interrupted` (the launcher on THIS host is gone, the 60 s launch window closed and no Senpi
 //   `ledger.json` exists) discards the `prelaunch.json` worktree (stop if it cannot be removed), writes
@@ -162,7 +162,7 @@ export function createReflectionRecovery(deps: ReflectionRecoveryDeps) {
     if (reported.has(key)) return "reported"
     reported.add(key)
     deps.warn(
-      `memory reflection is held by run ${runId} and ${reason}; new reflection requests only queue. Run /doctor; if no reflection run is active, run \`omo doctor --fix\` or move ${join(bound.paths.reflection, "active.lock")} aside.`,
+      `memory reflection is held by run ${runId} and ${reason}; new reflection requests only queue. Run /doctor; if no reflection run is active, move ${join(bound.paths.reflection, "active.lock")} aside.`,
       { runId },
     )
     return "reported"
