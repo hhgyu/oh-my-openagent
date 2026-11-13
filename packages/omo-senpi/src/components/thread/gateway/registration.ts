@@ -11,11 +11,11 @@ import {
   type SessionControlRegistrar,
   type SessionRuntimePort,
   type WakeReason,
-} from "./adapter"
-import { createInboxDrain, type InboxDrain, type InboxDrainOptions } from "./drain"
-import { gatewayInboxDirectory } from "./paths"
+} from "@oh-my-opencode/thread-core/gateway/adapter"
+import { createInboxDrain, type InboxDrain, type InboxDrainOptions } from "@oh-my-opencode/thread-core/gateway/drain"
+import { gatewayInboxDirectory } from "@oh-my-opencode/thread-core/gateway/paths"
 import { createExtensionResolver } from "./extension-resolver"
-import { createGatewayStore, type GatewayStore } from "./store"
+import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 
 /**
  * The provisional senpi `pi.session` control surface (`core/extensions/session-control-types.ts` on the

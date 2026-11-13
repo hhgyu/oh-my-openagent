@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 
 import { loadProvenanceWorkspaces } from "./provenance-config"
-import { resolveProvenance, type ExecGit, type GitRun, type ProvenanceRuntime } from "./provenance-resolver"
+import { resolveProvenance, type ExecGit, type GitRun, type ProvenanceRuntime } from "@oh-my-opencode/thread-core/gateway/provenance-resolver"
 import { settled } from "./testing/settled"
 
 const cwd = join(tmpdir(), "example-project")

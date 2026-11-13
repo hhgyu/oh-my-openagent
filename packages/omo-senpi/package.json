@@ -76,6 +76,7 @@
     "@oh-my-opencode/shared-skills": "workspace:*",
     "@oh-my-opencode/skills-loader-core": "workspace:*",
     "@oh-my-opencode/team-core": "workspace:*",
+    "@oh-my-opencode/thread-core": "workspace:*",
     "@oh-my-opencode/telemetry-core": "workspace:*",
     "@oh-my-opencode/utils": "workspace:*",
     "@sinclair/typebox": "0.34.52",

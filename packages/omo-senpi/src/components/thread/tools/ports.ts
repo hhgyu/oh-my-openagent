@@ -1,3 +1,4 @@
+import type { ThreadCloseOutcome } from "@oh-my-opencode/thread-core/control/port"
 import type { AddressBookHost, DiskSession } from "../address-book"
 import type { ThreadControl } from "../endpoint-controls"
 import type { EndpointKind } from "../endpoint-registry"
@@ -6,11 +7,11 @@ import type {
   GatewayWakeReply,
   ReleaseSessionReply,
   ReleaseSessionRequest,
-} from "../gateway/adapter"
-import type { ProvenanceRuntime } from "../gateway/provenance-resolver"
-import type { GatewayStore } from "../gateway/store"
-import type { ThreadTranscriptEntry } from "../reader"
-import type { RemoteThreadSurface } from "../remote/ports"
+} from "@oh-my-opencode/thread-core/gateway/adapter"
+import type { ProvenanceRuntime } from "@oh-my-opencode/thread-core/gateway/provenance-resolver"
+import type { GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
+import type { ThreadTranscriptEntry } from "@oh-my-opencode/thread-core/reader"
+import type { RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 
 export type ThreadHostSession = {
   readonly sessionId: string
@@ -197,8 +198,6 @@ export type ThreadToolSurfaceOptions = {
   readonly remote?: RemoteThreadSurface
 }
 
-/** Placeholder the component supplies when the host passes no per-call caller identity. */
-export const UNKNOWN_CALLER = "unknown-caller"
+export { UNKNOWN_CALLER } from "@oh-my-opencode/thread-core/caller"
 
-/** How a close ended: the session ended, no live session held it any more, or another client still holds it. */
-export type ThreadCloseOutcome = "closed" | "not_live" | "held_elsewhere"
+export type { ThreadCloseOutcome }

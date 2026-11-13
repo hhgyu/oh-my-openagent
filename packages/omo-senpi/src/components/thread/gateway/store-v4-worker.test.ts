@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite"
 import { afterEach, expect, test } from "bun:test"
 
-import { gatewayDatabasePath } from "./paths"
-import { GATEWAY_MIGRATIONS } from "./schema"
+import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
+import { GATEWAY_MIGRATIONS } from "@oh-my-opencode/thread-core/gateway/schema"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 import { settled } from "./testing/settled"
 

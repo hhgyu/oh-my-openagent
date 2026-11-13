@@ -1,4 +1,4 @@
-import type { AliasRegistry, AliasResult, RemoteSessionsPort, RemoteThreadSurface } from "./ports"
+import type { AliasRegistry, AliasResult, RemoteSessionsPort, RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 
 type Runtime = Pick<typeof import("./device-service"), "createDeviceServiceSessions">
 

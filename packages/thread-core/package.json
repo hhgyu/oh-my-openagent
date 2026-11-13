@@ -1,0 +1,26 @@
+{
+  "name": "@oh-my-opencode/thread-core",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Harness-neutral cross-session thread contracts, error taxonomy, addressing, and the session gateway store, delivery engine, inbox drain and relay.",
+  "exports": {
+    "./contracts": {
+      "types": "./src/contracts/index.ts",
+      "import": "./src/contracts/index.ts"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "import": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "test": "bun test src/*.test.ts src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@oh-my-opencode/omo-config-core": "workspace:*",
+    "typebox": "1.3.34"
+  },
+  "sideEffects": false
+}

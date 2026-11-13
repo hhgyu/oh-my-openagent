@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { readDiskSession } from "./address-book"
-import { createGatewayStore } from "./gateway/store"
+import { createGatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { listThreads } from "./tools/read-ops"
 import type { ThreadHost, ThreadHostSession, ThreadHostView, ThreadToolSurfaceOptions } from "./tools/ports"
 

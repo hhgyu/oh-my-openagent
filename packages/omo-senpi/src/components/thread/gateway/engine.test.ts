@@ -4,14 +4,14 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:f
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { ROOT_LIFETIME_MS } from "./constants"
-import type { GatewayDeliverRequest } from "./engine"
-import { gatewayInboxDirectory } from "./paths"
+import { ROOT_LIFETIME_MS } from "@oh-my-opencode/thread-core/gateway/constants"
+import type { GatewayDeliverRequest } from "@oh-my-opencode/thread-core/gateway/engine"
+import { gatewayInboxDirectory } from "@oh-my-opencode/thread-core/gateway/paths"
 import { createRemoteThreadFixture } from "../thread-remote-fixture"
-import type { RemoteThreadSurface } from "../remote/ports"
+import type { RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 import { settled } from "./testing/settled"
-import type { GatewayDeliveryResult } from "./types"
+import type { GatewayDeliveryResult } from "@oh-my-opencode/thread-core/gateway/types"
 
 let harness: GatewayHarness | undefined
 
@@ -334,7 +334,7 @@ describe("lost_ack_and_durable_recovery", () => {
     await h.get("A").store.dispose()
     await h.get("B").store.dispose()
     const reopened = h.session("B2")
-    const { createInboxDrain } = await import("./drain")
+    const { createInboxDrain } = await import("@oh-my-opencode/thread-core/gateway/drain")
     const drain = createInboxDrain({
       store: h.store(),
       runtime: reopened.runtime,

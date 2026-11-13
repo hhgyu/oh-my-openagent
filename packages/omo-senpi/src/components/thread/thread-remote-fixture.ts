@@ -2,8 +2,8 @@ import { mock } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { ThreadToolName, ThreadToolResult } from "./contracts"
-import { createGatewayStore, type GatewayStore } from "./gateway/store"
+import type { ThreadToolName, ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
+import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import type {
   AliasHolder,
   AliasRegistry,
@@ -13,8 +13,8 @@ import type {
   RemoteDevice,
   RemoteSessionRow,
   RemoteThreadSurface,
-} from "./remote/ports"
-import type { ThreadTranscriptEntry } from "./reader"
+} from "@oh-my-opencode/thread-core/remote/ports"
+import type { ThreadTranscriptEntry } from "@oh-my-opencode/thread-core/reader"
 import { createThreadTools, type ThreadHost, type ThreadHostSession } from "./tools"
 import type { ThreadCloseOutcome } from "./tools/ports"
 

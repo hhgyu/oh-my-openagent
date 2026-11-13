@@ -1,5 +1,5 @@
 import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
-import type { ThreadResolveResult } from "../addressing"
+import type { ThreadResolveResult } from "@oh-my-opencode/thread-core/addressing"
 import { relayAddressBook, type RelayAddressBook } from "../remote/address-book"
 import {
   assembleAddressBook,
@@ -17,12 +17,12 @@ import {
   workspaceDirectories,
   workspaceEntries,
   type ThreadAddressEntry,
-} from "../addressing"
-import type { ThreadToolName, ThreadToolResult, ThreadTranscriptItem } from "../contracts"
-import { threadToolFailure, type ThreadErrorCode } from "../errors"
-import { THREAD_TOOL_EXPOSURE, THREAD_TOOL_METADATA } from "../metadata"
+} from "@oh-my-opencode/thread-core/addressing"
+import type { ThreadToolName, ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
+import { threadToolFailure } from "@oh-my-opencode/thread-core/errors"
+import { THREAD_TOOL_EXPOSURE, THREAD_TOOL_METADATA } from "@oh-my-opencode/thread-core/metadata"
 import { readSessionFacts, threadTitle } from "../session-facts"
-import { threadLink } from "../thread-link"
+import { threadLink } from "@oh-my-opencode/thread-core/thread-link"
 import {
   UNKNOWN_CALLER,
   type ThreadHostSession,
@@ -37,14 +37,7 @@ import { sendView } from "./send-view"
 export type AnyTool = ToolDefinition<any, any>
 export type ToolOutput = AgentToolResult<{ readonly result: ThreadToolResult }>
 
-export function failure(
-  code: ThreadErrorCode,
-  message: string,
-  next: string,
-  details?: Readonly<Record<string, unknown>>,
-): ThreadToolResult {
-  return { kind: "error", error: threadToolFailure(code, message, next, details) }
-}
+export { failure } from "@oh-my-opencode/thread-core/tool-result"
 
 export function output(result: ThreadToolResult): ToolOutput {
   return { content: [{ type: "text", text: JSON.stringify(result) }], details: { result } }
@@ -254,11 +247,7 @@ export function routingId(session: ThreadHostSession): string {
   return session.sessionId
 }
 
-/** One role vocabulary for both read paths: engine `toolResult` is `tool`; every other non-chat kind is `system`. */
-export function transcriptRole(role: unknown): ThreadTranscriptItem["role"] {
-  if (role === "user" || role === "assistant") return role
-  return role === "toolResult" ? "tool" : "system"
-}
+export { transcriptRole } from "@oh-my-opencode/thread-core/read-result"
 
 export function targetSession(view: ThreadHostView, durableId: string): ThreadHostSession | undefined {
   return view.sessions.find((session) => (session.durableSessionId ?? session.sessionId) === durableId)

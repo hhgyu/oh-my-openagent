@@ -1,5 +1,5 @@
 import { createLazyRemoteSurface } from "./lazy-remote"
-import type { RemoteThreadSurface } from "./ports"
+import type { RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 
 /**
  * The remote surface every launch builds (on by default): the device-service client and the alias registry client ship

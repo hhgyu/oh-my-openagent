@@ -2,16 +2,16 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 
 import { toThreadAddressEntries, type AddressEntry } from "./address-book"
-import type { ThreadToolResult } from "./contracts"
-import { threadToolFailure, type ThreadToolFailure } from "./errors"
-import type { ReleaseSessionReply, ReleaseSessionRequest } from "./gateway/adapter"
-import { isUiRequestKind, UI_REQUEST_KINDS } from "./gateway/answer-shape"
-import { type BindInput, OUTBOUND_EVENTS, type OutboundEvent } from "./gateway/bindings"
-import type { GatewayRelay, RelayResult } from "./gateway/relay"
-import { createGatewayStore, type GatewayStore } from "./gateway/store"
-import { resolveProvenance, type ProvenanceWorkspaces } from "./gateway/provenance-resolver"
-import type { ReportOpResult } from "./gateway/store-relay-ops"
-import type { StoreExtensionApi } from "./gateway/store-extensions"
+import type { ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
+import { threadToolFailure, type ThreadToolFailure } from "@oh-my-opencode/thread-core/errors"
+import type { ReleaseSessionReply, ReleaseSessionRequest } from "@oh-my-opencode/thread-core/gateway/adapter"
+import { isUiRequestKind, UI_REQUEST_KINDS } from "@oh-my-opencode/thread-core/gateway/answer-shape"
+import { type BindInput, OUTBOUND_EVENTS, type OutboundEvent } from "@oh-my-opencode/thread-core/gateway/bindings"
+import type { GatewayRelay, RelayResult } from "@oh-my-opencode/thread-core/gateway/relay"
+import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
+import { resolveProvenance, type ProvenanceWorkspaces } from "@oh-my-opencode/thread-core/gateway/provenance-resolver"
+import type { ReportOpResult } from "@oh-my-opencode/thread-core/gateway/store-relay-ops"
+import type { StoreExtensionApi } from "@oh-my-opencode/thread-core/gateway/store-extensions"
 export type {
   StoreExtensionApi,
   StoreExtensionRegistration,
@@ -20,9 +20,9 @@ export type {
   StoreExtensionResult,
   StoreExtensionRefusal,
   StoreExtensionRefusalCode,
-} from "./gateway/store-extensions"
-import type { DeliveryTarget } from "./gateway/transport"
-import type { ExternalAuthor, GatewayDeliveryMode, GatewayDeliveryResult } from "./gateway/types"
+} from "@oh-my-opencode/thread-core/gateway/store-extensions"
+import type { DeliveryTarget } from "@oh-my-opencode/thread-core/gateway/transport"
+import type { ExternalAuthor, GatewayDeliveryMode, GatewayDeliveryResult } from "@oh-my-opencode/thread-core/gateway/types"
 import { createLiveThreadSurface, parseHostStatusAll } from "./live-surface"
 import { createGatewayResolver, createGatewayServices } from "./tools/gateway-services"
 import {
@@ -36,7 +36,7 @@ import {
 } from "./tools/internals"
 import { UNKNOWN_CALLER, type ThreadHost, type ThreadToolSurfaceOptions } from "./tools/ports"
 import { listThreads, readThread } from "./tools/read-ops"
-import type { RemoteThreadSurface } from "./remote/ports"
+import type { RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 import { stampThisDevice } from "./remote/this-device"
 
 export type ThreadSdkOptions = {

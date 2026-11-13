@@ -2,12 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 
-import { createInboxDrain } from "./drain"
-import { processStartTime } from "./process-identity"
+import { createInboxDrain } from "@oh-my-opencode/thread-core/gateway/drain"
+import { processStartTime } from "@oh-my-opencode/thread-core/gateway/process-identity"
 import { FakeSessionRuntime } from "./testing/fake-runtime"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 import { settled } from "./testing/settled"
-import type { DeliveryRow, GatewayDeliveryResult, ProcessIdentity } from "./types"
+import type { DeliveryRow, GatewayDeliveryResult, ProcessIdentity } from "@oh-my-opencode/thread-core/gateway/types"
 
 let harness: GatewayHarness | undefined
 

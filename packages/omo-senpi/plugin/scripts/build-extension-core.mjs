@@ -63,7 +63,7 @@ const supervisorOutputPath =
 // inline, so it ships as its own entry beside omo.js; `gateway/store.ts` resolves this name from
 // its own module location and falls back to `store-worker.ts` in source.
 export const GATEWAY_STORE_WORKER_NAME = "gateway-store-worker.mjs"
-const gatewayStoreWorkerEntryPath = join(packageRoot, "src", "components", "thread", "gateway", "store-worker.ts")
+const gatewayStoreWorkerEntryPath = join(packageRoot, "..", "thread-core", "src", "gateway", "store-worker.ts")
 const gatewayStoreWorkerOutputPath = join(
   process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot,
   "extensions",

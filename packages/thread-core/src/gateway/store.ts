@@ -33,6 +33,8 @@ export type GatewayStoreOptions = {
   readonly now?: () => number
   /** The module location the worker sidecar is resolved from when the facade does not run inside `omo.js` (the thread SDK runtime). */
   readonly workerModuleUrl?: string | URL
+  /** The worker entry itself, for a host that emits `store-worker.ts` under its own name; wins over `workerModuleUrl`. */
+  readonly workerUrl?: string | URL
   /**
    * Resolves extension enqueue targets through the caller's live-and-disk address book (`createExtensionResolver`).
    * The creator passes it: a store module that loaded the resolver itself would carry the engine's live surface into
@@ -172,7 +174,12 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
     // A worker inherits the parent's execArgv, and node refuses `--input-type` for a file entry: a
     // script run as `node --input-type=module -e` would otherwise never open the store.
     const execArgv = process.execArgv.filter((argument) => !argument.startsWith("--input-type"))
-    const spawned = new Worker(gatewayStoreWorkerUrl(options._test?.moduleUrl ?? options.workerModuleUrl), { execArgv })
+    const spawned = new Worker(
+      options._test?.moduleUrl === undefined && options.workerUrl !== undefined
+        ? options.workerUrl
+        : gatewayStoreWorkerUrl(options._test?.moduleUrl ?? options.workerModuleUrl),
+      { execArgv },
+    )
     worker = spawned
     spawned.unref()
     spawned.on("message", (message: WorkerMessage) => {

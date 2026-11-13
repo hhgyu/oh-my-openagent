@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test"
 import type { Worker } from "node:worker_threads"
 
-import type { GatewayStore } from "./store"
+import type { GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 import { remainingTestTime } from "../../../../../../test-support/test-deadline"
 

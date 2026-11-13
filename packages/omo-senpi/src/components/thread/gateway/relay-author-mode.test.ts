@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 
-import type { BindInput } from "./bindings"
-import { PAIR_BUCKET_BURST } from "./constants"
-import { gatewayOutboxMarkerPath } from "./paths"
-import { createGatewayRelay, type GatewayRelay } from "./relay"
+import type { BindInput } from "@oh-my-opencode/thread-core/gateway/bindings"
+import { PAIR_BUCKET_BURST } from "@oh-my-opencode/thread-core/gateway/constants"
+import { gatewayOutboxMarkerPath } from "@oh-my-opencode/thread-core/gateway/paths"
+import { createGatewayRelay, type GatewayRelay } from "@oh-my-opencode/thread-core/gateway/relay"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 
 let harness: GatewayHarness | undefined

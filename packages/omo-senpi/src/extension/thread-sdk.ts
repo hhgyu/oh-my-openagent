@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
-import { GATEWAY_STORE_WORKER_BUNDLE_NAME } from "../components/thread/gateway/store"
+import { GATEWAY_STORE_WORKER_BUNDLE_NAME } from "@oh-my-opencode/thread-core/gateway/store"
 import { createThreadSdk as createSdk, type ThreadSdk, type ThreadSdkOptions } from "../components/thread/sdk"
 
 export type { LocatedThread, ThreadSdk, ThreadSdkOptions } from "../components/thread/sdk"

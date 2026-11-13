@@ -1,11 +1,11 @@
 import { Database } from "bun:sqlite"
 import { afterEach, describe, expect, test } from "bun:test"
 
-import type { UiAnswerReply } from "./adapter"
-import type { AnswerFields } from "./answer-shape"
-import { gatewayDatabasePath } from "./paths"
-import { createGatewayRelay } from "./relay"
-import { ANSWER_IN_FLIGHT_MAX_MS } from "./store-relay-ops"
+import type { UiAnswerReply } from "@oh-my-opencode/thread-core/gateway/adapter"
+import type { AnswerFields } from "@oh-my-opencode/thread-core/gateway/answer-shape"
+import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
+import { createGatewayRelay } from "@oh-my-opencode/thread-core/gateway/relay"
+import { ANSWER_IN_FLIGHT_MAX_MS } from "@oh-my-opencode/thread-core/gateway/store-relay-ops"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 import { remainingTestTime } from "../../../../../../test-support/test-deadline"
 

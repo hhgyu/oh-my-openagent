@@ -13,21 +13,21 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import type { EndpointLiveness, GatewayEndpointPort, SessionControlDrainResult } from "./adapter"
-import { SESSION_CONTROL_DELIVERY_TYPE } from "./constants"
-import type { InboxDrainOptions } from "./drain"
-import { createGatewayEngine, resolveFromEntries, type GatewayAddressEntry, type GatewayEngine } from "./engine"
-import { gatewayInboxDirectory } from "./paths"
-import { processStartTime } from "./process-identity"
+import type { EndpointLiveness, GatewayEndpointPort, SessionControlDrainResult } from "@oh-my-opencode/thread-core/gateway/adapter"
+import { SESSION_CONTROL_DELIVERY_TYPE } from "@oh-my-opencode/thread-core/gateway/constants"
+import type { InboxDrainOptions } from "@oh-my-opencode/thread-core/gateway/drain"
+import { createGatewayEngine, resolveFromEntries, type GatewayAddressEntry, type GatewayEngine } from "@oh-my-opencode/thread-core/gateway/engine"
+import { gatewayInboxDirectory } from "@oh-my-opencode/thread-core/gateway/paths"
+import { processStartTime } from "@oh-my-opencode/thread-core/gateway/process-identity"
 import {
   createControlEndpointRegistrant,
   type ControlEndpointRegistrant,
   type SenpiWakeEvent,
   type SessionControlActionsPort,
 } from "./registration"
-import { createGatewayStore, type GatewayStore } from "./store"
+import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { FakeSessionRuntime } from "./testing/fake-runtime"
-import type { DeliveryRow, DeliveryState, GatewayDeliveryResult, ProcessIdentity } from "./types"
+import type { DeliveryRow, DeliveryState, GatewayDeliveryResult, ProcessIdentity } from "@oh-my-opencode/thread-core/gateway/types"
 
 type Reason = "idle" | "submission" | "draft_cleared" | "command" | "inbox" | "emitted" | "continue"
 const REASON_PRIORITY: readonly Reason[] = [

@@ -3,11 +3,18 @@ import { join } from "node:path"
 
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
-import { createCompletionTracker, type AgentEndFacts } from "./gateway/completion"
-import { SESSION_CONTROL_DELIVERY_TYPE } from "./gateway/constants"
-import { gatewayDatabasePath } from "./gateway/paths"
+import {
+  createRunContext,
+  noteAssistantMessage,
+  noteRunInput,
+  noteRunSettled,
+  type RunInput,
+} from "@oh-my-opencode/thread-core/run-context"
+import { createCompletionTracker, type AgentEndFacts } from "@oh-my-opencode/thread-core/gateway/completion"
+import { SESSION_CONTROL_DELIVERY_TYPE } from "@oh-my-opencode/thread-core/gateway/constants"
+import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
 import { loadProvenanceWorkspaces } from "./gateway/provenance-config"
-import { resolveProvenance } from "./gateway/provenance-resolver"
+import { resolveProvenance } from "@oh-my-opencode/thread-core/gateway/provenance-resolver"
 import { registerInitialSkills } from "./initial-skills"
 import {
   controlSessionOf,
@@ -18,7 +25,7 @@ import {
   type SessionControlActionsPort,
 } from "./gateway/registration"
 import { createExtensionResolver } from "./gateway/extension-resolver"
-import { createGatewayStore, type GatewayStore } from "./gateway/store"
+import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { registerThreadTools, UNKNOWN_CALLER, type ThreadToolSurfaceOptions } from "./tools"
 import { createLazyLiveThreadSurface } from "./lazy-live-surface"
 import { createDefaultRemoteSurface } from "./remote/default-remote"
@@ -61,37 +68,6 @@ export type ThreadComponentOptions = Partial<
   readonly agentDir?: () => string
   readonly store?: GatewayStore
   readonly controlEndpointTest?: ControlEndpointRegistrantOptions["_test"]
-}
-
-/**
- * `cause`: the newest delivery whose message the model has taken into its context (a send from this
- * run continues its causal root). A delivery admitted but still waiting in a queue is not a cause yet.
- * `consumed`: the deliveries the model has taken into its context since its last final answer (an
- * assistant message without a tool call), read from the engine's own `message_start` of each
- * delivery's custom message. senpi drains a queued follow-up after that answer and before
- * `agent_settled`, so the follow-up starts a new group: a report without `binding_id` goes to the
- * binding of the message the current answer is for, never to the thread the session started on.
- * Any other `user` or `custom` message after a final answer also starts a new group: a prompt typed
- * in the terminal, and equally an extension's message that starts a turn (a delegated task's result,
- * or a `sendUserMessage`), which keeps none of the bound messages taken up before it.
- * `local`: a `user` message is in the group. senpi 2026.9.30 gives a prompt, steer or follow-up typed
- * in the terminal and an extension's `sendUserMessage` (a non-blocking ask_user answer, a stop-hook
- * follow-up, `/remember`) the same shape, with no field naming its source, so every one counts as
- * typed input. Together with a bound message the answer then has two possible origins, and while the
- * session has another outbound binding a report without `binding_id` is refused rather than sent to
- * the bound thread (`store-relay-ops.ts` `reportBindingDefault`); with that thread's binding as the
- * only one it goes there. Never a misroute: an input the session cannot attribute makes an implicit
- * report refuse when several bindings exist.
- */
-type RunContext = {
-  turn: number
-  cause: string | undefined
-  chainHop: number
-  consumed: string[]
-  replyTo: string[]
-  replySenders: { session_id: string; name?: string }[]
-  local: boolean
-  answered: boolean
 }
 
 type EngineMessage = {
@@ -147,46 +123,19 @@ function callsTools(message: EngineMessage): boolean {
   )
 }
 
-/**
- * Decision 0027 section 6 (#13042): the reply allowance belongs to the consumed delivery and lasts for the work that
- * delivery started - the consuming turn and every later turn the engine starts on its own (a reminder, a goal
- * continuation, a monitor wake: a custom message that is no delivery). It ends when a new message starts work after
- * a final answer: a person's message (role user, which is also how a loop tick or a schedule arrives, so those end
- * it too) or any delivery, whose own sender the new group then holds. A delivery that joins running work adds its
- * sender. The run's deliveries (`consumed`, the implicit target of a report) end with the final answer in every
- * order: an engine-started message that arrives after the answer and before the settle keeps the allowance, not them.
- */
-function noteInput(run: RunContext, message: EngineMessage): void {
-  if (message.role !== "user" && message.role !== "custom") return
+/** Maps one engine message to the run input it is (`run-context.ts`); assistant and tool messages are none. */
+function runInputOf(message: EngineMessage): RunInput | undefined {
+  if (message.role !== "user" && message.role !== "custom") return undefined
   const delivery = deliveryOf(message)
-  if (message.role === "custom" && delivery === undefined) {
-    if (run.answered) run.consumed = []
-    run.answered = false
-    return
-  }
-  if (run.answered) {
-    run.cause = undefined
-    run.consumed = []
-    run.replyTo = []
-    run.replySenders = []
-    run.chainHop = 0
-    run.local = false
-    run.answered = false
-  }
-  if (message.role === "user") run.local = true
-  if (delivery === undefined) return
-  // Every consumed delivery is the cause of the run's next send, on either transport (decision 0027 section 3); one no row
-  // here holds starts a new root there and its hop count continues the chain (K8).
-  run.cause = delivery.id
-  run.chainHop = Math.max(run.chainHop, delivery.chainCount)
-  if (!run.consumed.includes(delivery.id)) run.consumed.push(delivery.id)
-  if (delivery.agentSender !== undefined && !run.replyTo.includes(delivery.agentSender))
-    run.replyTo.push(delivery.agentSender)
-  if (delivery.agentSender !== undefined && !run.replySenders.some((s) => s.session_id === delivery.agentSender))
-    run.replySenders.push({
-      session_id: delivery.agentSender,
-      ...(delivery.senderName === undefined ? {} : { name: delivery.senderName }),
-    })
+  if (delivery !== undefined)
+    return {
+      kind: "delivery",
+      id: delivery.id,
+      chainCount: delivery.chainCount,
+      ...(delivery.agentSender === undefined ? {} : { agentSender: delivery.agentSender }),
+      ...(delivery.senderName === undefined ? {} : { senderName: delivery.senderName }),
+    }
+  return message.role === "user" ? { kind: "user" } : { kind: "engine" }
 }
 
 /** senpi's ask_user tool per model family (`ask-user/family.js` `TOOL_NAMES`) and the flag that makes it wait for the answer. */
@@ -357,16 +306,7 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
             `thread gateway: ${event.items.length} legacy thread mailbox item(s) in ${event.directory} name no session id and were not imported: ${event.items.map((item) => `#${item.message_seq} -> ${JSON.stringify(item.target)}`).join(", ")}`,
           )
       })
-      const run: RunContext = {
-        turn: 0,
-        cause: undefined,
-        chainHop: 0,
-        consumed: [],
-        replyTo: [],
-        replySenders: [],
-        local: false,
-        answered: true,
-      }
+      const run = createRunContext()
       const completions = createCompletionTracker(
         (durableId, outcome, throughArmSeq) =>
           store.emitCompletions({
@@ -510,11 +450,12 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
       })
       pi.on("message_start", (event) => {
         const message = messageOf(event)
-        if (message !== undefined) noteInput(run, message)
+        const input = message === undefined ? undefined : runInputOf(message)
+        if (input !== undefined) noteRunInput(run, input)
       })
       pi.on("message_end", (event) => {
         const message = messageOf(event)
-        if (message?.role === "assistant") run.answered = !callsTools(message)
+        if (message?.role === "assistant") noteAssistantMessage(run, callsTools(message))
       })
       pi.on("agent_end", (event, eventCtx) => {
         const durableId = durableIdOf(eventCtx)
@@ -525,9 +466,7 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
         // A settle alone keeps the consumed delivery's senders, hop and cause (#13042): the next input decides whether
         // the work continues (noteInput). The run's deliveries end with the run: a report without binding_id after it
         // must name its thread.
-        run.consumed = []
-        run.local = false
-        run.answered = true
+        noteRunSettled(run)
         if (durableId === undefined) return
         // A failed write is reported (and retried) by the tracker's onWriteFailed.
         await waitAtMost(

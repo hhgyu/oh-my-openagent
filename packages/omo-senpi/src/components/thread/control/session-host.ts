@@ -1,4 +1,4 @@
-import type { ThreadDataError, ThreadSummary } from "../contracts"
+import type { ThreadDataError, ThreadSummary } from "@oh-my-opencode/thread-core/contracts"
 import type { ThreadToolSummary } from "../tools/internals"
 
 /**

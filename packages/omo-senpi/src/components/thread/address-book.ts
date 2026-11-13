@@ -1,10 +1,10 @@
 import { readdirSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 
-import { normalizeThreadName, type ThreadAddressEntry } from "./addressing"
-import type { ThreadStatus } from "./contracts"
+import { normalizeThreadName, type ThreadAddressEntry } from "@oh-my-opencode/thread-core/addressing"
+import type { ThreadStatus } from "@oh-my-opencode/thread-core/contracts"
 import type { EndpointKind } from "./endpoint-registry"
-import type { GatewayAddressEntry } from "./gateway/engine"
+import type { GatewayAddressEntry } from "@oh-my-opencode/thread-core/gateway/engine"
 import { readSessionFacts, threadTitle, type SessionFacts } from "./session-facts"
 
 export type HostSessionStatus = "opening" | "open" | "closing" | "closed"

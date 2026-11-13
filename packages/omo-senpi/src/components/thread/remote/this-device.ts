@@ -1,5 +1,5 @@
-import type { DeviceAbsentReason, Provenance } from "../gateway/types"
-import type { RemoteThreadSurface } from "./ports"
+import type { DeviceAbsentReason, Provenance } from "@oh-my-opencode/thread-core/gateway/types"
+import type { RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 
 /** This device's account device id, or why a delivery names none. */
 export type ThisDevice = { readonly device: string } | { readonly device_absent: DeviceAbsentReason }

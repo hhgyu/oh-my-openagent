@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 
-import { parseLstart } from "../thread/gateway/process-identity"
+import { parseLstart } from "@oh-my-opencode/thread-core/gateway/process-identity"
 
 /**
  * When `pid`'s process started, as an opaque token compared only against tokens this same probe produced on

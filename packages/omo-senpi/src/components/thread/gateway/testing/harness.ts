@@ -2,19 +2,19 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { toSessionControlDrainResult, type GatewayEndpointPort } from "../adapter"
-import { createInboxDrain, type InboxDrain } from "../drain"
-import { createGatewayEngine, resolveFromEntries, type GatewayAddressEntry, type GatewayEngine } from "../engine"
-import { createGatewayStore, type GatewayStore, type GatewayStoreOptions } from "../store"
+import { toSessionControlDrainResult, type GatewayEndpointPort } from "@oh-my-opencode/thread-core/gateway/adapter"
+import { createInboxDrain, type InboxDrain } from "@oh-my-opencode/thread-core/gateway/drain"
+import { createGatewayEngine, resolveFromEntries, type GatewayAddressEntry, type GatewayEngine } from "@oh-my-opencode/thread-core/gateway/engine"
+import { createGatewayStore, type GatewayStore, type GatewayStoreOptions } from "@oh-my-opencode/thread-core/gateway/store"
 import { FakeSessionRuntime } from "./fake-runtime"
-import type { RemoteThreadSurface } from "../../remote/ports"
+import type { RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 import { stampThisDevice } from "../../remote/this-device"
 
 // Cross-version conformance runs select a real older facade, which starts its own older worker.
 const storeFactory: typeof createGatewayStore =
   process.env.OMO_GATEWAY_TEST_STORE_MODULE === undefined
     ? createGatewayStore
-    : ((await import(process.env.OMO_GATEWAY_TEST_STORE_MODULE)) as typeof import("../store")).createGatewayStore
+    : ((await import(process.env.OMO_GATEWAY_TEST_STORE_MODULE)) as typeof import("@oh-my-opencode/thread-core/gateway/store")).createGatewayStore
 
 export type HarnessSession = {
   readonly id: string

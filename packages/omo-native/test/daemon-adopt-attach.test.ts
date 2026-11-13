@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { createGatewayStore } from "../../omo-senpi/src/components/thread/gateway/store"
+import { createGatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { createLiveThreadSurface } from "../../omo-senpi/src/components/thread/live-surface"
 import { createThreadSdk } from "../../omo-senpi/src/components/thread/sdk"
 import {

@@ -14,7 +14,7 @@ import {
   type ThreadFuzzyResult,
   type ThreadNameConflictResult,
   type ThreadResolveResult,
-} from "./addressing"
+} from "@oh-my-opencode/thread-core/addressing"
 import type { ThreadErrorCode, ThreadSummary } from "./index"
 
 // ---------------------------------------------------------------------------

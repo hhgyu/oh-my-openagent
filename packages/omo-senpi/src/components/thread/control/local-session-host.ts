@@ -1,4 +1,4 @@
-import type { ThreadSummary } from "../contracts"
+import type { ThreadSummary } from "@oh-my-opencode/thread-core/contracts"
 import { summary } from "../tools/internals"
 import type { ThreadHost } from "../tools/ports"
 import type { SessionHost } from "./session-host"
