@@ -123,6 +123,8 @@ export interface NativeOwnedTaskRuntimeOptions {
   stateDir: string
   scopes: SessionScopes
   parent: SessionLease
+  /** The actual host parent of a root that is a host subagent; a parentless root omits it. */
+  readonly rootHostParent?: string
   policy: SessionToolPolicy
   metadataSource: OwnedToolMetadataSource
   config(): OmoConfig | Promise<OmoConfig>
@@ -429,6 +431,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
           bindings,
           receiver: binding,
           root: options.parent,
+          ...(options.rootHostParent !== undefined && { rootHostParent: options.rootHostParent }),
           registryGeneration: basis.rootToken.registryGeneration,
           directory,
           rootDirectory: ctx.location.directory,
@@ -456,6 +459,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
           binding,
           issuer,
           journal: completionJournal,
+          ...(options.rootHostParent !== undefined && { rootHostParent: options.rootHostParent }),
           receiver: Object.freeze({
             backendID: "opencode2",
             directory,
@@ -519,6 +523,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     initializers.push({ close: closeNotificationOwners, done: false })
     const ancestry = createOwnedAncestry({
       root: options.parent,
+      ...(options.rootHostParent !== undefined && { rootHostParent: options.rootHostParent }),
       directory: ctx.location.directory,
       hostVersion: ctx.app.version,
       records: () => store.list().records,

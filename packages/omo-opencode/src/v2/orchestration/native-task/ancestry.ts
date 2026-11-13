@@ -55,6 +55,7 @@ export interface OwnedAncestry {
 
 export function createOwnedAncestry(options: {
   root: SessionLease
+  rootHostParent?: string
   directory: string
   hostVersion: string
   records(): readonly TaskRecord[]
@@ -152,7 +153,7 @@ export function createOwnedAncestry(options: {
         const actual = await options.get(id, signal)
         signal?.throwIfAborted()
         assertCurrent()
-        const expectedParent = rows[index]?.parent_session_id
+        const expectedParent = index < rows.length ? rows[index]?.parent_session_id : options.rootHostParent
         if (
           actual.id !== id ||
           actual.location.directory !== options.directory ||
