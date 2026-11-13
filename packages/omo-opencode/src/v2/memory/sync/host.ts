@@ -14,7 +14,7 @@ import {
   type SyncRpcAccount,
   type SyncRpcRegistration,
 } from "@oh-my-opencode/memory-core/sync-runner"
-import { createCliAccountSource } from "../../../cli/service-auth/sync-account"
+import { hostAccountSource } from "./account-source"
 import { createSyncRpcClaims } from "./claims"
 import { watchHeadLog } from "./head-watch"
 import { runnerLogger, type SyncHost, type SyncHostOptions } from "./ports"
@@ -27,19 +27,9 @@ const loadEngine = () => import("./engine-runtime")
 export function createSyncHost(options: SyncHostOptions): SyncHost {
   const pinDir = syncPinDir(options.memoryRoot)
   const logger = runnerLogger(options.logger)
-  // Built on the first resolve, so an invalid OMO_SERVICE_API_URL reaches the runner as a typed
-  // `sync-config-invalid` status instead of failing the host load.
-  let built: DeviceAccountSource | undefined
   const source: DeviceAccountSource =
     options.source ??
-    (async () => {
-      built ??= createCliAccountSource({
-        env: options.env,
-        pinDir,
-        logger: { warn: (line) => options.logger.warn(line) },
-      })
-      return built()
-    })
+    hostAccountSource({ env: options.env, pinDir, logger: { warn: (line) => options.logger.warn(line) } })
   const runner = createSyncRunner({
     logger,
     loadRuntime: loadEngine,
