@@ -132,7 +132,9 @@
     "knip.jsonc: omo doctor",
     "packages/memory-core/src/retention/cap.ts: omo doctor",
     "packages/memory-core/src/retention/pass.ts: omo doctor",
-    "packages/memory-core/src/retention/size.ts: omo doctor"
+    "packages/memory-core/src/retention/size.ts: omo doctor",
+    "docs/reference/opencode-v2-parity.md: omo doctor",
+    "packages/omo-opencode/src/v2/memory/doctor-command.ts: omo doctor"
   ],
   "literal-label": [
     "packages/omo-opencode/src/cli/account-keys/keystore.ts: =omo",
