@@ -19,6 +19,16 @@ export const ULW_LOOP_CONTINUATION_PROMPT = [
 	'In a JS eval cell run: const { agentToolkit } = await import(`${env("OMO_AGENT_TOOLKIT_SDK_ROOT")}/sdk.js`); print(await agentToolkit.status()). Inspect the active incomplete goals and the structured nextActions, and keep working until the run is complete or safely checkpointed.',
 ].join("\n");
 
+const BRAILLE_BLANK = "\u2800";
+
+export const ULW_LOOP_FOOTER_FRAME_INTERVAL_MS = 320;
+export const ULW_LOOP_FOOTER_FRAMES = [
+	`⚡ ultraworking${BRAILLE_BLANK.repeat(3)}`,
+	`⚡ ultraworking.${BRAILLE_BLANK.repeat(2)}`,
+	`⚡ ultraworking..${BRAILLE_BLANK}`,
+	"⚡ ultraworking...",
+] as const;
+
 export interface LoopPlanSnapshot {
 	readonly createdAt: string | undefined;
 	readonly aggregateComplete: boolean;
