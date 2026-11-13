@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { hostname } from "node:os"
 import { join } from "node:path"
 import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
-import { OmoConfigSchema } from "@oh-my-opencode/omo-config-core"
+import { OmoConfigSchema, OmoMemorySettingsSchema } from "@oh-my-opencode/omo-config-core"
+import type { BoundMemorySession } from "./binding"
+import { reflectionStore } from "./reflection-run-store"
 import { catalogModel, conversation, createScriptedFactsPorts, until } from "./facts.test-support"
 import { MEMORY_BINDING_KEY, registerMemoryComponent } from "./index"
 import type { FactsPortRequest } from "./facts-child"
@@ -145,6 +148,46 @@ describe("memory reflection wiring", () => {
     // then
     expect(ports.children).toHaveLength(0)
   })
+  test("#given a reflection lock whose launcher died after the session bound #when the next turn settles #then the lock is reclaimed and the step-count run launches", async () => {
+    // given
+    const deadPid = 999_999
+    let launcher: "alive" | "dead" = "alive"
+    const { f, ports, options } = setup({
+      probe: {
+        getPidLiveness: (pid) => (pid === deadPid ? launcher : "alive"),
+        now: () => Date.now() + 2 * 60_000,
+      },
+    })
+    f.addSession("root", { messages: conversation("use tabs", "noted, tabs it is") })
+    const cleanup = await registerMemoryComponent(f.host, options)
+    try {
+      await f.prompt("root", "use tabs")
+      await until(() => f.sessions.get("root")?.metadata?.[MEMORY_BINDING_KEY] !== undefined)
+      const binding = f.sessions.get("root")?.metadata?.[MEMORY_BINDING_KEY] as { identity: string }
+      const bound: BoundMemorySession = {
+        sessionID: "root",
+        identity: binding.identity,
+        paths: buildIdentityPaths(f.env.OMO_MEMORY_HOME ?? "", binding.identity),
+        settings: OmoMemorySettingsSchema.parse({}),
+        directory: "",
+        metadata: {},
+      }
+      await reflectionStore(bound, {
+        createRunId: () => "run-dead",
+        launcherIdentity: async () => ({ pid: deadPid, hostname: hostname(), processStart: null }),
+      }).tryReserve({ trigger: "manual", conversationIds: [], snapshots: [] })
+      // when
+      launcher = "dead"
+      await f.idle("root")
+      await until(() => ports.children.length === 1)
+      // then
+      expect(existsSync(join(bound.paths.reflection, "runs", "run-dead", "abandoned.json"))).toBe(true)
+      expect(readFileSync(join(bound.paths.reflection, "active.lock"), "utf8")).toContain('"runId": "run-1"')
+    } finally {
+      await cleanup()
+    }
+  })
+
   test("#given memory.reflection.category names a category with an available model #when a reflection launches #then the child runs on that model, not the host default", async () => {
     // given
     const config = OmoConfigSchema.parse({

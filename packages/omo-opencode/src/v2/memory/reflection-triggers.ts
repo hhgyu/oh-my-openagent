@@ -8,7 +8,9 @@
 // - accepted `session_compact` -> `session.compaction.ended` records `pendingCompaction`; nothing launches
 //   from it. The NEXT successful settle evaluates `compaction_accepted` (memory-core persists
 //   `pending_compaction`), clears the flag, then evaluates `settled`;
-// - disabled reflection clears the flag and evaluates nothing, as Senpi's `enabled === false` branch does.
+// - disabled reflection clears the flag and evaluates nothing, as Senpi's `enabled === false` branch does;
+// - every settle first runs the stale reflection-lock check (Senpi `onSettled` stale holder), whatever the
+//   turn's outcome or the reflection setting.
 // Senpi only evaluates sessions with accepted user input (`userActivity.has`); here that is a real prompt
 // seen this process. Owned children (facts, Kibitzer, reflection) never trigger. The work runs detached,
 // serialized per session, so the host hook is never blocked; `close` stops new work and awaits the rest.
@@ -27,6 +29,8 @@ export interface ReflectionTriggerDeps {
   readonly session: Pick<Plugin.Context["session"], "context">
   /** The reflection component's `evaluate` (reservation + detached launch of an active run). */
   readonly evaluate: (bound: BoundMemorySession, event: ReflectionEvent) => Promise<ReservationResult | null>
+  /** Senpi's per-turn stale reflection-lock check (`recoverStaleHolderAfterTurn`), run on every settled turn. */
+  readonly onTurnSettled?: (bound: BoundMemorySession) => Promise<void>
   /** Senpi `userActivity.has`: the session took real user input this process. */
   readonly hasUserActivity: (sessionID: string) => boolean
   readonly isOwnedSession: (sessionID: string) => boolean
@@ -71,6 +75,8 @@ export function createReflectionTriggers(deps: ReflectionTriggerDeps): Reflectio
     if (closed) return
     const bound = await deps.resolve(sessionID)
     if (bound === undefined || closed) return
+    await deps.onTurnSettled?.(bound)
+    if (closed) return
     if (!turnSettledSuccessfully(await deps.session.context({ sessionID }))) return
     if (closed) return
     if (!reflectionSettings(bound).enabled) {

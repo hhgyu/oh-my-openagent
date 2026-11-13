@@ -33,8 +33,10 @@ const deadLauncher = async (): Promise<ReflectionLauncherIdentity> => ({
   hostname: hostname(),
   processStart: null,
 })
-const probe = (launcher: "alive" | "dead") => ({
+const AFTER_LAUNCH_WINDOW_MS = 2 * 60_000
+const probe = (launcher: "alive" | "dead", offsetMs = AFTER_LAUNCH_WINDOW_MS) => ({
   getPidLiveness: (pid: number) => (pid === DEAD_PID ? launcher : ("alive" as const)),
+  now: () => Date.now() + offsetMs,
 })
 
 /** A run whose in-process launcher "died" after creating its worktree: reservation held, prelaunch + worktree on disk. */
@@ -138,6 +140,117 @@ describe("reflection recovery at bind", () => {
     expect(report).toEqual({ lock: "live" })
     expect(existsSync(worktree.dir)).toBe(true)
     expect((await store.readState()).active?.runId).toBe("run-dead")
+  })
+
+  test("#given a dead launcher whose reservation is inside the launch window #when the session binds #then the young launch is left alone and the first settled turn after the window reclaims it", async () => {
+    // given
+    const { bound, worktree, store } = await strandedRun()
+    let offsetMs = 0
+    const recovery = createReflectionRecovery({
+      host: { session: {} },
+      warn: () => undefined,
+      probe: { ...probe("dead"), now: () => Date.now() + offsetMs },
+    })
+
+    // when
+    const atBind = await recovery.onBound(bound)
+    const keptActive = (await store.readState()).active?.runId
+    offsetMs = AFTER_LAUNCH_WINDOW_MS
+    const atTurn = await recovery.onTurnSettled(bound)
+
+    // then
+    expect(atBind).toEqual({ lock: "reported" })
+    expect(keptActive).toBe("run-dead")
+    expect(atTurn).toEqual({ lock: "released" })
+    expect(existsSync(worktree.dir)).toBe(false)
+    expect((await store.readState()).active).toBeUndefined()
+    expect(existsSync(join(reflectionRunDir(bound, "run-dead"), "abandoned.json"))).toBe(true)
+  })
+
+  test("#given a launcher that was alive at bind and died afterwards #when the next turn settles #then the stale lock is reclaimed", async () => {
+    // given
+    const { bound, store } = await strandedRun()
+    let launcher: "alive" | "dead" = "alive"
+    const recovery = createReflectionRecovery({
+      host: { session: {} },
+      warn: () => undefined,
+      probe: { ...probe("alive"), getPidLiveness: (pid: number) => (pid === DEAD_PID ? launcher : "alive") },
+    })
+    const atBind = await recovery.onBound(bound)
+
+    // when
+    const whileAlive = await recovery.onTurnSettled(bound)
+    launcher = "dead"
+    const afterDeath = await recovery.onTurnSettled(bound)
+
+    // then
+    expect(atBind).toEqual({ lock: "live" })
+    expect(whileAlive).toEqual({ lock: "live" })
+    expect(afterDeath).toEqual({ lock: "released" })
+    expect((await store.readState()).active).toBeUndefined()
+  })
+
+  test("#given a dead launcher's run that already recorded its terminal state #when the session binds #then only the reservation is released", async () => {
+    // given
+    const { bound, store } = await strandedRun()
+    writeFileSync(
+      join(reflectionRunDir(bound, "run-dead"), "final.json"),
+      `${JSON.stringify({ version: 1, runId: "run-dead", outcome: "failed", finishedAt: new Date().toISOString() })}\n`,
+    )
+    const recovery = createReflectionRecovery({ host: { session: {} }, warn: () => undefined, probe: probe("dead") })
+
+    // when
+    const report = await recovery.onBound(bound)
+
+    // then
+    expect(report).toEqual({ lock: "released" })
+    expect((await store.readState()).active).toBeUndefined()
+    expect(existsSync(join(reflectionRunDir(bound, "run-dead"), "abandoned.json"))).toBe(false)
+  })
+
+  test("#given an old torn active.lock #when the session binds #then the reaper moves it aside", async () => {
+    // given
+    const identity = createBoundIdentity()
+    cleanups.push(identity.cleanup)
+    const { bound } = identity
+    mkdirSync(bound.paths.reflection, { recursive: true })
+    writeFileSync(join(bound.paths.reflection, "active.lock"), '{"runId":"reflection-run-4","launch')
+    const recovery = createReflectionRecovery({
+      host: { session: {} },
+      warn: () => undefined,
+      probe: probe("dead", 2 * 60 * 60_000),
+    })
+
+    // when
+    const report = await recovery.onBound(bound)
+
+    // then
+    expect(report).toEqual({ lock: "released" })
+    expect(existsSync(join(bound.paths.reflection, "active.lock"))).toBe(false)
+  })
+
+  test("#given a dead launcher's Senpi-ledger run #when two turns settle #then it is reported once and left to Senpi", async () => {
+    // given
+    const { bound, store } = await strandedRun()
+    writeFileSync(join(reflectionRunDir(bound, "run-dead"), "ledger.json"), "{}\n")
+    const warnings: string[] = []
+    const recovery = createReflectionRecovery({
+      host: { session: {} },
+      warn: (message) => {
+        warnings.push(message)
+      },
+      probe: probe("dead"),
+    })
+
+    // when
+    const reports = [await recovery.onTurnSettled(bound), await recovery.onTurnSettled(bound)]
+
+    // then
+    expect(reports).toEqual([{ lock: "reported" }, { lock: "reported" }])
+    expect((await store.readState()).active?.runId).toBe("run-dead")
+    expect(warnings.filter((message) => message.startsWith("memory reflection is held by run run-dead"))).toHaveLength(
+      1,
+    )
   })
 
   test("#given a dead launcher's run that has a Senpi ledger #when the session binds #then it is reported and left to Senpi's reconciliation", async () => {
