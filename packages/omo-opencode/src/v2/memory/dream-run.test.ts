@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
-import type { ReflectionRequest } from "@oh-my-opencode/memory-core"
+import { execFileSync } from "node:child_process"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { GitMemoryRepo, initMemoryWithSeeds, type ReflectionRequest } from "@oh-my-opencode/memory-core"
 import { OmoMemorySettingsSchema } from "@oh-my-opencode/omo-config-core"
 import type { BoundMemorySession } from "./binding"
 import { underSystemTokenPressure } from "./dream-budget"
@@ -57,8 +58,29 @@ function setup(compileWarnTokens = 30_000) {
     )
   const final = (): Record<string, unknown> =>
     JSON.parse(readFileSync(join(reflectionRunDir(bound, "dream-a"), "final.json"), "utf8"))
-  return { bound, ports, run, create, final }
+  const change = (sessionID: string, input: Record<string, unknown>) => runTool(edit, input, toolContext(sessionID))
+  return { bound, ports, run, create, change, final }
 }
+
+const note = (description: string, body: string): string => `---\ndescription: ${description}\n---\n\n${body}`
+
+async function seedNotes(bound: BoundMemorySession, files: Record<string, string | Uint8Array>): Promise<void> {
+  const repo = new GitMemoryRepo({ dir: bound.paths.repo, agentId: bound.identity })
+  await initMemoryWithSeeds(repo, { authorName: bound.identity })
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(bound.paths.repo, path)), { recursive: true })
+    writeFileSync(join(bound.paths.repo, path), content)
+  }
+  execFileSync("git", ["add", "-A"], { cwd: bound.paths.repo })
+  execFileSync(
+    "git",
+    ["-c", "user.name=fixture", "-c", "user.email=fixture@example.com", "commit", "-q", "--no-verify", "-m", "seed"],
+    { cwd: bound.paths.repo },
+  )
+}
+
+const outcomeOf = (report: Awaited<ReturnType<ReturnType<typeof setup>["run"]>>) =>
+  report.status === "finished" ? report.runs[0] : undefined
 
 describe("dream runs", () => {
   test("#given a dream with a target document #when the child edits only the target #then the omo-dream agent ran with the dream inputs and the edit merged", async () => {
@@ -95,6 +117,99 @@ describe("dream runs", () => {
       reason: "invalid_target",
     })
     expect(existsSync(join(bound.paths.repo, "reference", "other.md"))).toBe(false)
+  })
+
+  test("#given a targeted dream whose target another note links #when the child deletes the target #then it merges with the gate's link repair instead of failing invalid_target", async () => {
+    // given
+    const { bound, ports, run, change } = setup()
+    await seedNotes(bound, {
+      "reference/target.md": note("Target", "t\n"),
+      "reference/user.md": note("User", "See [[reference/target.md|the target]].\n"),
+    })
+    const running = run({ targetDoc: "reference/target.md" })
+    const child = await ports.started(1)
+    // when
+    await change(child.sessionID, {
+      command: "delete",
+      reason: "chore(dream): retire the target",
+      file_path: "reference/target.md",
+    })
+    child.finish()
+    const report = await running
+    // then
+    expect(outcomeOf(report)?.outcome).toBe("merged")
+    expect(existsSync(join(bound.paths.repo, "reference", "target.md"))).toBe(false)
+    expect(readFileSync(join(bound.paths.repo, "reference", "user.md"), "utf8")).toContain("See the target.\n")
+  })
+
+  test("#given a targeted dream #when the child forges the link-repair commit on another note #then the repair is recomputed, not trusted, and the run fails invalid_target", async () => {
+    // given
+    const { bound, ports, run, change } = setup()
+    await seedNotes(bound, {
+      "reference/target.md": note("Target", "t\n"),
+      "reference/other.md": note("Other", "o\n"),
+    })
+    const running = run({ targetDoc: "reference/target.md" })
+    const child = await ports.started(1)
+    // when
+    await change(child.sessionID, {
+      command: "str_replace",
+      reason: "chore(dream): maintain the target",
+      file_path: "reference/target.md",
+      old_string: "t\n",
+      new_string: "t2\n",
+    })
+    await change(child.sessionID, {
+      command: "str_replace",
+      reason: "chore(memory): repoint links to removed notes\n\nOmo-Link-Repair: 1",
+      file_path: "reference/other.md",
+      old_string: "o\n",
+      new_string: "rewritten\n",
+    })
+    child.finish()
+    const report = await running
+    // then
+    expect(outcomeOf(report)).toMatchObject({ outcome: "failed", reason: "invalid_target" })
+    expect(readFileSync(join(bound.paths.repo, "reference", "other.md"), "utf8")).toContain("o\n")
+  })
+
+  test("#given notes linking a note the dream archives #when the run merges #then UTF-8 links point at ARCHIVE.md and a non-UTF-8 note stays byte-identical", async () => {
+    // given
+    const { bound, ports, run, change } = setup()
+    const latin1 = Buffer.concat([
+      Buffer.from(note("Latin", "caf"), "utf8"),
+      Buffer.from([0xe9]),
+      Buffer.from(" [[reference/old.md]]\n", "utf8"),
+    ])
+    await seedNotes(bound, {
+      "ARCHIVE.md": note("Archive", "Archived notes:\n"),
+      "reference/old.md": note("Old", "old\n"),
+      "reference/user.md": note("User", "See [[reference/old.md|old notes]].\n"),
+      "reference/latin1.md": latin1,
+    })
+    const running = run({})
+    const child = await ports.started(1)
+    // when
+    await change(child.sessionID, {
+      command: "str_replace",
+      reason: "chore(dream): archive the old note",
+      file_path: "ARCHIVE.md",
+      old_string: "Archived notes:\n",
+      new_string: "Archived notes:\n- reference/old.md\n",
+    })
+    await change(child.sessionID, {
+      command: "delete",
+      reason: "chore(dream): archive the old note",
+      file_path: "reference/old.md",
+    })
+    child.finish()
+    const report = await running
+    // then
+    expect(outcomeOf(report)?.outcome).toBe("merged")
+    expect(readFileSync(join(bound.paths.repo, "reference", "user.md"), "utf8")).toContain(
+      "See [[ARCHIVE.md|old notes (archived)]].\n",
+    )
+    expect(readFileSync(join(bound.paths.repo, "reference", "latin1.md")).equals(latin1)).toBe(true)
   })
 
   test("#given a committed system tree over the soft target #when a pressure dream merges without trimming it #then it stays merged and records budget_not_met", async () => {

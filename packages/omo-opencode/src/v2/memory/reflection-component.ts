@@ -6,10 +6,10 @@
 // `reflection-triggers.ts` and `/reflect`) go through `evaluate`, which is Senpi's
 // `runtime.store.evaluate` followed by a detached `runtime.launch` of the run that won the active slot;
 // dreams (S7h, see `dream-triggers.ts` and `/dream`) go through `requestDream` and the same launch;
-// recovery runs at every bind. Close cancels live children and waits for every tracked run, evaluation
-// and recovery to settle.
+// recovery runs at every bind and the stale-lock check after each settled turn (`reflection-recovery.ts`).
+// Close cancels live children and waits for every tracked run, evaluation and recovery to settle.
 
-import type { ReflectionEvent, ReflectionLockProbe, ReservationResult, ReservedRun } from "@oh-my-opencode/memory-core"
+import type { ReflectionEvent, ReservationResult, ReservedRun, StaleLockProbe } from "@oh-my-opencode/memory-core"
 import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
 import { loadRuntimeConfig } from "../config/runtime"
 import type { probeJournalOwner } from "../host/child-journal"
@@ -43,7 +43,7 @@ export interface MemoryReflectionSeams extends ReflectionStoreSeams {
   readonly createPort?: (request: ReflectionPortRequest) => MemoryChildPort
   readonly timers?: MemoryChildTimers
   readonly deadlineMs?: number
-  readonly probe?: ReflectionLockProbe
+  readonly probe?: StaleLockProbe
   readonly probeOwner?: typeof probeJournalOwner
 }
 
@@ -62,6 +62,8 @@ export interface ReflectionComponent {
   dreamSettings(bound: BoundMemorySession): DreamTriggerSettings
   /** Bind-time crash recovery; never throws. */
   onBound(bound: BoundMemorySession): Promise<void>
+  /** Stale reflection-lock check after a settled turn, once that session's bind recovery finished; never throws. */
+  onTurnSettled(bound: BoundMemorySession): Promise<void>
   close(): Promise<void>
 }
 
@@ -128,6 +130,7 @@ export function createReflectionComponent(
     ...(seams.deadlineMs === undefined ? {} : { deadlineMs: seams.deadlineMs }),
   })
   const work = new Set<Promise<unknown>>()
+  const bindRecoveries = new Map<string, Promise<unknown>>()
   const cancels = new Set<() => void>()
   let closed = false
   const track = <T>(promise: Promise<T>): Promise<T> => {
@@ -206,10 +209,19 @@ export function createReflectionComponent(
     dreamSettings,
     async onBound(bound) {
       if (closed) return
-      await track(recovery.onBound(bound))
+      const recovered = track(recovery.onBound(bound))
+      bindRecoveries.set(bound.sessionID, recovered)
+      await recovered
+    },
+    async onTurnSettled(bound) {
+      if (closed) return
+      await bindRecoveries.get(bound.sessionID)
+      if (closed) return
+      await track(recovery.onTurnSettled(bound))
     },
     async close() {
       closed = true
+      bindRecoveries.clear()
       for (const cancel of cancels) cancel()
       cancels.clear()
       hosting.close()

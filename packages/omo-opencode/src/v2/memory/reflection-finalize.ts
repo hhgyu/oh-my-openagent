@@ -4,8 +4,10 @@
 // the worktree and failing the reservation, never by resuming a half-finalized run).
 // - a child that failed, hit its deadline or was cancelled maps to failed / timed_out, nothing merges;
 // - a completed child's tip goes through memory-core `preflightReflectionDescriptions` and
-//   `validateCompletion` against the worktree's recorded base; a dream with a target document fails
-//   with `invalid_target` when it changed anything else;
+//   `validateCompletion` against the worktree's recorded base, which also lands the gate's link repair
+//   (links to removed notes repointed, recognised only by recomputing it, #12642); a dream with a target
+//   document fails with `invalid_target` when it changed anything else, the gate's own repairs aside
+//   (`pathsOutsideTarget`, as Senpi's `resolveFinalizationDecision`);
 // - a valid tip is merged with `integrateValidatedReflection` in `auto` mode under the memory writer lock
 //   (`integration` mode expects the child to have merged by itself, which a V2 child without git cannot);
 // - the worktree and its branch are always removed afterwards (`cleanupReflectionWorktree`); a leftover
@@ -15,6 +17,7 @@ import {
   cleanupReflectionWorktree,
   describeDroppedEntries,
   integrateValidatedReflection,
+  pathsOutsideTarget,
   preflightReflectionDescriptions,
   validateCompletion,
   type ReflectionWorktree,
@@ -53,7 +56,7 @@ export async function decideReflection(input: {
   if (validation.status !== "valid")
     return { outcome: validation.status, reason: "completion_validation", detail: validation.detail }
   const target = run.request.targetDoc
-  if (target !== undefined && validation.changedPaths.some((path) => path !== target)) {
+  if (target !== undefined && pathsOutsideTarget(validation, [target]).length > 0) {
     return { outcome: "failed", reason: "invalid_target", detail: "Dream changed paths outside targetDoc" }
   }
   const integrated = await integrateValidatedReflection(worktree, {
