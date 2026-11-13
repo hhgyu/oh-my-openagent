@@ -5,6 +5,7 @@ import {
   NATIVE_EVAL_PERMISSION,
   NATIVE_EVAL_PLACEHOLDER_DESCRIPTION,
   NATIVE_EVAL_TOOL_NAME,
+  evalSessionEnvironment,
   evalStateDir,
   registerNativeEval,
 } from "./native-eval"
@@ -204,5 +205,23 @@ describe("native eval tool", () => {
     // then
     expect(atHome.replaceAll("\\", "/")).not.toContain("/home/user/.omo")
     expect(inProject.replaceAll("\\", "/")).toContain("/home/user/project/.omo/eval/opencode-v2/")
+  })
+
+  test("#given an eval call's host session #when its kernel environment is built #then it binds that session, the project directory and the staged agent-toolkit SDK", () => {
+    // given / when
+    const withSdk = evalSessionEnvironment({
+      directory: "/home/user/project",
+      sessionID: "ses_root",
+      agentToolkitSdkRoot: "/opt/omo/dist/v2/agent-toolkit-sdk",
+    })
+    const withoutSdk = evalSessionEnvironment({ directory: "/home/user/project", sessionID: "ses_other" })
+
+    // then
+    expect(withSdk).toEqual({
+      PI_SESSION_ID: "ses_root",
+      PI_SESSION_CWD: "/home/user/project",
+      OMO_AGENT_TOOLKIT_SDK_ROOT: "/opt/omo/dist/v2/agent-toolkit-sdk",
+    })
+    expect(withoutSdk).toEqual({ PI_SESSION_ID: "ses_other", PI_SESSION_CWD: "/home/user/project" })
   })
 })

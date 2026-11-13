@@ -79,6 +79,7 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
   const buildDefinition = deps.buildDefinition ?? buildEvalDefinition
   const capabilities = createKernelCapabilityTable()
   const stateDirs = new Map<string, string>()
+  const sessionEnvs = new Map<string, Readonly<Record<string, string>>>()
   /** The eval call whose cell runs in each session now (calls are exclusive per session). */
   const running = new Map<string, string>()
   let init: WorkerInit = { cwd: process.cwd(), sandbox: true, tools: [] }
@@ -131,10 +132,12 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
         signal.throwIfAborted()
         const stateDir = stateDirs.get(sessionID)
         if (!stateDir) throw Error(`eval session ${sessionID} has no state directory`)
+        const sessionEnv = sessionEnvs.get(sessionID)
         return createRuntime(modules, {
           sessionID,
           cwd: init.cwd,
           stateDir,
+          ...(sessionEnv && { sessionEnv }),
           sandbox: init.sandbox,
           ownedTools: hostTools(),
           signal,
@@ -144,6 +147,7 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
 
   const acquire = async (params: SessionParams): Promise<EvalSessionRuntime> => {
     stateDirs.set(params.sessionID, params.stateDir)
+    if (params.sessionEnv) sessionEnvs.set(params.sessionID, params.sessionEnv)
     try {
       return await sessions().acquire(params.sessionID)
     } finally {
@@ -210,6 +214,7 @@ export function attachCodemodeWorker(port: RpcPort, deps: CodemodeWorkerDeps = {
         const { sessionID } = params as { sessionID: string }
         capabilities.releaseSession(sessionID)
         stateDirs.delete(sessionID)
+        sessionEnvs.delete(sessionID)
         running.delete(sessionID)
         try {
           await registry?.release(sessionID)

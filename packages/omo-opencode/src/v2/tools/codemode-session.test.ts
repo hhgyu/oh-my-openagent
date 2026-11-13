@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-function fakeModules(log: string[]) {
+function fakeModules(log: string[], managerOptions: unknown[] = []) {
   class SessionManagerProxy {
     beginReplacement() {
       return 1
@@ -40,12 +40,15 @@ function fakeModules(log: string[]) {
     enabledLanguagesFrom: () => ({ js: true, py: false }),
     jsRuntimeInfo: () => ({}),
     runtimesFromAvailability: () => ({}),
-    createCodemodeSessionManager: async () => ({
-      async dispose() {
-        log.push("raw.dispose")
-      },
-      bridgeEndpoint: () => ({ port: 4242, token: "secret" }),
-    }),
+    createCodemodeSessionManager: async (options: unknown) => {
+      managerOptions.push(options)
+      return {
+        async dispose() {
+          log.push("raw.dispose")
+        },
+        bridgeEndpoint: () => ({ port: 4242, token: "secret" }),
+      }
+    },
     createEvalTool: (options: { settings: unknown }) => ({
       name: "eval",
       description: "d",
@@ -86,6 +89,23 @@ describe("eval session runtime", () => {
     expect(log).toEqual(["replace", "handles.dispose", "cells.dispose", "proxy.dispose"])
     expect(runtime.bridgeEndpoint()).toEqual({ port: 4242 })
     expect((runtime.tool as unknown as { settings: { sandbox: unknown } }).settings.sandbox).toEqual({ enabled: true })
+  })
+
+  test("#given a session environment #when the runtime is created #then codemode's session manager receives it for every kernel", async () => {
+    // given
+    const { createEvalSessionRuntime } = await import("./codemode-session")
+    const managerOptions: unknown[] = []
+    const sessionEnv = { PI_SESSION_ID: "ses_1", PI_SESSION_CWD: "/project" }
+
+    // when
+    const runtime = await createEvalSessionRuntime(fakeModules([], managerOptions), {
+      ...input(new AbortController().signal),
+      sessionEnv,
+    })
+
+    // then
+    expect(managerOptions).toEqual([expect.objectContaining({ sessionId: "ses_1", sessionEnv })])
+    await runtime.dispose()
   })
 
   test("#given a creation aborted before the proxy owns the manager #when it unwinds #then the raw manager itself is disposed", async () => {

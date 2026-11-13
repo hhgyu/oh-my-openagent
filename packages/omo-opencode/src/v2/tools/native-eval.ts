@@ -13,6 +13,7 @@ import type * as Plugin from "@opencode/plugin/promise/plugin"
 import type { Registration } from "@opencode/plugin/promise/registration"
 import type { Info, Result, ToolContext } from "@opencode/plugin/promise/tool"
 import { createHash } from "node:crypto"
+import { existsSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { AGENT_DEFINITIONS } from "../agents/definitions"
@@ -71,6 +72,8 @@ export interface NativeEvalOptions {
   readonly ownedTools?: readonly OwnedEvalHostTool[]
   readonly processEvents?: ProcessEvents
   readonly home?: string
+  /** Directory holding the built agent-toolkit `sdk.js`; defaults to the copy staged next to this bundle. */
+  readonly agentToolkitSdkRoot?: string
   readonly createTimeoutMs?: number
   readonly disposeTimeoutMs?: number
 }
@@ -80,6 +83,30 @@ export function evalStateDir(projectDirectory: string, sessionID: string, home: 
   const key = createHash("sha256").update(sessionID).digest("hex")
   if (resolve(projectDirectory) === resolve(home)) return join(tmpdir(), "omo-opencode-v2-eval", key)
   return join(projectDirectory, ".omo", "eval", "opencode-v2", key)
+}
+
+const AGENT_TOOLKIT_SDK_DIRECTORY = "agent-toolkit-sdk"
+
+/** The build stages the ulw-loop agent-toolkit SDK next to the V2 chunks (script/build-agent-toolkit-sdk.ts). */
+export function locateAgentToolkitSdkRoot(directory: string = import.meta.dir): string | undefined {
+  const root = join(directory, AGENT_TOOLKIT_SDK_DIRECTORY)
+  return existsSync(join(root, "sdk.js")) ? root : undefined
+}
+
+/**
+ * The kernel environment of one eval session, as Native's codemode sets it for its own sessions: the host's
+ * session id and directory bind the agent-toolkit SDK to the CALLING session, never to an id a cell supplies.
+ */
+export function evalSessionEnvironment(input: {
+  readonly directory: string
+  readonly sessionID: string
+  readonly agentToolkitSdkRoot?: string | undefined
+}): Readonly<Record<string, string>> {
+  return {
+    PI_SESSION_ID: input.sessionID,
+    PI_SESSION_CWD: input.directory,
+    ...(input.agentToolkitSdkRoot !== undefined && { OMO_AGENT_TOOLKIT_SDK_ROOT: input.agentToolkitSdkRoot }),
+  }
 }
 
 /** A cell's host-tool call names its eval call; this resolves it to that call's own SDK context, only
@@ -125,6 +152,8 @@ export async function registerNativeEval(
   const directory = host.location.directory
   const sandbox = host.options?.[NATIVE_EVAL_SANDBOX_OPTION] !== false
   const stateDir = (sessionID: string) => evalStateDir(directory, sessionID, options.home)
+  const agentToolkitSdkRoot = options.agentToolkitSdkRoot ?? locateAgentToolkitSdkRoot()
+  const sessionEnv = (sessionID: string) => evalSessionEnvironment({ directory, sessionID, agentToolkitSdkRoot })
   const stop = new AbortController()
   const roots = new Map<string, Promise<boolean>>()
   const registrations: Registration[] = []
@@ -142,6 +171,7 @@ export async function registerNativeEval(
       sandbox,
       ownedTools,
       stateDir,
+      sessionEnv,
       ...(options.createTimeoutMs !== undefined && { createTimeoutMs: options.createTimeoutMs }),
       ...(options.disposeTimeoutMs !== undefined && { disposeTimeoutMs: options.disposeTimeoutMs }),
       ...(options.processEvents && { processEvents: options.processEvents }),
