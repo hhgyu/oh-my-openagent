@@ -269,4 +269,30 @@ describe("kibitzer turn report", () => {
     // then
     expect(report).toEqual({ status: "error", message: "provider 503", error, userTexts: [] })
   })
+
+  test("#given an assistant whose error field is null #then the turn completed", () => {
+    // given
+    const messages = [{ type: "assistant", time: { created: 5 }, error: null }]
+    // when
+    const report = turnReport(messages, 0)
+    // then
+    expect(report).toEqual({ status: "completed", userTexts: [] })
+  })
+
+  test("#given a cold prompt cache written by the newest turn #then the context estimate counts the cache write", () => {
+    // given
+    const messages = [
+      { type: "assistant", time: { created: 5 }, tokens: { input: 33, output: 10, cache: { read: 79_711, write: 0 } } },
+      {
+        type: "assistant",
+        time: { created: 6 },
+        tokens: { input: 33, output: 10, cache: { read: 79_711, write: 800_000 } },
+      },
+    ]
+    // when
+    const report = turnReport(messages, 0)
+    // then
+    expect(report.contextTokens).toBe(879_744)
+    expect(report.usage).toEqual({ input: 66, output: 20, cacheRead: 159_422, cacheWrite: 800_000 })
+  })
 })
