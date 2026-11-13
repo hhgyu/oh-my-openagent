@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:bf6d4f9776fc1a5364b9053242a67f845aaff8dde7589d55846cc9790b9a1901:d0401940234347ad77d4c8cf48bb4ac723ddb939e1b5c94a0807fe3cf1064b94
+// omo-codex-install:edf310e08b04ac9961dd6fdfecc0fda43c8cacbb4edf38388138693dd5ce52d8:dc687839f80929c2a37a9bbf255c6499f65abae1a676cb299c0475a0032d40dd
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -19698,7 +19698,22 @@ var OmoAgentDefInputSchema = object({
   permission: OmoAgentPermissionSchema.optional(),
   prompt_append: string2().optional()
 }).strict();
-var OmoAgentDefSchema = preprocess((value) => isRecord3(value) ? normalizeLegacyModelFields(value) : value, OmoAgentDefInputSchema);
+function normalizeLegacyAgentFields(entry) {
+  const normalized = normalizeLegacyModelFields(entry);
+  if (entry["max_tokens"] === undefined && normalized["max_tokens"] !== undefined) {
+    delete normalized["max_tokens"];
+    normalized["maxTokens"] = entry["maxTokens"];
+  }
+  if (entry["provider_options"] === undefined && normalized["provider_options"] !== undefined) {
+    delete normalized["provider_options"];
+    for (const key of ["providerOptions", "textVerbosity", "thinking"]) {
+      if (entry[key] !== undefined)
+        normalized[key] = entry[key];
+    }
+  }
+  return normalized;
+}
+var OmoAgentDefSchema = preprocess((value) => isRecord3(value) ? normalizeLegacyAgentFields(value) : value, OmoAgentDefInputSchema);
 var OmoAgentsConfigSchema = record(string2(), OmoAgentDefSchema);
 
 // packages/omo-config-core/src/schema/category.ts
@@ -21531,19 +21546,27 @@ function hasChild(container, segment) {
 function segmentsOf(path) {
   return path.map((segment) => typeof segment === "number" ? segment : String(segment));
 }
-function targetPaths(root, issue) {
-  const base = segmentsOf(issue.path);
-  if (issue.code === "unrecognized_keys")
-    return issue.keys.map((key) => [...base, key]);
+function deepestExistingPrefix(root, path) {
   let node = root;
   let depth = 0;
-  for (const segment of base) {
+  for (const segment of path) {
     if (!isContainer(node) || !hasChild(node, segment))
       break;
     node = childOf(node, segment);
     depth += 1;
   }
-  return [base.slice(0, depth)];
+  return path.slice(0, depth);
+}
+function targetPaths(root, issue) {
+  const base = segmentsOf(issue.path);
+  if (issue.code === "unrecognized_keys") {
+    return issue.keys.map((key) => {
+      const path = [...base, key];
+      const existing = deepestExistingPrefix(root, path);
+      return existing.length === path.length ? path : existing;
+    });
+  }
+  return [deepestExistingPrefix(root, base)];
 }
 function isAncestor(ancestor, path) {
   return ancestor.length < path.length && ancestor.every((segment, index) => segment === path[index]);

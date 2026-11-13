@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 
 import { resolveUserOmoConfigPath, updateOmoConfig } from "@oh-my-opencode/omo-config-core"
 
+import { transformReasoningUnification } from "../../config-migration"
 import { parseJsonc } from "../../shared"
 import { runOpenCodeStartupMigration } from "../../startup-migration"
 import type { ConfigMergeResult, InstallConfig } from "../types"
@@ -26,7 +27,13 @@ export function writeOmoConfig(installConfig: InstallConfig): ConfigMergeResult 
     const migration = runOpenCodeStartupMigration({
       afterMigrations: () => {
         const generated = generateOmoConfig(installConfig)
-        const merged = deepMergeRecord(generated, existingOpenCodeConfig(targetPath))
+        // The startup migration already ran (and recorded its marker), so the deprecated chain keys the
+        // generator emits (`fallback_models`, `variant`) get the same one-shot rewrite here.
+        const merged = record(
+          transformReasoningUnification({
+            "[opencode]": deepMergeRecord(generated, existingOpenCodeConfig(targetPath)),
+          }).document["[opencode]"],
+        )
         const result = updateOmoConfig({
           edits: [{ path: ["[opencode]"], value: merged }],
           scope: "user",

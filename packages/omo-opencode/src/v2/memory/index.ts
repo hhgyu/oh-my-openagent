@@ -27,8 +27,11 @@ import { createRecallCollector, fileRecallStores, type RecallStores } from "./re
 import { createRecallDelivery } from "./recall-delivery"
 import { createSessionMetadataStore } from "./session-metadata"
 import { loadKibitzerPersona } from "@oh-my-opencode/memory-core"
+import { createModelCatalog } from "../host/model-catalog"
+import { consentedProviders } from "./reflection-consent"
 import {
   createKibitzerComponent,
+  createKibitzerModelResolver,
   kibitzerCategoryModel,
   kibitzerHostCapable,
   registerKibitzerAgent,
@@ -169,9 +172,30 @@ export async function registerMemoryComponent(
       return null
     }
   })()
+  const { model: modelDomain, provider: providerDomain } = context
+  const kibitzerModel = createKibitzerModelResolver({
+    loadConfig: (cwd) => loadRuntimeConfig({ cwd }).config,
+    catalog:
+      modelDomain === undefined || providerDomain === undefined
+        ? undefined
+        : () => createModelCatalog({ model: modelDomain, provider: providerDomain }).list(),
+    consentedProviders: () =>
+      consentedProviders({ provider: providerDomain, integration: context.integration }, (message, details) =>
+        logger.warn(message, details),
+      ),
+  })
   const kibitzer: KibitzerComponent | undefined =
     seams?.createPort !== undefined || (kibitzerHostCapable(context) && persona !== null)
-      ? createKibitzerComponent({ host: context, binder, stores, corpusCache, logger, now, ...seams })
+      ? createKibitzerComponent({
+          host: context,
+          binder,
+          stores,
+          corpusCache,
+          logger,
+          now,
+          resolveModel: kibitzerModel,
+          ...seams,
+        })
       : undefined
   const factsParts = createFactsComponent(context, {
     binder,
