@@ -34,7 +34,7 @@ export interface SessionHelpUsage {
 export type SessionHelpResult = ToolkitResultFor<"help"> & { readonly usage: SessionHelpUsage };
 export type SessionHelpResponse = ToolkitSuccess<"help", SessionHelpResult> | ToolkitFailure<"help">;
 export const SESSION_HELP_USAGE: SessionHelpUsage = {
-	import: 'const { agentToolkit } = await import(`${env("OMO_AGENT_TOOLKIT_SDK_ROOT")}/sdk.js`)',
+	import: `const { agentToolkit } = await import(\`\${env("OMO_AGENT_TOOLKIT_SDK_ROOT")}/sdk.js\`)`,
 	example:
 		'print(await agentToolkit.status()); await agentToolkit.recordEvidence({ goalId: "G001", criterionId: "C001", status: "pass", evidence: "<observable proof>", artifacts: ["<existing path>"] })',
 	sessionEnv: ["PI_SESSION_ID", "PI_SESSION_CWD", "PI_SESSION_FILE", "PI_GOAL_STORE_FILE"],

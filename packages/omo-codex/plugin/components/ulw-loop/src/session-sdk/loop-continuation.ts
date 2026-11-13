@@ -8,7 +8,7 @@ const ULW_LOOP_CONTINUATION_LIMIT = 8;
 export const ULW_LOOP_STEERING_REMINDER = [
 	"<omo-senpi-ulw-loop>",
 	"An active ulw-loop run is present in this working directory.",
-	'Before continuing, read it from a JS eval cell through the SDK: const { agentToolkit } = await import(`${env("OMO_AGENT_TOOLKIT_SDK_ROOT")}/sdk.js`); print(await agentToolkit.status()). The session id is bound from the host env, so pass no session id or plan path, call no tool named omo_agent_toolkit, and spawn no CLI.',
+	`Before continuing, read it from a JS eval cell through the SDK: const { agentToolkit } = await import(\`\${env("OMO_AGENT_TOOLKIT_SDK_ROOT")}/sdk.js\`); print(await agentToolkit.status()). The session id is bound from the host env, so pass no session id or plan path, call no tool named omo_agent_toolkit, and spawn no CLI.`,
 	"Use the returned plan plus its structured nextActions, and the existing .omo/ulw-loop ledger, as the source of truth.",
 	"Continue the current ulw-loop story with evidence-bound execution; do not start unrelated work until the active run is complete or checkpointed.",
 	"</omo-senpi-ulw-loop>",
@@ -16,7 +16,7 @@ export const ULW_LOOP_STEERING_REMINDER = [
 
 export const ULW_LOOP_CONTINUATION_PROMPT = [
 	"Continue the active ulw-loop run.",
-	'In a JS eval cell run: const { agentToolkit } = await import(`${env("OMO_AGENT_TOOLKIT_SDK_ROOT")}/sdk.js`); print(await agentToolkit.status()). Inspect the active incomplete goals and the structured nextActions, and keep working until the run is complete or safely checkpointed.',
+	`In a JS eval cell run: const { agentToolkit } = await import(\`\${env("OMO_AGENT_TOOLKIT_SDK_ROOT")}/sdk.js\`); print(await agentToolkit.status()). Inspect the active incomplete goals and the structured nextActions, and keep working until the run is complete or safely checkpointed.`,
 ].join("\n");
 
 const BRAILLE_BLANK = "\u2800";
