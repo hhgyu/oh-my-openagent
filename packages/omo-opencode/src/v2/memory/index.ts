@@ -217,6 +217,7 @@ export async function registerMemoryComponent(
           hasUserActivity,
           isOwnedSession,
           evaluate: (bound, event) => reflection.evaluate(bound, event),
+          onTurnSettled: (bound) => reflection.onTurnSettled(bound),
         })
   const dreams =
     reflection === undefined
