@@ -35,6 +35,7 @@ export interface ParentNotificationOwnerOptions {
   readonly binding: VerifiedParentBinding
   readonly issuer: ReturnType<typeof createParentNotificationAuthorityIssuer>
   readonly journal: CompletionIntentJournal
+  readonly rootHostParent?: string
   readonly receiver: CompletionIntentEnvelope["receiver"]
   readonly taskFor: (record: TaskRecord) => AcceptedNotificationTask | undefined
   readonly ownsTerminal: (record: TaskRecord) => boolean
@@ -322,7 +323,7 @@ export function createParentNotificationOwner(options: ParentNotificationOwnerOp
         if (
           actual.id !== receiver.sessionID ||
           actual.location.directory !== receiver.directory ||
-          (receiver.sessionID === receiver.rootSessionID && actual.parentID !== undefined)
+          (receiver.sessionID === receiver.rootSessionID && actual.parentID !== options.rootHostParent)
         )
           throw Error("Fresh receiving identity differs")
         if (!streamAlive) return
