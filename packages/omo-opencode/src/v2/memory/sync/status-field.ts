@@ -1,24 +1,26 @@
 // The `sync` field of the memory status snapshot (Senpi `memory-rpc-sync.ts`): the runner's status of
-// one repo mapped onto memory-core's `MemoryRpcSync`. A failing or frozen status exists only while the
-// engine runs, so its mapping is passed in from the engine chunk (`./status-copy.ts`).
+// one repo mapped onto memory-core's `MemoryRpcSync`. A failing or frozen status, and a pause carrying
+// held files (#12284), exists only while the engine runs, so its mapping is passed in from the engine
+// chunk (`./status-copy.ts`).
 
 import type { EngineStatus } from "@oh-my-opencode/memory-core/sync-engine"
 import type { SyncConfigInvalidStatus, SyncUnavailableStatus } from "@oh-my-opencode/memory-core/sync-runner"
 import type { MemoryRpcSync } from "./ports"
 
 export type RunnerStatus = EngineStatus | SyncUnavailableStatus | SyncConfigInvalidStatus
-export type FailingStatus = Extract<EngineStatus, { readonly kind: "failing" | "frozen" }>
+export type EngineOnlyStatus = Extract<EngineStatus, { readonly kind: "failing" | "frozen" | "paused" }>
 
 export async function readRpcSync(
   read: () => Promise<RunnerStatus | null>,
-  failure: (status: FailingStatus) => Promise<MemoryRpcSync>,
+  failure: (status: EngineOnlyStatus) => Promise<MemoryRpcSync>,
 ): Promise<MemoryRpcSync | undefined> {
   const status = await read().catch(() => null)
   if (status === null) return undefined
   switch (status.kind) {
     case "never_synced":
-    case "paused":
       return { state: status.kind }
+    case "paused":
+      return status.held === undefined ? { state: "paused" } : failure(status)
     case "synced":
       return { state: "synced", lastSyncedAtISO: new Date(status.at).toISOString() }
     case "failing":

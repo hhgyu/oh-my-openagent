@@ -1,10 +1,12 @@
-// The snapshot of a failing or frozen engine (Senpi `sync-status-copy.ts`): both statuses exist only while
-// the engine runs, so this ships in the engine chunk (`./engine-runtime.ts`), never the memory chunk.
+// The snapshot of a failing or frozen engine, or a pause carrying held files (#12284) (Senpi
+// `sync-status-copy.ts`): all three exist only while the engine runs, so this ships in the engine chunk
+// (`./engine-runtime.ts`), never the memory chunk.
 
 import type { MemoryRpcSync } from "./ports"
-import type { FailingStatus } from "./status-field"
+import type { EngineOnlyStatus } from "./status-field"
 
-type Frozen = Extract<FailingStatus, { readonly kind: "frozen" }>
+type Frozen = Extract<EngineOnlyStatus, { readonly kind: "frozen" }>
+type Failing = Extract<EngineOnlyStatus, { readonly kind: "failing" }>
 
 const ACTION: Partial<Record<Frozen["reason"], string>> = {
   waiting_recovery: "Run recovery again on this device.",
@@ -13,8 +15,11 @@ const ACTION: Partial<Record<Frozen["reason"], string>> = {
   no_epoch_key: "Approve this device again from a device that syncs.",
 }
 
-/** The snapshot schema accepts only the current failure literals, so a freeze is a failure of the "unknown" kind. */
-export function failureRpcSync(status: FailingStatus): MemoryRpcSync {
+/**
+ * The snapshot schema accepts only the current failure literals, so a freeze, and a held file (#12284), is a
+ * failure of the "unknown" kind; a hold keeps its reason, action, keys and size limit.
+ */
+export function failureRpcSync(status: EngineOnlyStatus): MemoryRpcSync {
   if (status.kind === "frozen") {
     return {
       state: "failing",
@@ -27,16 +32,21 @@ export function failureRpcSync(status: FailingStatus): MemoryRpcSync {
       },
     }
   }
-  const { failure } = status
+  if (status.kind === "paused")
+    return status.held === undefined ? { state: "paused" } : { state: "paused", failure: rpcFailure(status.held) }
+  return { state: "failing", failure: rpcFailure(status) }
+}
+
+function rpcFailure({ failure, since, attempts }: Omit<Failing, "kind">): NonNullable<MemoryRpcSync["failure"]> {
   return {
-    state: "failing",
-    failure: {
-      kind: failure.kind === "oversized_item" ? "unknown" : failure.kind,
-      reason: failure.reason,
-      action: failure.action,
-      sinceISO: new Date(status.since).toISOString(),
-      attempts: status.attempts,
-      ...(failure.kind === "stranded_lock" ? { paths: failure.paths } : {}),
-    },
+    kind: failure.kind === "oversized_item" ? "unknown" : failure.kind,
+    reason: failure.reason,
+    action: failure.action,
+    sinceISO: new Date(since).toISOString(),
+    attempts,
+    ...(failure.kind === "stranded_lock" ? { paths: failure.paths } : {}),
+    ...(failure.kind === "oversized_item"
+      ? { keys: failure.keys, stuckKeys: failure.stuck, limitBytes: failure.limitBytes }
+      : {}),
   }
 }
