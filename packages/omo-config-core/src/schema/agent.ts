@@ -52,8 +52,27 @@ const OmoAgentDefInputSchema = z
   })
   .strict()
 
+// `normalizeLegacyModelFields` folds `maxTokens` into `max_tokens` and `providerOptions` /
+// `textVerbosity` / an enabled `thinking` into `provider_options`, keys an agent does not own. The
+// legacy keys stay as written instead, so the strict schema reports the user's own key and the
+// loader drops just that key with a diagnostic naming it.
+function normalizeLegacyAgentFields(entry: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const normalized = normalizeLegacyModelFields(entry)
+  if (entry["max_tokens"] === undefined && normalized["max_tokens"] !== undefined) {
+    delete normalized["max_tokens"]
+    normalized["maxTokens"] = entry["maxTokens"]
+  }
+  if (entry["provider_options"] === undefined && normalized["provider_options"] !== undefined) {
+    delete normalized["provider_options"]
+    for (const key of ["providerOptions", "textVerbosity", "thinking"]) {
+      if (entry[key] !== undefined) normalized[key] = entry[key]
+    }
+  }
+  return normalized
+}
+
 export const OmoAgentDefSchema = z.preprocess(
-  (value) => (isRecord(value) ? normalizeLegacyModelFields(value) : value),
+  (value) => (isRecord(value) ? normalizeLegacyAgentFields(value) : value),
   OmoAgentDefInputSchema,
 )
 

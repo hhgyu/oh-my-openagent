@@ -8,5 +8,6 @@ export {
   type KibitzerSeams,
 } from "./component"
 export { kibitzerCategoryModel, registerKibitzerAgent } from "./agent"
+export { createKibitzerModelResolver } from "./model"
 export type { KibitzerChild, KibitzerChildPort, KibitzerChildTurnReport } from "./contract"
 export type { KibitzerWakeOutcome } from "./outcome"

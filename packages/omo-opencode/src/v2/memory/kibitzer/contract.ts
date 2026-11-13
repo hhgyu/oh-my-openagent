@@ -33,15 +33,32 @@ export type KibitzerChildTurnReport = MemoryChildTurnReport
 /** One live resident child. Every input goes through the owner's gated admission paths. */
 export type KibitzerChild = MemoryChild
 
+/** `provider/model` (plus an optional host variant) the child is staged with. */
+export interface KibitzerChildModel {
+  readonly model: string
+  readonly variant?: string
+}
+
+export type KibitzerModelPick =
+  | { readonly kind: "resolved"; readonly model: KibitzerChildModel }
+  | { readonly kind: "unavailable"; readonly category: string; readonly detail: string }
+
 export interface KibitzerChildStartInput {
   readonly sessionId: string
   readonly generation: number
   /** The seed envelope, or the reseed envelope followed by the first wake envelope. */
   readonly prompt: string
+  /** The model `resolveModel` picked for this seed. */
+  readonly model?: KibitzerChildModel
 }
 
 /** Starts one resident child with its first turn already admitted. */
 export interface KibitzerChildPort {
+  /**
+   * Picks the model for the next seed, asked before the wake takes a machine slot. An `unavailable`
+   * pick skips the wake: no slot, no child, no backoff.
+   */
+  resolveModel?(): Promise<KibitzerModelPick>
   start(input: KibitzerChildStartInput): Promise<KibitzerChild>
   /** Releases everything the port owns for this sidecar (backend, journal). Idempotent. */
   close(): Promise<void>
@@ -75,7 +92,7 @@ export interface KibitzerOfferInput {
   readonly taskSummary?: string
 }
 
-export type KibitzerBufferedReason = WakeSilenceReason | "backoff" | "slot_busy" | "disposed"
+export type KibitzerBufferedReason = WakeSilenceReason | "backoff" | "slot_busy" | "disposed" | "model_unavailable"
 
 export type KibitzerOfferResult =
   | { readonly action: "seeded"; readonly wake: number }

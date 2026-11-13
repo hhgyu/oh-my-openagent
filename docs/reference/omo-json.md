@@ -500,7 +500,7 @@ Deprecated keys accepted for back-compat and rewritten by migration:
 | `variant` | `reasoning` | Reasoning level or harness-native preset token. |
 | `reasoningEffort` | `reasoning` | `none` normalizes to `off`. |
 
-These are the only deprecated keys the strict agent schema accepts. `textVerbosity`, `fallback_models`, `thinking`, and `maxTokens` are category / model-entry keys, not agent keys (see [Model references and model strings](#model-references-and-model-strings)).
+These are the only deprecated keys the strict agent schema accepts. `textVerbosity`, `fallback_models`, `thinking`, and `maxTokens` are category / model-entry keys, not agent keys (see [Model references and model strings](#model-references-and-model-strings)). An agent that still carries one (an older `[opencode]` block, for example) keeps loading: only that key is dropped, with a diagnostic naming it (`agents.plan.maxTokens`), and every other field of the agent applies. The OpenCode installer writes an agent's fallbacks as a `models` chain (primary first), never as `fallback_models`.
 
 #### Codex managed agent roles
 

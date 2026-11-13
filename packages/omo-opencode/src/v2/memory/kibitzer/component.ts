@@ -39,6 +39,7 @@ import { createKibitzerChildPort, KIBITZER_JOURNAL_FILENAME, type IssuedKibitzer
 import type { KibitzerChildPort, KibitzerOfferResult, KibitzerSidecarTimers } from "./contract"
 import { contentText } from "./events"
 import { createKibitzerWakeRecorder } from "./observe"
+import type { KibitzerModelResolution } from "./model"
 import type { KibitzerWakeOutcome } from "./outcome"
 import { createKibitzerSidecar, type KibitzerSidecar } from "./sidecar"
 import {
@@ -85,6 +86,8 @@ export interface KibitzerComponentDeps extends KibitzerSeams {
   readonly corpusCache: RecallCorpusCache
   readonly logger: MemoryLogger
   readonly now: () => number
+  /** Recall-category model for a production seed; without it no production child is ever staged. */
+  readonly resolveModel?: (bound: BoundMemorySession) => Promise<KibitzerModelResolution>
 }
 
 export interface KibitzerComponent {
@@ -218,7 +221,14 @@ export function createKibitzerComponent(deps: KibitzerComponentDeps): KibitzerCo
     const session = deps.host.session
     if (app === undefined || !isBackendSession(session))
       throw new Error("Kibitzer child port requires the host app identity and the joined Effect session transport")
+    const resolveModel = deps.resolveModel
     return createKibitzerChildPort({
+      resolveModel: async () =>
+        resolveModel?.(request.bound) ?? {
+          kind: "unavailable",
+          category: resolveRecallSettings(request.bound.settings, request.bound.identity).category,
+          detail: "Kibitzer has no recall model resolver",
+        },
       host: { app, session },
       directory: request.bound.directory,
       parentSessionId: request.parentSessionId,

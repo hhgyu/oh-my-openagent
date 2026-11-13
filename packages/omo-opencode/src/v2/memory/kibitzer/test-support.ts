@@ -1,7 +1,14 @@
 // Controlled UNIT doubles for the Kibitzer lifecycle: a scripted child port (each turn settles only
 // when the test says so), a counting wake slot and manual timers. Never spawns OpenCode.
 import type { KibitzerWakeAdmission, KibitzerWakeSlot } from "@oh-my-opencode/memory-core/recall-sidecar"
-import type { KibitzerChild, KibitzerChildPort, KibitzerChildTurnReport, KibitzerSidecarTimers } from "./contract"
+import type {
+  KibitzerChild,
+  KibitzerChildModel,
+  KibitzerChildPort,
+  KibitzerChildTurnReport,
+  KibitzerModelPick,
+  KibitzerSidecarTimers,
+} from "./contract"
 import type { KibitzerPortRequest } from "./component"
 
 export interface Deferred<T> {
@@ -21,6 +28,8 @@ export function deferred<T>(): Deferred<T> {
 }
 
 export interface ScriptedChild extends KibitzerChild {
+  /** The model the seed staged the child with. */
+  readonly model: KibitzerChildModel | undefined
   readonly prompts: string[]
   readonly followUps: string[]
   readonly steers: string[]
@@ -37,6 +46,8 @@ export interface ScriptedPort extends KibitzerChildPort {
   failNextStart: Error | undefined
   /** Next `start` waits for this promise before answering. */
   holdNextStart: Promise<void> | undefined
+  /** What every `resolveModel` answers; a resolved scripted model by default. */
+  pick: KibitzerModelPick
   /** Resolves when the n-th child (1-based) has started. */
   started(count: number): Promise<ScriptedChild>
 }
@@ -48,6 +59,8 @@ export function createScriptedPort(request?: KibitzerPortRequest): ScriptedPort 
     closed: false,
     failNextStart: undefined,
     holdNextStart: undefined,
+    pick: { kind: "resolved", model: { model: "scripted/quick" } },
+    resolveModel: async () => port.pick,
     async start(input) {
       const hold = port.holdNextStart
       port.holdNextStart = undefined
@@ -64,6 +77,7 @@ export function createScriptedPort(request?: KibitzerPortRequest): ScriptedPort 
       const child: ScriptedChild = {
         sessionID,
         generation: input.generation,
+        model: input.model,
         prompts: [input.prompt],
         followUps: [],
         steers: [],

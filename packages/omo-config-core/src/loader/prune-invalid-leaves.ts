@@ -54,22 +54,34 @@ function segmentsOf(path: readonly PropertyKey[]): ConfigPathSegment[] {
   return path.map((segment) => (typeof segment === "number" ? segment : String(segment)))
 }
 
-/**
- * The smallest subtree an issue condemns: the deepest prefix of its path that exists in the
- * document. A wrong value resolves to its own path; a missing required key resolves to the object
- * that lacks it. An empty result means the issue is about the document root itself.
- */
-function targetPaths(root: Record<string, unknown>, issue: z.core.$ZodIssue): ConfigPathSegment[][] {
-  const base = segmentsOf(issue.path)
-  if (issue.code === "unrecognized_keys") return issue.keys.map((key) => [...base, key])
+function deepestExistingPrefix(root: Record<string, unknown>, path: readonly ConfigPathSegment[]): ConfigPathSegment[] {
   let node: unknown = root
   let depth = 0
-  for (const segment of base) {
+  for (const segment of path) {
     if (!isContainer(node) || !hasChild(node, segment)) break
     node = childOf(node, segment)
     depth += 1
   }
-  return [base.slice(0, depth)]
+  return path.slice(0, depth)
+}
+
+/**
+ * The smallest subtree an issue condemns: the deepest prefix of its path that exists in the
+ * document. A wrong value resolves to its own path; a missing required key resolves to the object
+ * that lacks it; an unrecognized key a schema preprocess synthesized (absent from the document)
+ * resolves to the object carrying it, so every pass removes something real. An empty result means
+ * the issue is about the document root itself.
+ */
+function targetPaths(root: Record<string, unknown>, issue: z.core.$ZodIssue): ConfigPathSegment[][] {
+  const base = segmentsOf(issue.path)
+  if (issue.code === "unrecognized_keys") {
+    return issue.keys.map((key) => {
+      const path = [...base, key]
+      const existing = deepestExistingPrefix(root, path)
+      return existing.length === path.length ? path : existing
+    })
+  }
+  return [deepestExistingPrefix(root, base)]
 }
 
 function isAncestor(ancestor: readonly ConfigPathSegment[], path: readonly ConfigPathSegment[]): boolean {

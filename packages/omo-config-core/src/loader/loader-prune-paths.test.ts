@@ -34,7 +34,7 @@ function writeProjectConfig(fixture: Fixture, document: unknown): string {
   return path
 }
 
-function load(fixture: Fixture, options: { readonly harness?: "senpi"; readonly profile?: string } = {}) {
+function load(fixture: Fixture, options: { readonly harness?: "senpi" | "opencode"; readonly profile?: string } = {}) {
   return loadOmoConfig({ cwd: fixture.cwd, env: { HOME: fixture.homeDir }, platform: "linux", ...options })
 }
 
@@ -243,6 +243,61 @@ describe("loadOmoConfig prunes only the invalid path in every section", () => {
         path: MERGED_CONFIG_DIAGNOSTIC_PATH,
         issuePaths: ["teams.alpha"],
       }),
+    ])
+  })
+
+  test("#given installer-written [opencode] agents with keys the strict agent schema does not own #when loading the opencode view #then only those keys are dropped and every agent, category and section survives", () => {
+    // given
+    const fixture = makeFixture()
+    writeUserConfig(fixture, {
+      task: { default_concurrency: 3 },
+      "[opencode]": {
+        agents: {
+          sisyphus: {
+            model: "anthropic/claude-opus-5",
+            fallback_models: [{ model: "openai/gpt-6", variant: "high" }],
+            maxTokens: 64000,
+          },
+          plan: { model: "openai/gpt-6", textVerbosity: "low" },
+          oracle: { model: "openai/gpt-6-astra" },
+        },
+        categories: { quick: { model: "openai/gpt-6-luna" } },
+      },
+    })
+
+    // when
+    const result = load(fixture, { harness: "opencode" })
+
+    // then
+    expect(result.config.task?.default_concurrency).toBe(3)
+    expect(result.config.categories?.quick?.model).toBe("openai/gpt-6-luna")
+    expect(result.config.agents?.sisyphus).toEqual({ model: "anthropic/claude-opus-5" })
+    expect(result.config.agents?.plan).toEqual({ model: "openai/gpt-6" })
+    expect(result.config.agents?.oracle).toEqual({ model: "openai/gpt-6-astra" })
+    expect(result.diagnostics.some((d) => d.kind === "validation")).toBe(false)
+    expect([...droppedKeys(result)].sort()).toEqual([
+      "agents.plan.textVerbosity",
+      "agents.sisyphus.fallback_models",
+      "agents.sisyphus.maxTokens",
+    ])
+  })
+
+  test("#given a typed agents entry with a legacy maxTokens #when loading #then the file still loads and only agents.plan.maxTokens is reported", () => {
+    // given
+    const fixture = makeFixture()
+    const path = writeUserConfig(fixture, {
+      agents: { plan: { model: "openai/gpt-6", maxTokens: 1000 }, oracle: { model: "openai/gpt-6-astra" } },
+    })
+
+    // when
+    const result = load(fixture)
+
+    // then
+    expect(result.sources.find((source) => source.path === path)?.loaded).toBe(true)
+    expect(result.config.agents?.plan).toEqual({ model: "openai/gpt-6" })
+    expect(result.config.agents?.oracle).toEqual({ model: "openai/gpt-6-astra" })
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ kind: "unknown-keys", path, issuePaths: ["agents.plan.maxTokens"] }),
     ])
   })
 })
