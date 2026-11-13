@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:e8715b11252543330b882f341358e087784c1fe0e58cbad7eb3bf83ba2be7351:1c0b63eacee6ef99d1b0b4c1713231cd6a3509c2793a429ed1689c7dff1fe18b
+// omo-codex-install:bf6d4f9776fc1a5364b9053242a67f845aaff8dde7589d55846cc9790b9a1901:d0401940234347ad77d4c8cf48bb4ac723ddb939e1b5c94a0807fe3cf1064b94
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -10226,6 +10226,10 @@ var init_package = __esm(() => {
       "./install/*": {
         types: "./src/install/*.ts",
         import: "./src/install/*.ts"
+      },
+      "./ulw-loop-session-sdk/*": {
+        types: "./plugin/components/ulw-loop/src/session-sdk/*.ts",
+        import: "./plugin/components/ulw-loop/src/session-sdk/*.ts"
       },
       "./marketplace.json": "./marketplace.json"
     },
