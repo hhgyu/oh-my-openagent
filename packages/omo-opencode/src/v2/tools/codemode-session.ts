@@ -43,6 +43,7 @@ export interface EvalRuntimeInput {
   readonly sandbox: boolean
   readonly ownedTools: readonly OwnedEvalHostTool[]
   readonly signal: AbortSignal
+  readonly sessionEnv?: Readonly<Record<string, string>>
 }
 
 type Construct = new (...args: unknown[]) => Record<string, unknown>
@@ -127,6 +128,7 @@ export async function createEvalSessionRuntime(
     sessionId: input.sessionID,
     ownerSessionId: input.sessionID,
     cwd: input.cwd,
+    ...(input.sessionEnv && { sessionEnv: input.sessionEnv }),
     settings,
     availability,
     artifactsDir,

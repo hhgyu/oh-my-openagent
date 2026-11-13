@@ -86,14 +86,25 @@ export const opencodeV2Tui = Plugin.define({
     if ("dialog" in context.ui) {
       const closeMemory = showMemoryCommandOutput(context)
       if (!("slot" in context.ui)) return closeMemory
-      return import("../v2/tui/dag-panel")
-        .then(({ registerDagStatusPanel }) => {
+      return Promise.all([import("../v2/tui/dag-panel"), import("../v2/tui/ulw-loop-footer")])
+        .then(([{ registerDagStatusPanel }, { registerUlwLoopFooter }]) => {
           const closeDag = registerDagStatusPanel(context)
+          let closeFooter: () => void
+          try {
+            closeFooter = registerUlwLoopFooter(context)
+          } catch (error) {
+            closeDag()
+            throw error
+          }
           return () => {
             try {
-              closeDag()
+              closeFooter()
             } finally {
-              closeMemory()
+              try {
+                closeDag()
+              } finally {
+                closeMemory()
+              }
             }
           }
         })

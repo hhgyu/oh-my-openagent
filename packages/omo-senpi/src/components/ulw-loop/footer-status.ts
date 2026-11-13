@@ -1,16 +1,14 @@
 import { readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 
-const STATUS_KEY = "ulw-loop"
-const FRAME_INTERVAL_MS = 320
-const BRAILLE_BLANK = "\u2800"
+import {
+  ULW_LOOP_FOOTER_FRAME_INTERVAL_MS as FRAME_INTERVAL_MS,
+  ULW_LOOP_FOOTER_FRAMES,
+} from "../../../../omo-codex/plugin/components/ulw-loop/src/session-sdk/loop-continuation.js"
 
-export const ULW_LOOP_FOOTER_FRAMES = [
-  `⚡ ultraworking${BRAILLE_BLANK.repeat(3)}`,
-  `⚡ ultraworking.${BRAILLE_BLANK.repeat(2)}`,
-  `⚡ ultraworking..${BRAILLE_BLANK}`,
-  "⚡ ultraworking...",
-] as const
+export { ULW_LOOP_FOOTER_FRAMES }
+
+const STATUS_KEY = "ulw-loop"
 
 type TimerHandle = ReturnType<typeof setInterval> | number
 
