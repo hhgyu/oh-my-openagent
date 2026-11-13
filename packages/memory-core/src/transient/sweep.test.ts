@@ -1,18 +1,25 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { rmSyncEfaultTolerant } from "./teardown.test-support"
 
-import { TRANSIENT_DIRNAME } from "./transient-identity"
-import { TRANSIENT_IDENTITY_MAX_AGE_MS, TRANSIENT_RUN_MAX_AGE_MS, sweepTransientMemoryRuns } from "./transient-sweep"
+import { TRANSIENT_DIRNAME } from "./identity"
+import { TRANSIENT_IDENTITY_MAX_AGE_MS, TRANSIENT_RUN_MAX_AGE_MS, sweepTransientMemoryRuns } from "./sweep"
 
 const roots: string[] = []
 const NOW = Date.parse("2026-09-10T12:00:00Z")
 
 afterEach(() => {
-  for (const root of roots.splice(0))
-    rmSyncEfaultTolerant(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 function memoryRoot(): string {

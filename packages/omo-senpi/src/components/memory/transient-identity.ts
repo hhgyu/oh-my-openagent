@@ -12,18 +12,18 @@
 // it in place and the sweep promotes it into the durable agents root once no detached child can
 // still be writing into it.
 
-import { existsSync } from "@oh-my-opencode/memory-core/fs"
 import { join } from "node:path"
 
-import { REPO_DIRNAME, buildIdentityPaths, removeTree, type MemoryIdentityPaths } from "@oh-my-opencode/memory-core"
+import { buildIdentityPaths, type MemoryIdentityPaths } from "@oh-my-opencode/memory-core"
+import {
+  TRANSIENT_DIRNAME,
+  isDurableIdentityRoot,
+  removeMemoryTree,
+  type TransientWarn,
+} from "@oh-my-opencode/memory-core/transient"
 import { readSessionRole } from "@oh-my-opencode/senpi-task"
 
-export const TRANSIENT_DIRNAME = "transient-runs"
-
-/** `<base36 epoch>-<pid>-<random>`; the pid lets the sweep spare a run whose owner is still alive. */
-const RUN_TOKEN_PATTERN = /^[0-9a-z]+-(\d+)-[0-9a-z]+$/
-
-export type TransientWarn = (message: string, fields?: Readonly<Record<string, unknown>>) => void
+export { TRANSIENT_DIRNAME, isDurableIdentityRoot, type TransientWarn } from "@oh-my-opencode/memory-core/transient"
 
 export interface IdentityRunPaths {
   /** Paths the run actually uses: the durable identity paths, or a transient mirror of them. */
@@ -65,16 +65,6 @@ export function isOneShotSurface(input: {
   return input.hasUI === false
 }
 
-/** The discriminator: an identity is durable exactly when it owns a `repo/`. */
-export function isDurableIdentityRoot(root: string, exists: (path: string) => boolean = existsSync): boolean {
-  return exists(join(root, REPO_DIRNAME))
-}
-
-export function readRunTokenPid(token: string): number | undefined {
-  const pid = RUN_TOKEN_PATTERN.exec(token)?.[1]
-  return pid === undefined ? undefined : Number(pid)
-}
-
 export function resolveIdentityRunPaths(input: ResolveIdentityRunPathsInput): IdentityRunPaths {
   const durableRoot = input.identityPaths.root
   if (!input.oneShot || isDurableIdentityRoot(durableRoot, input.exists)) {
@@ -98,24 +88,10 @@ export async function finalizeIdentityRun(input: {
   const runRoot = input.run.transientRunRoot
   if (runRoot === undefined) return "durable"
   if (isDurableIdentityRoot(input.run.paths.root)) return "kept"
-  await removeMemoryTree(runRoot, input.warn)
+  await removeMemoryTree(runRoot, input.warn, "omo-senpi memory")
   return "removed"
-}
-
-export async function removeMemoryTree(path: string, warn?: TransientWarn): Promise<boolean> {
-  try {
-    await removeTree(path)
-    return true
-  } catch (error) {
-    warn?.("omo-senpi memory transient run cleanup failed", { path, error: describe(error) })
-    return false
-  }
 }
 
 function defaultRunToken(): string {
   return `${Date.now().toString(36)}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

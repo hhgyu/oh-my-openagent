@@ -20,6 +20,12 @@ export const consoleMemoryLogger: MemoryLogger = {
   warn: (message, details) => console.warn(`[oh-my-openagent/v2] ${message}`, details ?? {}),
 }
 
+/** Repo maintenance also prints its informational records (packing, retention, sweeps): at most a few per 12 hours. */
+export const consoleMaintenanceLogger: MemoryLogger = {
+  ...consoleMemoryLogger,
+  info: (message, details) => console.info(`[oh-my-openagent/v2] ${message}`, details ?? {}),
+}
+
 /** `memory` block of the unified config for one directory, schema defaults when absent. */
 export function loadMemorySettings(cwd: string): OmoMemorySettings {
   return loadRuntimeConfig({ cwd }).config.memory ?? OmoMemorySettingsSchema.parse({})

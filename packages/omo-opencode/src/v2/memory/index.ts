@@ -13,6 +13,7 @@ import { createMemoryCommands } from "./commands"
 import { memoryCommandRpc, stripMemoryCommandOutputs } from "./command-output"
 import { MEMORY_COMMAND_OUTPUT_EVENT } from "./command-output-event"
 import {
+  consoleMaintenanceLogger,
   consoleMemoryLogger,
   loadMemorySettings,
   memoryComponentEnabled,
@@ -256,7 +257,11 @@ export async function registerMemoryComponent(
           settings: (bound) => reflection.dreamSettings(bound),
           pressure: underSystemTokenPressure,
         })
-  const maintenance = createV2MemoryMaintenance(logger, options.maintenance)
+  const maintenance = createV2MemoryMaintenance(
+    options.logger ?? consoleMaintenanceLogger,
+    { loadSettings, home: options.home, env },
+    options.maintenance,
+  )
   // Sync acquires once per distinct bound repo and loads its runtime lazily (see `./sync/runtime`); an
   // unsafe memory root binds nothing, so it gets no sync and no `omo.memory.sync` RPC either.
   const memoryRoot = resolveSafeMemoryRoot(env, context.location.directory, options.home)
