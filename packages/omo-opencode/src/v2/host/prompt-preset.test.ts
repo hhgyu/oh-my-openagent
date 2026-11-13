@@ -142,8 +142,11 @@ it("renders the Native search-grounding wording when provider-native search is a
   expect(grounded).toBe(native.buildPreset("claude-haiku-5-5", withNativeSearch).prompt)
   expect(grounded).not.toBe(plain)
   expect(
-    port.render({ model: { provider: "anthropic", id: "claude-haiku-5.5" }, settings: { promptPreset: "auto" }, options: withNativeSearch })
-      .prompt,
+    port.render({
+      model: { provider: "anthropic", id: "claude-haiku-5.5" },
+      settings: { promptPreset: "auto" },
+      options: withNativeSearch,
+    }).prompt,
   ).toBe(grounded)
 })
 
