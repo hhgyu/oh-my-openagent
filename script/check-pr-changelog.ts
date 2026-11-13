@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process"
 import { checkPrChangelog, fetchBaseIfMissing, FRAGMENT_DIR, fragmentPath } from "./changelog-gate-rules.ts"
 import { GATE_CONFIG } from "./changelog-gate.config.ts"
 import { isUserFacingPath as isShippedPath, shippingPolicy } from "./changelog-shipping-policy.mjs"
+import { upstreamSyncExemption } from "./changelog-upstream-sync.ts"
 import { checkPackageLogs } from "./package-log-gate.ts"
 import { isReleaseStatePr } from "./release-pr-marker.ts"
 
@@ -69,9 +70,22 @@ function run(): number {
     releaseActors: isReleaseWorkflow ? [actor] : [],
     isUserFacing: (path: string) => shipped.some((at) => isShippedPath(path, at)),
   }
-  const addedFiles = list("A")
-  const modifiedFiles = list("M")
-  const deletedFiles = list("D")
+  const ownPath = prNumber > 0 ? fragmentPath(prNumber) : null
+  const changed = { added: list("A"), modified: list("M"), deleted: list("D") }
+  // An upstream merge carries upstream's release edits; only paths whose bytes are upstream's leave the lists.
+  const sync = upstreamSyncExemption((args) => git(...args), {
+    labels,
+    head,
+    baseHead,
+    ownFragment: ownPath,
+    changedPaths: [...changed.added, ...changed.modified, ...changed.deleted],
+  })
+  if (sync)
+    console.log(`changelog-gate: upstream-sync ${sync.exempt.length > 0 ? "applied" : "not applied"} - ${sync.note}`)
+  const keep = (path: string) => !sync?.exempt.includes(path)
+  const addedFiles = changed.added.filter(keep)
+  const modifiedFiles = changed.modified.filter(keep)
+  const deletedFiles = changed.deleted.filter(keep)
   const dirNames = (rev: string) => {
     try {
       return git("ls-tree", "-r", "--name-only", rev, "--", FRAGMENT_DIR)
@@ -92,7 +106,6 @@ function run(): number {
   const baseFragments = dirNames(cut)
   const postCut = mergedIntoBase ? dirNames(baseSide).filter((name) => !baseFragments.includes(name)) : []
   const headFragments = dirNames(head).filter((name) => !postCut.includes(name))
-  const ownPath = prNumber > 0 ? fragmentPath(prNumber) : null
   const addedFragment = ownPath && addedFiles.includes(ownPath) ? { content: git("show", `${head}:${ownPath}`) } : null
   // The module's bootstrap inputs: the base BRANCH head (never the merge base) decides whether a
   // changelog already exists, and an added changelog is read from the head blob with its mode.
