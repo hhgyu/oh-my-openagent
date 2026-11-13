@@ -24,18 +24,32 @@ function runtime() {
   roots.push(directory)
   const lease = createNativeDagGenerationLease()
   leases.push(lease)
-  return createNativeDagRuntime({ directory, parentSessionID: PARENT, executionMode: { agents: {}, config: {} }, lease })
+  return createNativeDagRuntime({
+    directory,
+    parentSessionID: PARENT,
+    executionMode: { agents: {}, config: {} },
+    lease,
+  })
 }
 
-const node = (id: string, dependsOn?: readonly string[]) => ({ id, prompt: `do ${id}`, category: "quick", ...(dependsOn && { dependsOn }) })
+const node = (id: string, dependsOn?: readonly string[]) => ({
+  id,
+  prompt: `do ${id}`,
+  category: "quick",
+  ...(dependsOn && { dependsOn }),
+})
 
 async function startRun(dag: ReturnType<typeof runtime>, nodes: DagDefinition["nodes"]): Promise<DagRunId> {
-  const started = await dag.manager.start({ definition: { key: "s6c", name: "s6c", nodes }, parentSessionId: PARENT, rootSessionId: PARENT })
+  const started = await dag.manager.start({
+    definition: { key: "s6c", name: "s6c", nodes },
+    parentSessionId: PARENT,
+    rootSessionId: PARENT,
+  })
   return started.snapshot.runId
 }
 
 /** Lets every queued microtask and timer of the engine run, without asserting on wall-clock time. */
-const settle = () => new Promise(resolve => setTimeout(resolve, 50))
+const settle = () => new Promise((resolve) => setTimeout(resolve, 50))
 
 describe("native DAG blocking drive", () => {
   test("#given a 3-node DAG with one dependency #when a call drives it #then the frontier admits a and b first and c only after a", async () => {
@@ -46,20 +60,29 @@ describe("native DAG blocking drive", () => {
 
     // when
     const drive = dag.drive(runId, { port: nativeDagCallPort(fake.operation), signal: new AbortController().signal })
-    await fake.whenStarted("a"); await fake.whenStarted("b")
+    await fake.whenStarted("a")
+    await fake.whenStarted("b")
     await settle()
-    const firstWave = fake.starts.map(start => start.nodeId)
+    const firstWave = fake.starts.map((start) => start.nodeId)
     fake.complete("a")
     await fake.whenStarted("c")
-    fake.complete("b"); fake.complete("c")
+    fake.complete("b")
+    fake.complete("c")
     const result = await drive
 
     // then
     expect(firstWave).toEqual(["a", "b"])
-    expect(fake.starts.map(start => start.nodeId)).toEqual(["a", "b", "c"])
-    expect(fake.starts.every(start => start.spec.run_in_background === false && start.spec.depth === 1 && start.spec.parent_session_id === PARENT)).toBe(true)
+    expect(fake.starts.map((start) => start.nodeId)).toEqual(["a", "b", "c"])
+    expect(
+      fake.starts.every(
+        (start) =>
+          start.spec.run_in_background === false && start.spec.depth === 1 && start.spec.parent_session_id === PARENT,
+      ),
+    ).toBe(true)
     expect(result.status).toBe("completed")
-    const attached = dag.store.readEvents(runId, 0, { limit: 500 }).events.flatMap(event => event.type === "dag.node.task-attached" ? [String(event.nodeId)] : [])
+    const attached = dag.store
+      .readEvents(runId, 0, { limit: 500 })
+      .events.flatMap((event) => (event.type === "dag.node.task-attached" ? [String(event.nodeId)] : []))
     expect(attached).toEqual(["a", "b", "c"])
     expect(dag.driving()).toBe(0)
   })
@@ -68,21 +91,25 @@ describe("native DAG blocking drive", () => {
     // given
     const dag = runtime()
     const runId = await startRun(dag, [node("a"), node("b", ["a"])])
-    const first = createFakeDagOperation(PARENT), call = new AbortController()
+    const first = createFakeDagOperation(PARENT),
+      call = new AbortController()
     const drive = dag.drive(runId, { port: nativeDagCallPort(first.operation), signal: call.signal })
     await first.whenStarted("a")
 
     // when
     call.abort(Error("call ended"))
-    const ended = await drive.then(() => "settled", (error: unknown) => error instanceof Error ? error.message : String(error))
+    const ended = await drive.then(
+      () => "settled",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    )
     first.revoke()
     first.complete("a")
     await settle()
 
     // then
     expect(ended).toBe("call ended")
-    expect(first.starts.map(start => start.nodeId)).toEqual(["a"])
-    expect(dag.manager.snapshot(runId, PARENT).nodes.find(entry => entry.id === "b")?.state).toBe("pending")
+    expect(first.starts.map((start) => start.nodeId)).toEqual(["a"])
+    expect(dag.manager.snapshot(runId, PARENT).nodes.find((entry) => entry.id === "b")?.state).toBe("pending")
 
     // when the next blocking call drives the same run
     const second = createFakeDagOperation(PARENT)
@@ -93,7 +120,7 @@ describe("native DAG blocking drive", () => {
 
     // then a is attached again (not restarted) and b is admitted by THIS call
     expect((await next).status).toBe("completed")
-    expect(second.starts.map(start => start.nodeId)).toEqual(["b"])
+    expect(second.starts.map((start) => start.nodeId)).toEqual(["b"])
   })
 })
 
@@ -105,8 +132,11 @@ describe("native DAG spawn policy", () => {
     const fake = createFakeDagOperation(PARENT)
 
     // when
-    const result = await dag.drive(runId, { port: nativeDagCallPort(fake.operation), signal: new AbortController().signal,
-      spawnPolicy: () => ({ kind: "deny", message: "plan gate closed" }) })
+    const result = await dag.drive(runId, {
+      port: nativeDagCallPort(fake.operation),
+      signal: new AbortController().signal,
+      spawnPolicy: () => ({ kind: "deny", message: "plan gate closed" }),
+    })
 
     // then
     expect(fake.starts).toEqual([])
@@ -127,7 +157,10 @@ describe("held DAG task port", () => {
     await settle()
     const waiting = held.held()
     held.dropHeld()
-    const outcome = await start.then(() => "started", (error: unknown) => error)
+    const outcome = await start.then(
+      () => "started",
+      (error: unknown) => error,
+    )
 
     // then
     expect(waiting).toBe(1)
@@ -149,7 +182,9 @@ describe("held DAG task port", () => {
 
     // then
     expect(during).toBeUndefined()
-    expect(() => held.port.findOwnedTask({ kind: "dag", runId: "dag_x" as DagRunId, nodeId: "a" as DagNodeId })).toThrow(NativeDagAdmissionHeld)
+    expect(() =>
+      held.port.findOwnedTask({ kind: "dag", runId: "dag_x" as DagRunId, nodeId: "a" as DagNodeId }),
+    ).toThrow(NativeDagAdmissionHeld)
   })
 
   test("#given the engine's all-scope send to this run's node child #when it reaches the port #then it goes through the call's scoped send", async () => {
@@ -158,11 +193,19 @@ describe("held DAG task port", () => {
     const held = createHeldDagTaskPort(runId)
     const fake = createFakeDagOperation(PARENT)
     const release = held.bind(nativeDagCallPort(fake.operation))
-    const started = await held.port.startOwned({ prompt: "p", parent_session_id: PARENT, depth: 1 }, { kind: "dag", runId, nodeId: "a" as DagNodeId, fingerprint: "f" })
+    const started = await held.port.startOwned(
+      { prompt: "p", parent_session_id: PARENT, depth: 1 },
+      { kind: "dag", runId, nodeId: "a" as DagNodeId, fingerprint: "f" },
+    )
     const taskId = started.kind === "started" ? started.task_id : "none"
 
     // when
-    const outcome = await held.port.sendToTask({ idOrName: taskId, message: "focus", callerSessionId: PARENT, allScope: true })
+    const outcome = await held.port.sendToTask({
+      idOrName: taskId,
+      message: "focus",
+      callerSessionId: PARENT,
+      allScope: true,
+    })
     release()
 
     // then
@@ -176,23 +219,40 @@ describe("held DAG task port", () => {
     const held = createHeldDagTaskPort(runId)
     const fake = createFakeDagOperation(PARENT)
     fake.seed("task-plain")
-    fake.seed("task-other-run", { owner: { kind: "dag", runId: "dag_other" as DagRunId, nodeId: "a" as DagNodeId, fingerprint: "f" } })
-    fake.seed("task-foreign-root", { parent: "ses_other_root", owner: { kind: "dag", runId, nodeId: "a" as DagNodeId, fingerprint: "f" } })
+    fake.seed("task-other-run", {
+      owner: { kind: "dag", runId: "dag_other" as DagRunId, nodeId: "a" as DagNodeId, fingerprint: "f" },
+    })
+    fake.seed("task-foreign-root", {
+      parent: "ses_other_root",
+      owner: { kind: "dag", runId, nodeId: "a" as DagNodeId, fingerprint: "f" },
+    })
     const call = nativeDagCallPort(fake.operation)
     const release = held.bind(call)
 
     // when
-    const attempts = ["task-plain", "task-other-run", "task-foreign-root", "task-missing"].map(idOrName => {
-      try { return held.port.sendToTask({ idOrName, message: "m", allScope: true }) } catch (error) { return error }
+    const attempts = ["task-plain", "task-other-run", "task-foreign-root", "task-missing"].map((idOrName) => {
+      try {
+        return held.port.sendToTask({ idOrName, message: "m", allScope: true })
+      } catch (error) {
+        return error
+      }
     })
-    const direct = (() => { try { return call.sendToTask({ idOrName: "task-foreign-root", message: "m" }) } catch (error) { return error } })()
+    const direct = (() => {
+      try {
+        return call.sendToTask({ idOrName: "task-foreign-root", message: "m" })
+      } catch (error) {
+        return error
+      }
+    })()
     release()
 
     // then
     for (const attempt of attempts) expect(attempt).toBeInstanceOf(NativeDagRefusal)
     expect(direct).toBeInstanceOf(NativeDagRefusal)
     expect((attempts[1] as NativeDagRefusal).code).toBe("node_not_found")
-    expect((attempts[1] as NativeDagRefusal).message).toBe("Task task-other-run is not a node child of workflow run dag_send, so workflow send does not reach it. Send targets only this run's own nodes.")
+    expect((attempts[1] as NativeDagRefusal).message).toBe(
+      "Task task-other-run is not a node child of workflow run dag_send, so workflow send does not reach it. Send targets only this run's own nodes.",
+    )
     expect(fake.sent).toEqual([])
   })
 })

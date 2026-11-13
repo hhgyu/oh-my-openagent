@@ -49,9 +49,10 @@ function readEventString(event: ManagedChildEvent, key: string): string | undefi
 function assistantFailure(message: unknown): { readonly message: string; readonly stop_reason: string } | undefined {
   if (!isRecord(message) || message.role !== "assistant") return undefined
   if (message.stopReason !== "error") return undefined
-  const diagnostic = typeof message.errorMessage === "string" && message.errorMessage.length > 0
-    ? message.errorMessage
-    : "child turn failed without a diagnostic message"
+  const diagnostic =
+    typeof message.errorMessage === "string" && message.errorMessage.length > 0
+      ? message.errorMessage
+      : "child turn failed without a diagnostic message"
   return { message: diagnostic, stop_reason: "error" }
 }
 

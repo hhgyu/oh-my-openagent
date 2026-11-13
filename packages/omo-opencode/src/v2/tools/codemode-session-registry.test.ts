@@ -8,8 +8,12 @@ function fakeRuntime() {
     tool: { name: "eval", description: "", parameters: {}, execute: async () => ({ content: [] }) },
     bridgeEndpoint: () => undefined,
     exclusive: (_signal, work) => work(),
-    dispose: async () => { state.disposed++ },
-    abandon: () => { state.abandoned++ },
+    dispose: async () => {
+      state.disposed++
+    },
+    abandon: () => {
+      state.abandoned++
+    },
   }
   return { runtime, state }
 }
@@ -17,10 +21,22 @@ function fakeRuntime() {
 function fakeProcess() {
   const listeners = new Map<string, Set<() => void>>()
   const events: ProcessEvents = {
-    on(event, listener) { let set = listeners.get(event); if (!set) listeners.set(event, set = new Set()); set.add(listener) },
-    off(event, listener) { listeners.get(event)?.delete(listener) },
+    on(event, listener) {
+      let set = listeners.get(event)
+      if (!set) listeners.set(event, (set = new Set()))
+      set.add(listener)
+    },
+    off(event, listener) {
+      listeners.get(event)?.delete(listener)
+    },
   }
-  return { events, emit: (event: string) => { for (const listener of listeners.get(event) ?? []) listener() }, count: (event: string) => listeners.get(event)?.size ?? 0 }
+  return {
+    events,
+    emit: (event: string) => {
+      for (const listener of listeners.get(event) ?? []) listener()
+    },
+    count: (event: string) => listeners.get(event)?.size ?? 0,
+  }
 }
 
 describe("eval session registry", () => {
@@ -29,7 +45,13 @@ describe("eval session registry", () => {
     const proc = fakeProcess()
     const made = fakeRuntime()
     let creations = 0
-    const registry = createEvalSessionRegistry({ processEvents: proc.events, create: async () => { creations++; return made.runtime } })
+    const registry = createEvalSessionRegistry({
+      processEvents: proc.events,
+      create: async () => {
+        creations++
+        return made.runtime
+      },
+    })
 
     // when
     const [a, b] = await Promise.all([registry.acquire("ses_1"), registry.acquire("ses_1")])
@@ -46,9 +68,14 @@ describe("eval session registry", () => {
   test("#given live sessions #when the plugin disposes #then every runtime is disposed, new ones are refused and process hooks are removed", async () => {
     // given
     const proc = fakeProcess()
-    const first = fakeRuntime(), second = fakeRuntime()
-    const registry = createEvalSessionRegistry({ processEvents: proc.events, create: async id => id === "a" ? first.runtime : second.runtime })
-    await registry.acquire("a"); await registry.acquire("b")
+    const first = fakeRuntime(),
+      second = fakeRuntime()
+    const registry = createEvalSessionRegistry({
+      processEvents: proc.events,
+      create: async (id) => (id === "a" ? first.runtime : second.runtime),
+    })
+    await registry.acquire("a")
+    await registry.acquire("b")
     expect(proc.count("exit")).toBe(1)
 
     // when
@@ -67,11 +94,14 @@ describe("eval session registry", () => {
     const proc = fakeProcess()
     const live = fakeRuntime()
     let pendingSignal: AbortSignal | undefined
-    const registry = createEvalSessionRegistry({ processEvents: proc.events, create: (id, signal) => {
-      if (id === "live") return Promise.resolve(live.runtime)
-      pendingSignal = signal
-      return new Promise<EvalSessionRuntime>(() => {})
-    } })
+    const registry = createEvalSessionRegistry({
+      processEvents: proc.events,
+      create: (id, signal) => {
+        if (id === "live") return Promise.resolve(live.runtime)
+        pendingSignal = signal
+        return new Promise<EvalSessionRuntime>(() => {})
+      },
+    })
     await registry.acquire("live")
     void registry.acquire("starting")
 
@@ -88,7 +118,13 @@ describe("eval session registry", () => {
     const made = fakeRuntime()
     const gate = Promise.withResolvers<EvalSessionRuntime>()
     let signal: AbortSignal | undefined
-    const registry = createEvalSessionRegistry({ processEvents: fakeProcess().events, create: (_id, given) => { signal = given; return gate.promise } })
+    const registry = createEvalSessionRegistry({
+      processEvents: fakeProcess().events,
+      create: (_id, given) => {
+        signal = given
+        return gate.promise
+      },
+    })
     const acquiring = registry.acquire("ses_1")
 
     // when
@@ -107,7 +143,11 @@ describe("eval session registry", () => {
     // given
     const made = fakeRuntime()
     const gate = Promise.withResolvers<EvalSessionRuntime>()
-    const registry = createEvalSessionRegistry({ processEvents: fakeProcess().events, createTimeoutMs: 20, create: () => gate.promise })
+    const registry = createEvalSessionRegistry({
+      processEvents: fakeProcess().events,
+      createTimeoutMs: 20,
+      create: () => gate.promise,
+    })
 
     // when
     const error = await registry.acquire("ses_1").catch((caught: unknown) => caught)
@@ -123,7 +163,11 @@ describe("eval session registry", () => {
   test("#given a runtime whose dispose hangs #when the session is released #then cleanup is bounded", async () => {
     // given
     const made = fakeRuntime()
-    const registry = createEvalSessionRegistry({ processEvents: fakeProcess().events, disposeTimeoutMs: 20, create: async () => ({ ...made.runtime, dispose: () => new Promise<void>(() => {}) }) })
+    const registry = createEvalSessionRegistry({
+      processEvents: fakeProcess().events,
+      disposeTimeoutMs: 20,
+      create: async () => ({ ...made.runtime, dispose: () => new Promise<void>(() => {}) }),
+    })
     await registry.acquire("ses_1")
 
     // when

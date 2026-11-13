@@ -30,9 +30,30 @@ test("moved operation accepts a real minimal identity catalog with receiver-boun
   const model = { provider: "local", id: "exact" }
   const registry = {
     entries: [model],
-    getAvailable() { return this.entries },
-    find(provider: string, id: string) { return this.entries.find((entry) => entry.provider === provider && entry.id === id) },
+    getAvailable() {
+      return this.entries
+    },
+    find(provider: string, id: string) {
+      return this.entries.find((entry) => entry.provider === provider && entry.id === id)
+    },
   }
-  const plan = planner.createTaskChildPlanner({}, {}, () => registry)({ prompt: "inspect", parent_session_id: "parent", depth: 0, model: "local/exact:high" })
-  expect(plan).toEqual({ kind: "resolved", plan: { model: "local/exact", resolved_model: { source: "explicit", provider: "local", model_id: "exact", display: "local/exact:high", reasoning: "high" }, variant: "high" } })
+  const plan = planner.createTaskChildPlanner(
+    {},
+    {},
+    () => registry,
+  )({ prompt: "inspect", parent_session_id: "parent", depth: 0, model: "local/exact:high" })
+  expect(plan).toEqual({
+    kind: "resolved",
+    plan: {
+      model: "local/exact",
+      resolved_model: {
+        source: "explicit",
+        provider: "local",
+        model_id: "exact",
+        display: "local/exact:high",
+        reasoning: "high",
+      },
+      variant: "high",
+    },
+  })
 })

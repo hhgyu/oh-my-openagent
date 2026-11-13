@@ -5,17 +5,30 @@ import { TranscriptJournal, type ReservedRun } from "@oh-my-opencode/memory-core
 import { OmoMemorySettingsSchema } from "@oh-my-opencode/omo-config-core"
 import type { BoundMemorySession } from "./binding"
 import { fireDream } from "./dream-fire"
-import { evaluateDreamGates, resolveDreamTriggerSettings, type DreamTriggerSettings } from "@oh-my-opencode/memory-core/dream-gates"
+import {
+  evaluateDreamGates,
+  resolveDreamTriggerSettings,
+  type DreamTriggerSettings,
+} from "@oh-my-opencode/memory-core/dream-gates"
 import { reflectionStore } from "./reflection-run-store"
 import { createBoundIdentity } from "./reflection.test-support"
 
 setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
 
 const cleanups: (() => void)[] = []
-afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup() })
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup()
+})
 
 const NOW = Date.parse("2026-11-12T00:00:00.000Z")
-const settings: DreamTriggerSettings = { enabled: true, idleMinutes: 30, minHoursBetween: 24, shutdownLaunch: false, autoSelectMax: 5, autoSelectMaxChars: 150_000 }
+const settings: DreamTriggerSettings = {
+  enabled: true,
+  idleMinutes: 30,
+  minHoursBetween: 24,
+  shutdownLaunch: false,
+  autoSelectMax: 5,
+  autoSelectMaxChars: 150_000,
+}
 
 function setup() {
   const identity = createBoundIdentity()
@@ -23,11 +36,18 @@ function setup() {
   const bound: BoundMemorySession = identity.bound
   const launched: ReservedRun[] = []
   let runs = 0
-  const fire = (origin: "manual" | "idle" | "pressure", request = {}, overrides: Partial<DreamTriggerSettings> = {}) => fireDream({
-    bound, origin, request, settings: { ...settings, ...overrides }, now: () => NOW,
-    store: reflectionStore(bound, { createRunId: () => `dream-${++runs}`, now: () => new Date(NOW) }),
-    launch: run => { launched.push(run) },
-  })
+  const fire = (origin: "manual" | "idle" | "pressure", request = {}, overrides: Partial<DreamTriggerSettings> = {}) =>
+    fireDream({
+      bound,
+      origin,
+      request,
+      settings: { ...settings, ...overrides },
+      now: () => NOW,
+      store: reflectionStore(bound, { createRunId: () => `dream-${++runs}`, now: () => new Date(NOW) }),
+      launch: (run) => {
+        launched.push(run)
+      },
+    })
   const journal = async (conversationId: string, bytes: number) => {
     await new TranscriptJournal({ journalDir: join(bound.paths.transcripts, conversationId) }).reconcile([
       { kind: "user", messageId: `${conversationId}-u`, text: "x".repeat(bytes) },
@@ -44,7 +64,11 @@ function setup() {
 describe("dream gates", () => {
   test("#given each origin #when the gates are evaluated #then manual bypasses, disabled and spacing refuse, and only idle needs volume", async () => {
     // given
-    const probe = (lastDreamAtMs: number | null, bytes: number) => ({ nowMs: NOW, lastDreamAtMs: async () => lastDreamAtMs, unreflectedBytes: async () => bytes })
+    const probe = (lastDreamAtMs: number | null, bytes: number) => ({
+      nowMs: NOW,
+      lastDreamAtMs: async () => lastDreamAtMs,
+      unreflectedBytes: async () => bytes,
+    })
     // when
     const results = await Promise.all([
       evaluateDreamGates("manual", { ...settings, enabled: false }, probe(NOW, 0)),
@@ -69,7 +93,10 @@ describe("dream gates", () => {
 
   test("#given a per-identity dream override #when the settings resolve #then the override wins field by field", () => {
     // given
-    const memory = OmoMemorySettingsSchema.parse({ dream: { idle_minutes: 10 }, agents: { "agent-one": { dream: { enabled: false } } } })
+    const memory = OmoMemorySettingsSchema.parse({
+      dream: { idle_minutes: 10 },
+      agents: { "agent-one": { dream: { enabled: false } } },
+    })
     // when
     const resolved = resolveDreamTriggerSettings(memory, "agent-one")
     // then
@@ -101,7 +128,10 @@ describe("dream fire", () => {
     // when
     const outcomes = [await small.fire("idle"), await recent.fire("idle")]
     // then
-    expect(outcomes).toEqual([{ fired: false, rejection: "insufficient_volume" }, { fired: false, rejection: "too_soon" }])
+    expect(outcomes).toEqual([
+      { fired: false, rejection: "insufficient_volume" },
+      { fired: false, rejection: "too_soon" },
+    ])
     expect([...small.launched, ...recent.launched]).toEqual([])
   })
 

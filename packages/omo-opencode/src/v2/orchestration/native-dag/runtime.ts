@@ -1,6 +1,16 @@
 import {
-  createDagFileStore, createDagManager, createDagWaitSurface,
-  type DagFileStore, type DagLeasePort, type DagManager, type DagMaterializeSkills, type DagNodeSpawnPolicy, type DagRunId, type DagRunRecordV1, type DagRunResult, type DagSettings,
+  createDagFileStore,
+  createDagManager,
+  createDagWaitSurface,
+  type DagFileStore,
+  type DagLeasePort,
+  type DagManager,
+  type DagMaterializeSkills,
+  type DagNodeSpawnPolicy,
+  type DagRunId,
+  type DagRunRecordV1,
+  type DagRunResult,
+  type DagSettings,
 } from "@oh-my-opencode/senpi-task/dag"
 import { nativeTaskStateDir } from "../native-task/component"
 import { driveDagRun, type NativeDagEntry } from "./drive"
@@ -58,26 +68,56 @@ export interface NativeDagRuntime {
 export function createNativeDagRuntime(options: NativeDagRuntimeOptions): NativeDagRuntime {
   // One fenced store for the manager, every drive and every control: the engine keys its commit
   // notifications on the store object, and no writer here overwrites another holder's terminal run.
-  const fenced = fenceForeignTerminalRuns(createDagFileStore({
-    project_dir: options.directory,
-    task: { state_dir: nativeTaskStateDir(options.directory, options.parentSessionID), ...(options.settings && { dag: options.settings }) },
-  }), options.lease)
-  const store: DagFileStore = { ...fenced, writeCheckpoint(runId, checkpoint) {
-    fenced.writeCheckpoint(runId, checkpoint)
-    options.onChanged?.()
-  } }
+  const fenced = fenceForeignTerminalRuns(
+    createDagFileStore({
+      project_dir: options.directory,
+      task: {
+        state_dir: nativeTaskStateDir(options.directory, options.parentSessionID),
+        ...(options.settings && { dag: options.settings }),
+      },
+    }),
+    options.lease,
+  )
+  const store: DagFileStore = {
+    ...fenced,
+    writeCheckpoint(runId, checkpoint) {
+      fenced.writeCheckpoint(runId, checkpoint)
+      options.onChanged?.()
+    },
+  }
   // A manager outside a call never loads a skill; without a materializer an `amend` would keep each
   // changed node's PREVIOUS effective prompt and the re-run would dispatch the stale prompt.
-  const managerWith = (materializeSkills: DagMaterializeSkills) => createDagManager({ store, materializeSkills, ...(options.settings && { settings: options.settings }) })
+  const managerWith = (materializeSkills: DagMaterializeSkills) =>
+    createDagManager({ store, materializeSkills, ...(options.settings && { settings: options.settings }) })
   const manager = managerWith(callBoundSkillMaterializer)
   // Results are projected from the store; a drive returns only after its run is terminal.
   const results = createDagWaitSurface({ store, subscribe: () => () => {} })
   const driving = new Map<string, Promise<unknown>>()
-  async function run(runId: DagRunId, call: NativeDagCall, detach: boolean, enter?: NativeDagEntry): Promise<DagRunRecordV1> {
-    if (driving.has(runId)) throw new NativeDagRefusal("run_still_active", `Dag run ${runId} is already being driven by another workflow call in this session.`)
-    const drive = driveDagRun({ store, manager, runId, parentSessionID: options.parentSessionID, call: call.port, signal: call.signal, detach,
-      executionMode: options.executionMode, lease: options.lease, materializeSkills: call.materializeSkills ?? callBoundSkillMaterializer,
-      ...(call.spawnPolicy && { spawnPolicy: call.spawnPolicy }), ...(enter && { enter }) })
+  async function run(
+    runId: DagRunId,
+    call: NativeDagCall,
+    detach: boolean,
+    enter?: NativeDagEntry,
+  ): Promise<DagRunRecordV1> {
+    if (driving.has(runId))
+      throw new NativeDagRefusal(
+        "run_still_active",
+        `Dag run ${runId} is already being driven by another workflow call in this session.`,
+      )
+    const drive = driveDagRun({
+      store,
+      manager,
+      runId,
+      parentSessionID: options.parentSessionID,
+      call: call.port,
+      signal: call.signal,
+      detach,
+      executionMode: options.executionMode,
+      lease: options.lease,
+      materializeSkills: call.materializeSkills ?? callBoundSkillMaterializer,
+      ...(call.spawnPolicy && { spawnPolicy: call.spawnPolicy }),
+      ...(enter && { enter }),
+    })
     driving.set(runId, drive)
     try {
       return await drive
@@ -89,13 +129,16 @@ export function createNativeDagRuntime(options: NativeDagRuntimeOptions): Native
   return Object.freeze({
     store,
     manager,
-    managerFor: (call: NativeDagCall) => call.materializeSkills ? managerWith(call.materializeSkills) : manager,
+    managerFor: (call: NativeDagCall) => (call.materializeSkills ? managerWith(call.materializeSkills) : manager),
     async drive(runId: DagRunId, call: NativeDagCall): Promise<DagRunResult> {
       await run(runId, call, false)
       return results.wait(runId, options.parentSessionID)
     },
-    async admit(runId: DagRunId, call: NativeDagCall): Promise<void> { await run(runId, call, true) },
-    control: (runId: DagRunId, call: NativeDagCall, entry: NativeDagEntry, detach: boolean) => run(runId, call, detach, entry),
+    async admit(runId: DagRunId, call: NativeDagCall): Promise<void> {
+      await run(runId, call, true)
+    },
+    control: (runId: DagRunId, call: NativeDagCall, entry: NativeDagEntry, detach: boolean) =>
+      run(runId, call, detach, entry),
     driving: () => driving.size,
     isDriving: (runId: string) => driving.has(runId),
     async pauseForShutdown() {

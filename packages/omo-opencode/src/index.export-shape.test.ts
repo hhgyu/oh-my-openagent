@@ -23,13 +23,25 @@ describe("oh-my-openagent plugin export shape", () => {
     const registered: string[] = []
     const disposed: string[] = []
     const context = {
-      options: { "omo-senpi-lsp-tools-enabled": false, "omo-senpi-ultrawork-disabled": true, "omo-senpi-todo-fanout-reminder-disabled": true, "omo-senpi-question-gates-disabled": true, "omo-senpi-comment-checker-disabled": true, "omo-memory-enabled": false, "omo-native-eval-enabled": false },
+      options: {
+        "omo-senpi-lsp-tools-enabled": false,
+        "omo-senpi-ultrawork-disabled": true,
+        "omo-senpi-todo-fanout-reminder-disabled": true,
+        "omo-senpi-question-gates-disabled": true,
+        "omo-senpi-comment-checker-disabled": true,
+        "omo-memory-enabled": false,
+        "omo-native-eval-enabled": false,
+      },
       location: { directory: process.cwd() as Plugin.Context["location"]["directory"] },
       agent: {
         transform: async (callback) => {
           expect(typeof callback).toBe("function")
           registered.push("agents")
-          return { dispose: async () => { disposed.push("agents") } }
+          return {
+            dispose: async () => {
+              disposed.push("agents")
+            },
+          }
         },
       },
       tool: {
@@ -37,7 +49,11 @@ describe("oh-my-openagent plugin export shape", () => {
           expect(name).toBe("execute.after")
           expect(typeof callback).toBe("function")
           registered.push("tool-after")
-          return { dispose: async () => { disposed.push("tool-after") } }
+          return {
+            dispose: async () => {
+              disposed.push("tool-after")
+            },
+          }
         },
       },
       rpc: {
@@ -46,7 +62,12 @@ describe("oh-my-openagent plugin export shape", () => {
           expect(Object.keys(definition.methods)).toEqual(["status"])
           expect(typeof Reflect.get(handlers, "status")).toBe("function")
           registered.push("rpc")
-          return { dispose: async () => { disposed.push("rpc") }, events: { emit: async () => {} } }
+          return {
+            dispose: async () => {
+              disposed.push("rpc")
+            },
+            events: { emit: async () => {} },
+          }
         },
       },
     } satisfies {

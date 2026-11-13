@@ -9,11 +9,7 @@ import { createMemberTaskSendTool } from "./member-extension/tools"
 import { assembleMemberExtensions } from "./member-extensions"
 import { projectMemberStatus, type RuntimeMemberStatus } from "./member-projection"
 import type { TeamCoreConfig } from "./runtime-config"
-import {
-  SenpiTeamRuntimeError,
-  type SpawnMemberExtensionConfig,
-  type TeamRuntimeManagerPort,
-} from "./runtime-types"
+import { SenpiTeamRuntimeError, type SpawnMemberExtensionConfig, type TeamRuntimeManagerPort } from "./runtime-types"
 
 type TeamMember = TeamSpec["members"][number]
 
@@ -105,9 +101,10 @@ async function spawnOneMember(input: SpawnMembersInput, member: TeamMember): Pro
   if (member.worktreePath !== undefined) await mkdir(member.worktreePath, { recursive: true })
 
   const launch = input.memberExtension
-  const extensions = launch === undefined || input.inProcess !== undefined
-    ? undefined
-    : assembleMemberExtensions(launch.entryPath, await resolveInheritedExtensionList(launch.inheritedExtensions))
+  const extensions =
+    launch === undefined || input.inProcess !== undefined
+      ? undefined
+      : assembleMemberExtensions(launch.entryPath, await resolveInheritedExtensionList(launch.inheritedExtensions))
   const result = await input.manager.start(buildMemberStartSpec(input, member, extensions))
   if (result.kind === "held") return { taskId: result.task_id, status: "pending" }
   if (result.kind !== "started") {
@@ -162,12 +159,14 @@ function buildMemberStartSpec(
     team_role: "member",
     ...(member.worktreePath !== undefined ? { cwd: member.worktreePath } : {}),
     ...(extensions !== undefined ? { extensions } : {}),
-    ...(launch !== undefined ? {
-      memberEnv: {
-        SENPI_TASK_MEMBER: `${input.teamRunId}::${member.name}`,
-        SENPI_TASK_TEAM_CONFIG: launch.teamConfig,
-      },
-    } : {}),
+    ...(launch !== undefined
+      ? {
+          memberEnv: {
+            SENPI_TASK_MEMBER: `${input.teamRunId}::${member.name}`,
+            SENPI_TASK_TEAM_CONFIG: launch.teamConfig,
+          },
+        }
+      : {}),
   }
 }
 
@@ -196,13 +195,15 @@ function buildInProcessMemberStartSpec(
     ...(member.worktreePath !== undefined ? { cwd: member.worktreePath } : {}),
     // The task id is assigned by the start itself, so the definition addresses the member task by
     // name and records no task event; a host that binds its own producer supplies the real task id.
-    memberScopedTools: [createMemberTaskSendTool({
-      teamRunId: input.teamRunId,
-      memberName: member.name,
-      taskId: name,
-      config: teamConfig,
-      members: input.spec.members.map((entry) => entry.name),
-    })],
+    memberScopedTools: [
+      createMemberTaskSendTool({
+        teamRunId: input.teamRunId,
+        memberName: member.name,
+        taskId: name,
+        config: teamConfig,
+        members: input.spec.members.map((entry) => entry.name),
+      }),
+    ],
   }
 }
 
@@ -225,11 +226,12 @@ function describePlanError(error: PlanResolutionError): string {
   const agents = error.availableAgents ?? []
   const categories = error.availableCategories ?? []
   const agentSuffix = agents.length > 0 ? ` Available agents: ${agents.join(", ")}.` : ""
-  const categorySuffix = categories.length === 0
-    ? ""
-    : error.code === "model_unavailable"
-      ? ` Valid category names: ${categories.join(", ")}. Retry one of these, or configure categories.<name>.models in omo.json: model overrides cannot be combined with category.`
-      : ` Available categories: ${categories.join(", ")}.`
+  const categorySuffix =
+    categories.length === 0
+      ? ""
+      : error.code === "model_unavailable"
+        ? ` Valid category names: ${categories.join(", ")}. Retry one of these, or configure categories.<name>.models in omo.json: model overrides cannot be combined with category.`
+        : ` Available categories: ${categories.join(", ")}.`
   return error.message + agentSuffix + categorySuffix
 }
 

@@ -56,16 +56,18 @@ export function createMemoryIdentityContext(input: {
 
 /** First-write seam: callers invoke this before mutation; reads must never create identity storage. */
 export async function ensureIdentityRuntimeDirs(paths: MemoryIdentityPaths): Promise<void> {
-  await Promise.all([
-    paths.locks,
-    paths.transcripts,
-    paths.reflection,
-    paths.reflectionSessions,
-    paths.worktrees,
-    paths.viewers,
-    paths.pushQueue,
-    paths.factsQueue,
-    paths.facts,
-    paths.notices,
-  ].map((path) => mkdir(path, { recursive: true, mode: 0o700 })))
+  await Promise.all(
+    [
+      paths.locks,
+      paths.transcripts,
+      paths.reflection,
+      paths.reflectionSessions,
+      paths.worktrees,
+      paths.viewers,
+      paths.pushQueue,
+      paths.factsQueue,
+      paths.facts,
+      paths.notices,
+    ].map((path) => mkdir(path, { recursive: true, mode: 0o700 })),
+  )
 }

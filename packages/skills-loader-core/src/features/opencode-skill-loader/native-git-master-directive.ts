@@ -1,12 +1,15 @@
-export interface NativeGitMasterSettings { readonly commit_footer: boolean | string; readonly include_co_authored_by: boolean; readonly git_env_prefix: string }
+export interface NativeGitMasterSettings {
+  readonly commit_footer: boolean | string
+  readonly include_co_authored_by: boolean
+  readonly git_env_prefix: string
+}
 import {
   CO_AUTHOR_TRAILER_INSTRUCTION,
   NO_CO_AUTHOR_INSTRUCTION,
   buildAttributedCommitExample,
 } from "./git-master-template-injection"
 
-export const DEFAULT_COMMIT_FOOTER =
-  "Ultraworked with [omo](https://github.com/code-yeongyu/oh-my-openagent)"
+export const DEFAULT_COMMIT_FOOTER = "Ultraworked with [omo](https://github.com/code-yeongyu/oh-my-openagent)"
 
 export const COMMIT_ATTRIBUTION_OPEN_TAG = "<commit_attribution>"
 
@@ -49,4 +52,3 @@ function resolveFooterText(footer: NativeGitMasterSettings["commit_footer"]): st
   if (footer === false) return undefined
   return typeof footer === "string" ? footer : DEFAULT_COMMIT_FOOTER
 }
-

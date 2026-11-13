@@ -26,7 +26,10 @@ export const CODEMODE_RPC = {
   kernels: "kernels",
 } as const
 
-export interface EvalDefinition { readonly description: string; readonly parameters: unknown }
+export interface EvalDefinition {
+  readonly description: string
+  readonly parameters: unknown
+}
 
 export interface WorkerInit {
   readonly cwd: string
@@ -37,12 +40,23 @@ export interface WorkerInit {
   readonly disposeTimeoutMs?: number
 }
 
-export interface LoadReply { readonly definition?: EvalDefinition }
-export interface SessionParams { readonly sessionID: string; readonly stateDir: string }
-export interface ExecuteParams extends SessionParams { readonly toolCallId: string; readonly params: unknown }
+export interface LoadReply {
+  readonly definition?: EvalDefinition
+}
+export interface SessionParams {
+  readonly sessionID: string
+  readonly stateDir: string
+}
+export interface ExecuteParams extends SessionParams {
+  readonly toolCallId: string
+  readonly params: unknown
+}
 
 /** A live kernel-tools capability registered in the worker; only its id crosses the thread boundary. */
-export interface CapabilityRef { readonly id: string; readonly invokeScope: boolean }
+export interface CapabilityRef {
+  readonly id: string
+  readonly invokeScope: boolean
+}
 
 export interface HostToolParams {
   readonly sessionID: string
@@ -53,7 +67,9 @@ export interface HostToolParams {
   readonly toolCallId?: string
 }
 
-export interface KernelToolScope { readonly tools?: { readonly allow?: readonly string[]; readonly deny?: readonly string[] } }
+export interface KernelToolScope {
+  readonly tools?: { readonly allow?: readonly string[]; readonly deny?: readonly string[] }
+}
 
 export interface KernelToolInvokeRequest {
   readonly name: string
@@ -70,8 +86,13 @@ export interface CapabilityInvokeParams {
   readonly invoker?: { readonly sessionId: string }
 }
 
-export interface CapabilityDescribeParams { readonly capabilityId: string; readonly names: readonly string[] }
-export interface KernelsNotice { readonly pids: readonly number[] }
+export interface CapabilityDescribeParams {
+  readonly capabilityId: string
+  readonly names: readonly string[]
+}
+export interface KernelsNotice {
+  readonly pids: readonly number[]
+}
 
 /** One session's eval runtime as the main thread sees it. */
 export interface EvalSessionHandle {

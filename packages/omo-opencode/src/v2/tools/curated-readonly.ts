@@ -1,5 +1,10 @@
 import type { AgentToolResult } from "@code-yeongyu/senpi"
-import { createCuratedReadonlyBashTool, CuratedReadonlyBashParams, CuratedReadonlyCommandError, type CuratedReadonlyBashInput } from "@oh-my-opencode/senpi-task/task-operations"
+import {
+  createCuratedReadonlyBashTool,
+  CuratedReadonlyBashParams,
+  CuratedReadonlyCommandError,
+  type CuratedReadonlyBashInput,
+} from "@oh-my-opencode/senpi-task/task-operations"
 import { curatedReadonlyFormatter } from "@oh-my-opencode/utils/curated-readonly-presentation"
 import type { ToolDomain } from "@opencode/plugin/effect/tool"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
@@ -22,10 +27,18 @@ export interface ReadonlyBrokerCall {
   readonly messageID: string
   readonly id: string
 }
-type ReadonlyBrokerDispatch = (call: ReadonlyBrokerCall, input: CuratedReadonlyBashInput, signal: AbortSignal) => Promise<AgentToolResult<undefined>>
+type ReadonlyBrokerDispatch = (
+  call: ReadonlyBrokerCall,
+  input: CuratedReadonlyBashInput,
+  signal: AbortSignal,
+) => Promise<AgentToolResult<undefined>>
 
 // The ORIGINAL Native description text; its executor is never invoked.
-const native = createCuratedReadonlyBashTool(".", () => Promise.reject(Error("Description template only")), curatedReadonlyFormatter)
+const native = createCuratedReadonlyBashTool(
+  ".",
+  () => Promise.reject(Error("Description template only")),
+  curatedReadonlyFormatter,
+)
 const checkInput = Compile(CuratedReadonlyBashParams)
 
 /** Typed SDK failures and broker policy refusals stay tool errors with their original text. */
@@ -43,13 +56,19 @@ export function createReadonlyBrokerToolInfo(dispatch: ReadonlyBrokerDispatch): 
     // The SAME original typebox schema object; decoding is checked below, never assumed.
     input: CuratedReadonlyBashParams as unknown as ToolInfo["input"],
     options: { codemode: false, permission: READONLY_BROKER_PERMISSION },
-    execute: (input, context) => Effect.tryPromise({
-      try: async signal => {
-        if (!checkInput.Check(input)) throw new ToolError({ message: "Invalid read-only broker input" })
-        const call: ReadonlyBrokerCall = Object.freeze({ sessionID: context.sessionID, agent: context.agent, messageID: context.messageID, id: context.id })
-        return adaptNativeTaskResult(await dispatch(call, input, signal))
-      },
-      catch: toToolError,
-    }),
+    execute: (input, context) =>
+      Effect.tryPromise({
+        try: async (signal) => {
+          if (!checkInput.Check(input)) throw new ToolError({ message: "Invalid read-only broker input" })
+          const call: ReadonlyBrokerCall = Object.freeze({
+            sessionID: context.sessionID,
+            agent: context.agent,
+            messageID: context.messageID,
+            id: context.id,
+          })
+          return adaptNativeTaskResult(await dispatch(call, input, signal))
+        },
+        catch: toToolError,
+      }),
   }
 }

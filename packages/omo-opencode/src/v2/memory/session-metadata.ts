@@ -21,14 +21,20 @@ export function createSessionMetadataStore(session: MemorySessionPort): SessionM
   return {
     write(sessionID, key, value) {
       const previous = chains.get(sessionID) ?? Promise.resolve()
-      const next = previous.catch(() => undefined).then(async () => {
-        const info = await session.get({ sessionID })
-        const current: SessionMetadata = info.metadata ?? {}
-        if (jsonEqual(current[key], value)) return
-        await session.update({ sessionID, metadata: { ...current, [key]: value } })
-      })
+      const next = previous
+        .catch(() => undefined)
+        .then(async () => {
+          const info = await session.get({ sessionID })
+          const current: SessionMetadata = info.metadata ?? {}
+          if (jsonEqual(current[key], value)) return
+          await session.update({ sessionID, metadata: { ...current, [key]: value } })
+        })
       chains.set(sessionID, next)
-      void next.finally(() => { if (chains.get(sessionID) === next) chains.delete(sessionID) }).catch(() => undefined)
+      void next
+        .finally(() => {
+          if (chains.get(sessionID) === next) chains.delete(sessionID)
+        })
+        .catch(() => undefined)
       return next
     },
     async settled() {

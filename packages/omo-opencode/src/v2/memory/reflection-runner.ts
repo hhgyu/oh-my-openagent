@@ -23,7 +23,13 @@ import { classifyReflectionFailure, type ReflectionDecision } from "./reflection
 import { cleanupRunWorktree, decideReflection } from "./reflection-finalize"
 import { reflectionModelUnavailableDetail, type ReflectionModelResolution } from "./reflection-model"
 import {
-  createRunWorktree, memoryWriterLock, openMemoryRepo, reflectionSettings, reflectionStore, writeRunTerminal, writeTranscriptPayload,
+  createRunWorktree,
+  memoryWriterLock,
+  openMemoryRepo,
+  reflectionSettings,
+  reflectionStore,
+  writeRunTerminal,
+  writeTranscriptPayload,
   type ReflectionStoreSeams,
 } from "./reflection-run-store"
 
@@ -67,7 +73,11 @@ interface ExecutedRun {
 }
 
 export function createReflectionRunner(deps: ReflectionRunnerDeps) {
-  async function execute(bound: BoundMemorySession, run: ReservedRun, input: Omit<ReflectionRunInput, "request">): Promise<ExecutedRun> {
+  async function execute(
+    bound: BoundMemorySession,
+    run: ReservedRun,
+    input: Omit<ReflectionRunInput, "request">,
+  ): Promise<ExecutedRun> {
     let model = input.model
     let selection: Pick<ReflectionChildLaunch, "variant" | "fallbacks"> = {}
     if (model === undefined && deps.resolveModel !== undefined) {
@@ -75,12 +85,25 @@ export function createReflectionRunner(deps: ReflectionRunnerDeps) {
       try {
         resolution = await deps.resolveModel(bound, input.parentSessionId)
       } catch (error) {
-        return settle(bound, run, { outcome: "failed", reason: "spawn_failed", detail: `reflection model resolution failed: ${errorMessage(error)}` }, true)
+        return settle(
+          bound,
+          run,
+          {
+            outcome: "failed",
+            reason: "spawn_failed",
+            detail: `reflection model resolution failed: ${errorMessage(error)}`,
+          },
+          true,
+        )
       }
       if (resolution.kind === "unavailable") {
         // Native settles before any worktree or ledger exists: `failed`/`category_unavailable`.
         const detail = reflectionModelUnavailableDetail(resolution)
-        deps.warn("memory reflection not launched: no usable model for the reflection category", { runId: run.runId, category: resolution.category, cause: resolution.cause })
+        deps.warn("memory reflection not launched: no usable model for the reflection category", {
+          runId: run.runId,
+          category: resolution.category,
+          cause: resolution.cause,
+        })
         return settle(bound, run, { outcome: "failed", reason: "category_unavailable", detail }, true)
       }
       model = resolution.model
@@ -95,15 +118,21 @@ export function createReflectionRunner(deps: ReflectionRunnerDeps) {
       transcriptPath = await writeTranscriptPayload(bound, run)
       if (run.request.trigger === "dream") prompt = await buildDreamLaunchPrompt(bound, run, worktree.dir)
     } catch (error) {
-      const cleanedUp = worktree === undefined || await cleanupRunWorktree(worktree, run.runId, deps.warn)
+      const cleanedUp = worktree === undefined || (await cleanupRunWorktree(worktree, run.runId, deps.warn))
       deps.warn("memory reflection not launched: run setup failed", { runId: run.runId, error: errorMessage(error) })
       return settle(bound, run, { outcome: "failed", reason: "spawn_failed", detail: errorMessage(error) }, cleanedUp)
     }
     let decision: ReflectionDecision
     try {
       const launch: ReflectionChildLaunch = {
-        runId: run.runId, parentSessionId: input.parentSessionId, worktreeDir: worktree.dir, transcriptPath,
-        request: { trigger: run.request.trigger, ...(run.request.focus === undefined ? {} : { focus: run.request.focus }) },
+        runId: run.runId,
+        parentSessionId: input.parentSessionId,
+        worktreeDir: worktree.dir,
+        transcriptPath,
+        request: {
+          trigger: run.request.trigger,
+          ...(run.request.focus === undefined ? {} : { focus: run.request.focus }),
+        },
         ...(prompt === undefined ? {} : { prompt }),
         deadlineMs: deps.deadlineMs ?? reflectionSettings(bound).timeout_minutes * 60_000,
         ...(model === undefined ? {} : { model }),
@@ -112,7 +141,13 @@ export function createReflectionRunner(deps: ReflectionRunnerDeps) {
       }
       const child = await deps.launch(bound, launch)
       decision = await decideReflection({ run, worktree, child, withWriterLock, warn: deps.warn })
-      if (child.attemptedModels?.length) decision = { ...decision, detail: [decision.detail, `attempted models: ${child.attemptedModels.join(" -> ")}`].filter(Boolean).join("; ") }
+      if (child.attemptedModels?.length)
+        decision = {
+          ...decision,
+          detail: [decision.detail, `attempted models: ${child.attemptedModels.join(" -> ")}`]
+            .filter(Boolean)
+            .join("; "),
+        }
     } catch (error) {
       decision = { outcome: "failed", reason: "runner_failed", detail: errorMessage(error) }
     }
@@ -124,21 +159,41 @@ export function createReflectionRunner(deps: ReflectionRunnerDeps) {
     return settle(bound, run, decision, await cleanupRunWorktree(worktree, run.runId, deps.warn))
   }
 
-  async function settle(bound: BoundMemorySession, run: ReservedRun, decision: ReflectionDecision, cleanedUp: boolean): Promise<ExecutedRun> {
+  async function settle(
+    bound: BoundMemorySession,
+    run: ReservedRun,
+    decision: ReflectionDecision,
+    cleanedUp: boolean,
+  ): Promise<ExecutedRun> {
     const failure = classifyReflectionFailure(decision)
-    const completion = await reflectionStore(bound, deps).complete(run.runId, decision.outcome, failure === undefined ? undefined : { failure })
+    const completion = await reflectionStore(bound, deps).complete(
+      run.runId,
+      decision.outcome,
+      failure === undefined ? undefined : { failure },
+    )
     const at = (deps.now?.() ?? new Date()).toISOString()
     await writeRunTerminal(bound, run, {
-      kind: "final", outcome: decision.outcome, at,
+      kind: "final",
+      outcome: decision.outcome,
+      at,
       ...(decision.reason === undefined ? {} : { reason: decision.reason }),
       ...(decision.detail === undefined ? {} : { detail: decision.detail }),
       ...(decision.integrationSha === undefined ? {} : { integrationSha: decision.integrationSha }),
-    }).catch((error: unknown) => { deps.warn("reflection final sentinel not written", { runId: run.runId, error: errorMessage(error) }) })
-    return { result: { runId: run.runId, cleanedUp, ...decision }, ...(completion.launch === undefined ? {} : { promoted: completion.launch }) }
+    }).catch((error: unknown) => {
+      deps.warn("reflection final sentinel not written", { runId: run.runId, error: errorMessage(error) })
+    })
+    return {
+      result: { runId: run.runId, cleanedUp, ...decision },
+      ...(completion.launch === undefined ? {} : { promoted: completion.launch }),
+    }
   }
 
   /** Executes an active run this launcher owns, then every run its completion promotes. */
-  async function drive(bound: BoundMemorySession, first: ReservedRun, input: Omit<ReflectionRunInput, "request">): Promise<readonly ReflectionRunResult[]> {
+  async function drive(
+    bound: BoundMemorySession,
+    first: ReservedRun,
+    input: Omit<ReflectionRunInput, "request">,
+  ): Promise<readonly ReflectionRunResult[]> {
     const runs: ReflectionRunResult[] = []
     let next: ReservedRun | undefined = first
     while (next !== undefined) {
@@ -160,6 +215,7 @@ export function createReflectionRunner(deps: ReflectionRunnerDeps) {
   return {
     runReflection,
     /** Runs a reservation recovery promoted to active (its launcher is this process now). */
-    runPromoted: (bound: BoundMemorySession, run: ReservedRun, input: Omit<ReflectionRunInput, "request">) => drive(bound, run, input),
+    runPromoted: (bound: BoundMemorySession, run: ReservedRun, input: Omit<ReflectionRunInput, "request">) =>
+      drive(bound, run, input),
   }
 }

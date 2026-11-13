@@ -25,7 +25,12 @@ export interface ToolResultContextLike {
   }
 }
 
-export function toHookInput(event: ToolResultEventLike, ctx: ToolResultContextLike, absolutePath: string, hookEventName: string): HookInput {
+export function toHookInput(
+  event: ToolResultEventLike,
+  ctx: ToolResultContextLike,
+  absolutePath: string,
+  hookEventName: string,
+): HookInput {
   return {
     session_id: ctx.sessionManager?.getSessionId?.() ?? "unknown",
     tool_name: event.toolName,
@@ -41,8 +46,14 @@ export function toHookInput(event: ToolResultEventLike, ctx: ToolResultContextLi
   }
 }
 
-export function toApplyPatchHookInputs(event: ToolResultEventLike, ctx: ToolResultContextLike, hookEventName: string): HookInput[] {
-  return extractApplyPatchEdits(event.details, event.input).map((edit) => toHookInput(event, ctx, resolve(ctx.cwd, edit.filePath), hookEventName))
+export function toApplyPatchHookInputs(
+  event: ToolResultEventLike,
+  ctx: ToolResultContextLike,
+  hookEventName: string,
+): HookInput[] {
+  return extractApplyPatchEdits(event.details, event.input).map((edit) =>
+    toHookInput(event, ctx, resolve(ctx.cwd, edit.filePath), hookEventName),
+  )
 }
 
 function toCoreToolInput(input: Record<string, unknown>, absolutePath: string): HookInput["tool_input"] {

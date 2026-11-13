@@ -8,8 +8,12 @@ export function nativeAgentIdentities(config: AgentsConfig): AgentDefinition[] {
   return Object.entries(resolveTaskAgents({ agents: config.nativeAgents }))
     .filter(([id]) => !roles.has(id))
     .map(([id, definition]) => ({
-      id, name: id, description: definition.description ?? `Native task agent ${id}`,
-      mode: "subagent", hidden: true, system: definition.prompt ?? "",
+      id,
+      name: id,
+      description: definition.description ?? `Native task agent ${id}`,
+      mode: "subagent",
+      hidden: true,
+      system: definition.prompt ?? "",
       restrictions: CURATED_READONLY_AGENT_NAMES.has(id) ? CURATED_ROLE_RESTRICTIONS : [],
     }))
 }

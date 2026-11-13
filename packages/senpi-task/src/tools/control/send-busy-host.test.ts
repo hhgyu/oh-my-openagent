@@ -29,7 +29,10 @@ function busyManager(): { manager: SendManager; settle: (outcome: SendOutcome) =
 
 type Late = { readonly result: SendToolResult; readonly delivery: LateSendDelivery }
 
-function lateOutcomes(): { deliver: (result: SendToolResult, delivery: LateSendDelivery) => void; next: Promise<Late> } {
+function lateOutcomes(): {
+  deliver: (result: SendToolResult, delivery: LateSendDelivery) => void
+  next: Promise<Late>
+} {
   const arrived = Promise.withResolvers<Late>()
   return { deliver: (result, delivery) => arrived.resolve({ result, delivery }), next: arrived.promise }
 }
@@ -41,9 +44,11 @@ describe("task_send against a busy task host (#10042)", () => {
     const late = lateOutcomes()
 
     // when
-    const result = await bounded(runTaskSend(busy.manager, { to: "st_00000001", message: "hi" }, "parent-1", undefined, {
-      deliverLateOutcome: late.deliver,
-    }))
+    const result = await bounded(
+      runTaskSend(busy.manager, { to: "st_00000001", message: "hi" }, "parent-1", undefined, {
+        deliverLateOutcome: late.deliver,
+      }),
+    )
     busy.settle({ kind: "revived", task_id: "st_00000001", run_epoch: 2 })
 
     // then
@@ -66,7 +71,12 @@ describe("task_send against a busy task host (#10042)", () => {
     // when
     controller.abort(new Error("parent aborted"))
     const result = await bounded(running)
-    busy.settle({ kind: "not_continuable", task_id: "st_00000001", reason: "session_unavailable", suggestion: "read it" })
+    busy.settle({
+      kind: "not_continuable",
+      task_id: "st_00000001",
+      reason: "session_unavailable",
+      suggestion: "read it",
+    })
 
     // then
     expect(result.details).toMatchObject({ kind: "delivering", reason: "aborted" })
@@ -80,9 +90,11 @@ describe("task_send against a busy task host (#10042)", () => {
     const controller = new AbortController()
     controller.abort(new Error("parent aborted"))
 
-    const result = await bounded(runTaskSend(busy.manager, { to: "st_00000001", message: "hi" }, "parent-1", undefined, {
-      signal: controller.signal,
-    }))
+    const result = await bounded(
+      runTaskSend(busy.manager, { to: "st_00000001", message: "hi" }, "parent-1", undefined, {
+        signal: controller.signal,
+      }),
+    )
 
     expect(busy.calls()).toBe(0)
     expect(result.details).toMatchObject({ kind: "aborted" })
@@ -91,7 +103,9 @@ describe("task_send against a busy task host (#10042)", () => {
   test("#given a caller with no channel for a late outcome (Desktop RPC, team member) #when its turn aborts mid-send #then task_send still returns at once", async () => {
     const busy = busyManager()
     const controller = new AbortController()
-    const running = runTaskSend(busy.manager, { to: "st_00000001", message: "hi" }, "parent-1", undefined, { signal: controller.signal })
+    const running = runTaskSend(busy.manager, { to: "st_00000001", message: "hi" }, "parent-1", undefined, {
+      signal: controller.signal,
+    })
 
     controller.abort(new Error("parent aborted"))
     const result = await bounded(running)
@@ -102,7 +116,6 @@ describe("task_send against a busy task host (#10042)", () => {
   })
 })
 
-
 test("a host retains the canonical mapped send and returned late delivery work", async () => {
   const busy = busyManager()
   const controller = new AbortController()
@@ -112,20 +125,33 @@ test("a host retains the canonical mapped send and returned late delivery work",
   let deliveryFinished = false
   const options = {
     signal: controller.signal,
-    retainWork(promise: Promise<unknown>, phase: "sending" | "late") { work.push({ promise, phase }); void promise.catch(() => {}) },
-    async deliverLateOutcome() { entered.resolve(); await gate.promise; deliveryFinished = true },
+    retainWork(promise: Promise<unknown>, phase: "sending" | "late") {
+      work.push({ promise, phase })
+      void promise.catch(() => {})
+    },
+    async deliverLateOutcome() {
+      entered.resolve()
+      await gate.promise
+      deliveryFinished = true
+    },
   }
   const reporting = runTaskSend(busy.manager, { to: "st_00000001", message: "hi" }, "parent-1", undefined, options)
   controller.abort(Error("reporting stopped"))
   try {
     expect((await bounded(reporting)).details.kind).toBe("delivering")
-    expect(work.map(row => row.phase)).toEqual(["sending", "late"])
+    expect(work.map((row) => row.phase)).toEqual(["sending", "late"])
     busy.settle({ kind: "revived", task_id: "st_00000001", run_epoch: 2 })
     await bounded(entered.promise)
-    expect(await bounded(present(work[0]).promise)).toMatchObject({ content: expect.any(Array), details: { kind: "revived", run_epoch: 2 } })
+    expect(await bounded(present(work[0]).promise)).toMatchObject({
+      content: expect.any(Array),
+      details: { kind: "revived", run_epoch: 2 },
+    })
     let lateJoined = false
-    void present(work[1]).promise.then(() => { lateJoined = true })
-    await Promise.resolve(); await Promise.resolve()
+    void present(work[1]).promise.then(() => {
+      lateJoined = true
+    })
+    await Promise.resolve()
+    await Promise.resolve()
     expect(lateJoined).toBe(false)
     expect(deliveryFinished).toBe(false)
     gate.resolve()
@@ -139,7 +165,6 @@ test("a host retains the canonical mapped send and returned late delivery work",
   }
 })
 
-
 test("retained late work exposes an asynchronous delivery rejection without resending", async () => {
   const busy = busyManager()
   const controller = new AbortController()
@@ -147,14 +172,21 @@ test("retained late work exposes an asynchronous delivery rejection without rese
   const failure = Error("late delivery failed")
   const reporting = runTaskSend(busy.manager, { to: "st_00000001", message: "hi" }, "parent-1", undefined, {
     signal: controller.signal,
-    retainWork(promise, phase) { work.push({ phase, promise }); void promise.catch(() => {}) },
-    async deliverLateOutcome() { throw failure },
+    retainWork(promise, phase) {
+      work.push({ phase, promise })
+      void promise.catch(() => {})
+    },
+    async deliverLateOutcome() {
+      throw failure
+    },
   })
   controller.abort(Error("stop reporting"))
   expect((await bounded(reporting)).details.kind).toBe("delivering")
   busy.settle({ kind: "revived", task_id: "st_00000001", run_epoch: 2 })
-  expect(await bounded(present(work.find(row => row.phase === "sending")).promise)).toMatchObject({ details: { kind: "revived" } })
-  await expect(bounded(present(work.find(row => row.phase === "late")).promise)).rejects.toBe(failure)
+  expect(await bounded(present(work.find((row) => row.phase === "sending")).promise)).toMatchObject({
+    details: { kind: "revived" },
+  })
+  await expect(bounded(present(work.find((row) => row.phase === "late")).promise)).rejects.toBe(failure)
   expect(busy.calls()).toBe(1)
 })
 
@@ -165,7 +197,9 @@ test("an already aborted caller creates no retained Native work", async () => {
   const work: Promise<unknown>[] = []
   const result = await runTaskSend(busy.manager, { to: "st_00000001", message: "hi" }, "parent-1", undefined, {
     signal: controller.signal,
-    retainWork(promise) { work.push(promise) },
+    retainWork(promise) {
+      work.push(promise)
+    },
   })
   expect(result.details.kind).toBe("aborted")
   expect(busy.calls()).toBe(0)

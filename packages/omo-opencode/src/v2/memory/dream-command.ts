@@ -36,7 +36,8 @@ function requiredValue(value: string | true | undefined, flag: string): string {
 function resolveTargetDoc(repoDir: string, value: string | true | undefined): string | undefined {
   if (value === undefined) return undefined
   const raw = requiredValue(value, "--to")
-  if (isAbsolute(raw) || /^[a-zA-Z]:[\\/]/.test(raw)) throw new TypeError("--to must be a memory-repo-relative document path")
+  if (isAbsolute(raw) || /^[a-zA-Z]:[\\/]/.test(raw))
+    throw new TypeError("--to must be a memory-repo-relative document path")
   let absolute: string
   try {
     absolute = validateMemoryPath(repoDir, raw, { fieldName: "--to", toolPath: false })
@@ -49,30 +50,50 @@ function resolveTargetDoc(repoDir: string, value: string | true | undefined): st
 }
 
 function conversationList(value: string | true | undefined): string[] {
-  const ids = requiredValue(value, "--conversation").split(",").map(id => id.trim()).filter(Boolean)
+  const ids = requiredValue(value, "--conversation")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean)
   if (ids.length === 0) throw new TypeError("--conversation expects one or more comma-separated ids")
-  if (ids.some(id => !JOURNAL_ID.test(id) || id === "." || id === "..")) throw new TypeError("--conversation ids must be plain conversation ids")
+  if (ids.some((id) => !JOURNAL_ID.test(id) || id === "." || id === ".."))
+    throw new TypeError("--conversation ids must be plain conversation ids")
   return [...new Set(ids)]
 }
 
 function dreamRejection(rejection: string): string {
   if (rejection === "no_unreflected_content") return "dream found no unreflected content to process"
   if (rejection === "no_session") return "dreaming is not available without a bound memory session"
-  if (rejection === "parked") return "automatic memory reflection is paused after repeated failures; run /reflect to retry now"
+  if (rejection === "parked")
+    return "automatic memory reflection is paused after repeated failures; run /reflect to retry now"
   return `dream request was not started: ${rejection}`
 }
 
-async function conversationScope(bound: BoundMemorySession, flags: ReadonlyMap<string, string | true>, focus: string, deps: DreamCommandDeps): Promise<readonly string[] | undefined> {
-  if (flags.has("from")) throw new TypeError("--from transcript:<path> stages Senpi session JSONL and is not available on OpenCode; use --conversation or --recent")
+async function conversationScope(
+  bound: BoundMemorySession,
+  flags: ReadonlyMap<string, string | true>,
+  focus: string,
+  deps: DreamCommandDeps,
+): Promise<readonly string[] | undefined> {
+  if (flags.has("from"))
+    throw new TypeError(
+      "--from transcript:<path> stages Senpi session JSONL and is not available on OpenCode; use --conversation or --recent",
+    )
   if (flags.has("conversation")) return conversationList(flags.get("conversation"))
   if (!flags.has("recent")) return undefined
   const recentN = Number(requiredValue(flags.get("recent"), "--recent"))
   if (!Number.isInteger(recentN) || recentN <= 0) throw new TypeError("--recent expects a positive integer")
   const settings = deps.settings(bound)
-  const selected = await selectRecentDreamConversations({
-    transcriptsDir: bound.paths.transcripts, currentConversationId: bound.sessionID,
-    autoSelectMax: settings.autoSelectMax, autoSelectMaxBytes: settings.autoSelectMaxChars, now: () => new Date(deps.now?.() ?? Date.now()),
-  }, recentN, focus.length === 0 ? {} : { focus })
+  const selected = await selectRecentDreamConversations(
+    {
+      transcriptsDir: bound.paths.transcripts,
+      currentConversationId: bound.sessionID,
+      autoSelectMax: settings.autoSelectMax,
+      autoSelectMaxBytes: settings.autoSelectMaxChars,
+      now: () => new Date(deps.now?.() ?? Date.now()),
+    },
+    recentN,
+    focus.length === 0 ? {} : { focus },
+  )
   if (selected.conversationIds.length === 0) throw new TypeError("--recent found no unreflected conversations")
   return selected.conversationIds
 }
@@ -80,11 +101,12 @@ async function conversationScope(bound: BoundMemorySession, flags: ReadonlyMap<s
 export function createDreamCommand(deps: DreamCommandDeps): ExtraMemoryCommand {
   return {
     name: DREAM_COMMAND_NAMES.dream,
-    description: "Request a memory dream: consolidate memory across conversations, optionally scoped, focused or limited to one document.",
+    description:
+      "Request a memory dream: consolidate memory across conversations, optionally scoped, focused or limited to one document.",
     async run(bound, args) {
       if (bound === undefined) return { text: dreamRejection("no_session"), level: "error" }
       const parsed = parseCommandArgs(args, { booleans: ["auto"] })
-      if (MODE_FLAGS.filter(flag => parsed.flags.has(flag)).length > 1) {
+      if (MODE_FLAGS.filter((flag) => parsed.flags.has(flag)).length > 1) {
         return { text: "choose exactly one of --auto, --recent, --conversation, or --from", level: "error" }
       }
       const focus = parsed.positionals.join(" ").trim()

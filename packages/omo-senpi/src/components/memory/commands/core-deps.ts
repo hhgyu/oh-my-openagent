@@ -15,6 +15,12 @@ export function senpiCommandDeps(
   return {
     ...deps,
     hookChecker: deps.hookChecker ?? memoryHookChecker,
-    ...(pi === undefined ? {} : { sendUserMessage: (text: string) => { pi.sendUserMessage(text) } }),
+    ...(pi === undefined
+      ? {}
+      : {
+          sendUserMessage: (text: string) => {
+            pi.sendUserMessage(text)
+          },
+        }),
   }
 }

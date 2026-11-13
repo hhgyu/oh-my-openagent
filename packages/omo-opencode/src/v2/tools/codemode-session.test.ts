@@ -5,22 +5,57 @@ import { join } from "node:path"
 
 function fakeModules(log: string[]) {
   class SessionManagerProxy {
-    beginReplacement() { return 1 }
-    async replace() { log.push("replace"); return true }
-    async dispose() { log.push("proxy.dispose") }
+    beginReplacement() {
+      return 1
+    }
+    async replace() {
+      log.push("replace")
+      return true
+    }
+    async dispose() {
+      log.push("proxy.dispose")
+    }
   }
-  class HandleRegistry { dispose() { log.push("handles.dispose") } }
-  class EvalDetachedCellManager { async dispose() { log.push("cells.dispose") } }
+  class HandleRegistry {
+    dispose() {
+      log.push("handles.dispose")
+    }
+  }
+  class EvalDetachedCellManager {
+    async dispose() {
+      log.push("cells.dispose")
+    }
+  }
   return {
-    root: "/opt/codemode", version: "2026.11.5-1",
+    root: "/opt/codemode",
+    version: "2026.11.5-1",
     defaultCodemodeSettings: { cellTimeoutSeconds: 30 },
     resolveEnabledLanguages: () => ({ js: true, py: false }),
-    resolveForegroundWindowSeconds: () => 30, resolveRunBudgetSeconds: () => 60, resolveHardLimitSeconds: () => 600, resolveMaxDetachedCells: () => 4,
-    getInterpreterAvailability: async () => ({}), createInterpreterDetector: () => ({}),
-    enabledLanguagesFrom: () => ({ js: true, py: false }), jsRuntimeInfo: () => ({}), runtimesFromAvailability: () => ({}),
-    createCodemodeSessionManager: async () => ({ async dispose() { log.push("raw.dispose") }, bridgeEndpoint: () => ({ port: 4242, token: "secret" }) }),
-    createEvalTool: (options: { settings: unknown }) => ({ name: "eval", description: "d", parameters: {}, settings: options.settings, execute: async () => ({ content: [] }) }),
-    SessionManagerProxy, HandleRegistry, EvalDetachedCellManager,
+    resolveForegroundWindowSeconds: () => 30,
+    resolveRunBudgetSeconds: () => 60,
+    resolveHardLimitSeconds: () => 600,
+    resolveMaxDetachedCells: () => 4,
+    getInterpreterAvailability: async () => ({}),
+    createInterpreterDetector: () => ({}),
+    enabledLanguagesFrom: () => ({ js: true, py: false }),
+    jsRuntimeInfo: () => ({}),
+    runtimesFromAvailability: () => ({}),
+    createCodemodeSessionManager: async () => ({
+      async dispose() {
+        log.push("raw.dispose")
+      },
+      bridgeEndpoint: () => ({ port: 4242, token: "secret" }),
+    }),
+    createEvalTool: (options: { settings: unknown }) => ({
+      name: "eval",
+      description: "d",
+      parameters: {},
+      settings: options.settings,
+      execute: async () => ({ content: [] }),
+    }),
+    SessionManagerProxy,
+    HandleRegistry,
+    EvalDetachedCellManager,
     kernelToolsStorage: { getStore: () => undefined },
     kernelRegistry: { list: () => [] },
   } as unknown as import("./codemode-loader").CodemodeModules
@@ -29,7 +64,14 @@ function fakeModules(log: string[]) {
 describe("eval session runtime", () => {
   const stateRoot = mkdtempSync(join(tmpdir(), "omo-eval-runtime-"))
   afterAll(() => rmSync(stateRoot, { recursive: true, force: true }))
-  const input = (signal: AbortSignal) => ({ sessionID: "ses_1", cwd: "/project", stateDir: stateRoot, sandbox: true, ownedTools: [], signal })
+  const input = (signal: AbortSignal) => ({
+    sessionID: "ses_1",
+    cwd: "/project",
+    stateDir: stateRoot,
+    sandbox: true,
+    ownedTools: [],
+    signal,
+  })
 
   test("#given a runtime #when it is disposed twice #then handles, cells and kernels go once each in that order, and settings carry the sandbox", async () => {
     // given
@@ -53,7 +95,13 @@ describe("eval session runtime", () => {
     const controller = new AbortController()
     const modules = fakeModules(log)
     const create = modules.createCodemodeSessionManager as unknown as () => Promise<unknown>
-    Object.assign(modules, { createCodemodeSessionManager: async () => { const raw = await create(); controller.abort(Error("released")); return raw } })
+    Object.assign(modules, {
+      createCodemodeSessionManager: async () => {
+        const raw = await create()
+        controller.abort(Error("released"))
+        return raw
+      },
+    })
 
     // when
     const error = await createEvalSessionRuntime(modules, input(controller.signal)).catch((caught: unknown) => caught)
@@ -72,9 +120,19 @@ describe("eval session runtime", () => {
     const aborted = new AbortController()
 
     // when
-    const first = runtime.exclusive(new AbortController().signal, async () => { order.push("first:start"); await gate.promise; order.push("first:end") })
-    const skipped = runtime.exclusive(aborted.signal, async () => { order.push("skipped") }).catch((error: unknown) => error)
-    const second = runtime.exclusive(new AbortController().signal, async () => { order.push("second") })
+    const first = runtime.exclusive(new AbortController().signal, async () => {
+      order.push("first:start")
+      await gate.promise
+      order.push("first:end")
+    })
+    const skipped = runtime
+      .exclusive(aborted.signal, async () => {
+        order.push("skipped")
+      })
+      .catch((error: unknown) => error)
+    const second = runtime.exclusive(new AbortController().signal, async () => {
+      order.push("second")
+    })
     aborted.abort(Error("gone"))
     gate.resolve()
     await Promise.all([first, second])

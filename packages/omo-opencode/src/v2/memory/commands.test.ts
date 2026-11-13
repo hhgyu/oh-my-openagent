@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { CORE_MEMORY_COMMANDS, REMEMBER_INSTRUCTION } from "@oh-my-opencode/memory-core/commands"
-import { MEMORY_COMMAND_NAMES, MEMORY_COMMAND_OUTPUT_ID_PREFIX, MEMORY_COMMAND_OUTPUT_KEY, registerMemoryComponent } from "./index"
+import {
+  MEMORY_COMMAND_NAMES,
+  MEMORY_COMMAND_OUTPUT_ID_PREFIX,
+  MEMORY_COMMAND_OUTPUT_KEY,
+  registerMemoryComponent,
+} from "./index"
 import { createMemoryFixture } from "./test-support"
 
 const fixtures: ReturnType<typeof createMemoryFixture>[] = []
@@ -9,7 +14,9 @@ function fixture(settings: Record<string, unknown> = {}) {
   fixtures.push(created)
   return created
 }
-afterEach(() => { for (const created of fixtures.splice(0)) created.cleanup() })
+afterEach(() => {
+  for (const created of fixtures.splice(0)) created.cleanup()
+})
 
 describe("memory commands", () => {
   test("#given the memory component #when it registers #then every host-neutral command is added under its OpenCode name and description", async () => {
@@ -18,8 +25,11 @@ describe("memory commands", () => {
     // when
     const cleanup = await registerMemoryComponent(f.host, f.options())
     // then
-    const core = Object.entries(CORE_MEMORY_COMMANDS).map(([name, entry]) => [MEMORY_COMMAND_NAMES[name as keyof typeof MEMORY_COMMAND_NAMES], entry.description])
-    const registered = [...f.commands.values()].map(definition => [definition.name, definition.description])
+    const core = Object.entries(CORE_MEMORY_COMMANDS).map(([name, entry]) => [
+      MEMORY_COMMAND_NAMES[name as keyof typeof MEMORY_COMMAND_NAMES],
+      entry.description,
+    ])
+    const registered = [...f.commands.values()].map((definition) => [definition.name, definition.description])
     expect(registered.slice(0, core.length)).toEqual(core)
     expect(registered.slice(core.length).map(([name]) => name)).toEqual(["doctor", "sleeptime", "people", "palace"])
     expect(f.commands.has("init")).toBe(false)
@@ -37,7 +47,10 @@ describe("memory commands", () => {
     await f.runCommand("memfs", "root", "init")
     await f.runCommand("memory", "root")
     // then
-    expect(f.events.map(event => [event.rpcID, event.name])).toEqual([["omo-memory", "command.output"], ["omo-memory", "command.output"]])
+    expect(f.events.map((event) => [event.rpcID, event.name])).toEqual([
+      ["omo-memory", "command.output"],
+      ["omo-memory", "command.output"],
+    ])
     expect(f.events[0]?.data).toMatchObject({ sessionID: "root", command: "memfs", level: "info" })
     expect(f.events[1]?.data).toMatchObject({ sessionID: "root", command: "memory", level: "info" })
     expect(JSON.stringify(f.events[1]?.data)).toContain("# Memory: ")
@@ -53,12 +66,19 @@ describe("memory commands", () => {
     // when
     await f.runCommand("memory", "root")
     // then
-    expect(f.synthetics.map(post => [post.sessionID, post.resume, post.metadata?.[MEMORY_COMMAND_OUTPUT_KEY], post.metadata?.level])).toEqual([
+    expect(
+      f.synthetics.map((post) => [
+        post.sessionID,
+        post.resume,
+        post.metadata?.[MEMORY_COMMAND_OUTPUT_KEY],
+        post.metadata?.level,
+      ]),
+    ).toEqual([
       ["root", false, "memfs", "info"],
       ["root", false, "memory", "info"],
     ])
     for (const post of f.synthetics) expect(post.id ?? "").toStartWith(MEMORY_COMMAND_OUTPUT_ID_PREFIX)
-    expect(new Set(f.synthetics.map(post => post.id)).size).toBe(2)
+    expect(new Set(f.synthetics.map((post) => post.id)).size).toBe(2)
     expect(f.synthetics[1]?.text).toStartWith("# Memory: ")
     await cleanup()
   })
@@ -68,7 +88,13 @@ describe("memory commands", () => {
     const f = fixture()
     f.addSession("root")
     const cleanup = await registerMemoryComponent(f.host, f.options())
-    const request = () => [{ id: "msg_user_1" }, { id: `${MEMORY_COMMAND_OUTPUT_ID_PREFIX}a` }, {}, { id: `${MEMORY_COMMAND_OUTPUT_ID_PREFIX}b` }, { id: "msg_assistant_2" }]
+    const request = () => [
+      { id: "msg_user_1" },
+      { id: `${MEMORY_COMMAND_OUTPUT_ID_PREFIX}a` },
+      {},
+      { id: `${MEMORY_COMMAND_OUTPUT_ID_PREFIX}b` },
+      { id: "msg_assistant_2" },
+    ]
     const compacted = request()
     // when
     const sent = await f.requestMessages("root", request())
@@ -88,7 +114,11 @@ describe("memory commands", () => {
     await f.runCommand("memory", "child")
     // then
     expect(f.synthetics).toHaveLength(1)
-    expect(f.synthetics[0]).toMatchObject({ sessionID: "child", resume: false, metadata: { [MEMORY_COMMAND_OUTPUT_KEY]: "memory", level: "error" } })
+    expect(f.synthetics[0]).toMatchObject({
+      sessionID: "child",
+      resume: false,
+      metadata: { [MEMORY_COMMAND_OUTPUT_KEY]: "memory", level: "error" },
+    })
     expect(f.synthetics[0]?.text).toContain("memory is not bound to this session")
     await cleanup()
   })
@@ -102,7 +132,12 @@ describe("memory commands", () => {
     await f.runCommand("remember", "root", "I prefer tabs")
     // then
     expect(f.synthetics).toHaveLength(1)
-    expect(f.synthetics[0]).toMatchObject({ sessionID: "root", resume: true, delivery: "steer", text: `${REMEMBER_INSTRUCTION}\n\nI prefer tabs` })
+    expect(f.synthetics[0]).toMatchObject({
+      sessionID: "root",
+      resume: true,
+      delivery: "steer",
+      text: `${REMEMBER_INSTRUCTION}\n\nI prefer tabs`,
+    })
     expect(f.synthetics[0]?.id).toBeUndefined()
     expect(f.events).toEqual([])
     await cleanup()
@@ -112,15 +147,19 @@ describe("memory commands", () => {
     // given
     const f = fixture()
     f.addSession("root")
-    f.syntheticFailure = input => (input.resume === true ? new Error("inbox closed") : undefined)
+    f.syntheticFailure = (input) => (input.resume === true ? new Error("inbox closed") : undefined)
     const cleanup = await registerMemoryComponent(f.host, f.options())
     // when
     const run = f.runCommand("remember", "root", "I prefer tabs")
     // then
     await expect(run).resolves.toBeUndefined()
-    expect(f.synthetics).toEqual([expect.objectContaining({ sessionID: "root", resume: false, text: "/remember failed: inbox closed" })])
+    expect(f.synthetics).toEqual([
+      expect.objectContaining({ sessionID: "root", resume: false, text: "/remember failed: inbox closed" }),
+    ])
     expect(f.synthetics[0]?.metadata?.level).toBe("error")
-    expect(f.events.map(event => event.data)).toEqual([{ sessionID: "root", command: "remember", level: "error", text: "/remember failed: inbox closed" }])
+    expect(f.events.map((event) => event.data)).toEqual([
+      { sessionID: "root", command: "remember", level: "error", text: "/remember failed: inbox closed" },
+    ])
     await cleanup()
   })
 
@@ -130,7 +169,16 @@ describe("memory commands", () => {
     f.addSession("root")
     f.syntheticFailure = () => new Error("session gone")
     const warnings: string[] = []
-    const cleanup = await registerMemoryComponent(f.host, f.options({ logger: { warn: message => { warnings.push(message) } } }))
+    const cleanup = await registerMemoryComponent(
+      f.host,
+      f.options({
+        logger: {
+          warn: (message) => {
+            warnings.push(message)
+          },
+        },
+      }),
+    )
     // when
     const run = f.runCommand("memory", "root")
     // then
@@ -142,7 +190,9 @@ describe("memory commands", () => {
   test("#given a journaled session #when /search runs #then matches come from the identity's transcript journals", async () => {
     // given
     const f = fixture()
-    f.addSession("root", { messages: [{ id: "msg_1", type: "user", text: "my coffee order is a flat white", time: { created: 1 } }] })
+    f.addSession("root", {
+      messages: [{ id: "msg_1", type: "user", text: "my coffee order is a flat white", time: { created: 1 } }],
+    })
     const cleanup = await registerMemoryComponent(f.host, f.options())
     await f.idle("root")
     // when

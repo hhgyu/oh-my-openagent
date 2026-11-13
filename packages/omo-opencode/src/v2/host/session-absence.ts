@@ -6,6 +6,7 @@ const SESSION_NOT_FOUND_TAGS: ReadonlySet<string> = new Set(["Session.NotFoundEr
  * failure (transport, location, codec, a different session) leaves the session's presence unknown. */
 export function isHostSessionAbsent(error: unknown, sessionID: string): boolean {
   if (typeof error !== "object" || error === null) return false
-  const tag: unknown = Reflect.get(error, "_tag"), named: unknown = Reflect.get(error, "sessionID")
+  const tag: unknown = Reflect.get(error, "_tag"),
+    named: unknown = Reflect.get(error, "sessionID")
   return typeof tag === "string" && SESSION_NOT_FOUND_TAGS.has(tag) && named === sessionID
 }

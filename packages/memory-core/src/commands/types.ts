@@ -38,9 +38,7 @@ export interface MemoryCommandIdentity {
 }
 
 /** Where `/search` reads transcripts from, or the actionable reason it cannot. */
-export type MemoryTranscriptSource =
-  | { readonly provider: TranscriptProvider }
-  | { readonly error: string }
+export type MemoryTranscriptSource = { readonly provider: TranscriptProvider } | { readonly error: string }
 
 export interface MemoryCommandDeps {
   /** Bound identity for a session; undefined when the session has no memory binding. */
@@ -96,10 +94,7 @@ export function identityForInit(deps: MemoryCommandDeps, ctx: MemoryCommandConte
   return identityFor(deps, ctx) ?? deps.resolveIdentity?.()
 }
 
-export function requireIdentity(
-  deps: MemoryCommandDeps,
-  ctx: MemoryCommandContext,
-): MemoryCommandIdentity | string {
+export function requireIdentity(deps: MemoryCommandDeps, ctx: MemoryCommandContext): MemoryCommandIdentity | string {
   const identity = identityFor(deps, ctx)
   if (identity !== undefined) return identity
   return "memory is not bound to this session; start a session with memory enabled and retry"

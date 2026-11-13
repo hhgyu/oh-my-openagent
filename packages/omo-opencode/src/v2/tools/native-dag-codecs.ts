@@ -23,8 +23,12 @@ export function checkedNativeDagInput(input: unknown): DagToolInput {
 /** Trusted assembly only, before registry cloning. The strict decoder checks and returns the
  * ORIGINAL input value; the workflow input needs no argument normalizer. */
 export function issueNativeDagCodec(tool: ListedTool): ToolCodecAssociation {
-  if ((tool.input as unknown) !== nativeDagInputSchema) throw Error("Native workflow input schema does not match tool definition")
-  const input = issueToolValueCodec(tool, "input", { schema: nativeDagInputSchema, decodeUnknown: value => checkedNativeDagInput(value) })
+  if ((tool.input as unknown) !== nativeDagInputSchema)
+    throw Error("Native workflow input schema does not match tool definition")
+  const input = issueToolValueCodec(tool, "input", {
+    schema: nativeDagInputSchema,
+    decodeUnknown: (value) => checkedNativeDagInput(value),
+  })
   return Object.freeze({ tool, input })
 }
 

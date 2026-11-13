@@ -17,10 +17,22 @@ type Listener = (event: { readonly data?: unknown; readonly message?: string }) 
 function fakeProcessEvents() {
   const listeners = new Map<string, Set<() => void>>()
   const events: ProcessEvents = {
-    on(event, listener) { let set = listeners.get(event); if (!set) listeners.set(event, set = new Set()); set.add(listener) },
-    off(event, listener) { listeners.get(event)?.delete(listener) },
+    on(event, listener) {
+      let set = listeners.get(event)
+      if (!set) listeners.set(event, (set = new Set()))
+      set.add(listener)
+    },
+    off(event, listener) {
+      listeners.get(event)?.delete(listener)
+    },
   }
-  return { events, emit: (event: string) => { for (const listener of [...listeners.get(event) ?? []]) listener() }, count: (event: string) => listeners.get(event)?.size ?? 0 }
+  return {
+    events,
+    emit: (event: string) => {
+      for (const listener of [...(listeners.get(event) ?? [])]) listener()
+    },
+    count: (event: string) => listeners.get(event)?.size ?? 0,
+  }
 }
 
 export interface FakeWorkerSetup {
@@ -30,43 +42,104 @@ export interface FakeWorkerSetup {
 }
 
 export function connectFakeWorker(setup: FakeWorkerSetup = {}) {
-  const state = { spawned: 0, terminated: 0, created: [] as string[], disposed: [] as string[], killed: [] as (readonly number[])[], channels: [] as MessageChannel[] }
+  const state = {
+    spawned: 0,
+    terminated: 0,
+    created: [] as string[],
+    disposed: [] as string[],
+    killed: [] as (readonly number[])[],
+    channels: [] as MessageChannel[],
+  }
   const errorListeners: Listener[] = []
   const modules = { kernelRegistry: { list: () => setup.kernels?.() ?? [] } } as unknown as CodemodeModules
   const runtime = (input: EvalRuntimeInput): EvalSessionRuntime => ({
-    tool: { name: "eval", description: "d", parameters: {}, execute: (...args) => setup.execute ? setup.execute(input, ...args) : Promise.resolve({ content: [{ type: "text", text: "42" }] }) },
+    tool: {
+      name: "eval",
+      description: "d",
+      parameters: {},
+      execute: (...args) =>
+        setup.execute ? setup.execute(input, ...args) : Promise.resolve({ content: [{ type: "text", text: "42" }] }),
+    },
     bridgeEndpoint: () => undefined,
-    exclusive: (signal, work) => { signal.throwIfAborted(); return work() },
-    dispose: async () => { state.disposed.push(input.sessionID) },
+    exclusive: (signal, work) => {
+      signal.throwIfAborted()
+      return work()
+    },
+    dispose: async () => {
+      state.disposed.push(input.sessionID)
+    },
     abandon: () => {},
   })
   const spawn = (): CodemodeWorkerPort => {
     state.spawned++
     const channel = new MessageChannel()
     state.channels.push(channel)
-    attachCodemodeWorker({ postMessage: message => channel.port2.postMessage(message), addEventListener: (_type, listener) => { channel.port2.addEventListener("message", listener); channel.port2.start() } }, {
-      loader: { load: async () => modules, loaded: () => modules },
-      createRuntime: async (_modules, input) => { state.created.push(input.sessionID); return runtime(input) },
-      buildDefinition: async () => ({ description: "codemode description", parameters: { type: "object" } }),
-    })
-    return {
-      postMessage: message => channel.port1.postMessage(message),
-      addEventListener: (type, listener) => {
-        if (type === "message") { channel.port1.addEventListener("message", listener); channel.port1.start() } else errorListeners.push(listener)
+    attachCodemodeWorker(
+      {
+        postMessage: (message) => channel.port2.postMessage(message),
+        addEventListener: (_type, listener) => {
+          channel.port2.addEventListener("message", listener)
+          channel.port2.start()
+        },
       },
-      terminate: () => { state.terminated++; channel.port1.close(); channel.port2.close() },
+      {
+        loader: { load: async () => modules, loaded: () => modules },
+        createRuntime: async (_modules, input) => {
+          state.created.push(input.sessionID)
+          return runtime(input)
+        },
+        buildDefinition: async () => ({ description: "codemode description", parameters: { type: "object" } }),
+      },
+    )
+    return {
+      postMessage: (message) => channel.port1.postMessage(message),
+      addEventListener: (type, listener) => {
+        if (type === "message") {
+          channel.port1.addEventListener("message", listener)
+          channel.port1.start()
+        } else errorListeners.push(listener)
+      },
+      terminate: () => {
+        state.terminated++
+        channel.port1.close()
+        channel.port2.close()
+      },
     }
   }
   const proc = fakeProcessEvents()
   const backend = createCodemodeWorkerBackend({
-    cwd: "/project", sandbox: true, ownedTools: setup.ownedTools ?? [], stateDir: id => `/state/${id}`,
-    processEvents: proc.events, spawn, killKernels: pids => { state.killed.push(pids) },
+    cwd: "/project",
+    sandbox: true,
+    ownedTools: setup.ownedTools ?? [],
+    stateDir: (id) => `/state/${id}`,
+    processEvents: proc.events,
+    spawn,
+    killKernels: (pids) => {
+      state.killed.push(pids)
+    },
   })
-  const close = () => { for (const channel of state.channels) { channel.port1.close(); channel.port2.close() } }
-  return { backend, state, proc, crash: (message: string) => { for (const listener of errorListeners.splice(0)) listener({ message }) }, close }
+  const close = () => {
+    for (const channel of state.channels) {
+      channel.port1.close()
+      channel.port2.close()
+    }
+  }
+  return {
+    backend,
+    state,
+    proc,
+    crash: (message: string) => {
+      for (const listener of errorListeners.splice(0)) listener({ message })
+    },
+    close,
+  }
 }
 
-type Hook = (input: { sessionID: string; agent: string; tools: Record<string, { description: string; input: unknown }> }) => Promise<void> | void
+type Hook = (input: {
+  sessionID: string
+  agent: string
+  tools: Record<string, { description: string; input: unknown }>
+}) => Promise<void> | void
 
 export interface FakeEvalHost {
   readonly host: NativeEvalHost
@@ -85,13 +158,31 @@ export function fakeEvalHost(sessions: Record<string, { parentID?: string; direc
     options: {},
     tool: {
       async transform(callback: (editor: unknown) => void) {
-        callback({ list: () => tools, add: (tool: Info) => { tools.push({ ...tool, id: `tool_${tools.length}` }) } })
-        return { dispose: async () => { tools.length = 0 } }
+        callback({
+          list: () => tools,
+          add: (tool: Info) => {
+            tools.push({ ...tool, id: `tool_${tools.length}` })
+          },
+        })
+        return {
+          dispose: async () => {
+            tools.length = 0
+          },
+        }
       },
-      async list() { return tools },
+      async list() {
+        return tools
+      },
     },
     session: {
-      async hook(_name: string, callback: Hook) { hooks.push(callback); return { dispose: async () => { hooks.length = 0 } } },
+      async hook(_name: string, callback: Hook) {
+        hooks.push(callback)
+        return {
+          dispose: async () => {
+            hooks.length = 0
+          },
+        }
+      },
       async get(input: { sessionID: string }) {
         const info = sessions[input.sessionID] ?? {}
         return { id: input.sessionID, parentID: info.parentID, location: { directory: info.directory ?? "/project" } }
@@ -99,29 +190,55 @@ export function fakeEvalHost(sessions: Record<string, { parentID?: string; direc
     },
     event: {
       subscribe(options: { signal?: AbortSignal }) {
-        return { async *[Symbol.asyncIterator]() {
-          while (!options.signal?.aborted) {
-            const next = deleted.shift()
-            if (next) { yield { type: "session.deleted", data: { sessionID: next } }; continue }
-            await new Promise<void>(resolve => { wake = resolve; options.signal?.addEventListener("abort", () => resolve(), { once: true }) })
-          }
-        } }
+        return {
+          async *[Symbol.asyncIterator]() {
+            while (!options.signal?.aborted) {
+              const next = deleted.shift()
+              if (next) {
+                yield { type: "session.deleted", data: { sessionID: next } }
+                continue
+              }
+              await new Promise<void>((resolve) => {
+                wake = resolve
+                options.signal?.addEventListener("abort", () => resolve(), { once: true })
+              })
+            }
+          },
+        }
       },
     },
   }
-  return { host: host as unknown as NativeEvalHost, tools, hooks, deleteSession: (id: string) => { deleted.push(id); wake?.() } }
+  return {
+    host: host as unknown as NativeEvalHost,
+    tools,
+    hooks,
+    deleteSession: (id: string) => {
+      deleted.push(id)
+      wake?.()
+    },
+  }
 }
 
 export const NO_PROCESS_EVENTS: ProcessEvents = { on() {}, off() {} }
 
-export function fakeEvalBackend(run: EvalSessionHandle["run"] = async () => ({ content: [] }), options: { load?: () => Promise<void>; definition?: EvalDefinition } = {}) {
+export function fakeEvalBackend(
+  run: EvalSessionHandle["run"] = async () => ({ content: [] }),
+  options: { load?: () => Promise<void>; definition?: EvalDefinition } = {},
+) {
   const state = { acquired: 0, released: [] as string[], disposed: 0 }
   const backend: EvalBackend = {
     load: options.load ?? (async () => {}),
     definition: () => options.definition,
-    acquire: async () => { state.acquired++; return { run } },
-    release: async sessionID => { state.released.push(sessionID) },
-    dispose: async () => { state.disposed++ },
+    acquire: async () => {
+      state.acquired++
+      return { run }
+    },
+    release: async (sessionID) => {
+      state.released.push(sessionID)
+    },
+    dispose: async () => {
+      state.disposed++
+    },
   }
   return { backend, state }
 }

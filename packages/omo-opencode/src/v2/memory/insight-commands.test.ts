@@ -16,10 +16,14 @@ import { createMemoryFixture } from "./test-support"
 setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
 
 const cleanups: (() => void)[] = []
-afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup() })
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup()
+})
 
-const HUMAN = "---\ndescription: who the user is\nkind: person\naliases: [\"Boss\"]\n---\n\nIDENTITY: the person you work with\nRELATIONSHIP: works-with: jane-doe\n"
-const JANE = "---\ndescription: Person - Jane Doe\nkind: person\naliases: [\"Jane\",\"JD\"]\n---\n\nIDENTITY: staff engineer\nRELATIONSHIP: reports-to: human\n"
+const HUMAN =
+  '---\ndescription: who the user is\nkind: person\naliases: ["Boss"]\n---\n\nIDENTITY: the person you work with\nRELATIONSHIP: works-with: jane-doe\n'
+const JANE =
+  '---\ndescription: Person - Jane Doe\nkind: person\naliases: ["Jane","JD"]\n---\n\nIDENTITY: staff engineer\nRELATIONSHIP: reports-to: human\n'
 const SKILL_WITHOUT_NAME = "---\ndescription: a skill with no name field\n---\n\nbody\n"
 
 async function seeded(settings: Record<string, unknown> = {}): Promise<BoundMemorySession> {
@@ -68,20 +72,36 @@ describe("/doctor (S7c)", () => {
     // given
     const bound = await seeded()
     mkdirSync(bound.paths.reflection, { recursive: true })
-    writeFileSync(join(bound.paths.reflection, "park.json"), JSON.stringify({
-      version: 1, streak: 3, parkedAt: "2026-11-12T00:00:00.000Z",
-      lastFailure: { runId: "run-9", at: "2026-11-12T00:00:00.000Z", fingerprint: "fp-1", retryable: false, reason: "category_unavailable" },
-    }))
+    writeFileSync(
+      join(bound.paths.reflection, "park.json"),
+      JSON.stringify({
+        version: 1,
+        streak: 3,
+        parkedAt: "2026-11-12T00:00:00.000Z",
+        lastFailure: {
+          runId: "run-9",
+          at: "2026-11-12T00:00:00.000Z",
+          fingerprint: "fp-1",
+          retryable: false,
+          reason: "category_unavailable",
+        },
+      }),
+    )
 
     // when
     const result = await createDoctorCommand().run(bound, "--json")
 
     // then
-    const report = JSON.parse(result.text) as { level: string; checks: { name: string; level: string; detail: string }[] }
-    const health = report.checks.find(check => check.name === "reflection-health")
+    const report = JSON.parse(result.text) as {
+      level: string
+      checks: { name: string; level: string; detail: string }[]
+    }
+    const health = report.checks.find((check) => check.name === "reflection-health")
     expect(result.level).toBe("warning")
     expect(health?.level).toBe("warn")
-    expect(health?.detail).toContain("automatic reflection paused since 2026-11-12T00:00:00.000Z (next probe 2026-11-12T06:00:00.000Z")
+    expect(health?.detail).toContain(
+      "automatic reflection paused since 2026-11-12T00:00:00.000Z (next probe 2026-11-12T06:00:00.000Z",
+    )
   })
 
   test("#given an unknown flag #when /doctor runs #then it refuses with the flag named", async () => {
@@ -101,7 +121,9 @@ describe("/sleeptime (S7c)", () => {
     // given
     const created = createBoundIdentity()
     cleanups.push(created.cleanup)
-    const settings = OmoMemorySettingsSchema.parse({ agents: { [created.bound.identity]: { dream: { idle_minutes: 5 } } } })
+    const settings = OmoMemorySettingsSchema.parse({
+      agents: { [created.bound.identity]: { dream: { idle_minutes: 5 } } },
+    })
 
     // when
     const result = await createSleeptimeCommand().run({ ...created.bound, settings }, "")
@@ -158,7 +180,10 @@ describe("/people (S7d)", () => {
     const result = await createPeopleCommand().run(created.bound, 'jane --ask "what does she prefer?"')
 
     // then
-    expect(result).toEqual({ text: expect.stringContaining("/people --ask is not available on OpenCode yet"), level: "error" })
+    expect(result).toEqual({
+      text: expect.stringContaining("/people --ask is not available on OpenCode yet"),
+      level: "error",
+    })
   })
 
   test("#given people records disabled #when /people runs #then it refuses", async () => {
@@ -216,7 +241,10 @@ describe("/palace (S7d)", () => {
     const result = await createPalaceCommand().run(undefined, "")
 
     // then
-    expect(result).toEqual({ text: "memory is not bound in this session, so /palace has nothing to render", level: "warning" })
+    expect(result).toEqual({
+      text: "memory is not bound in this session, so /palace has nothing to render",
+      level: "warning",
+    })
   })
 })
 
@@ -224,10 +252,12 @@ describe("read-side command registration", () => {
   test("#given the memory component #when /sleeptime runs through the host #then the output takes the RPC event and the stripped record route", async () => {
     // given
     const f = createMemoryFixture()
-    cleanups.push(() => { f.cleanup() })
+    cleanups.push(() => {
+      f.cleanup()
+    })
     f.addSession("root")
     const cleanup = await registerMemoryComponent(f.host, f.options())
-    const registered = ["doctor", "sleeptime", "people", "palace"].filter(name => f.commands.has(name))
+    const registered = ["doctor", "sleeptime", "people", "palace"].filter((name) => f.commands.has(name))
 
     // when
     await f.runCommand("sleeptime", "root")
@@ -235,7 +265,7 @@ describe("read-side command registration", () => {
 
     // then
     expect(registered).toEqual(["doctor", "sleeptime", "people", "palace"])
-    expect(f.events.map(event => event.name)).toEqual([MEMORY_COMMAND_OUTPUT_EVENT])
+    expect(f.events.map((event) => event.name)).toEqual([MEMORY_COMMAND_OUTPUT_EVENT])
     expect(f.synthetics).toHaveLength(1)
     expect(f.synthetics[0]?.description).toBe("/sleeptime")
     expect(f.synthetics[0]?.resume).toBe(false)

@@ -19,7 +19,10 @@ const REFLECT_COMMAND_NAMES: Readonly<Record<"reflect", string>> = { reflect: "r
 export interface ExtraMemoryCommand {
   readonly name: string
   readonly description: string
-  run(bound: BoundMemorySession | undefined, args: string): Promise<{ readonly text: string; readonly level: NotifyLevel }>
+  run(
+    bound: BoundMemorySession | undefined,
+    args: string,
+  ): Promise<{ readonly text: string; readonly level: NotifyLevel }>
 }
 
 type ReflectEvaluate = (bound: BoundMemorySession, event: ReflectionEvent) => Promise<ReservationResult | null>
@@ -28,7 +31,10 @@ const UNBOUND = "memory is not bound to this session; start a session with memor
 
 function parseConversationIds(value: string | true | undefined): string[] | undefined {
   if (value === undefined || value === true) return undefined
-  const ids = value.split(",").map(id => id.trim()).filter(id => id.length > 0)
+  const ids = value
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0)
   return ids.length > 0 ? ids : undefined
 }
 
@@ -39,7 +45,10 @@ export function createReflectCommand(evaluate: ReflectEvaluate): ExtraMemoryComm
     async run(bound, args) {
       if (bound === undefined) return { text: UNBOUND, level: "error" }
       if (!reflectionSettings(bound).enabled) {
-        return { text: "reflection is disabled; set reflection.enabled to true in your omo config to enable it", level: "error" }
+        return {
+          text: "reflection is disabled; set reflection.enabled to true in your omo config to enable it",
+          level: "error",
+        }
       }
       const parsed = parseCommandArgs(args)
       const recentRaw = parsed.flags.get("recent")
@@ -67,8 +76,15 @@ export function createReflectCommand(evaluate: ReflectEvaluate): ExtraMemoryComm
         focus.length > 0 ? `focus "${focus}"` : undefined,
       ].filter((part): part is string => part !== undefined)
       const suffix = scope.length > 0 ? ` (${scope.join("; ")})` : ""
-      if (result.status === "active") return { text: `reflection run ${result.run.runId} reserved${suffix}; it runs in the background`, level: "info" }
-      return { text: `reflection request queued as ${result.run.runId}${suffix}; a run is already active and this request runs next`, level: "info" }
+      if (result.status === "active")
+        return {
+          text: `reflection run ${result.run.runId} reserved${suffix}; it runs in the background`,
+          level: "info",
+        }
+      return {
+        text: `reflection request queued as ${result.run.runId}${suffix}; a run is already active and this request runs next`,
+        level: "info",
+      }
     },
   }
 }

@@ -2,14 +2,20 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createDagFileStore, createDagManager, type DagRunId, type DagRunRecordV1 } from "@oh-my-opencode/senpi-task/dag"
+import {
+  createDagFileStore,
+  createDagManager,
+  type DagRunId,
+  type DagRunRecordV1,
+} from "@oh-my-opencode/senpi-task/dag"
 import { claimDagRunLease, createNativeDagGenerationLease, type NativeDagGenerationLease } from "./lease"
 import { NativeDagRefusal } from "./refusals"
 
 type Leased = DagRunRecordV1 & { readonly leaseHolderPid?: number }
 const PARENT = "ses_dag_lease_root"
 const OTHER_PID = 4242
-const roots: string[] = [], leases: NativeDagGenerationLease[] = []
+const roots: string[] = [],
+  leases: NativeDagGenerationLease[] = []
 afterEach(() => {
   for (const lease of leases.splice(0)) lease.dispose()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
@@ -26,16 +32,23 @@ async function runHeldBy(holder: number) {
   roots.push(directory)
   const store = createDagFileStore({ project_dir: directory, task: { state_dir: join(directory, "state") } })
   const manager = createDagManager({ store })
-  const started = await manager.start({ parentSessionId: PARENT, rootSessionId: PARENT, definition: { key: "lease", name: "lease", nodes: [{ id: "a", prompt: "do a", category: "quick" }] } })
+  const started = await manager.start({
+    parentSessionId: PARENT,
+    rootSessionId: PARENT,
+    definition: { key: "lease", name: "lease", nodes: [{ id: "a", prompt: "do a", category: "quick" }] },
+  })
   const runId: DagRunId = started.snapshot.runId
-  store.withRunLock(runId, () => { store.writeCheckpoint(runId, { ...manager.record(runId, PARENT), status: "running", leaseHolderPid: holder }) })
+  store.withRunLock(runId, () => {
+    store.writeCheckpoint(runId, { ...manager.record(runId, PARENT), status: "running", leaseHolderPid: holder })
+  })
   return { store, runId, holder: (): number | undefined => manager.record(runId, PARENT).leaseHolderPid }
 }
 
 describe("OpenCode 2 DAG generation lease holder", () => {
   test("#given a generation of this process #then its holder is a safe integer above every pid, and it reads live until that generation retires", () => {
     // given
-    const own = lease(), sibling = lease()
+    const own = lease(),
+      sibling = lease()
 
     // then
     expect(Number.isSafeInteger(own.holder())).toBe(true)
@@ -49,7 +62,7 @@ describe("OpenCode 2 DAG generation lease holder", () => {
     // given
     const foreign = lease({ pid: OTHER_PID })
     let alive = true
-    const own = lease({ isProcessAlive: pid => pid === OTHER_PID && alive })
+    const own = lease({ isProcessAlive: (pid) => pid === OTHER_PID && alive })
 
     // then
     expect(own.isAlive(foreign.holder())).toBe(true)
@@ -69,10 +82,16 @@ describe("OpenCode 2 DAG run lease claim", () => {
     // given
     const foreign = lease({ pid: OTHER_PID })
     const { store, runId, holder } = await runHeldBy(foreign.holder())
-    const own = lease({ isProcessAlive: pid => pid === OTHER_PID })
+    const own = lease({ isProcessAlive: (pid) => pid === OTHER_PID })
 
     // when
-    const claim = (() => { try { return claimDagRunLease(store, runId, own) } catch (error) { return error } })()
+    const claim = (() => {
+      try {
+        return claimDagRunLease(store, runId, own)
+      } catch (error) {
+        return error
+      }
+    })()
 
     // then
     expect(claim instanceof NativeDagRefusal && claim.code).toBe("run_still_active")

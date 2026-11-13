@@ -30,8 +30,12 @@ export const GATED_NO_ANSWER = "No answer: do not take the action it gates. Keep
  *   `session.hook("context")`, which receives GATED_NO_ANSWER once as a tagged system part.
  */
 export async function registerQuestionGates(context: Host): Promise<() => Promise<void>> {
-  if (context.options?.[DISABLED_FLAG] === true || context.options?.["omo-senpi-disabled"] === true ||
-      process.env.OMO_SENPI_DISABLED === "1") return async () => {}
+  if (
+    context.options?.[DISABLED_FLAG] === true ||
+    context.options?.["omo-senpi-disabled"] === true ||
+    process.env.OMO_SENPI_DISABLED === "1"
+  )
+    return async () => {}
   const pending = new Map<string, GateMatch>()
   const registrations: Registration[] = []
   let closed = false
@@ -40,48 +44,62 @@ export async function registerQuestionGates(context: Host): Promise<() => Promis
     if (disposal) return disposal
     closed = true
     disposal = (async () => {
-      const results = await Promise.allSettled(registrations.map(registration => registration.dispose()))
+      const results = await Promise.allSettled(registrations.map((registration) => registration.dispose()))
       pending.clear()
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
-      if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Question gates cleanup failed")
+      if (failures.length)
+        throw new AggregateError(
+          failures.map((result) => result.reason),
+          "Question gates cleanup failed",
+        )
     })()
     return disposal
   }
   try {
-    registrations.push(await context.tool.hook("execute.before", event => {
-      if (closed || !QUESTION_TOOLS.has(event.tool)) return
-      const gate = matchGate(event.input)
-      if (gate === undefined) return
-      pending.set(`${event.sessionID}:${event.id}`, gate)
-      if (pending.size > MAX_PENDING_GATES) {
-        const oldest = pending.keys().next().value
-        if (oldest !== undefined) pending.delete(oldest)
-      }
-    }))
-    registrations.push(await context.session.hook("context", value => {
-      if (closed) return
-      const prefix = `${value.sessionID}:`
-      const unsettled = [...pending.keys()].filter(key => key.startsWith(prefix))
-      if (unsettled.length === 0) return
-      for (const key of unsettled) pending.delete(key)
-      if (value.system.some(part => part.metadata?.[GATE_MARKER] === true)) return
-      value.system.push({ type: "text", text: GATED_NO_ANSWER, metadata: { [GATE_MARKER]: true } })
-    }))
-    registrations.push(await context.tool.hook("execute.after", event => {
-      const key = `${event.sessionID}:${event.id}`
-      const gate = pending.get(key)
-      if (gate === undefined) return
-      pending.delete(key)
-      if (closed || event.status !== "error" || event.error.message.includes(GATED_NO_ANSWER)) return
-      const original = event.error
-      event.error = new ToolError({
-        message: original.message ? `${original.message}\n${GATED_NO_ANSWER}` : GATED_NO_ANSWER,
-        ...(original.error === undefined ? {} : { error: original.error }),
-        metadata: { ...original.metadata, omoQuestionGate: { rule: gate.rule, header: gate.header ?? null } },
-      })
-    }))
+    registrations.push(
+      await context.tool.hook("execute.before", (event) => {
+        if (closed || !QUESTION_TOOLS.has(event.tool)) return
+        const gate = matchGate(event.input)
+        if (gate === undefined) return
+        pending.set(`${event.sessionID}:${event.id}`, gate)
+        if (pending.size > MAX_PENDING_GATES) {
+          const oldest = pending.keys().next().value
+          if (oldest !== undefined) pending.delete(oldest)
+        }
+      }),
+    )
+    registrations.push(
+      await context.session.hook("context", (value) => {
+        if (closed) return
+        const prefix = `${value.sessionID}:`
+        const unsettled = [...pending.keys()].filter((key) => key.startsWith(prefix))
+        if (unsettled.length === 0) return
+        for (const key of unsettled) pending.delete(key)
+        if (value.system.some((part) => part.metadata?.[GATE_MARKER] === true)) return
+        value.system.push({ type: "text", text: GATED_NO_ANSWER, metadata: { [GATE_MARKER]: true } })
+      }),
+    )
+    registrations.push(
+      await context.tool.hook("execute.after", (event) => {
+        const key = `${event.sessionID}:${event.id}`
+        const gate = pending.get(key)
+        if (gate === undefined) return
+        pending.delete(key)
+        if (closed || event.status !== "error" || event.error.message.includes(GATED_NO_ANSWER)) return
+        const original = event.error
+        event.error = new ToolError({
+          message: original.message ? `${original.message}\n${GATED_NO_ANSWER}` : GATED_NO_ANSWER,
+          ...(original.error === undefined ? {} : { error: original.error }),
+          metadata: { ...original.metadata, omoQuestionGate: { rule: gate.rule, header: gate.header ?? null } },
+        })
+      }),
+    )
   } catch (error) {
-    try { await cleanup() } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Question gates registration and rollback failed") }
+    try {
+      await cleanup()
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Question gates registration and rollback failed")
+    }
     throw error
   }
   return cleanup

@@ -8,10 +8,20 @@
 // only feed the wake budget.
 
 import { join } from "node:path"
-import { GitMemoryRepo, type RecallCandidate, type RecallCorpus, type RecallCorpusCache, type RecallNudge } from "@oh-my-opencode/memory-core"
+import {
+  GitMemoryRepo,
+  type RecallCandidate,
+  type RecallCorpus,
+  type RecallCorpusCache,
+  type RecallNudge,
+} from "@oh-my-opencode/memory-core"
 import { existsSync } from "@oh-my-opencode/memory-core/fs"
 import {
-  createKibitzerWakeSlot, kibitzerSidecarSessionDir, kibitzerWakesFile, KIBITZER_SIDECAR_TOOL_NAMES, type KibitzerWakeSlot,
+  createKibitzerWakeSlot,
+  kibitzerSidecarSessionDir,
+  kibitzerWakesFile,
+  KIBITZER_SIDECAR_TOOL_NAMES,
+  type KibitzerWakeSlot,
 } from "@oh-my-opencode/memory-core/recall-sidecar"
 import type { OmoMemoryRecall } from "@oh-my-opencode/omo-config-core"
 import type { Context } from "@opencode/plugin/promise/plugin"
@@ -31,7 +41,15 @@ import { contentText } from "./events"
 import { createKibitzerWakeRecorder } from "./observe"
 import type { KibitzerWakeOutcome } from "./outcome"
 import { createKibitzerSidecar, type KibitzerSidecar } from "./sidecar"
-import { createKibitzerTools, KIBITZER_MEMORY_DESCRIPTION, KIBITZER_MEMORY_TOOL_NAME, KIBITZER_PRIVATE_TOOL_NAMES, kibitzerMemoryInput, wrapMemoryTool, type KibitzerToolsDeps } from "./tools"
+import {
+  createKibitzerTools,
+  KIBITZER_MEMORY_DESCRIPTION,
+  KIBITZER_MEMORY_TOOL_NAME,
+  KIBITZER_PRIVATE_TOOL_NAMES,
+  kibitzerMemoryInput,
+  wrapMemoryTool,
+  type KibitzerToolsDeps,
+} from "./tools"
 
 export interface KibitzerPortRequest {
   readonly bound: BoundMemorySession
@@ -72,13 +90,30 @@ export interface KibitzerComponentDeps extends KibitzerSeams {
 export interface KibitzerComponent {
   isKibitzerSession(sessionID: string): boolean
   onPrompt(sessionID: string, text: string): void
-  onToolBefore(event: { readonly sessionID: string; readonly tool: string; readonly id: string; readonly input: unknown }): void
-  onToolAfter(event: { readonly sessionID: string; readonly tool: string; readonly id: string; readonly status: string; readonly result?: unknown; readonly error?: unknown }): void
+  onToolBefore(event: {
+    readonly sessionID: string
+    readonly tool: string
+    readonly id: string
+    readonly input: unknown
+  }): void
+  onToolAfter(event: {
+    readonly sessionID: string
+    readonly tool: string
+    readonly id: string
+    readonly status: string
+    readonly result?: unknown
+    readonly error?: unknown
+  }): void
   /** Returns true when the request belongs to a Kibitzer child (its tools were narrowed; nothing else applies). */
   onContext(value: Pick<SessionContext, "sessionID" | "tools" | "messages">): boolean
   /** Tool exposure only, for every model request (compaction included): a child is narrowed to its contract tools, any other session loses the child-only ones. True for a child. */
   narrowTools(value: Pick<SessionContext, "sessionID" | "tools">): boolean
-  offer(bound: BoundMemorySession, candidates: readonly RecallCandidate[], surfaced: ReadonlySet<string>, recall: OmoMemoryRecall): Promise<KibitzerOfferResult | undefined>
+  offer(
+    bound: BoundMemorySession,
+    candidates: readonly RecallCandidate[],
+    surfaced: ReadonlySet<string>,
+    recall: OmoMemoryRecall,
+  ): Promise<KibitzerOfferResult | undefined>
   tools<S extends z.ZodObject<z.ZodRawShape>>(memory: Info<S>): readonly Info[]
   activeSessions(): readonly string[]
   whenIdle(): Promise<void>
@@ -102,16 +137,24 @@ export function createKibitzerComponent(deps: KibitzerComponentDeps): KibitzerCo
   const records = new Map<string, Promise<SessionRecord | undefined>>()
   const children = new Map<string, { readonly sidecar: KibitzerSidecar; readonly lease: SessionLease }>()
   const chains = new Map<string, Promise<unknown>>()
-  const recorder = createKibitzerWakeRecorder({ now: deps.now, warn: (message, details) => deps.logger.warn(message, details) })
+  const recorder = createKibitzerWakeRecorder({
+    now: deps.now,
+    warn: (message, details) => deps.logger.warn(message, details),
+  })
   let closed = false
 
   function queue<T>(sessionID: string, work: () => Promise<T>): Promise<T | undefined> {
     const next = (chains.get(sessionID) ?? Promise.resolve()).then(work).catch((error: unknown) => {
-      deps.logger.warn("kibitzer hook skipped", { sessionID, error: error instanceof Error ? error.message : String(error) })
+      deps.logger.warn("kibitzer hook skipped", {
+        sessionID,
+        error: error instanceof Error ? error.message : String(error),
+      })
       return undefined
     })
     chains.set(sessionID, next)
-    void next.then(() => { if (chains.get(sessionID) === next) chains.delete(sessionID) })
+    void next.then(() => {
+      if (chains.get(sessionID) === next) chains.delete(sessionID)
+    })
     return next
   }
 
@@ -131,24 +174,38 @@ export function createKibitzerComponent(deps: KibitzerComponentDeps): KibitzerCo
     if (!recall.enabled) return undefined
     const sessionDir = kibitzerSidecarSessionDir(bound.paths.recall, sessionID)
     const request: KibitzerPortRequest = {
-      bound, parentSessionId: sessionID, journalPath: join(sessionDir, KIBITZER_JOURNAL_FILENAME), scopes,
-      onIssued: child => { children.set(child.sessionID, { sidecar, lease: child.lease }) },
-      onRetired: childID => { children.delete(childID) },
+      bound,
+      parentSessionId: sessionID,
+      journalPath: join(sessionDir, KIBITZER_JOURNAL_FILENAME),
+      scopes,
+      onIssued: (child) => {
+        children.set(child.sessionID, { sidecar, lease: child.lease })
+      },
+      onRetired: (childID) => {
+        children.delete(childID)
+      },
     }
     const port = deps.createPort?.(request) ?? productionPort(request)
     const wakesFile = kibitzerWakesFile(bound.paths.recall, sessionID)
     const sidecar = createKibitzerSidecar({
       sessionId: sessionID,
       port,
-      deliver: nudges => deliver(bound, nudges),
-      onWake: outcome => {
+      deliver: (nudges) => deliver(bound, nudges),
+      onWake: (outcome) => {
         recorder.record(wakesFile, outcome)
         deps.onWake?.(outcome)
       },
-      wakeSlot: deps.createWakeSlot?.(bound, recall) ?? createKibitzerWakeSlot({ locksDirectory: bound.paths.locks, maxConcurrent: recall.max_concurrent_wakes }),
+      wakeSlot:
+        deps.createWakeSlot?.(bound, recall) ??
+        createKibitzerWakeSlot({ locksDirectory: bound.paths.locks, maxConcurrent: recall.max_concurrent_wakes }),
       toolBudget: recall.tool_budget,
       sidecarMaxTokens: recall.sidecar_max_tokens,
-      eventCaps: { toolArgs: recall.event_caps.tool_args, resultHead: recall.event_caps.result_head, assistant: recall.event_caps.assistant, prompt: recall.event_caps.prompt },
+      eventCaps: {
+        toolArgs: recall.event_caps.tool_args,
+        resultHead: recall.event_caps.result_head,
+        assistant: recall.event_caps.assistant,
+        prompt: recall.event_caps.prompt,
+      },
       now: deps.now,
       ...(deps.timers === undefined ? {} : { timers: deps.timers }),
       warn: (message, details) => deps.logger.warn(message, details),
@@ -159,26 +216,39 @@ export function createKibitzerComponent(deps: KibitzerComponentDeps): KibitzerCo
   function productionPort(request: KibitzerPortRequest): KibitzerChildPort {
     const app = deps.host.app
     const session = deps.host.session
-    if (app === undefined || !isBackendSession(session)) throw new Error("Kibitzer child port requires the host app identity and the joined Effect session transport")
+    if (app === undefined || !isBackendSession(session))
+      throw new Error("Kibitzer child port requires the host app identity and the joined Effect session transport")
     return createKibitzerChildPort({
       host: { app, session },
-      directory: request.bound.directory, parentSessionId: request.parentSessionId, journalPath: request.journalPath,
-      agent: KIBITZER_AGENT_ID, permissions: KIBITZER_PERMISSIONS.map(rule => ({ ...rule })), toolNames: KIBITZER_SIDECAR_TOOL_NAMES,
-      scopes: request.scopes, onIssued: request.onIssued, onRetired: request.onRetired,
+      directory: request.bound.directory,
+      parentSessionId: request.parentSessionId,
+      journalPath: request.journalPath,
+      agent: KIBITZER_AGENT_ID,
+      permissions: KIBITZER_PERMISSIONS.map((rule) => ({ ...rule })),
+      toolNames: KIBITZER_SIDECAR_TOOL_NAMES,
+      scopes: request.scopes,
+      onIssued: request.onIssued,
+      onRetired: request.onRetired,
     })
   }
 
   async function deliver(bound: BoundMemorySession, nudges: readonly RecallNudge[]): Promise<void> {
     // Senpi delivery marks the ledger at accept time so the collector never re-offers the path.
     try {
-      await deps.stores.ledger(bound).markSurfaced(bound.sessionID, nudges.map(nudge => ({ path: nudge.path, hash: RECALL_SURFACE_HASH })))
+      await deps.stores.ledger(bound).markSurfaced(
+        bound.sessionID,
+        nudges.map((nudge) => ({ path: nudge.path, hash: RECALL_SURFACE_HASH })),
+      )
     } catch (error) {
-      deps.logger.warn("kibitzer delivery ledger mark skipped", { sessionID: bound.sessionID, error: error instanceof Error ? error.message : String(error) })
+      deps.logger.warn("kibitzer delivery ledger mark skipped", {
+        sessionID: bound.sessionID,
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
     const pending = deps.stores.pending(bound)
     const queued = await pending.take(bound.sessionID)
     const seen = new Set<string>()
-    const merged = [...queued, ...nudges].filter(nudge => !seen.has(nudge.path) && seen.add(nudge.path) !== undefined)
+    const merged = [...queued, ...nudges].filter((nudge) => !seen.has(nudge.path) && seen.add(nudge.path) !== undefined)
     await pending.write(bound.sessionID, merged)
   }
 
@@ -217,15 +287,22 @@ export function createKibitzerComponent(deps: KibitzerComponentDeps): KibitzerCo
       return false
     }
     // Exposure follows the child's permissions: only the five contract tools, `memory` read-only.
-    for (const name of Object.keys(value.tools)) if (!(KIBITZER_SIDECAR_TOOL_NAMES as readonly string[]).includes(name)) Reflect.deleteProperty(value.tools, name)
-    if (value.tools[KIBITZER_MEMORY_TOOL_NAME] !== undefined) value.tools[KIBITZER_MEMORY_TOOL_NAME] = { description: KIBITZER_MEMORY_DESCRIPTION, input: KIBITZER_MEMORY_SCHEMA }
+    for (const name of Object.keys(value.tools))
+      if (!(KIBITZER_SIDECAR_TOOL_NAMES as readonly string[]).includes(name)) Reflect.deleteProperty(value.tools, name)
+    if (value.tools[KIBITZER_MEMORY_TOOL_NAME] !== undefined)
+      value.tools[KIBITZER_MEMORY_TOOL_NAME] = {
+        description: KIBITZER_MEMORY_DESCRIPTION,
+        input: KIBITZER_MEMORY_SCHEMA,
+      }
     return true
   }
 
   return {
-    isKibitzerSession: sessionID => children.has(sessionID),
+    isKibitzerSession: (sessionID) => children.has(sessionID),
     onPrompt(sessionID, text) {
-      capture(sessionID, sidecar => { sidecar.events.onPrompt(text) })
+      capture(sessionID, (sidecar) => {
+        sidecar.events.onPrompt(text)
+      })
     },
     onToolBefore(event) {
       const child = children.get(event.sessionID)
@@ -233,7 +310,9 @@ export function createKibitzerComponent(deps: KibitzerComponentDeps): KibitzerCo
         child.sidecar.observeChildTool(event.sessionID, "start", event.id)
         return
       }
-      capture(event.sessionID, sidecar => { sidecar.events.onToolCall(event.tool, event.id, event.input) })
+      capture(event.sessionID, (sidecar) => {
+        sidecar.events.onToolCall(event.tool, event.id, event.input)
+      })
     },
     onToolAfter(event) {
       const child = children.get(event.sessionID)
@@ -242,13 +321,18 @@ export function createKibitzerComponent(deps: KibitzerComponentDeps): KibitzerCo
         return
       }
       const isError = event.status !== "completed"
-      capture(event.sessionID, sidecar => { sidecar.events.onToolResult(event.tool, event.id, isError, isError ? event.error : event.result) })
+      capture(event.sessionID, (sidecar) => {
+        sidecar.events.onToolResult(event.tool, event.id, isError, isError ? event.error : event.result)
+      })
     },
     narrowTools,
     onContext(value) {
       if (narrowTools(value)) return true
       const text = newestAssistantText(value.messages)
-      if (text !== undefined) capture(value.sessionID, sidecar => { sidecar.events.onAssistant(text) })
+      if (text !== undefined)
+        capture(value.sessionID, (sidecar) => {
+          sidecar.events.onAssistant(text)
+        })
       return false
     },
     async offer(bound, candidates, surfaced, recall) {
@@ -271,13 +355,19 @@ export function createKibitzerComponent(deps: KibitzerComponentDeps): KibitzerCo
     async close() {
       closed = true
       await Promise.allSettled([...chains.values()])
-      const settled = await Promise.allSettled([...records.values()].map(async pending => (await pending)?.sidecar.shutdown()))
+      const settled = await Promise.allSettled(
+        [...records.values()].map(async (pending) => (await pending)?.sidecar.shutdown()),
+      )
       records.clear()
       children.clear()
       scopes.dispose()
       await recorder.idle()
       const failures = settled.filter((result): result is PromiseRejectedResult => result.status === "rejected")
-      if (failures.length > 0) throw new AggregateError(failures.map(failure => failure.reason), "Kibitzer shutdown incomplete")
+      if (failures.length > 0)
+        throw new AggregateError(
+          failures.map((failure) => failure.reason),
+          "Kibitzer shutdown incomplete",
+        )
     },
   }
 }

@@ -42,21 +42,34 @@ export interface KibitzerWakeOutcome {
 const EMPTY_RESPONSE_TWICE = "Model returned an empty response twice"
 const UPSTREAM_FAILURE_PATTERN = /\b503\b|auth[_ -]?unavailable|overloaded/iu
 
-export function classifyWakeEnd(report: KibitzerChildTurnReport, abort: KibitzerWakeAbort | undefined): KibitzerWakeEnd {
+export function classifyWakeEnd(
+  report: KibitzerChildTurnReport,
+  abort: KibitzerWakeAbort | undefined,
+): KibitzerWakeEnd {
   switch (abort) {
-    case "tool_budget": return { status: "tool_budget_exceeded" }
-    case "deadline": return { status: "deadline" }
-    case "shutdown": return { status: "cancelled", cause: "shutdown" }
-    case undefined: break
-    default: return abort satisfies never
+    case "tool_budget":
+      return { status: "tool_budget_exceeded" }
+    case "deadline":
+      return { status: "deadline" }
+    case "shutdown":
+      return { status: "cancelled", cause: "shutdown" }
+    case undefined:
+      break
+    default:
+      return abort satisfies never
   }
   if (report.status === "completed") return { status: "completed" }
   // A turn cancelled outside the sidecar: the child is gone from under it.
-  if (report.status === "cancelled") return { status: "failed", cause: "child_failed", reason: "child turn was cancelled outside the sidecar" }
+  if (report.status === "cancelled")
+    return { status: "failed", cause: "child_failed", reason: "child turn was cancelled outside the sidecar" }
   const reason = normalizeGateReason(report.message)
   if (reason === EMPTY_RESPONSE_TWICE) return { status: "completed" }
   if (reason === undefined) return { status: "failed", cause: "child_failed" }
-  return { status: "failed", cause: UPSTREAM_FAILURE_PATTERN.test(reason) ? "child_failed_upstream" : "child_failed", reason }
+  return {
+    status: "failed",
+    cause: UPSTREAM_FAILURE_PATTERN.test(reason) ? "child_failed_upstream" : "child_failed",
+    reason,
+  }
 }
 
 export function startFailureEnd(error: unknown): Extract<KibitzerWakeEnd, { readonly status: "failed" }> {
@@ -71,7 +84,10 @@ export function isDiagnosticWakeEnd(end: KibitzerWakeEnd): boolean {
 /** Bounded, control-free, secret-safe one-line reason. */
 function normalizeGateReason(message: string | undefined): string | undefined {
   if (message === undefined) return undefined
-  const text = message.replace(/[\u0000-\u001F\u007F-\u009F]/gu, "").replace(/\s+/gu, " ").trim()
+  const text = message
+    .replace(/[\u0000-\u001F\u007F-\u009F]/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim()
   if (text.length === 0) return undefined
   if (containsSecretLikeMaterial(text)) return "redacted"
   return text.length > GATE_REASON_MAX_CHARS ? `${text.slice(0, GATE_REASON_MAX_CHARS - 1)}…` : text

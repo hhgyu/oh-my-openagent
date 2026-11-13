@@ -1,5 +1,10 @@
 import { createDagScheduler, type DagRunId, type DagScheduler } from "@oh-my-opencode/senpi-task/dag"
-import { createDagRuntimeControls, createPausedNodeCancel, type DagToolDeps, type PausedNodeHoldPort } from "@oh-my-opencode/senpi-task/dag-operations"
+import {
+  createDagRuntimeControls,
+  createPausedNodeCancel,
+  type DagToolDeps,
+  type PausedNodeHoldPort,
+} from "@oh-my-opencode/senpi-task/dag-operations"
 import { admittedChildren, type NativeDagEntered, type NativeDagEntry } from "./drive"
 import type { NativeDagCall, NativeDagRuntime } from "./runtime"
 import type { NativeDagCallPort } from "./task-port"
@@ -23,7 +28,8 @@ function endedChildClosure(port: Pick<NativeDagCallPort, "get">): PausedNodeHold
   return {
     async closeHold(taskId) {
       const record = port.get(taskId)
-      if (record !== undefined && !TERMINAL_TASK_STATUSES.has(record.status)) throw Error(`task ${taskId} has not ended, so its run hold is still in place`)
+      if (record !== undefined && !TERMINAL_TASK_STATUSES.has(record.status))
+        throw Error(`task ${taskId} has not ended, so its run hold is still in place`)
     },
   }
 }
@@ -39,11 +45,14 @@ export function nativeDagControls(input: NativeDagControlInput): NativeDagContro
   /** One Native runtime control verb over this call's scheduler options. Returns the re-entry it
    * adopted (retry, amend) for the call to drive; every other scheduler it built is retired. */
   function native(verb: (controls: RuntimeControls) => Promise<unknown>): NativeDagEntry {
-    return async options => {
+    return async (options) => {
       let adopted: NativeDagEntered | undefined
       const controllers: DagScheduler[] = []
       const controls = createDagRuntimeControls({
-        coreManager: runtime.manager, schedulerOptions: options, schedulers: new Map(), sessionId: () => parent,
+        coreManager: runtime.manager,
+        schedulerOptions: options,
+        schedulers: new Map(),
+        sessionId: () => parent,
         controller(runId, sessionId) {
           const scheduler = createDagScheduler({ ...options, initialRecord: runtime.manager.record(runId, sessionId) })
           controllers.push(scheduler)
@@ -51,9 +60,13 @@ export function nativeDagControls(input: NativeDagControlInput): NativeDagContro
         },
         // Admission is held by the call binding itself, never by a latch.
         clearAdmissionLatch() {},
-        adoptReentry(_runId, reentry) { adopted = reentry },
+        adoptReentry(_runId, reentry) {
+          adopted = reentry
+        },
       })
-      try { await verb(controls) } catch (error) {
+      try {
+        await verb(controls)
+      } catch (error) {
         await adopted?.scheduler.suspend()
         throw error
       } finally {
@@ -65,36 +78,71 @@ export function nativeDagControls(input: NativeDagControlInput): NativeDagContro
   /** Native `cancel`: the scheduler's run cancellation cancels every attached child through this
    * call's port and journals the node and run transitions. Children earlier calls admitted are
    * attached first, so a held run's children are cancelled too. */
-  const cancelRun = (runId: DagRunId, reason: string | undefined): NativeDagEntry => async options => {
-    const initialRecord = runtime.manager.record(runId, parent)
-    const scheduler = createDagScheduler({ ...options, initialRecord, preAttachedTasks: admittedChildren(initialRecord, options.taskManager, true) })
-    try { await scheduler.cancel(runId, reason) } finally { await scheduler.suspend() }
-    return undefined
-  }
+  const cancelRun =
+    (runId: DagRunId, reason: string | undefined): NativeDagEntry =>
+    async (options) => {
+      const initialRecord = runtime.manager.record(runId, parent)
+      const scheduler = createDagScheduler({
+        ...options,
+        initialRecord,
+        preAttachedTasks: admittedChildren(initialRecord, options.taskManager, true),
+      })
+      try {
+        await scheduler.cancel(runId, reason)
+      } finally {
+        await scheduler.suspend()
+      }
+      return undefined
+    }
   return {
     async cancel(runId, reason) {
       await runtime.control(runId, call, cancelRun(runId, reason), true)
     },
     async cancelNode(runId, nodeId) {
-      await runtime.control(runId, call, async options => {
-        await createPausedNodeCancel(id => ({ ...options, initialRecord: runtime.manager.record(id, parent) }), endedChildClosure(options.taskManager))(runId, nodeId)
-        return undefined
-      }, true)
+      await runtime.control(
+        runId,
+        call,
+        async (options) => {
+          await createPausedNodeCancel(
+            (id) => ({ ...options, initialRecord: runtime.manager.record(id, parent) }),
+            endedChildClosure(options.taskManager),
+          )(runId, nodeId)
+          return undefined
+        },
+        true,
+      )
     },
     async retry(runId, nodeIds, options) {
-      await runtime.control(runId, call, native(controls => controls.retry(runId, nodeIds, options)), input.detach)
+      await runtime.control(
+        runId,
+        call,
+        native((controls) => controls.retry(runId, nodeIds, options)),
+        input.detach,
+      )
       return runtime.manager.snapshot(runId, parent)
     },
     async send(runId, nodeId, message) {
       let sent: Awaited<ReturnType<RuntimeControls["send"]>> | undefined
-      await runtime.control(runId, call, native(async controls => { sent = await controls.send(runId, nodeId, message) }), true)
+      await runtime.control(
+        runId,
+        call,
+        native(async (controls) => {
+          sent = await controls.send(runId, nodeId, message)
+        }),
+        true,
+      )
       if (sent === undefined) throw Error(`workflow send to node ${nodeId} produced no outcome`)
       // A revived child's later fold is the engine's; its failure is the store's, not this call's.
       void sent.settled?.catch(() => {})
       return sent
     },
     async amend(runId, definition) {
-      await runtime.control(runId, call, native(controls => controls.amend(runId, definition)), input.detach)
+      await runtime.control(
+        runId,
+        call,
+        native((controls) => controls.amend(runId, definition)),
+        input.detach,
+      )
       return runtime.manager.snapshot(runId, parent)
     },
   }

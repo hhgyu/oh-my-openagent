@@ -35,7 +35,13 @@ export interface ParkingObservedInfo {
   readonly permissions?: readonly SessionRule[]
   readonly metadata?: SessionMetadata
 }
-export interface Observed { readonly agent?: string; readonly present: boolean; readonly rules: string; readonly marker?: string; readonly foreign: string }
+export interface Observed {
+  readonly agent?: string
+  readonly present: boolean
+  readonly rules: string
+  readonly marker?: string
+  readonly foreign: string
+}
 export interface ParkingPort {
   readonly locator: ChildLocator
   record(): ChildRecord
@@ -53,35 +59,73 @@ export interface ParkingPort {
 
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`
-  if (value && typeof value === "object") return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(Reflect.get(value, key))}`).join(",")}}`
+  if (value && typeof value === "object")
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonical(Reflect.get(value, key))}`)
+      .join(",")}}`
   return JSON.stringify(value) ?? "null"
 }
-export function rules(value: readonly SessionRule[]): SessionRule[] { return value.map(rule => ({ action: rule.action, resource: rule.resource, effect: rule.effect })) }
-function parkedRules(parking: Pick<ParkingDescriptor, "original">): SessionRule[] { return [...rules(parking.original.rules), { ...PARKED_DENY_RULE }] }
-export function parkingMarker(record: Pick<ChildRecord, "key">, parking: Pick<ParkingDescriptor, "id" | "owner" | "fingerprint">): SessionMetadata {
+export function rules(value: readonly SessionRule[]): SessionRule[] {
+  return value.map((rule) => ({ action: rule.action, resource: rule.resource, effect: rule.effect }))
+}
+function parkedRules(parking: Pick<ParkingDescriptor, "original">): SessionRule[] {
+  return [...rules(parking.original.rules), { ...PARKED_DENY_RULE }]
+}
+export function parkingMarker(
+  record: Pick<ChildRecord, "key">,
+  parking: Pick<ParkingDescriptor, "id" | "owner" | "fingerprint">,
+): SessionMetadata {
   return { format: 1, parking: parking.id, key: record.key, owner: parking.owner, fingerprint: parking.fingerprint }
 }
 export function observe(info: ParkingObservedInfo): Observed {
   const metadata = { ...info.metadata }
   // A null own key is a removed marker under merge-patch metadata semantics.
-  const own = Object.hasOwn(metadata, PARKING_MARKER_KEY) && metadata[PARKING_MARKER_KEY] !== null ? canonical(metadata[PARKING_MARKER_KEY]) : undefined
+  const own =
+    Object.hasOwn(metadata, PARKING_MARKER_KEY) && metadata[PARKING_MARKER_KEY] !== null
+      ? canonical(metadata[PARKING_MARKER_KEY])
+      : undefined
   Reflect.deleteProperty(metadata, PARKING_MARKER_KEY)
-  return { ...(info.agent === undefined ? {} : { agent: info.agent }), present: info.permissions !== undefined, rules: canonical(rules(info.permissions ?? [])), ...(own === undefined ? {} : { marker: own }), foreign: canonical(metadata) }
+  return {
+    ...(info.agent === undefined ? {} : { agent: info.agent }),
+    present: info.permissions !== undefined,
+    rules: canonical(rules(info.permissions ?? [])),
+    ...(own === undefined ? {} : { marker: own }),
+    foreign: canonical(metadata),
+  }
 }
 const same = (left: Observed, right: Observed) => canonical(left) === canonical(right)
 /** "original": the recorded rules without our marker (absent and [] are equivalent in host
  * merge semantics; update cannot unset). "parked": exactly our deny-last rules plus OUR marker. */
-export function classifyParking(seen: Observed, parking: ParkingDescriptor, record: Pick<ChildRecord, "key">): "original" | "parked" | "diverged" {
+export function classifyParking(
+  seen: Observed,
+  parking: ParkingDescriptor,
+  record: Pick<ChildRecord, "key">,
+): "original" | "parked" | "diverged" {
   if (seen.agent !== parking.agent) return "diverged"
-  if ((seen.present || !parking.original.present) && seen.rules === canonical(rules(parking.original.rules)) && seen.marker === undefined) return "original"
-  if (seen.present && seen.rules === canonical(parkedRules(parking)) && seen.marker === canonical(parkingMarker(record, parking))) return "parked"
+  if (
+    (seen.present || !parking.original.present) &&
+    seen.rules === canonical(rules(parking.original.rules)) &&
+    seen.marker === undefined
+  )
+    return "original"
+  if (
+    seen.present &&
+    seen.rules === canonical(parkedRules(parking)) &&
+    seen.marker === canonical(parkingMarker(record, parking))
+  )
+    return "parked"
   return "diverged"
 }
 export function parkingConflict(port: Pick<ParkingPort, "checkpoint" | "locator">) {
   return async (base: ParkingDescriptor, reason: string): Promise<never> => {
     const { readback: _verified, ...unverified } = base
     await port.checkpoint({ ...unverified, state: "conflict", conflict: reason })
-    throw new SessionBackendError("conflict", `Child parking conflict: ${reason}; custody retained for explicit reconcile`, port.locator)
+    throw new SessionBackendError(
+      "conflict",
+      `Child parking conflict: ${reason}; custody retained for explicit reconcile`,
+      port.locator,
+    )
   }
 }
 
@@ -89,52 +133,84 @@ export function parkingConflict(port: Pick<ParkingPort, "checkpoint" | "locator"
  * expected revision: this is optimistic OBSERVED-conflict detection, not compare-and-set. An
  * external last writer between our final read and update remains possible and is not certified. */
 export async function parkChild(port: ParkingPort): Promise<ParkingDescriptor> {
-  const conflict = parkingConflict(port), classify = classifyParking
+  const conflict = parkingConflict(port),
+    classify = classifyParking
   let existing = port.record().parking
   if (existing?.state === "restoring") {
     // A failed restore re-parks: unwritten restore returns to parked; a written one parks anew.
-    await port.join(); await port.fence()
+    await port.join()
+    await port.fence()
     const state = classify(observe(await port.read()), existing, port.record())
     if (state === "diverged") return conflict(existing, "host rules diverged during restore")
-    if (state === "parked") { const parked: ParkingDescriptor = { ...existing, state: "parked", readback: "verified" }; await port.checkpoint(parked); return parked }
+    if (state === "parked") {
+      const parked: ParkingDescriptor = { ...existing, state: "parked", readback: "verified" }
+      await port.checkpoint(parked)
+      return parked
+    }
     existing = undefined
   }
   if (existing?.state === "restored") existing = undefined
-  if (existing?.state === "conflict") throw new SessionBackendError("conflict", "Child parking is in conflict; explicit reconcile required", port.locator)
+  if (existing?.state === "conflict")
+    throw new SessionBackendError("conflict", "Child parking is in conflict; explicit reconcile required", port.locator)
   if (existing?.state === "parked") {
     // Idempotent retry: re-verify the host still enforces OUR deny before a receipt.
-    await port.join(); await port.fence()
-    if (classify(observe(await port.read()), existing, port.record()) !== "parked") return conflict(existing, "parked host rules or marker changed")
+    await port.join()
+    await port.fence()
+    if (classify(observe(await port.read()), existing, port.record()) !== "parked")
+      return conflict(existing, "parked host rules or marker changed")
     return existing
   }
   const before = existing ? undefined : observe(await port.read())
   await port.join()
-  await port.fence(); await port.interrupt()
-  await port.fence(); await port.wait()
   await port.fence()
-  const info = await port.read(), quiet = observe(info)
+  await port.interrupt()
+  await port.fence()
+  await port.wait()
+  await port.fence()
+  const info = await port.read(),
+    quiet = observe(info)
   let parking = existing
   if (!parking) {
     const record = port.record()
     const original = { present: info.permissions !== undefined, rules: rules(info.permissions ?? []) }
-    const id = randomUUID(), fingerprint = createHash("sha256").update(canonical(parkedRules({ original }))).digest("hex")
-    parking = { format: 1, state: "intent", id, owner: record.owner, original, fingerprint, marker: PARKING_MARKER_KEY,
-      ...(quiet.agent === undefined ? {} : { agent: quiet.agent }), ...(record.turn ? { nativeEpoch: record.turn.nativeEpoch } : {}), intentRevision: record.revision + 1 }
-    if (!before || !same(before, quiet)) return conflict(parking, "session rules, agent or metadata changed during quiescence")
+    const id = randomUUID(),
+      fingerprint = createHash("sha256")
+        .update(canonical(parkedRules({ original })))
+        .digest("hex")
+    parking = {
+      format: 1,
+      state: "intent",
+      id,
+      owner: record.owner,
+      original,
+      fingerprint,
+      marker: PARKING_MARKER_KEY,
+      ...(quiet.agent === undefined ? {} : { agent: quiet.agent }),
+      ...(record.turn ? { nativeEpoch: record.turn.nativeEpoch } : {}),
+      intentRevision: record.revision + 1,
+    }
+    if (!before || !same(before, quiet))
+      return conflict(parking, "session rules, agent or metadata changed during quiescence")
     if (quiet.marker !== undefined) return conflict(parking, "foreign parking marker present")
     await port.checkpoint(parking)
   }
   // Recheck journal and the actual child immediately before the original write.
   await port.fence()
-  const record = port.record(), current = await port.read(), seen = observe(current)
+  const record = port.record(),
+    current = await port.read(),
+    seen = observe(current)
   const state = classify(seen, parking, record)
   if (state === "diverged") return conflict(parking, "session rules, agent or marker diverged before write")
   if (state === "original") {
-    const metadata: Record<string, SessionMetadata[string]> = { ...current.metadata, [PARKING_MARKER_KEY]: parkingMarker(record, parking) }
+    const metadata: Record<string, SessionMetadata[string]> = {
+      ...current.metadata,
+      [PARKING_MARKER_KEY]: parkingMarker(record, parking),
+    }
     await port.update({ permissions: parkedRules(parking), metadata })
   }
   const after = observe(await port.read())
-  if (classify(after, parking, record) !== "parked" || after.foreign !== seen.foreign) return conflict(parking, "permission write readback differs")
+  if (classify(after, parking, record) !== "parked" || after.foreign !== seen.foreign)
+    return conflict(parking, "permission write readback differs")
   const parked: ParkingDescriptor = { ...parking, state: "parked", readback: "verified" }
   await port.checkpoint(parked)
   return parked

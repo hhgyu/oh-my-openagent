@@ -22,17 +22,26 @@ export type ProviderConsentDomains = {
 }
 
 /** Provider ids the user configured or authenticated, from the live host records. */
-export async function consentedProviders(domains: ProviderConsentDomains, warn?: (message: string, details?: Record<string, unknown>) => void): Promise<ReadonlySet<string>> {
+export async function consentedProviders(
+  domains: ProviderConsentDomains,
+  warn?: (message: string, details?: Record<string, unknown>) => void,
+): Promise<ReadonlySet<string>> {
   const { provider, integration } = domains
   if (provider === undefined || integration === undefined) return new Set()
   try {
     const [providers, integrations] = await Promise.all([provider.list(), integration.list()])
-    const connected = new Set(integrations.data.filter(entry => entry.connections.length > 0).map(entry => entry.id))
-    return new Set(providers.data
-      .filter(entry => entry.integrationID === undefined || connected.has(entry.integrationID))
-      .map(entry => entry.id))
+    const connected = new Set(
+      integrations.data.filter((entry) => entry.connections.length > 0).map((entry) => entry.id),
+    )
+    return new Set(
+      providers.data
+        .filter((entry) => entry.integrationID === undefined || connected.has(entry.integrationID))
+        .map((entry) => entry.id),
+    )
   } catch (error) {
-    warn?.("memory reflection could not read provider connections; only explicit and session models are eligible", { error: error instanceof Error ? error.message : String(error) })
+    warn?.("memory reflection could not read provider connections; only explicit and session models are eligible", {
+      error: error instanceof Error ? error.message : String(error),
+    })
     return new Set()
   }
 }

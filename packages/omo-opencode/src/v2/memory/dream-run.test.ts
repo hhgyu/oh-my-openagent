@@ -17,24 +17,46 @@ import { createBoundIdentity, runTool, toolContext } from "./reflection.test-sup
 setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
 
 const cleanups: (() => void)[] = []
-afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup() })
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup()
+})
 
 function setup(compileWarnTokens = 30_000) {
   const identity = createBoundIdentity()
   cleanups.push(identity.cleanup)
-  const bound: BoundMemorySession = { ...identity.bound, settings: OmoMemorySettingsSchema.parse({ compile_warn_tokens: compileWarnTokens }) }
+  const bound: BoundMemorySession = {
+    ...identity.bound,
+    settings: OmoMemorySettingsSchema.parse({ compile_warn_tokens: compileWarnTokens }),
+  }
   const ports = createScriptedFactsPorts()
-  const hosting = createReflectionChildHosting({ host: { session: {} }, createPort: request => ports.createPort(request), timers: createManualTimers(), warn: () => undefined })
-  const runner = createReflectionRunner({ launch: hosting.launch, warn: () => undefined, createRunId: () => "dream-a" })
-  const edit = hosting.tools().find(entry => entry.name === REFLECTION_MEMORY_TOOL_NAME)
-  if (edit === undefined) throw new Error("reflection_memory missing")
-  const run = (request: Partial<ReflectionRequest>) => runner.runReflection(bound, {
-    parentSessionId: bound.sessionID, request: { trigger: "dream", origin: "manual", conversationIds: [], snapshots: [], ...request },
+  const hosting = createReflectionChildHosting({
+    host: { session: {} },
+    createPort: (request) => ports.createPort(request),
+    timers: createManualTimers(),
+    warn: () => undefined,
   })
-  const create = (sessionID: string, path: string) => runTool(edit, {
-    command: "create", reason: "chore(dream): note", file_path: path, description: "A note", file_text: "Note.\n",
-  }, toolContext(sessionID))
-  const final = (): Record<string, unknown> => JSON.parse(readFileSync(join(reflectionRunDir(bound, "dream-a"), "final.json"), "utf8"))
+  const runner = createReflectionRunner({ launch: hosting.launch, warn: () => undefined, createRunId: () => "dream-a" })
+  const edit = hosting.tools().find((entry) => entry.name === REFLECTION_MEMORY_TOOL_NAME)
+  if (edit === undefined) throw new Error("reflection_memory missing")
+  const run = (request: Partial<ReflectionRequest>) =>
+    runner.runReflection(bound, {
+      parentSessionId: bound.sessionID,
+      request: { trigger: "dream", origin: "manual", conversationIds: [], snapshots: [], ...request },
+    })
+  const create = (sessionID: string, path: string) =>
+    runTool(
+      edit,
+      {
+        command: "create",
+        reason: "chore(dream): note",
+        file_path: path,
+        description: "A note",
+        file_text: "Note.\n",
+      },
+      toolContext(sessionID),
+    )
+  const final = (): Record<string, unknown> =>
+    JSON.parse(readFileSync(join(reflectionRunDir(bound, "dream-a"), "final.json"), "utf8"))
   return { bound, ports, run, create, final }
 }
 
@@ -68,7 +90,10 @@ describe("dream runs", () => {
     child.finish()
     const report = await running
     // then
-    expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({ outcome: "failed", reason: "invalid_target" })
+    expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({
+      outcome: "failed",
+      reason: "invalid_target",
+    })
     expect(existsSync(join(bound.paths.repo, "reference", "other.md"))).toBe(false)
   })
 

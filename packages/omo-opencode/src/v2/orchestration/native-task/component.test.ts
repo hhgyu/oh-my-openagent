@@ -3,21 +3,32 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { CHILD_HOST_TOOLS, childStructuralToolNames } from "@oh-my-opencode/senpi-task/task-operations"
-import { CHILD_HOST_TOOLS as ORIGINAL_CHILD_HOST_TOOLS, childStructuralToolNames as originalChildStructuralToolNames } from "../../../../../senpi-task/src/runners/in-process/host-tools"
+import {
+  CHILD_HOST_TOOLS as ORIGINAL_CHILD_HOST_TOOLS,
+  childStructuralToolNames as originalChildStructuralToolNames,
+} from "../../../../../senpi-task/src/runners/in-process/host-tools"
 import { bumpTaskId, createTaskId } from "../../../../../senpi-task/src/state/id"
 import type { ListedTool } from "../../host/tool-registry"
 import { nativeTaskEnabled } from "../../index"
 import { childCatalog, nativeTaskStateDir, seedTaskIdFloor } from "./component"
 
-const tool = (id: string, name: string, options?: ListedTool["options"]) => ({ id, name, description: id, ...(options ? { options } : {}) }) as unknown as ListedTool
+const tool = (id: string, name: string, options?: ListedTool["options"]) =>
+  ({ id, name, description: id, ...(options ? { options } : {}) }) as unknown as ListedTool
 
 describe("#given the actual SDK catalog", () => {
   test("#then only unnamespaced child grant candidates remain", () => {
     // given
-    const catalog = [tool("read", "read", { codemode: false }), tool("shell", "shell"), tool("browser_click", "click", { namespace: "browser" }),
-      tool("subagent", "subagent"), tool("execute", "execute"), tool("public-task", "task"), tool("public-output", "task_output")]
+    const catalog = [
+      tool("read", "read", { codemode: false }),
+      tool("shell", "shell"),
+      tool("browser_click", "click", { namespace: "browser" }),
+      tool("subagent", "subagent"),
+      tool("execute", "execute"),
+      tool("public-task", "task"),
+      tool("public-output", "task_output"),
+    ]
     // when
-    const ids = childCatalog(catalog).map(item => item.id)
+    const ids = childCatalog(catalog).map((item) => item.id)
     // then
     expect(ids).toEqual(["read", "shell"])
   })
@@ -26,7 +37,8 @@ describe("#given the actual SDK catalog", () => {
 describe("#given a parent session", () => {
   test("#then each parent gets a distinct state directory under the project .omo", () => {
     // when
-    const first = nativeTaskStateDir("/project", "ses_a"), second = nativeTaskStateDir("/project", "ses_b")
+    const first = nativeTaskStateDir("/project", "ses_a"),
+      second = nativeTaskStateDir("/project", "ses_b")
     // then
     expect(first.startsWith(join("/project", ".omo", "tasks", "opencode-v2"))).toBe(true)
     expect(first).not.toBe(second)
@@ -67,6 +79,8 @@ describe("#given task records already held by other parents of this project", ()
       const next = createTaskId()
       // then
       expect(next > highest).toBe(true)
-    } finally { rmSync(project, { recursive: true, force: true }) }
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
   })
 })

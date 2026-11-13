@@ -13,12 +13,14 @@ import { isHostSessionRecord } from "./host-session"
  * it would report the task resumed while no turn runs.
  */
 export function isFallbackHandoff(record: TaskRecord | null | undefined): record is TaskRecord {
-  return record != null
-    && record.fallback_handoff_epoch !== undefined
-    && record.fallback_handoff_epoch === record.notification.run_epoch
-    && record.owned_session === undefined
-    && record.pid === undefined
-    && !isHostSessionRecord(record)
+  return (
+    record != null &&
+    record.fallback_handoff_epoch !== undefined &&
+    record.fallback_handoff_epoch === record.notification.run_epoch &&
+    record.owned_session === undefined &&
+    record.pid === undefined &&
+    !isHostSessionRecord(record)
+  )
 }
 
 export type FallbackRung = {
@@ -37,7 +39,14 @@ export type FallbackRung = {
  * launch that never happens never leaves the record naming a model nothing ran on.
  */
 export function handOffToNextRung(record: TaskRecord, rung: FallbackRung): TaskRecord {
-  const { owned_session: closingOwned, pid: closingPid, runner_kind: _closedRunner, host_session: closingSession, provisional_exit: _exit, ...rest } = record
+  const {
+    owned_session: closingOwned,
+    pid: closingPid,
+    runner_kind: _closedRunner,
+    host_session: closingSession,
+    provisional_exit: _exit,
+    ...rest
+  } = record
   const runEpoch = nextRunEpoch(record)
   const closing = {
     ...(closingOwned === undefined ? {} : { owned_session: closingOwned }),
@@ -46,7 +55,9 @@ export function handOffToNextRung(record: TaskRecord, rung: FallbackRung): TaskR
   }
   return {
     ...rest,
-    ...(closingPid === undefined && closingSession === undefined && closingOwned === undefined ? {} : { fallback_closing_child: closing }),
+    ...(closingPid === undefined && closingSession === undefined && closingOwned === undefined
+      ? {}
+      : { fallback_closing_child: closing }),
     model: rung.model.display,
     resolved_model: rung.model,
     fallback_models: rung.remaining,
@@ -71,11 +82,14 @@ export function forgetClosedChild(record: TaskRecord, closed: TaskRecord["fallba
   const current = record.fallback_closing_child
   if (current === undefined || closed === undefined) return record
   if (JSON.stringify(current.owned_session) !== JSON.stringify(closed.owned_session)) return record
-  if (current.pid !== closed.pid || current.host_session?.session_path !== closed.host_session?.session_path ||
+  if (
+    current.pid !== closed.pid ||
+    current.host_session?.session_path !== closed.host_session?.session_path ||
     current.host_session?.socket !== closed.host_session?.socket ||
     current.host_session?.instance_id !== closed.host_session?.instance_id ||
     current.host_session?.routing_id !== closed.host_session?.routing_id
-  ) return record
+  )
+    return record
   const { fallback_closing_child: _closed, ...rest } = record
   return rest
 }

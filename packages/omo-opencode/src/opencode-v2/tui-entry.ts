@@ -1,8 +1,6 @@
 import * as Plugin from "@opencode/plugin/tui/plugin"
 
-import {
-  MEMORY_COMMAND_OUTPUT_EVENT_TYPE, readMemoryCommandOutputEvent,
-} from "../v2/memory/command-output-event"
+import { MEMORY_COMMAND_OUTPUT_EVENT_TYPE, readMemoryCommandOutputEvent } from "../v2/memory/command-output-event"
 import { OPENCODE_V2_NOTICE_DURATION_MS, OPENCODE_V2_NOTICE_MESSAGE, OPENCODE_V2_NOTICE_TITLE } from "./startup-notice"
 
 type NoticeToast = {
@@ -29,10 +27,24 @@ export function showOpenCodeV2Notice(context: NoticeToast): void {
 
 /** The TUI slice the memory command output needs; `data` is absent in contexts without a live client. */
 export interface MemoryOutputTui {
-  readonly data?: { readonly on: (type: typeof MEMORY_COMMAND_OUTPUT_EVENT_TYPE, handler: (event: { readonly data: unknown }) => void) => () => void }
+  readonly data?: {
+    readonly on: (
+      type: typeof MEMORY_COMMAND_OUTPUT_EVENT_TYPE,
+      handler: (event: { readonly data: unknown }) => void,
+    ) => () => void
+  }
   readonly ui: {
-    readonly dialog: { readonly alert: (options: { readonly title: string; readonly message: string }) => Promise<void> }
-    readonly toast: { readonly show: (options: { readonly title: string; readonly message: string; readonly variant: "error"; readonly sessionID: string }) => void }
+    readonly dialog: {
+      readonly alert: (options: { readonly title: string; readonly message: string }) => Promise<void>
+    }
+    readonly toast: {
+      readonly show: (options: {
+        readonly title: string
+        readonly message: string
+        readonly variant: "error"
+        readonly sessionID: string
+      }) => void
+    }
   }
 }
 
@@ -43,15 +55,25 @@ export interface MemoryOutputTui {
  */
 export function showMemoryCommandOutput(context: MemoryOutputTui): () => void {
   if (context.data === undefined) return () => undefined
-  return context.data.on(MEMORY_COMMAND_OUTPUT_EVENT_TYPE, event => {
+  return context.data.on(MEMORY_COMMAND_OUTPUT_EVENT_TYPE, (event) => {
     const output = readMemoryCommandOutputEvent(event.data)
     if (output === undefined) return
     if (output.level === "error") {
-      context.ui.toast.show({ title: `/${output.command}`, message: output.text, variant: "error", sessionID: output.sessionID })
+      context.ui.toast.show({
+        title: `/${output.command}`,
+        message: output.text,
+        variant: "error",
+        sessionID: output.sessionID,
+      })
       return
     }
     void context.ui.dialog.alert({ title: `/${output.command}`, message: output.text }).catch((error: unknown) => {
-      context.ui.toast.show({ title: `/${output.command}`, message: `${output.text} (dialog failed: ${String(error)})`, variant: "error", sessionID: output.sessionID })
+      context.ui.toast.show({
+        title: `/${output.command}`,
+        message: `${output.text} (dialog failed: ${String(error)})`,
+        variant: "error",
+        sessionID: output.sessionID,
+      })
     })
   })
 }
@@ -64,10 +86,21 @@ export const opencodeV2Tui = Plugin.define({
     if ("dialog" in context.ui) {
       const closeMemory = showMemoryCommandOutput(context)
       if (!("slot" in context.ui)) return closeMemory
-      return import("../v2/tui/dag-panel").then(({ registerDagStatusPanel }) => {
-        const closeDag = registerDagStatusPanel(context)
-        return () => { try { closeDag() } finally { closeMemory() } }
-      }).catch((error: unknown) => { closeMemory(); throw error })
+      return import("../v2/tui/dag-panel")
+        .then(({ registerDagStatusPanel }) => {
+          const closeDag = registerDagStatusPanel(context)
+          return () => {
+            try {
+              closeDag()
+            } finally {
+              closeMemory()
+            }
+          }
+        })
+        .catch((error: unknown) => {
+          closeMemory()
+          throw error
+        })
     }
     return undefined
   },

@@ -4,7 +4,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
-import { SYNC_CONFIG_INVALID, SYNC_UNAVAILABLE, createDeviceSessionResolver, createSyncRunner } from "@oh-my-opencode/memory-core/sync-runner"
+import {
+  SYNC_CONFIG_INVALID,
+  SYNC_UNAVAILABLE,
+  createDeviceSessionResolver,
+  createSyncRunner,
+} from "@oh-my-opencode/memory-core/sync-runner"
 
 import { selectedDeviceAccountSource } from "./device-session/account-runtime-loader"
 
@@ -28,7 +33,9 @@ test("an unloadable device account sidecar reports sync-unavailable with its rea
   const paths = await identity()
   const warned: { message: string; code: unknown }[] = []
   const errors: string[] = []
-  const missing = Object.assign(new Error("Cannot find module '#omo-device-account-runtime'"), { code: "ERR_MODULE_NOT_FOUND" })
+  const missing = Object.assign(new Error("Cannot find module '#omo-device-account-runtime'"), {
+    code: "ERR_MODULE_NOT_FOUND",
+  })
   const runner = createSyncRunner({
     loadRuntime,
     logger: {
@@ -63,12 +70,14 @@ test("an invalid OMO_SERVICE_API_URL is reported as a configuration error naming
     logger: {
       info: () => undefined,
       warn: (_message: string, meta?: Record<string, unknown>) => warned.push(meta?.code),
-      error: (message: string, meta?: Record<string, unknown>) => errors.push({ message, code: meta?.code, variable: meta?.variable }),
+      error: (message: string, meta?: Record<string, unknown>) =>
+        errors.push({ message, code: meta?.code, variable: meta?.variable }),
     },
     resolveSession: createDeviceSessionResolver({
       source: selectedDeviceAccountSource({ env: { OMO_SERVICE_API_URL: "not a url" } }),
       pinDir: join(paths.runtime, "pins"),
-      loadRuntime: () => Promise.reject(new Error("the engine sidecar is not reached when the account cannot be built")),
+      loadRuntime: () =>
+        Promise.reject(new Error("the engine sidecar is not reached when the account cannot be built")),
     }),
     watchHead: () => () => undefined,
   })

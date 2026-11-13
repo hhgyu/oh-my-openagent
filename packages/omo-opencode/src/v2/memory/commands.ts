@@ -1,7 +1,13 @@
 import { redactSecretLikeMaterial } from "@oh-my-opencode/memory-core"
 import {
-  CORE_MEMORY_COMMANDS, journalTranscriptSource, runCoreMemoryCommand,
-  type CoreMemoryCommandName, type MemoryCommandContext, type MemoryCommandDeps, type MemoryCommandIdentity, type NotifyLevel,
+  CORE_MEMORY_COMMANDS,
+  journalTranscriptSource,
+  runCoreMemoryCommand,
+  type CoreMemoryCommandName,
+  type MemoryCommandContext,
+  type MemoryCommandDeps,
+  type MemoryCommandIdentity,
+  type NotifyLevel,
 } from "@oh-my-opencode/memory-core/commands"
 import type { CommandDefinition, CommandInvocation } from "@opencode/plugin/promise/command"
 import type * as Plugin from "@opencode/plugin/promise/plugin"
@@ -82,22 +88,31 @@ export function createMemoryCommands(deps: MemoryCommandsDeps): MemoryCommands {
 
   function post(sessionID: string, run: () => Promise<unknown>): Promise<void> {
     const previous = chains.get(sessionID) ?? Promise.resolve()
-    const next = previous.then(run).then(() => undefined, (error: unknown) => {
-      deps.logger.warn("memory command output was not posted", { sessionID, error: describeError(error) })
-    })
+    const next = previous.then(run).then(
+      () => undefined,
+      (error: unknown) => {
+        deps.logger.warn("memory command output was not posted", { sessionID, error: describeError(error) })
+      },
+    )
     chains.set(sessionID, next)
-    void next.finally(() => { if (chains.get(sessionID) === next) chains.delete(sessionID) })
+    void next.finally(() => {
+      if (chains.get(sessionID) === next) chains.delete(sessionID)
+    })
     return next
   }
 
-  const newOutputID = deps.newOutputID ?? (() => `${MEMORY_COMMAND_OUTPUT_ID_PREFIX}${randomUUID().replaceAll("-", "")}`)
+  const newOutputID =
+    deps.newOutputID ?? (() => `${MEMORY_COMMAND_OUTPUT_ID_PREFIX}${randomUUID().replaceAll("-", "")}`)
 
   async function display(output: Output, text: string): Promise<void> {
     if (deps.display === undefined) return
     try {
       await deps.display({ sessionID: output.sessionID, command: output.command, level: output.level, text })
     } catch (error) {
-      deps.logger.warn("memory command output was not displayed", { sessionID: output.sessionID, error: describeError(error) })
+      deps.logger.warn("memory command output was not displayed", {
+        sessionID: output.sessionID,
+        error: describeError(error),
+      })
     }
   }
 
@@ -107,14 +122,16 @@ export function createMemoryCommands(deps: MemoryCommandsDeps): MemoryCommands {
     await display(output, text)
     // The ID is chosen before the call so the record is strippable from the first request that could see it.
     const id = newOutputID()
-    await post(output.sessionID, () => deps.session.synthetic({
-      sessionID: output.sessionID,
-      id,
-      text,
-      description: `/${output.command}`,
-      metadata: { [MEMORY_COMMAND_OUTPUT_KEY]: output.command, level: output.level },
-      resume: false,
-    }))
+    await post(output.sessionID, () =>
+      deps.session.synthetic({
+        sessionID: output.sessionID,
+        id,
+        text,
+        description: `/${output.command}`,
+        metadata: { [MEMORY_COMMAND_OUTPUT_KEY]: output.command, level: output.level },
+        resume: false,
+      }),
+    )
   }
 
   const retry = deps.factsRetry
@@ -127,27 +144,38 @@ export function createMemoryCommands(deps: MemoryCommandsDeps): MemoryCommands {
     let turnSent = false
     try {
       const bound = await deps.binder.resolve(sessionID)
-      const identity: MemoryCommandIdentity | undefined = bound === undefined ? undefined : { identity: bound.identity, identityPaths: bound.paths }
+      const identity: MemoryCommandIdentity | undefined =
+        bound === undefined ? undefined : { identity: bound.identity, identityPaths: bound.paths }
       let level: NotifyLevel = "info"
       const ctx: MemoryCommandContext = {
         mode: "opencode",
         hasUI: false,
         ...(bound === undefined ? {} : { cwd: bound.directory }),
         sessionManager: { getSessionId: () => sessionID },
-        ui: { notify: (_message, notified = "info") => { level = notified } },
+        ui: {
+          notify: (_message, notified = "info") => {
+            level = notified
+          },
+        },
       }
       const commandDeps: MemoryCommandDeps = {
-        contextForSession: id => (id === sessionID ? identity : undefined),
+        contextForSession: (id) => (id === sessionID ? identity : undefined),
         resolveIdentity: () => identity,
-        bustPromptCache: () => { deps.bustPromptCache(sessionID) },
+        bustPromptCache: () => {
+          deps.bustPromptCache(sessionID)
+        },
         transcriptSource: () => journalTranscriptSource(identity),
         commandNames: MEMORY_COMMAND_NAMES,
         ...(retry === undefined ? {} : { factsSink: { reconcile: () => retry(sessionID) } }),
-        sendUserMessage: async text => {
+        sendUserMessage: async (text) => {
           if (deps.isClosed()) throw new Error("memory component is closed")
           await deps.session.synthetic({
-            sessionID, text, description: `/${command}`, metadata: { [MEMORY_COMMAND_OUTPUT_KEY]: command },
-            delivery: invocation.delivery, resume: true,
+            sessionID,
+            text,
+            description: `/${command}`,
+            metadata: { [MEMORY_COMMAND_OUTPUT_KEY]: command },
+            delivery: invocation.delivery,
+            resume: true,
           })
           turnSent = true
         },
@@ -170,7 +198,12 @@ export function createMemoryCommands(deps: MemoryCommandsDeps): MemoryCommands {
       const result = await command.run(await deps.binder.resolve(sessionID), invocation.prompt.text)
       output = { sessionID, command: command.name, ...result }
     } catch (error) {
-      output = { sessionID, command: command.name, text: redactSecretLikeMaterial(describeError(error)), level: "error" }
+      output = {
+        sessionID,
+        command: command.name,
+        text: redactSecretLikeMaterial(describeError(error)),
+        level: "error",
+      }
     }
     await postOutput(output)
   }
@@ -179,12 +212,12 @@ export function createMemoryCommands(deps: MemoryCommandsDeps): MemoryCommands {
     ...(Object.keys(CORE_MEMORY_COMMANDS) as CoreMemoryCommandName[]).map((name): CommandDefinition => ({
       name: MEMORY_COMMAND_NAMES[name],
       description: CORE_MEMORY_COMMANDS[name].description,
-      execute: invocation => execute(name, invocation),
+      execute: (invocation) => execute(name, invocation),
     })),
     ...(deps.extraCommands ?? []).map((command): CommandDefinition => ({
       name: command.name,
       description: command.description,
-      execute: invocation => executeExtra(command, invocation),
+      execute: (invocation) => executeExtra(command, invocation),
     })),
   ]
 

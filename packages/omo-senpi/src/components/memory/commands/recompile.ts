@@ -10,6 +10,7 @@ import type { MemoryCommandContext, MemoryCommandDeps } from "./types"
 export function registerRecompileCommand(pi: MemoryCommandPort, deps: MemoryCommandDeps): void {
   pi.registerCommand("recompile", {
     ...LAZY_MEMORY_COMMANDS.recompile,
-    handler: (args: string, ctx: MemoryCommandContext): Promise<string> => runRecompileCommand(senpiCommandDeps(deps), args, ctx),
+    handler: (args: string, ctx: MemoryCommandContext): Promise<string> =>
+      runRecompileCommand(senpiCommandDeps(deps), args, ctx),
   })
 }

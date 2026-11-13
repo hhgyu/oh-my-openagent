@@ -60,9 +60,7 @@ const SAM_CARD = [
 
 const fixtures: PalaceFixture[] = []
 
-export async function createPalaceFixture(
-  options: { readonly injection?: boolean } = {},
-): Promise<PalaceFixture> {
+export async function createPalaceFixture(options: { readonly injection?: boolean } = {}): Promise<PalaceFixture> {
   const root = await mkdtemp(join(tmpdir(), "omo-palace-"))
   const identity = "palace-agent"
   const paths = buildIdentityPaths(root, identity)
@@ -115,9 +113,7 @@ export async function seedPalacePeople(
   fixture: PalaceFixture,
   options: { readonly injection?: boolean } = {},
 ): Promise<string> {
-  const janeBody = options.injection
-    ? `${JANE_CARD}\nATTRIBUTE: ${INJECTION_PAYLOAD}\n`
-    : JANE_CARD
+  const janeBody = options.injection ? `${JANE_CARD}\nATTRIBUTE: ${INJECTION_PAYLOAD}\n` : JANE_CARD
   await writePalaceWorkingFile(fixture, "system/human.md", HUMAN_CARD)
   await writePalaceWorkingFile(fixture, "people/jane-doe/card.md", janeBody)
   await writePalaceWorkingFile(fixture, "people/sam-rivers/card.md", SAM_CARD)
@@ -156,10 +152,20 @@ export async function commitPalaceFile(
 }
 
 async function ensureIdentityRuntimeDirs(paths: MemoryIdentityPaths): Promise<void> {
-  await Promise.all([
-    paths.locks, paths.transcripts, paths.reflection, paths.reflectionSessions, paths.worktrees,
-    paths.viewers, paths.pushQueue, paths.factsQueue, paths.facts, paths.notices,
-  ].map((path) => mkdir(path, { recursive: true, mode: 0o700 })))
+  await Promise.all(
+    [
+      paths.locks,
+      paths.transcripts,
+      paths.reflection,
+      paths.reflectionSessions,
+      paths.worktrees,
+      paths.viewers,
+      paths.pushQueue,
+      paths.factsQueue,
+      paths.facts,
+      paths.notices,
+    ].map((path) => mkdir(path, { recursive: true, mode: 0o700 })),
+  )
 }
 
 async function writeBinary(target: string): Promise<void> {

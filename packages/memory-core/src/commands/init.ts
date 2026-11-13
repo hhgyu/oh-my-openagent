@@ -27,7 +27,11 @@ function initInstruction(repoPath: string, command: string): string {
   ].join("\n")
 }
 
-export async function runInitCommand(deps: MemoryCommandDeps, _args: string, ctx: MemoryCommandContext): Promise<string> {
+export async function runInitCommand(
+  deps: MemoryCommandDeps,
+  _args: string,
+  ctx: MemoryCommandContext,
+): Promise<string> {
   const identity = requireIdentity(deps, ctx)
   if (typeof identity === "string") return respond(ctx, identity, "error")
 

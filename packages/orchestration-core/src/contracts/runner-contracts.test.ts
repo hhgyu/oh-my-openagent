@@ -24,10 +24,19 @@ test("public barrel and direct contract share the original branded constructor a
 })
 
 test("prototype/name spoofs and revoked proxies cannot manufacture a runner failure brand", () => {
-  const revoked = Proxy.revocable({}, {}); revoked.revoke()
-  for (const value of [null, undefined, false, "RunnerError", new Error("RunnerError"),
+  const revoked = Proxy.revocable({}, {})
+  revoked.revoke()
+  for (const value of [
+    null,
+    undefined,
+    false,
+    "RunnerError",
+    new Error("RunnerError"),
     { name: "RunnerError", failure: { kind: "model_unavailable", message: "spoof" } },
-    Object.create(RunnerError.prototype), revoked.proxy]) expect(RunnerError.is(value)).toBe(false)
+    Object.create(RunnerError.prototype),
+    revoked.proxy,
+  ])
+    expect(RunnerError.is(value)).toBe(false)
   const real = new RunnerError({ kind: "model_unavailable", message: "real" })
   expect(RunnerError.is(new Proxy(real, {}))).toBe(false)
   real.name = "different diagnostic name"
@@ -48,8 +57,18 @@ test("all runner wire outcomes retain Native spellings and optional exit/interru
   const policies: readonly ChildCompletionPolicy[] = ["final-text", "turn"]
   const outcomes = [
     { status: "completed", finalResponse: "answer", model: "provider/model" },
-    { status: "error", killed: true, model: "provider/model", failure: { kind: "child-turn-failed", message: "failed",
-      reason: "open_timed_out", rejected_while: "exited", exit: { kind: "crashed", code: 1, signal: "SIGTERM" } } },
+    {
+      status: "error",
+      killed: true,
+      model: "provider/model",
+      failure: {
+        kind: "child-turn-failed",
+        message: "failed",
+        reason: "open_timed_out",
+        rejected_while: "exited",
+        exit: { kind: "crashed", code: 1, signal: "SIGTERM" },
+      },
+    },
     { status: "cancelled" },
     { status: "interrupted", cause, message: "replaced", finalResponse: "partial", abortedBy: "user" },
   ] satisfies readonly RunnerOutcome[]
@@ -62,8 +81,10 @@ test("implemented core contract closure has only explicit local imports and no h
   const files = ["../index.ts", "task-start-failure.ts", "child-outcome.ts", "runner-error.ts"]
   for (const file of files) {
     const source = readFileSync(new URL(file, import.meta.url), "utf8")
-    const imports = [...source.matchAll(/(?:import|export)\s+(?:type\s+)?[\s\S]*?from\s*["']([^"']+)["']/g)].map(match => present(match[1]))
-    expect(imports.every(specifier => specifier.startsWith("."))).toBe(true)
+    const imports = [...source.matchAll(/(?:import|export)\s+(?:type\s+)?[\s\S]*?from\s*["']([^"']+)["']/g)].map(
+      (match) => present(match[1]),
+    )
+    expect(imports.every((specifier) => specifier.startsWith("."))).toBe(true)
     expect(source).not.toMatch(/@code-yeongyu\/senpi|@opencode\/|@opencode-ai\/|senpi-barrel/)
   }
 })

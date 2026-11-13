@@ -31,7 +31,9 @@ type Frame = {
 const terminals = new Set(["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"])
 const finishes = new Set(["stop", "length", "tool-calls"])
 
-function isDefinedNumber(value: number | undefined): value is number { return value !== undefined }
+function isDefinedNumber(value: number | undefined): value is number {
+  return value !== undefined
+}
 
 /** Whether the turn a previous observer retained was cut off before the host settled it, read from
  * the retained records only (a rebound binding is uncertain by design, so its outcome is never
@@ -41,29 +43,49 @@ function isDefinedNumber(value: number | undefined): value is number { return va
  * transcript-tail decision of Native `continueInterruptedTurn` (`sessionTailNeedsContinuation`:
  * an aborted, unanswered or unfinished tail continues) over the owned observation. */
 export function retainedTurnCutOff(records: readonly ObservationRecord[]): boolean {
-  let open = false, interrupted = false
+  let open = false,
+    interrupted = false
   const undelivered = new Set<string>()
   for (const record of records) {
     if (record.kind === "stop") return false
-    if (record.kind === "input") { undelivered.add(record.inboxID); continue }
+    if (record.kind === "input") {
+      undelivered.add(record.inboxID)
+      continue
+    }
     if (record.kind !== "host") continue
     const { type, data } = record.event
     if (type === "session.inbox.delivered" && data.inboxID !== undefined) undelivered.delete(data.inboxID)
-    else if (type === "session.execution.started") { open = true; interrupted = false }
-    else if (open && terminals.has(type)) { open = false; interrupted = type === "session.execution.interrupted" }
+    else if (type === "session.execution.started") {
+      open = true
+      interrupted = false
+    } else if (open && terminals.has(type)) {
+      open = false
+      interrupted = type === "session.execution.interrupted"
+    }
   }
   return open || interrupted || undelivered.size > 0
 }
 
 /** Own observations, not host wait/info.outcome or a fabricated execution identifier. */
 
-export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completion?: ChildCompletionPolicy): OwnedChildOutcome {
+export function projectOwnedChildOutcome(
+  snapshot: ObservationSnapshot,
+  completion?: ChildCompletionPolicy,
+): OwnedChildOutcome {
   const base = { delivered: [] as string[], consumption: "unconfirmed" as const }
   const uncertain = (reason: string): OwnedChildOutcome => ({ ...base, status: "uncertain", reason })
-  if (completion !== undefined && completion !== "final-text" && completion !== "turn") return uncertain("invalid-completion-policy")
+  if (completion !== undefined && completion !== "final-text" && completion !== "turn")
+    return uncertain("invalid-completion-policy")
   const locator = snapshot?.binding?.locator
-  if (!locator || locator.format !== 1 || !snapshot.binding.key || !snapshot.binding.token
-    || !locator.sessionID || !Array.isArray(snapshot.records) || !Array.isArray(snapshot.uncertainty)) {
+  if (
+    !locator ||
+    locator.format !== 1 ||
+    !snapshot.binding.key ||
+    !snapshot.binding.token ||
+    !locator.sessionID ||
+    !Array.isArray(snapshot.records) ||
+    !Array.isArray(snapshot.uncertainty)
+  ) {
     return uncertain("invalid-snapshot")
   }
   if (snapshot.uncertainty.length > 0) return uncertain("observation-invalidated")
@@ -76,7 +98,9 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completi
   let cursor: number | undefined
   let stopped = false
   let issue: string | undefined
-  const fail = (reason: string) => { issue ??= reason }
+  const fail = (reason: string) => {
+    issue ??= reason
+  }
   const currentStep = (event: SafeChildEvent): Step | undefined => {
     const step = event.data.assistantMessageID === undefined ? undefined : steps.get(event.data.assistantMessageID)
     if (!frame || frame.terminal || !step || !frame.steps.includes(step)) fail("unmatched-step")
@@ -90,7 +114,10 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completi
     if (ids.has(record.id)) return uncertain("duplicate-record")
     ids.add(record.id)
     if (record.kind === "uncertain") return uncertain("observation-invalidated")
-    if (record.kind === "stop") { stopped = true; continue }
+    if (record.kind === "stop") {
+      stopped = true
+      continue
+    }
     if (record.kind === "input") {
       if (expected.has(record.inboxID)) return uncertain("duplicate-input")
       expected.add(record.inboxID)
@@ -106,9 +133,15 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completi
       if (event.durable.version !== 1 && event.durable.version !== 2) fail("unknown-event-version")
       if (cursor !== undefined && event.durable.seq !== cursor + 1) fail("insufficient-cursor-coverage")
       cursor = event.durable.seq
-    } else if (event.type === "session.execution.started" || terminals.has(event.type)
-      || event.type === "session.inbox.delivered" || event.type.startsWith("session.step.")
-      || event.type === "session.text.ended" || event.type === "session.tool.called" || event.type === "session.retry.scheduled") {
+    } else if (
+      event.type === "session.execution.started" ||
+      terminals.has(event.type) ||
+      event.type === "session.inbox.delivered" ||
+      event.type.startsWith("session.step.") ||
+      event.type === "session.text.ended" ||
+      event.type === "session.tool.called" ||
+      event.type === "session.retry.scheduled"
+    ) {
       fail("missing-durable-cursor")
     }
 
@@ -119,54 +152,104 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completi
     }
     if (event.type === "session.inbox.delivered") {
       const inboxID = event.data.inboxID
-      if (!inboxID) { fail("missing-input-identity"); continue }
+      if (!inboxID) {
+        fail("missing-input-identity")
+        continue
+      }
       if (expected.has(inboxID)) {
         if (!frame || frame.terminal || delivered.has(inboxID)) fail("unmatched-input-delivery")
-        else { delivered.add(inboxID); frame.delivered.push(inboxID) }
+        else {
+          delivered.add(inboxID)
+          frame.delivered.push(inboxID)
+        }
       }
       continue
     }
     if (event.type === "session.step.started") {
       const { assistantMessageID, model } = event.data
       const prior = assistantMessageID === undefined ? undefined : steps.get(assistantMessageID)
-      if (frame && !frame.terminal && prior && frame.steps.at(-1) === prior && model && prior.pendingRetry !== undefined) {
+      if (
+        frame &&
+        !frame.terminal &&
+        prior &&
+        frame.steps.at(-1) === prior &&
+        model &&
+        prior.pendingRetry !== undefined
+      ) {
         // The real host reuses its assistant ID across retries. Only the explicit witness permits it.
         prior.retryAttempt = prior.pendingRetry
         prior.pendingRetry = undefined
         prior.model = model
-        prior.parts.clear(); prior.textStarts.clear()
-        prior.ended = undefined; prior.failed = undefined
-      } else if (!frame || frame.terminal || !assistantMessageID || !model || prior
-        || frame.steps.some(step => step.pendingRetry !== undefined || !step.ended && !step.failed)) {
+        prior.parts.clear()
+        prior.textStarts.clear()
+        prior.ended = undefined
+        prior.failed = undefined
+      } else if (
+        !frame ||
+        frame.terminal ||
+        !assistantMessageID ||
+        !model ||
+        prior ||
+        frame.steps.some((step) => step.pendingRetry !== undefined || (!step.ended && !step.failed))
+      ) {
         fail("invalid-step-start")
       } else {
-        const step: Step = { id: assistantMessageID, afterOwnDelivery: frame.delivered.length > 0, model, parts: new Map(), textStarts: new Set(), calls: new Map(), retryAttempt: 1 }
-        steps.set(step.id, step); frame.steps.push(step)
+        const step: Step = {
+          id: assistantMessageID,
+          afterOwnDelivery: frame.delivered.length > 0,
+          model,
+          parts: new Map(),
+          textStarts: new Set(),
+          calls: new Map(),
+          retryAttempt: 1,
+        }
+        steps.set(step.id, step)
+        frame.steps.push(step)
       }
       continue
     }
     if (event.type === "session.retry.scheduled") {
       const step = currentStep(event)
       const attempt = event.data.attempt
-      if (!step || !frame || frame.steps.at(-1) !== step || step.ended || step.failed === "aborted"
-        || step.pendingRetry !== undefined || attempt === undefined || attempt !== step.retryAttempt + 1 || !event.data.errorType) {
+      if (
+        !step ||
+        !frame ||
+        frame.steps.at(-1) !== step ||
+        step.ended ||
+        step.failed === "aborted" ||
+        step.pendingRetry !== undefined ||
+        attempt === undefined ||
+        attempt !== step.retryAttempt + 1 ||
+        !event.data.errorType
+      ) {
         fail("unmatched-retry")
       } else step.pendingRetry = attempt
       continue
     }
-    if (event.type.startsWith("session.step.") || event.type.startsWith("session.text.")
-      || event.type.startsWith("session.reasoning.") || event.type.startsWith("session.tool.")) {
+    if (
+      event.type.startsWith("session.step.") ||
+      event.type.startsWith("session.text.") ||
+      event.type.startsWith("session.reasoning.") ||
+      event.type.startsWith("session.tool.")
+    ) {
       const step = currentStep(event)
       if (!step) continue
-      if (step.pendingRetry !== undefined) { fail("retry-not-restarted"); continue }
-      if (step.ended || step.failed) { fail("event-after-step-terminal"); continue }
+      if (step.pendingRetry !== undefined) {
+        fail("retry-not-restarted")
+        continue
+      }
+      if (step.ended || step.failed) {
+        fail("event-after-step-terminal")
+        continue
+      }
       if (event.type === "session.text.started") {
         const ordinal = event.data.ordinal
         if (ordinal === undefined || step.textStarts.has(ordinal)) fail("invalid-text-start")
         else step.textStarts.add(ordinal)
       } else if (event.type === "session.text.ended") {
         const { ordinal, text } = event.data
-        if (ordinal === undefined || text === undefined || !step.textStarts.has(ordinal) || step.parts.has(ordinal)) fail("invalid-text-part")
+        if (ordinal === undefined || text === undefined || !step.textStarts.has(ordinal) || step.parts.has(ordinal))
+          fail("invalid-text-part")
         else step.parts.set(ordinal, text)
       } else if (event.type === "session.step.ended") {
         if (step.textStarts.size !== step.parts.size) fail("missing-text-end")
@@ -177,26 +260,45 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completi
         step.failed = event.data.errorType ?? "unknown"
       } else if (event.type === "session.tool.called") {
         if (!event.data.callID || !frame || frame.calls.has(event.data.callID)) fail("invalid-tool-call")
-        else { frame.calls.add(event.data.callID); step.calls.set(event.data.callID, "called") }
-      } else if (event.type === "session.tool.success" || event.type === "session.tool.failed" || event.type === "session.tool.progress") {
+        else {
+          frame.calls.add(event.data.callID)
+          step.calls.set(event.data.callID, "called")
+        }
+      } else if (
+        event.type === "session.tool.success" ||
+        event.type === "session.tool.failed" ||
+        event.type === "session.tool.progress"
+      ) {
         const callID = event.data.callID
         if (!callID || step.calls.get(callID) !== "called") fail("unmatched-tool-event")
         else if (event.type !== "session.tool.progress") {
           if (event.type === "session.tool.failed" && !event.data.errorType) fail("missing-tool-error")
           step.calls.set(callID, event.type === "session.tool.success" ? "success" : "failed")
         }
-      } else if (!["session.step.streamed", "session.text.delta", "session.reasoning.started", "session.reasoning.delta",
-        "session.reasoning.ended", "session.tool.input.started", "session.tool.input.delta", "session.tool.input.ended",
-      ].includes(event.type)) {
+      } else if (
+        ![
+          "session.step.streamed",
+          "session.text.delta",
+          "session.reasoning.started",
+          "session.reasoning.delta",
+          "session.reasoning.ended",
+          "session.tool.input.started",
+          "session.tool.input.delta",
+          "session.tool.input.ended",
+        ].includes(event.type)
+      ) {
         fail("unknown-step-event")
       }
       continue
     }
     if (terminals.has(event.type)) {
-      if (!frame || frame.terminal) { fail("unmatched-execution-terminal"); continue }
-      if (frame.steps.some(step => step.pendingRetry !== undefined)) fail("retry-not-restarted")
-      if (frame.steps.some(step => [...step.calls.values()].includes("called"))) fail("unfinished-tool-call")
-      if (frame.steps.some(step => !step.ended && !step.failed)) fail("unfinished-step")
+      if (!frame || frame.terminal) {
+        fail("unmatched-execution-terminal")
+        continue
+      }
+      if (frame.steps.some((step) => step.pendingRetry !== undefined)) fail("retry-not-restarted")
+      if (frame.steps.some((step) => [...step.calls.values()].includes("called"))) fail("unfinished-tool-call")
+      if (frame.steps.some((step) => !step.ended && !step.failed)) fail("unfinished-step")
       if (event.type === "session.execution.failed" && !event.data.errorType) fail("missing-execution-error")
       frame.terminal = event
     } else if (event.type.startsWith("session.execution.")) {
@@ -212,7 +314,9 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completi
     ...base,
     ...(frame ? { startEventID: frame.start, delivered: [...frame.delivered] } : {}),
     ...(frame?.terminal ? { terminalEventID: frame.terminal.id } : {}),
-    ...(frame && last ? { assistantMessageID: last.id, model: { ...last.model }, observedSteps: frame.steps.length } : {}),
+    ...(frame && last
+      ? { assistantMessageID: last.id, model: { ...last.model }, observedSteps: frame.steps.length }
+      : {}),
     ...(frame && frame.calls.size > 0 ? { observedToolCalls: frame.calls.size } : {}),
   }
   const terminal = frame?.terminal
@@ -222,40 +326,53 @@ export function projectOwnedChildOutcome(snapshot: ObservationSnapshot, completi
   }
   if (!terminal || !frame) return { ...facts, status: "pending" }
   if (!frame.delivered.length) return { ...facts, status: "control-only" }
-  if (terminal.type === "session.execution.interrupted") return { ...facts, status: "interrupted", reason: "host-interrupted" }
-  if (terminal.type === "session.execution.failed") return { ...facts, status: "error", reason: terminal.data.errorType }
+  if (terminal.type === "session.execution.interrupted")
+    return { ...facts, status: "interrupted", reason: "host-interrupted" }
+  if (terminal.type === "session.execution.failed")
+    return { ...facts, status: "error", reason: terminal.data.errorType }
   if (!last) return uncertain("missing-assistant-step")
-  if ([...expected].some(id => !delivered.has(id))) return { ...facts, status: "pending", reason: "input-not-delivered" }
-  const failed = frame.steps.find(step => step.failed)
+  if ([...expected].some((id) => !delivered.has(id)))
+    return { ...facts, status: "pending", reason: "input-not-delivered" }
+  const failed = frame.steps.find((step) => step.failed)
   if (failed) return { ...facts, status: failed.failed === "aborted" ? "interrupted" : "error", reason: failed.failed }
-  const ownedSteps = frame.steps.filter(step => step.afterOwnDelivery)
+  const ownedSteps = frame.steps.filter((step) => step.afterOwnDelivery)
   if (completion !== undefined && ownedSteps.length === 0) return uncertain("missing-owned-assistant-step")
   if (last.ended?.data.finish === "tool-calls") return uncertain("unfinished-assistant-turn")
-  const stepText = (step: Step) => [...step.parts].sort(([a], [b]) => a - b).map(([, part]) => part).join("")
+  const stepText = (step: Step) =>
+    [...step.parts]
+      .sort(([a], [b]) => a - b)
+      .map(([, part]) => part)
+      .join("")
   // Native keeps the last nonempty assistant message WITHIN the current turn.
   // Both explicit Native policies retain it; omitted policy preserves legacy P0 behavior.
-  const text = completion !== undefined
-    ? [...ownedSteps].reverse().map(stepText).find(value => value.length > 0) ?? ""
-    : stepText(last)
+  const text =
+    completion !== undefined
+      ? ([...ownedSteps]
+          .reverse()
+          .map(stepText)
+          .find((value) => value.length > 0) ?? "")
+      : stepText(last)
   if (text.length > 1_048_576) return uncertain("output-too-large")
   if (text.length === 0 && completion !== "turn") return { ...facts, status: "error", reason: "empty-assistant-output" }
-  const ended = frame.steps.map(step => {
+  const ended = frame.steps.map((step) => {
     if (!step.ended) throw new Error("Completed owned child step is missing its end event")
     return step.ended.data
   })
   const tokenKeys = ["input", "output", "reasoning", "cacheRead", "cacheWrite"] as const
   const tokens: NonNullable<OwnedChildOutcome["tokens"]> = {}
   for (const key of tokenKeys) {
-    const counts = ended.map(data => data.tokens?.[key])
+    const counts = ended.map((data) => data.tokens?.[key])
     if (counts.every(isDefinedNumber)) {
       const total = counts.reduce((sum, count) => sum + count, 0)
       if (Number.isSafeInteger(total)) tokens[key] = total
     }
   }
-  const costs = ended.map(data => data.cost)
+  const costs = ended.map((data) => data.cost)
   const cost = costs.every(isDefinedNumber) ? costs.reduce((sum, value) => sum + value, 0) : undefined
   return {
-    ...facts, status: "completed", text,
+    ...facts,
+    status: "completed",
+    text,
     ...(Object.keys(tokens).length ? { tokens } : {}),
     ...(cost !== undefined && Number.isFinite(cost) ? { cost } : {}),
   }

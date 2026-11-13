@@ -1,5 +1,9 @@
 import { isGpt6AstraModel } from "@oh-my-opencode/model-core"
-import { classifyUltraworkInput, isUltraworkInput, type ArmingSnapshot } from "@oh-my-opencode/prompts-core/ultrawork-keyword"
+import {
+  classifyUltraworkInput,
+  isUltraworkInput,
+  type ArmingSnapshot,
+} from "@oh-my-opencode/prompts-core/ultrawork-keyword"
 import { readSessionRole } from "@oh-my-opencode/senpi-task"
 
 import { transformContextText } from "../../extension/context-text-transform"
@@ -85,7 +89,12 @@ function isCurrentArmingSlot(value: unknown): value is SharedArmingSlot {
   // a 32-bit FNV-1a revision demonstrably allowed) can never reuse stale arming.
   // A bare ledger from a pre-slot bundle has no directive to match, so it is
   // discarded here exactly like a mismatched one.
-  return slot.directive === SENPI_ULTRAWORK_DIRECTIVE && slot.astraDirective === SENPI_ASTRA_ULTRAWORK_DIRECTIVE && typeof slot.arming === "object" && slot.arming !== null
+  return (
+    slot.directive === SENPI_ULTRAWORK_DIRECTIVE &&
+    slot.astraDirective === SENPI_ASTRA_ULTRAWORK_DIRECTIVE &&
+    typeof slot.arming === "object" &&
+    slot.arming !== null
+  )
 }
 
 export function sharedSessionArming(): SessionArming {
@@ -95,7 +104,11 @@ export function sharedSessionArming(): SessionArming {
     return existing.arming
   }
   const created = createSessionArming()
-  const slot: SharedArmingSlot = { directive: SENPI_ULTRAWORK_DIRECTIVE, astraDirective: SENPI_ASTRA_ULTRAWORK_DIRECTIVE, arming: created }
+  const slot: SharedArmingSlot = {
+    directive: SENPI_ULTRAWORK_DIRECTIVE,
+    astraDirective: SENPI_ASTRA_ULTRAWORK_DIRECTIVE,
+    arming: created,
+  }
   registry[ARMING_LEDGER_KEY] = slot
   return created
 }
@@ -111,7 +124,13 @@ export function createUltraworkComponent(arming: SessionArming = sharedSessionAr
       // receiving boundary so a model switch or fallback cannot deliver its old policy.
       pi.on("context", (payload: unknown, eventCtx: unknown) => {
         if (ctx.config.getFlag(ULTRAWORK_DISABLED_FLAG) === true) return
-        if (typeof payload !== "object" || payload === null || !("messages" in payload) || !Array.isArray(payload.messages)) return
+        if (
+          typeof payload !== "object" ||
+          payload === null ||
+          !("messages" in payload) ||
+          !Array.isArray(payload.messages)
+        )
+          return
         const directive = directiveForModel(modelIdFromContext(eventCtx))
         let selected = false
         const messages = payload.messages.map((message: unknown) => {
@@ -122,10 +141,20 @@ export function createUltraworkComponent(arming: SessionArming = sharedSessionAr
             return content ?? text
           }
           if (typeof message.content === "string") return transformContextText({ ...message }, selectText)
-          const content = Array.isArray(message.content) ? message.content.map((block: unknown) => {
-              if (typeof block !== "object" || block === null || !("type" in block) || block.type !== "text" || !("text" in block) || typeof block.text !== "string") return block
-              return { ...block, text: selectText(block.text) }
-            }) : message.content
+          const content = Array.isArray(message.content)
+            ? message.content.map((block: unknown) => {
+                if (
+                  typeof block !== "object" ||
+                  block === null ||
+                  !("type" in block) ||
+                  block.type !== "text" ||
+                  !("text" in block) ||
+                  typeof block.text !== "string"
+                )
+                  return block
+                return { ...block, text: selectText(block.text) }
+              })
+            : message.content
           return { ...message, content }
         })
         if (!selected) return

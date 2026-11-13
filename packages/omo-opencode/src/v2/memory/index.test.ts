@@ -12,10 +12,17 @@ function fixture(settings: Record<string, unknown> = {}) {
   fixtures.push(created)
   return created
 }
-afterEach(() => { for (const created of fixtures.splice(0)) created.cleanup() })
+afterEach(() => {
+  for (const created of fixtures.splice(0)) created.cleanup()
+})
 
-const create = (file: string, description: string, body: string) =>
-  ({ command: "create", reason: `add ${file}`, file_path: file, description, file_text: body })
+const create = (file: string, description: string, body: string) => ({
+  command: "create",
+  reason: `add ${file}`,
+  file_path: file,
+  description,
+  file_text: body,
+})
 
 describe("registerMemoryComponent", () => {
   test("#given memory.enabled false or the omo-memory-enabled option false #then nothing is registered", async () => {
@@ -24,10 +31,21 @@ describe("registerMemoryComponent", () => {
     const disabledByOption = fixture()
     // when
     const first = await registerMemoryComponent(disabledByConfig.host, disabledByConfig.options())
-    const second = await registerMemoryComponent({ ...disabledByOption.host, options: { "omo-memory-enabled": false } }, disabledByOption.options())
+    const second = await registerMemoryComponent(
+      { ...disabledByOption.host, options: { "omo-memory-enabled": false } },
+      disabledByOption.options(),
+    )
     // then
-    expect([disabledByConfig.hooks.size, disabledByConfig.tools.size, disabledByConfig.commands.size, disabledByOption.hooks.size, disabledByOption.tools.size, disabledByOption.commands.size]).toEqual([0, 0, 0, 0, 0, 0])
-    await first(); await second()
+    expect([
+      disabledByConfig.hooks.size,
+      disabledByConfig.tools.size,
+      disabledByConfig.commands.size,
+      disabledByOption.hooks.size,
+      disabledByOption.tools.size,
+      disabledByOption.commands.size,
+    ]).toEqual([0, 0, 0, 0, 0, 0])
+    await first()
+    await second()
   })
 
   test("#given a root session without a memory repo #when a user turn is accepted #then only runtime bookkeeping is created and nothing is projected", async () => {
@@ -72,7 +90,12 @@ describe("registerMemoryComponent", () => {
     await f.runTool("memory", "root", create("system/notes.md", "Working notes for this project", "turn trailer"))
     // then
     const metadata = f.sessions.get("root")?.metadata ?? {}
-    const repo = join(f.env.OMO_MEMORY_HOME ?? "", "agents", String((metadata[MEMORY_BINDING_KEY] as { identity: string }).identity), "repo")
+    const repo = join(
+      f.env.OMO_MEMORY_HOME ?? "",
+      "agents",
+      String((metadata[MEMORY_BINDING_KEY] as { identity: string }).identity),
+      "repo",
+    )
     const message = execFileSync("git", ["-C", repo, "log", "-1", "--format=%B"], { encoding: "utf8" })
     expect(message).toContain("Omo-Session: root")
     expect(message).toContain("Omo-Turn: 2")
@@ -94,7 +117,12 @@ describe("registerMemoryComponent", () => {
     const nudged = await f.context("reload")
     await f.runTool("memory", "reload", create("reference/reload.md", "Reload provenance", "saved after reload"))
     const metadata = f.sessions.get("reload")?.metadata ?? {}
-    const repo = join(f.env.OMO_MEMORY_HOME ?? "", "agents", String((metadata[MEMORY_BINDING_KEY] as { identity: string }).identity), "repo")
+    const repo = join(
+      f.env.OMO_MEMORY_HOME ?? "",
+      "agents",
+      String((metadata[MEMORY_BINDING_KEY] as { identity: string }).identity),
+      "repo",
+    )
     // then
     expect(partsWith(nudged, "omo.memory.save-nudge")).toHaveLength(1)
     expect(execFileSync("git", ["-C", repo, "log", "-1", "--format=%B"], { encoding: "utf8" })).toContain("Omo-Turn: 3")
@@ -108,52 +136,71 @@ describe("registerMemoryComponent", () => {
     const cleanup = await registerMemoryComponent(f.host, f.options())
     const prompt = f.hooks.get("session:prompt")
     if (prompt === undefined) throw new Error("Missing prompt hook")
-    await Reflect.apply(prompt, undefined, [{ sessionID: "accepted-only", messageID: "not-enqueued", prompt: { text: "rejected" } }])
+    await Reflect.apply(prompt, undefined, [
+      { sessionID: "accepted-only", messageID: "not-enqueued", prompt: { text: "rejected" } },
+    ])
     await f.prompt("accepted-only", "accepted")
-    await f.runTool("memory", "accepted-only", create("reference/accepted.md", "Accepted turn provenance", "one accepted turn"))
+    await f.runTool(
+      "memory",
+      "accepted-only",
+      create("reference/accepted.md", "Accepted turn provenance", "one accepted turn"),
+    )
     const binding = f.sessions.get("accepted-only")?.metadata?.[MEMORY_BINDING_KEY] as { identity: string }
     const repo = join(f.env.OMO_MEMORY_HOME ?? "", "agents", binding.identity, "repo")
     expect(execFileSync("git", ["-C", repo, "log", "-1", "--format=%B"], { encoding: "utf8" })).toContain("Omo-Turn: 1")
     await cleanup()
   })
 
-  test.each([false, true])("#given acceptance is in flight with another session blocking the stream %s #when its session is deleted #then eviction waits for persistence and a later bind reloads the durable counter", async backlog => {
-    const f = fixture()
-    f.addSession("deleted")
-    f.addSession("blocked")
-    const cleanup = await registerMemoryComponent(f.host, f.options())
-    const entered = Promise.withResolvers<undefined>()
-    const held = Promise.withResolvers<undefined>()
-    const original = f.host.session.get.bind(f.host.session)
-    const read = spyOn(f.host.session, "get").mockImplementation(async input => {
-      entered.resolve(undefined)
-      await held.promise
-      return original(input)
-    })
-    try {
-      const initial = f.prompt(backlog ? "blocked" : "deleted", "accepted before deletion")
-      await entered.promise
-      const pending = backlog ? f.emitEvent("session.inbox.enqueued", "deleted") : initial
-      const deletion = f.emitEvent("session.deleted", "deleted")
-      held.resolve(undefined)
-      await Promise.all([initial, pending, deletion])
-      const binding = f.sessions.get("deleted")?.metadata?.[MEMORY_BINDING_KEY] as { identity: string }
-      const root = join(f.env.OMO_MEMORY_HOME ?? "", "agents", binding.identity)
-      const directory = join(root, "runtime", "accepted-turns")
-      const name = readdirSync(directory).find(file => file.endsWith(".json") && (JSON.parse(readFileSync(join(directory, file), "utf8")) as { sessionID: string }).sessionID === "deleted")
-      if (name === undefined) throw new Error("Missing durable accepted-turn record")
-      const file = join(directory, name)
-      const persisted = JSON.parse(readFileSync(file, "utf8")) as { turns: number }
-      expect(persisted.turns).toBe(1)
-      writeFileSync(file, JSON.stringify({ ...persisted, turns: 7 }))
-      await f.runTool("memory", "deleted", create("reference/resumed.md", "Resumed counter", "durable data survives deletion"))
-      expect(execFileSync("git", ["-C", join(root, "repo"), "log", "-1", "--format=%B"], { encoding: "utf8" })).toContain("Omo-Turn: 7")
-    } finally {
-      held.resolve(undefined)
-      read.mockRestore()
-      await cleanup()
-    }
-  })
+  test.each([false, true])(
+    "#given acceptance is in flight with another session blocking the stream %s #when its session is deleted #then eviction waits for persistence and a later bind reloads the durable counter",
+    async (backlog) => {
+      const f = fixture()
+      f.addSession("deleted")
+      f.addSession("blocked")
+      const cleanup = await registerMemoryComponent(f.host, f.options())
+      const entered = Promise.withResolvers<undefined>()
+      const held = Promise.withResolvers<undefined>()
+      const original = f.host.session.get.bind(f.host.session)
+      const read = spyOn(f.host.session, "get").mockImplementation(async (input) => {
+        entered.resolve(undefined)
+        await held.promise
+        return original(input)
+      })
+      try {
+        const initial = f.prompt(backlog ? "blocked" : "deleted", "accepted before deletion")
+        await entered.promise
+        const pending = backlog ? f.emitEvent("session.inbox.enqueued", "deleted") : initial
+        const deletion = f.emitEvent("session.deleted", "deleted")
+        held.resolve(undefined)
+        await Promise.all([initial, pending, deletion])
+        const binding = f.sessions.get("deleted")?.metadata?.[MEMORY_BINDING_KEY] as { identity: string }
+        const root = join(f.env.OMO_MEMORY_HOME ?? "", "agents", binding.identity)
+        const directory = join(root, "runtime", "accepted-turns")
+        const name = readdirSync(directory).find(
+          (file) =>
+            file.endsWith(".json") &&
+            (JSON.parse(readFileSync(join(directory, file), "utf8")) as { sessionID: string }).sessionID === "deleted",
+        )
+        if (name === undefined) throw new Error("Missing durable accepted-turn record")
+        const file = join(directory, name)
+        const persisted = JSON.parse(readFileSync(file, "utf8")) as { turns: number }
+        expect(persisted.turns).toBe(1)
+        writeFileSync(file, JSON.stringify({ ...persisted, turns: 7 }))
+        await f.runTool(
+          "memory",
+          "deleted",
+          create("reference/resumed.md", "Resumed counter", "durable data survives deletion"),
+        )
+        expect(
+          execFileSync("git", ["-C", join(root, "repo"), "log", "-1", "--format=%B"], { encoding: "utf8" }),
+        ).toContain("Omo-Turn: 7")
+      } finally {
+        held.resolve(undefined)
+        read.mockRestore()
+        await cleanup()
+      }
+    },
+  )
 
   test("#given a root session #when it writes memory #then the seeded repo is created and one pinned block is projected per request", async () => {
     // given
@@ -161,13 +208,22 @@ describe("registerMemoryComponent", () => {
     f.addSession("root", { metadata: { "user.key": "kept" } })
     const cleanup = await registerMemoryComponent(f.host, f.options())
     // when
-    const result = await f.runTool("memory", "root", create("system/notes.md", "Working notes for this project", "token zebra-4711"))
+    const result = await f.runTool(
+      "memory",
+      "root",
+      create("system/notes.md", "Working notes for this project", "token zebra-4711"),
+    )
     const first = await f.context("root")
     const again = await f.context("root", first)
     // then
     expect(typeof result.metadata?.commit).toBe("string")
     const metadata = f.sessions.get("root")?.metadata ?? {}
-    const repo = join(f.env.OMO_MEMORY_HOME ?? "", "agents", String((metadata[MEMORY_BINDING_KEY] as { identity: string }).identity), "repo")
+    const repo = join(
+      f.env.OMO_MEMORY_HOME ?? "",
+      "agents",
+      String((metadata[MEMORY_BINDING_KEY] as { identity: string }).identity),
+      "repo",
+    )
     expect(existsSync(join(repo, "system", "persona.md"))).toBe(true)
     expect(readFileSync(join(repo, "system", "notes.md"), "utf8")).toContain("zebra-4711")
     expect(partsWith(again, MEMORY_PART_MARKER)).toHaveLength(1)
@@ -187,7 +243,8 @@ describe("registerMemoryComponent", () => {
     // when
     await f.runTool("memory_apply_patch", "root", {
       reason: "add beta",
-      input: "*** Begin Patch\n*** Add File: system/later.md\n+---\n+description: Notes added after the pin\n+---\n+token beta-2\n*** End Patch",
+      input:
+        "*** Begin Patch\n*** Add File: system/later.md\n+---\n+description: Notes added after the pin\n+---\n+token beta-2\n*** End Patch",
     })
     const stillPinned = partsWith(await f.context("root"), MEMORY_PART_MARKER)[0]?.text
     await f.compaction("root")

@@ -5,7 +5,14 @@
 // to clear because its holder is this live host (the S7h "Stranded git lock file(s)" spawn failure).
 // Senpi seeds the same way: `prepareMemoryEngineSession` initializes the repo inside its writer lock.
 
-import { createLockRecord, GitMemoryRepo, initMemoryWithSeeds, memoryWriterLockPath, withLock, type MemoryIdentityPaths } from "@oh-my-opencode/memory-core"
+import {
+  createLockRecord,
+  GitMemoryRepo,
+  initMemoryWithSeeds,
+  memoryWriterLockPath,
+  withLock,
+  type MemoryIdentityPaths,
+} from "@oh-my-opencode/memory-core"
 import { existsSync, mkdir } from "@oh-my-opencode/memory-core/fs"
 import { join } from "node:path"
 
@@ -23,8 +30,12 @@ export interface WriterLockOptions {
 }
 
 /** The cross-process `memory-write` lock every parent-repo write takes; `holder` labels the lock record. */
-export function memoryWriterLock(target: MemoryRepoTarget, holder: string, options: WriterLockOptions = {}): WriterLock {
-  return async operation => {
+export function memoryWriterLock(
+  target: MemoryRepoTarget,
+  holder: string,
+  options: WriterLockOptions = {},
+): WriterLock {
+  return async (operation) => {
     await mkdir(target.paths.locks, { recursive: true, mode: 0o700 })
     const record = await createLockRecord(holder)
     return withLock(memoryWriterLockPath(target.paths.locks), record, operation, {
@@ -42,10 +53,11 @@ export function memoryWriterLock(target: MemoryRepoTarget, holder: string, optio
  */
 export async function openMemoryRepo(target: MemoryRepoTarget, lock: WriterLock): Promise<GitMemoryRepo> {
   const repo = new GitMemoryRepo({ dir: target.paths.repo, agentId: target.identity })
-  const seeded = async (): Promise<boolean> => existsSync(join(target.paths.repo, ".git")) && await repo.head() !== null
-  if (!await seeded()) {
+  const seeded = async (): Promise<boolean> =>
+    existsSync(join(target.paths.repo, ".git")) && (await repo.head()) !== null
+  if (!(await seeded())) {
     await lock(async () => {
-      if (!await seeded()) await initMemoryWithSeeds(repo, { authorName: target.identity })
+      if (!(await seeded())) await initMemoryWithSeeds(repo, { authorName: target.identity })
     })
   }
   return repo

@@ -27,27 +27,40 @@ export function locationPermissionAdapters(directory: string): Readonly<Record<s
     return path.resolve(directory, value)
   }
   return {
-    read: input => {
+    read: (input) => {
       const value = record(input)
       // Current public read codec uses path; accept filePath only for explicitly compatible inventories.
       if (value.path !== undefined && value.filePath !== undefined) throw new Error("Ambiguous read path")
       return [{ action: "read", resources: [absolute(value.path ?? value.filePath)] }]
     },
-    grep: input => {
+    grep: (input) => {
       const value = record(input)
       if (typeof value.pattern !== "string" || !value.pattern) throw new Error("Expected grep pattern")
-      return [{ action: "read", resources: [absolute(value.path ?? directory)] }, { action: "grep", resources: [value.pattern] }]
+      return [
+        { action: "read", resources: [absolute(value.path ?? directory)] },
+        { action: "grep", resources: [value.pattern] },
+      ]
     },
   }
 }
 
-export async function assertPermissions(port: PermissionPort, context: ToolContext, permissions: readonly ResourcePermission[]) {
+export async function assertPermissions(
+  port: PermissionPort,
+  context: ToolContext,
+  permissions: readonly ResourcePermission[],
+) {
   if (!permissions.length) throw new Error("Permission adapter must declare resources")
   for (const permission of permissions) {
-    if (!permission.action || !permission.resources.length || permission.resources.some(value => !value)) throw new Error("Invalid resource permission")
+    if (!permission.action || !permission.resources.length || permission.resources.some((value) => !value))
+      throw new Error("Invalid resource permission")
     context.signal.throwIfAborted()
-    const input = { sessionID: context.sessionID, agent: context.agent, action: permission.action, resources: [...permission.resources],
-      source: { type: "tool" as const, messageID: context.messageID, id: context.id } }
+    const input = {
+      sessionID: context.sessionID,
+      agent: context.agent,
+      action: permission.action,
+      resources: [...permission.resources],
+      source: { type: "tool" as const, messageID: context.messageID, id: context.id },
+    }
     // Options belong ONLY to our issued internal API, never SDK Promise.assert
     // or a structural lookalike of the joined owner.
     if (hasJoinedPermissionCancellation(port)) await port.assert(input, { signal: context.signal })

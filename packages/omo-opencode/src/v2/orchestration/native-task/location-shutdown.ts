@@ -6,7 +6,10 @@ type EventLocation = { readonly directory: string; readonly workspaceID?: string
 /** The host scopes a plugin's subscription to its own location; an event that still names another
  * location (or workspace) is not ours. */
 function sameLocation(event: EventLocation, own: ShutdownHost["location"]): boolean {
-  return event === undefined || event.directory === own.directory && (event.workspaceID ?? undefined) === (own.workspaceID ?? undefined)
+  return (
+    event === undefined ||
+    (event.directory === own.directory && (event.workspaceID ?? undefined) === (own.workspaceID ?? undefined))
+  )
 }
 
 /** Calls `onShutdown` once when OpenCode shuts this plugin's location down (`location.shutdown`, emitted by
@@ -24,13 +27,17 @@ export function watchLocationShutdown(host: ShutdownHost, onShutdown: () => Prom
         break
       }
     } catch (error) {
-      if (!stop.signal.aborted) console.warn("[oh-my-openagent/v2] location shutdown watch failed; the host close still parks children", error)
+      if (!stop.signal.aborted)
+        console.warn("[oh-my-openagent/v2] location shutdown watch failed; the host close still parks children", error)
       return
     }
     if (!shutdown || stop.signal.aborted) return
     stop.abort()
     await onShutdown().catch((error: unknown) => {
-      console.error("[oh-my-openagent/v2] Native task park on location shutdown failed; the host close retries it", error)
+      console.error(
+        "[oh-my-openagent/v2] Native task park on location shutdown failed; the host close retries it",
+        error,
+      )
     })
   })()
   return () => stop.abort()

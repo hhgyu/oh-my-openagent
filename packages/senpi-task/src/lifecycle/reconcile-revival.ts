@@ -33,18 +33,28 @@ export async function reconcileScopedRevival(
   if (!reconciliationActive(context) || context.config.resume_children === false) return []
 
   const outcomes: ReconcileOutcome[] = []
-  const sessionRecords = records.filter((record) => record.parent_session_id === parentSessionId && record.owned_session === undefined)
-  for (const record of records.filter(record => record.parent_session_id === parentSessionId && record.owned_session !== undefined)) {
+  const sessionRecords = records.filter(
+    (record) => record.parent_session_id === parentSessionId && record.owned_session === undefined,
+  )
+  for (const record of records.filter(
+    (record) => record.parent_session_id === parentSessionId && record.owned_session !== undefined,
+  )) {
     if (!context.ownedSessions) throw new Error("Owned session lifecycle port required")
     outcomes.push(await context.ownedSessions.reconcile(record))
   }
-  const expected = new Map<string, TaskRecord>(sessionRecords.filter(isSuspended).map(record => [record.task_id, record]))
+  const expected = new Map<string, TaskRecord>(
+    sessionRecords.filter(isSuspended).map((record) => [record.task_id, record]),
+  )
   const canClaim = (fresh: TaskRecord) => {
     const observed = expected.get(fresh.task_id)
-    return observed !== undefined && context.reconcileAdmission.canClaim?.(fresh) !== false
-      && fresh.host_pid === observed.host_pid && fresh.residency_claim === observed.residency_claim
-      && fresh.notification.run_epoch === observed.notification.run_epoch
-      && fresh.residency_state === observed.residency_state
+    return (
+      observed !== undefined &&
+      context.reconcileAdmission.canClaim?.(fresh) !== false &&
+      fresh.host_pid === observed.host_pid &&
+      fresh.residency_claim === observed.residency_claim &&
+      fresh.notification.run_epoch === observed.notification.run_epoch &&
+      fresh.residency_state === observed.residency_state
+    )
   }
   // A daemon-hosted child NAMES its transcript on the record. The disk scan below only knows the
   // child's own session dir, so without this a parked host session reads as "terminal with no
@@ -89,8 +99,9 @@ export async function reconcileScopedRevival(
     }
   }
 
-  const candidates = suspendedCandidates(context, parentSessionId)
-    .filter(({ record }) => !excludedFromAdmission.has(record.task_id) && canClaim(record))
+  const candidates = suspendedCandidates(context, parentSessionId).filter(
+    ({ record }) => !excludedFromAdmission.has(record.task_id) && canClaim(record),
+  )
   if (context.config.reattach_on_reconcile === false) {
     outcomes.push(...candidates.map(({ record }) => deferred(record.task_id, "reattach_disabled")))
     return recordDeferrals(context, outcomes)
@@ -144,7 +155,11 @@ function recordDeferrals(context: LifecycleContext, outcomes: ReconcileOutcome[]
     try {
       markRevivalDeferred(context, outcome.task_id, outcome.reason)
     } catch (error) {
-      log("senpi-task revival deferral not recorded", { taskId: outcome.task_id, reason: outcome.reason, error: String(error) })
+      log("senpi-task revival deferral not recorded", {
+        taskId: outcome.task_id,
+        reason: outcome.reason,
+        error: String(error),
+      })
     }
   }
   return outcomes
@@ -157,8 +172,13 @@ function disposeSuspendedTerminalWithoutTranscript(
   let applied = false
   try {
     context.store.mutate(observed.task_id, (fresh) => {
-      if (!reconciliationActive(context) || fresh.residency_claim !== observed.residency_claim
-        || fresh.host_pid !== observed.host_pid || fresh.notification.run_epoch !== observed.notification.run_epoch) return fresh
+      if (
+        !reconciliationActive(context) ||
+        fresh.residency_claim !== observed.residency_claim ||
+        fresh.host_pid !== observed.host_pid ||
+        fresh.notification.run_epoch !== observed.notification.run_epoch
+      )
+        return fresh
       if (!isSuspendedResidency(fresh.residency_state) || !TERMINAL_STATUSES.has(fresh.status)) return fresh
       applied = true
       const { host_pid: _hostPid, ...rest } = fresh
@@ -171,8 +191,13 @@ function disposeSuspendedTerminalWithoutTranscript(
 }
 
 function suspendedCandidates(context: LifecycleContext, parentSessionId: string): readonly RevivalCandidate[] {
-  return context.store.list().records.flatMap((record): readonly RevivalCandidate[] =>
-    isRevivalCandidate(record, parentSessionId) && isSuspended(record) ? [{ record, priorResidency: record.residency_state }] : [])
+  return context.store
+    .list()
+    .records.flatMap((record): readonly RevivalCandidate[] =>
+      isRevivalCandidate(record, parentSessionId) && isSuspended(record)
+        ? [{ record, priorResidency: record.residency_state }]
+        : [],
+    )
 }
 
 function isSuspended(record: TaskRecord): record is TaskRecord & { readonly residency_state: SuspendedResidency } {

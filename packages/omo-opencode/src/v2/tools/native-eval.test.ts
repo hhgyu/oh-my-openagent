@@ -1,13 +1,29 @@
 import { describe, expect, test } from "bun:test"
 import { Error as ToolError, type ToolContext } from "@opencode/plugin/promise/tool"
 import {
-  EVAL_DENIED_AGENTS, NATIVE_EVAL_PERMISSION, NATIVE_EVAL_PLACEHOLDER_DESCRIPTION, NATIVE_EVAL_TOOL_NAME,
-  evalStateDir, registerNativeEval,
+  EVAL_DENIED_AGENTS,
+  NATIVE_EVAL_PERMISSION,
+  NATIVE_EVAL_PLACEHOLDER_DESCRIPTION,
+  NATIVE_EVAL_TOOL_NAME,
+  evalStateDir,
+  registerNativeEval,
 } from "./native-eval"
-import { NO_PROCESS_EVENTS as noProcess, fakeEvalBackend as fakeBackend, fakeEvalHost as fakeHost } from "./test-support"
+import {
+  NO_PROCESS_EVENTS as noProcess,
+  fakeEvalBackend as fakeBackend,
+  fakeEvalHost as fakeHost,
+} from "./test-support"
 
 function context(overrides: Partial<ToolContext> = {}): ToolContext {
-  return { sessionID: "ses_root", agent: "sisyphus", messageID: "msg_1", id: "call_1", signal: new AbortController().signal, progress: async () => {}, ...overrides } as ToolContext
+  return {
+    sessionID: "ses_root",
+    agent: "sisyphus",
+    messageID: "msg_1",
+    id: "call_1",
+    signal: new AbortController().signal,
+    progress: async () => {},
+    ...overrides,
+  } as ToolContext
 }
 
 describe("native eval tool", () => {
@@ -40,7 +56,10 @@ describe("native eval tool", () => {
     // given
     const fake = fakeHost()
     const seen: { signal?: AbortSignal; id?: string; params?: unknown }[] = []
-    const made = fakeBackend(async (id, params, signal) => { seen.push({ id, params, signal }); return { content: [{ type: "text", text: "42" }], details: { language: "js" } } })
+    const made = fakeBackend(async (id, params, signal) => {
+      seen.push({ id, params, signal })
+      return { content: [{ type: "text", text: "42" }], details: { language: "js" } }
+    })
     const dispose = await registerNativeEval(fake.host, { backend: made.backend, processEvents: noProcess })
     const caller = context()
 
@@ -49,7 +68,9 @@ describe("native eval tool", () => {
 
     // then
     expect(result).toEqual({ content: [{ type: "text", text: "42" }], metadata: { nativeEval: { language: "js" } } })
-    expect(seen).toEqual([{ id: "call_1", params: { language: "js", code: "6*7", summary: "s" }, signal: caller.signal }])
+    expect(seen).toEqual([
+      { id: "call_1", params: { language: "js", code: "6*7", summary: "s" }, signal: caller.signal },
+    ])
     expect(made.state.acquired).toBe(1)
     await dispose()
     expect(made.state.disposed).toBe(1)
@@ -58,12 +79,20 @@ describe("native eval tool", () => {
   test("#given a running cell #when the call is aborted #then the abort propagates and the model gets a tool error", async () => {
     // given
     const fake = fakeHost()
-    const made = fakeBackend((_id, _params, signal) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })))
+    const made = fakeBackend(
+      (_id, _params, signal) =>
+        new Promise((_resolve, reject) =>
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+        ),
+    )
     const dispose = await registerNativeEval(fake.host, { backend: made.backend, processEvents: noProcess })
     const controller = new AbortController()
 
     // when
-    const pending = fake.tools[0]?.execute({ language: "js", code: "await sleep()", summary: "s" }, context({ signal: controller.signal }))
+    const pending = fake.tools[0]?.execute(
+      { language: "js", code: "await sleep()", summary: "s" },
+      context({ signal: controller.signal }),
+    )
     await Bun.sleep(5)
     controller.abort(Error("user interrupted"))
     const error = await pending?.catch((caught: unknown) => caught)
@@ -82,7 +111,10 @@ describe("native eval tool", () => {
     const controller = new AbortController()
 
     // when
-    const pending = fake.tools[0]?.execute({ language: "js", code: "1", summary: "s" }, context({ signal: controller.signal }))
+    const pending = fake.tools[0]?.execute(
+      { language: "js", code: "1", summary: "s" },
+      context({ signal: controller.signal }),
+    )
     controller.abort(Error("stop"))
     const error = await pending?.catch((caught: unknown) => caught)
 
@@ -99,8 +131,12 @@ describe("native eval tool", () => {
     const tool = fake.tools[0]
 
     // when
-    const readOnly = await tool?.execute({}, context({ agent: "explore" } as Partial<ToolContext>)).catch((caught: unknown) => caught)
-    const child = await tool?.execute({}, context({ sessionID: "ses_child" } as Partial<ToolContext>)).catch((caught: unknown) => caught)
+    const readOnly = await tool
+      ?.execute({}, context({ agent: "explore" } as Partial<ToolContext>))
+      .catch((caught: unknown) => caught)
+    const child = await tool
+      ?.execute({}, context({ sessionID: "ses_child" } as Partial<ToolContext>))
+      .catch((caught: unknown) => caught)
 
     // then
     expect((readOnly as Error).message).toContain("not available to the explore agent")
@@ -112,21 +148,35 @@ describe("native eval tool", () => {
   test("#given the context hook #when a request is built #then children and read-only roles lose eval and roots get the loaded description", async () => {
     // given
     const fake = fakeHost({ ses_child: { parentID: "ses_root" } })
-    const made = fakeBackend(undefined, { definition: { description: "codemode description", parameters: { type: "object", properties: { code: {} } } } })
+    const made = fakeBackend(undefined, {
+      definition: { description: "codemode description", parameters: { type: "object", properties: { code: {} } } },
+    })
     const dispose = await registerNativeEval(fake.host, { backend: made.backend, processEvents: noProcess })
     const id = fake.tools[0]?.id ?? ""
-    const request = (sessionID: string, agent: string) => ({ sessionID, agent, tools: { [id]: { description: "placeholder", input: {} } } as Record<string, { description: string; input: unknown }> })
+    const request = (sessionID: string, agent: string) => ({
+      sessionID,
+      agent,
+      tools: { [id]: { description: "placeholder", input: {} } } as Record<
+        string,
+        { description: string; input: unknown }
+      >,
+    })
     await fake.tools[0]?.execute({ language: "js", code: "1", summary: "s" }, context())
     await Bun.sleep(1)
 
     // when
-    const child = request("ses_child", "sisyphus"), readOnly = request("ses_root", "oracle"), root = request("ses_root", "sisyphus")
+    const child = request("ses_child", "sisyphus"),
+      readOnly = request("ses_root", "oracle"),
+      root = request("ses_root", "sisyphus")
     for (const value of [child, readOnly, root]) await fake.hooks[0]?.(value)
 
     // then
     expect(child.tools[id]).toBeUndefined()
     expect(readOnly.tools[id]).toBeUndefined()
-    expect(root.tools[id]).toEqual({ description: "codemode description", input: { type: "object", properties: { code: {} } } })
+    expect(root.tools[id]).toEqual({
+      description: "codemode description",
+      input: { type: "object", properties: { code: {} } },
+    })
     await dispose()
   })
 

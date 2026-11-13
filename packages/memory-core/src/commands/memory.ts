@@ -45,7 +45,11 @@ function renderNameSection(title: string, paths: readonly string[]): string[] {
   return ["", `## ${title}`, ...sorted.map((path) => `- ${path}`)]
 }
 
-export async function runMemoryViewCommand(deps: MemoryCommandDeps, args: string, ctx: MemoryCommandContext): Promise<string> {
+export async function runMemoryViewCommand(
+  deps: MemoryCommandDeps,
+  args: string,
+  ctx: MemoryCommandContext,
+): Promise<string> {
   const identity = requireIdentity(deps, ctx)
   if (typeof identity === "string") return respond(ctx, identity, "error")
 
@@ -54,7 +58,11 @@ export async function runMemoryViewCommand(deps: MemoryCommandDeps, args: string
     return runMemoryUnlock(ctx, identity, parsed.positionals.slice(1).join(" "), parsed.flags.get("force") === true)
   }
   if (parsed.positionals.length > 0) {
-    return respond(ctx, `unknown /memory subcommand "${parsed.positionals[0]}"; use /memory or /memory unlock <lock path>`, "error")
+    return respond(
+      ctx,
+      `unknown /memory subcommand "${parsed.positionals[0]}"; use /memory or /memory unlock <lock path>`,
+      "error",
+    )
   }
 
   if (!hasGitRepo(identity)) {
@@ -68,7 +76,11 @@ export async function runMemoryViewCommand(deps: MemoryCommandDeps, args: string
   const repo = openRepo(deps, identity)
   const head = await repo.head()
   if (head === null) {
-    return respond(ctx, `memory repository at ${identity.identityPaths.repo} has no commits yet; run ${slashCommand(deps, "init")}`, "error")
+    return respond(
+      ctx,
+      `memory repository at ${identity.identityPaths.repo} has no commits yet; run ${slashCommand(deps, "init")}`,
+      "error",
+    )
   }
 
   const porcelain = (await repo.status()).split(/\r?\n/).filter((line) => line.trim().length > 0)

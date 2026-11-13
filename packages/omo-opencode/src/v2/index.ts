@@ -105,9 +105,13 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
       cleanups.push(await runtime.register(context))
     }
     // An eval cell's `tools.task` reaches the Native task component through this port (S9d).
-    const evalTask = owners.nativeTask && context.options?.["omo-native-eval-enabled"] !== false
-      ? await import("./tools/eval-task-host-tool").then(module => ({ port: module.createEvalTaskPort(), tool: module.createEvalTaskHostTool }))
-      : undefined
+    const evalTask =
+      owners.nativeTask && context.options?.["omo-native-eval-enabled"] !== false
+        ? await import("./tools/eval-task-host-tool").then((module) => ({
+            port: module.createEvalTaskPort(),
+            tool: module.createEvalTaskHostTool,
+          }))
+        : undefined
     if (context.options?.["omo-native-eval-enabled"] !== false) {
       // Native `eval`, on by default like Native. Registers the tool only; senpi-codemode itself
       // is imported on the first call.
@@ -117,14 +121,28 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
     if (owners.nativeTask) {
       const { registerNativeTaskComponent } = await import("./orchestration/native-task/component")
       // The lead team tools share the Native task component's registry, kernel and service.
-      const team = nativeTeamEnabled(context.options) ? (await import("./orchestration/native-team/component")).registerNativeTeamComponent : undefined
-      const dag = nativeDagEnabled(context.options) ? (await import("./orchestration/native-dag/component")).registerNativeDagComponent : undefined
-      cleanups.push(await registerNativeTaskComponent(context, owners.nativeTask, { ...(team && { team }), ...(dag && { dag: host => dag(host, context.rpc) }), ...(evalTask && { evalTask: evalTask.port }) }))
+      const team = nativeTeamEnabled(context.options)
+        ? (await import("./orchestration/native-team/component")).registerNativeTeamComponent
+        : undefined
+      const dag = nativeDagEnabled(context.options)
+        ? (await import("./orchestration/native-dag/component")).registerNativeDagComponent
+        : undefined
+      cleanups.push(
+        await registerNativeTaskComponent(context, owners.nativeTask, {
+          ...(team && { team }),
+          ...(dag && { dag: (host) => dag(host, context.rpc) }),
+          ...(evalTask && { evalTask: evalTask.port }),
+        }),
+      )
     }
     cleanups.push(await registerBootstrap(context.rpc))
   } catch (error) {
     for (const cleanup of cleanups.reverse()) {
-      try { await cleanup() } catch (cleanupError) { console.error("[oh-my-openagent/v2] setup cleanup failed", cleanupError) }
+      try {
+        await cleanup()
+      } catch (cleanupError) {
+        console.error("[oh-my-openagent/v2] setup cleanup failed", cleanupError)
+      }
     }
     throw error
   }
@@ -133,7 +151,11 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
     if (disposed) return
     disposed = true
     for (const cleanup of cleanups.reverse()) {
-      try { await cleanup() } catch (error) { console.error("[oh-my-openagent/v2] cleanup failed", error) }
+      try {
+        await cleanup()
+      } catch (error) {
+        console.error("[oh-my-openagent/v2] cleanup failed", error)
+      }
     }
   }
 }
@@ -148,14 +170,21 @@ export function setupV2EffectHost(context: EffectPlugin.Context): Effect.Effect<
     console.info("[oh-my-openagent/v2] Effect session transport ready", context.app.version)
     // Acquired BEFORE the Promise component so scope finalization (LIFO) closes them after it.
     const nativeTask = nativeTaskEnabled(context.options)
-      ? yield* Effect.flatMap(Effect.promise(() => import("./orchestration/native-task/component")), component => component.acquireNativeTaskEffectOwners(context, bridge))
+      ? yield* Effect.flatMap(
+          Effect.promise(() => import("./orchestration/native-task/component")),
+          (component) => component.acquireNativeTaskEffectOwners(context, bridge),
+        )
       : undefined
     yield* fromPromise({
       id: PLUGIN_ID,
-      setup: (promiseContext) => setupV2Host({
-        ...promiseContext,
-        session: { ...promiseContext.session, ...bridge },
-      }, nativeTask ? { nativeTask } : {}),
+      setup: (promiseContext) =>
+        setupV2Host(
+          {
+            ...promiseContext,
+            session: { ...promiseContext.session, ...bridge },
+          },
+          nativeTask ? { nativeTask } : {},
+        ),
     }).effect(context)
   })
 }

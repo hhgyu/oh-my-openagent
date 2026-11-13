@@ -26,7 +26,12 @@ describe("facts status pending count", () => {
     tempDirs.push(dir)
     const identityPaths = buildIdentityPaths(join(dir, "memory"), "agent")
     const queue = new FactsQueue({ identityPaths })
-    await queue.enqueue({ identity: "agent", sessionId: "conv", conversationId: "conv", entries: [entry("user", "ask"), entry("assistant", "answer")] })
+    await queue.enqueue({
+      identity: "agent",
+      sessionId: "conv",
+      conversationId: "conv",
+      entries: [entry("user", "ask"), entry("assistant", "answer")],
+    })
     const pending = await queue.listPending()
     await queue.claim(pending, "claim-1")
     const now = new Date("2026-01-01T00:00:00.000Z")
@@ -45,9 +50,16 @@ describe("facts status wait wording", () => {
     // given
     const now = new Date("2026-08-16T12:00:00.000Z")
     const record: FactsFailureRecord = {
-      conversationId: "conv-a", end_message_id: "msg-a", end_snapshot_line: 4, state: "backoff", streak: 1,
-      firstFailureAt: "2026-08-16T11:59:30.000Z", lastFailureAt: "2026-08-16T11:59:30.000Z", lastReason: "child_exit",
-      lastFailureId: "run-1", nextEligibleAt: "2026-08-16T12:00:42.000Z",
+      conversationId: "conv-a",
+      end_message_id: "msg-a",
+      end_snapshot_line: 4,
+      state: "backoff",
+      streak: 1,
+      firstFailureAt: "2026-08-16T11:59:30.000Z",
+      lastFailureAt: "2026-08-16T11:59:30.000Z",
+      lastReason: "child_exit",
+      lastFailureId: "run-1",
+      nextEligibleAt: "2026-08-16T12:00:42.000Z",
     }
     // when
     const text = formatFactsStatus("agent", { pending: 1, records: [record], now })

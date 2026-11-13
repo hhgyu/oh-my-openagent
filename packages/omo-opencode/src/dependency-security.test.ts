@@ -63,8 +63,7 @@ function extractLockedVersion(packageReference: string): string {
 async function findFirstPartyEffectImports(): Promise<string[]> {
   // POSIX ERE, not PCRE: `git grep -P` needs a git built with USE_LIBPCRE and
   // exits 128 without it (#10735). Every git supports -E.
-  const importPattern =
-    String.raw`(from[[:space:]]+|import\([[:space:]]*|require\([[:space:]]*)["']effect(/[^"']*)?["']`
+  const importPattern = String.raw`(from[[:space:]]+|import\([[:space:]]*|require\([[:space:]]*)["']effect(/[^"']*)?["']`
   const result = Bun.spawnSync(
     [
       "git",
@@ -98,7 +97,11 @@ async function findFirstPartyEffectImports(): Promise<string[]> {
 
 // The OpenCode 2 plugin API is Effect-based; only its host adapter (and the build test of its Effect root)
 // may import the host-provided effect.
-const EFFECT_HOST_ADAPTER_PREFIXES = ["packages/omo-opencode/src/v2/", "packages/omo-opencode/src/opencode-v2/", "script/build-v2-effect-root.test.ts"] as const
+const EFFECT_HOST_ADAPTER_PREFIXES = [
+  "packages/omo-opencode/src/v2/",
+  "packages/omo-opencode/src/opencode-v2/",
+  "script/build-v2-effect-root.test.ts",
+] as const
 
 describe("dependency security", () => {
   it("#given picomatch is bundled into the published dist #when dependencies are locked #then it uses the patched ReDoS-safe release", () => {
@@ -146,6 +149,8 @@ describe("dependency security", () => {
   it("#given first-party TypeScript sources #when dependency imports are scanned #then only the OpenCode 2 Effect host adapter imports effect", async () => {
     const effectImports = await findFirstPartyEffectImports()
 
-    expect(effectImports.filter((path) => !EFFECT_HOST_ADAPTER_PREFIXES.some((prefix) => path.startsWith(prefix)))).toEqual([])
+    expect(
+      effectImports.filter((path) => !EFFECT_HOST_ADAPTER_PREFIXES.some((prefix) => path.startsWith(prefix))),
+    ).toEqual([])
   }, 90_000)
 })

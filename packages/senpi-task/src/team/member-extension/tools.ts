@@ -66,15 +66,18 @@ export async function runMemberTaskSend(
   const recipients = new Set([...deps.members, TEAM_LEAD_SENTINEL])
   if (!recipients.has(input.to)) throw new UnknownMemberRecipientError(input.to, deps.members)
 
-  const message = buildTeamMessage({
-    from: deps.memberName,
-    to: input.to,
-    body: input.message,
-    ...(input.summary !== undefined ? { summary: input.summary } : {}),
-  }, {
-    now: deps.now ?? Date.now,
-    newMessageId: deps.newMessageId ?? randomUUID,
-  })
+  const message = buildTeamMessage(
+    {
+      from: deps.memberName,
+      to: input.to,
+      body: input.message,
+      ...(input.summary !== undefined ? { summary: input.summary } : {}),
+    },
+    {
+      now: deps.now ?? Date.now,
+      newMessageId: deps.newMessageId ?? randomUUID,
+    },
+  )
 
   await sendMessage(message, deps.teamRunId, deps.config, {
     isLead: false,
@@ -92,9 +95,7 @@ export async function runMemberTaskSend(
   })
 }
 
-export function createMemberTaskSendTool(
-  deps: MemberTaskSendDeps,
-): MemberTaskSendTool {
+export function createMemberTaskSendTool(deps: MemberTaskSendDeps): MemberTaskSendTool {
   // Returned as a plain literal: senpi's defineTool is an identity helper for type inference
   // (pinned by the senpi API tripwire), so wrapping here would only statically bind this module
   // to the engine barrel.

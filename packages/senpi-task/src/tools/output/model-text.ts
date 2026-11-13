@@ -31,4 +31,3 @@ function nonEmpty(value: string | undefined): string | undefined {
   const normalized = value === undefined ? undefined : excerptRendererText(value)
   return normalized !== undefined && normalized.length > 0 ? normalized : undefined
 }
-

@@ -8,7 +8,8 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const DIST_DIR = resolve(process.argv[2] ?? join(SCRIPT_DIR, "..", "dist"))
 const IMPORT_LINE = 'import { createRequire as __omoCreateRequire } from "node:module";'
 const BUN_REQUIRE_LINE = "var __require = import.meta.require;"
-const NODE_SAFE_REQUIRE_LINE = 'var __require = typeof import.meta.require === "function" ? import.meta.require : __omoCreateRequire(import.meta.url);'
+const NODE_SAFE_REQUIRE_LINE =
+  'var __require = typeof import.meta.require === "function" ? import.meta.require : __omoCreateRequire(import.meta.url);'
 
 // Splitting can move Bun's helper into a shared or lazy chunk. Patch only the
 // OpenCode entry/chunk directories; CLI and other product builds are independent.

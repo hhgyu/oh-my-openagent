@@ -13,7 +13,12 @@ import { recordingEditor } from "./test-support"
 const emptyConfig: AgentsConfig = { agents: {}, disabled_agents: [] }
 
 function effective(editor: AgentEditor, id: string, action: string, resource = "*") {
-  return editor.get(id)?.permissions.findLast((rule) => (rule.action === "*" || rule.action === action) && (rule.resource === "*" || rule.resource === resource))?.effect
+  return editor
+    .get(id)
+    ?.permissions.findLast(
+      (rule) =>
+        (rule.action === "*" || rule.action === action) && (rule.resource === "*" || rule.resource === resource),
+    )?.effect
 }
 
 describe("native v2 agents", () => {
@@ -40,7 +45,9 @@ describe("native v2 agents", () => {
     editor.update("plan", () => {})
     editor.update("custom-host", () => {})
     let defaultChanges = 0
-    editor.default = () => { defaultChanges++ }
+    editor.default = () => {
+      defaultChanges++
+    }
     applyAgents(editor, emptyConfig)
     expect(defaultChanges).toBe(0)
     for (const id of ["build", "builder", "plan"]) {
@@ -50,7 +57,12 @@ describe("native v2 agents", () => {
     expect(editor.get("custom-host")?.hidden).toBe(false)
     expect(editor.get("sisyphus")?.hidden).toBe(false)
     expect(editor.get("prometheus")?.hidden).toBe(false)
-    expect(editor.list().filter((agent) => !agent.hidden).map((agent) => agent.id)).not.toContain("build")
+    expect(
+      editor
+        .list()
+        .filter((agent) => !agent.hidden)
+        .map((agent) => agent.id),
+    ).not.toContain("build")
   })
 
   it("retains builtin fallback visibility when corresponding OmO replacements are disabled", () => {
@@ -61,27 +73,44 @@ describe("native v2 agents", () => {
     expect(editor.get("plan")?.hidden).toBe(false)
     expect(editor.get("build")?.mode).toBe("primary")
     expect(editor.get("plan")?.mode).toBe("primary")
-    expect(editor.list().filter(agent => !agent.hidden)).toHaveLength(2)
+    expect(editor.list().filter((agent) => !agent.hidden)).toHaveLength(2)
   })
 
   it("uses only selectable enabled replacements to decide builtin visibility", () => {
     const disabled = ["hephaestus", "atlas"]
     const { editor } = recordingEditor()
     editor.update("plan", () => {})
-    applyAgents(editor, { agents: { sisyphus: { mode: "subagent" }, prometheus: { disable: true } }, disabled_agents: disabled })
+    applyAgents(editor, {
+      agents: { sisyphus: { mode: "subagent" }, prometheus: { disable: true } },
+      disabled_agents: disabled,
+    })
     expect(editor.get("build")?.hidden).toBe(false)
     expect(editor.get("plan")?.hidden).toBe(false)
     const promoted = recordingEditor().editor
-    applyAgents(promoted, { agents: { sisyphus: { mode: "subagent" }, oracle: { mode: "primary" } }, disabled_agents: disabled })
+    applyAgents(promoted, {
+      agents: { sisyphus: { mode: "subagent" }, oracle: { mode: "primary" } },
+      disabled_agents: disabled,
+    })
     expect(promoted.get("build")?.hidden).toBe(true)
   })
 
   it("applies model, model-chain primary, prompt, name and permission overrides", () => {
     const { editor } = recordingEditor()
-    applyAgents(editor, { agents: {
-      sisyphus: { model: "mock/primary#low", reasoning: "high", prompt: "custom system", prompt_append: "extra", displayName: "My Builder", permission: { bash: { "git *": "allow", "rm *": "deny" } }, permissions: [{ action: "webfetch", resource: "*", effect: "deny" }] },
-      hephaestus: { model: "mock/ignored", models: [{ model: "mock/chain", reasoning: "medium" }] },
-    }, disabled_agents: [] })
+    applyAgents(editor, {
+      agents: {
+        sisyphus: {
+          model: "mock/primary#low",
+          reasoning: "high",
+          prompt: "custom system",
+          prompt_append: "extra",
+          displayName: "My Builder",
+          permission: { bash: { "git *": "allow", "rm *": "deny" } },
+          permissions: [{ action: "webfetch", resource: "*", effect: "deny" }],
+        },
+        hephaestus: { model: "mock/ignored", models: [{ model: "mock/chain", reasoning: "medium" }] },
+      },
+      disabled_agents: [],
+    })
     expect(editor.get("sisyphus")?.model).toEqual({ providerID: "mock", id: "primary", variant: "high" })
     expect(editor.get("sisyphus")?.system).toBe("custom system\n\nextra")
     expect(editor.get("sisyphus")?.name).toBe("My Builder")
@@ -92,7 +121,13 @@ describe("native v2 agents", () => {
 
   it("inherits the host model and applies reasoning without forcing a model default", () => {
     const { editor } = recordingEditor()
-    editor.update("oracle", (agent) => { agent.model = { providerID: "mock" as NonNullable<typeof agent.model>["providerID"], id: "inherited" as NonNullable<typeof agent.model>["id"], variant: "low" as NonNullable<typeof agent.model>["variant"] } })
+    editor.update("oracle", (agent) => {
+      agent.model = {
+        providerID: "mock" as NonNullable<typeof agent.model>["providerID"],
+        id: "inherited" as NonNullable<typeof agent.model>["id"],
+        variant: "low" as NonNullable<typeof agent.model>["variant"],
+      }
+    })
     applyAgents(editor, { agents: { oracle: { reasoning: "high" } }, disabled_agents: [] })
     expect(editor.get("oracle")?.model).toEqual({ providerID: "mock", id: "inherited", variant: "high" })
     expect(editor.get("sisyphus")?.model).toBeUndefined()
@@ -110,40 +145,59 @@ describe("native v2 agents", () => {
     editor.update("bad-custom", () => {})
     const warnings = spyOn(console, "warn").mockImplementation(() => undefined)
     try {
-      applyAgents(editor, { agents: {}, disabled_agents: [], nativeAgents: {
-        "bad-custom": { permission: { read: undefined } }, "good-custom": { prompt: "valid" },
-      } })
+      applyAgents(editor, {
+        agents: {},
+        disabled_agents: [],
+        nativeAgents: {
+          "bad-custom": { permission: { read: undefined } },
+          "good-custom": { prompt: "valid" },
+        },
+      })
       expect(editor.get("bad-custom")).toBeUndefined()
       expect(editor.get("good-custom")?.mode).toBe("subagent")
       for (const id of AGENT_IDS) expect(editor.get(id)).toBeDefined()
       expect(warnings.mock.calls).toHaveLength(1)
       expect(warnings.mock.calls[0]?.[0]).toContain("agents.bad-custom.permission.read")
-    } finally { warnings.mockRestore() }
+    } finally {
+      warnings.mockRestore()
+    }
   })
 
   it("#given an unrepresentable stock override #when agents register #then its defaults and every other identity survive", () => {
     const { editor } = recordingEditor()
     const warnings = spyOn(console, "warn").mockImplementation(() => undefined)
     try {
-      applyAgents(editor, { agents: {}, disabled_agents: [], nativeAgents: { oracle: { permission: { read: undefined } } } })
+      applyAgents(editor, {
+        agents: {},
+        disabled_agents: [],
+        nativeAgents: { oracle: { permission: { read: undefined } } },
+      })
       for (const id of AGENT_IDS) expect(editor.get(id)).toBeDefined()
       expect(effective(editor, "oracle", "edit")).toBe("deny")
       expect(warnings.mock.calls).toHaveLength(1)
       expect(warnings.mock.calls[0]?.[0]).toContain("agents.oracle.permission.read")
-    } finally { warnings.mockRestore() }
+    } finally {
+      warnings.mockRestore()
+    }
   })
 
   it("#given a Native custom agent with a malformed model #when agents register #then it stays unavailable without aborting registration", () => {
     const { editor } = recordingEditor()
     const warnings = spyOn(console, "warn").mockImplementation(() => undefined)
     try {
-      applyAgents(editor, { agents: {}, disabled_agents: [], nativeAgents: { "bad-model": { model: "not-qualified" }, "good-custom": {} } })
+      applyAgents(editor, {
+        agents: {},
+        disabled_agents: [],
+        nativeAgents: { "bad-model": { model: "not-qualified" }, "good-custom": {} },
+      })
       expect(editor.get("bad-model")).toBeUndefined()
       expect(editor.get("good-custom")).toBeDefined()
       for (const id of AGENT_IDS) expect(editor.get(id)).toBeDefined()
       expect(warnings.mock.calls).toHaveLength(1)
       expect(warnings.mock.calls[0]?.[0]).toContain("agents.bad-model.model")
-    } finally { warnings.mockRestore() }
+    } finally {
+      warnings.mockRestore()
+    }
   })
   it("removes disabled OmO agents but preserves an unrelated host id in the denylist", () => {
     const { editor } = recordingEditor()
@@ -156,7 +210,15 @@ describe("native v2 agents", () => {
 
   it("enforces role restrictions after broad user allowances", () => {
     const { editor } = recordingEditor()
-    applyAgents(editor, { agents: Object.fromEntries(AGENT_IDS.map((id) => [id, { permission: { "*": "allow", edit: "allow", bash: "allow" }, tools: { edit: true } }])), disabled_agents: [] })
+    applyAgents(editor, {
+      agents: Object.fromEntries(
+        AGENT_IDS.map((id) => [
+          id,
+          { permission: { "*": "allow", edit: "allow", bash: "allow" }, tools: { edit: true } },
+        ]),
+      ),
+      disabled_agents: [],
+    })
     for (const id of ["oracle", "explore", "librarian", "metis", "momus", "multimodal-looker", "prometheus"]) {
       expect(effective(editor, id, "edit")).toBe("deny")
       expect(effective(editor, id, "bash")).toBe("deny")
@@ -169,33 +231,58 @@ describe("native v2 agents", () => {
 
   it("denies native shell for read-only roles even after user shell allowances", () => {
     const { editor } = recordingEditor()
-    applyAgents(editor, { agents: Object.fromEntries(AGENT_IDS.map((id) => [id, { permission: { "*": "allow", bash: "allow", shell: "allow" }, tools: { bash: true, shell: true } }])), disabled_agents: [] })
-    for (const id of ["oracle", "explore", "librarian", "metis", "momus", "multimodal-looker", "prometheus"]) expect(effective(editor, id, "shell")).toBe("deny")
+    applyAgents(editor, {
+      agents: Object.fromEntries(
+        AGENT_IDS.map((id) => [
+          id,
+          { permission: { "*": "allow", bash: "allow", shell: "allow" }, tools: { bash: true, shell: true } },
+        ]),
+      ),
+      disabled_agents: [],
+    })
+    for (const id of ["oracle", "explore", "librarian", "metis", "momus", "multimodal-looker", "prometheus"])
+      expect(effective(editor, id, "shell")).toBe("deny")
     expect(effective(editor, "prometheus", "edit", "**/.omo/plans/*.md")).toBe("allow")
   })
 
   it("exposes only curated broker defaults before user rules, never overriding a user deny", () => {
     // given a host wildcard deny for each Native curated identity
-    for (const id of ["explore", "librarian", "plan-consultant", "plan-reviewer"]) for (const userDeny of [false, true]) {
-      const { editor } = recordingEditor()
-      editor.update(id, agent => { agent.permissions = [{ action: "*", resource: "*", effect: "deny" }] })
-      // when OmO registers the real child agent with or without an explicit user restriction
-      applyAgents(editor, { agents: { [id]: userDeny ? { permission: { omo_native_readonly: "deny", omo_native_ls: "deny" } } : {} }, disabled_agents: [] })
-      // then stock mutation remains denied and user broker denies win over plugin defaults
-      expect(effective(editor, id, "omo_native_readonly")).toBe(userDeny ? "deny" : "allow")
-      expect(effective(editor, id, "omo_native_ls")).toBe(userDeny ? "deny" : "allow")
-      expect(effective(editor, id, "shell")).toBe("deny")
-      expect(effective(editor, id, "edit")).toBe("deny")
-    }
+    for (const id of ["explore", "librarian", "plan-consultant", "plan-reviewer"])
+      for (const userDeny of [false, true]) {
+        const { editor } = recordingEditor()
+        editor.update(id, (agent) => {
+          agent.permissions = [{ action: "*", resource: "*", effect: "deny" }]
+        })
+        // when OmO registers the real child agent with or without an explicit user restriction
+        applyAgents(editor, {
+          agents: { [id]: userDeny ? { permission: { omo_native_readonly: "deny", omo_native_ls: "deny" } } : {} },
+          disabled_agents: [],
+        })
+        // then stock mutation remains denied and user broker denies win over plugin defaults
+        expect(effective(editor, id, "omo_native_readonly")).toBe(userDeny ? "deny" : "allow")
+        expect(effective(editor, id, "omo_native_ls")).toBe(userDeny ? "deny" : "allow")
+        expect(effective(editor, id, "shell")).toBe("deny")
+        expect(effective(editor, id, "edit")).toBe("deny")
+      }
   })
 
   it("keeps Native-only builtins and custom identities out of the primary picker while preserving custom denies", () => {
     // given an enabled custom Native persona with a host-only primary-mode override
     const { editor } = recordingEditor()
-    applyAgents(editor, { agents: { "custom-auditor": { mode: "primary", permission: { read: "deny" } } }, disabled_agents: [],
-      nativeAgents: { "custom-auditor": { tools: { read: true } }, "disabled-custom": { disable: true } } })
+    applyAgents(editor, {
+      agents: { "custom-auditor": { mode: "primary", permission: { read: "deny" } } },
+      disabled_agents: [],
+      nativeAgents: { "custom-auditor": { tools: { read: true } }, "disabled-custom": { disable: true } },
+    })
     // then the actual registrar creates callable subagent identities, not new primary choices
-    for (const id of ["plan-consultant", "plan-reviewer", "omo-native-code-reviewer", "omo-native-qa-executor", "omo-native-gate-reviewer", "custom-auditor"]) {
+    for (const id of [
+      "plan-consultant",
+      "plan-reviewer",
+      "omo-native-code-reviewer",
+      "omo-native-qa-executor",
+      "omo-native-gate-reviewer",
+      "custom-auditor",
+    ]) {
       expect(editor.get(id)?.mode).toBe("subagent")
       expect(editor.get(id)?.hidden).toBe(true)
     }
@@ -228,37 +315,110 @@ describe("native v2 agents", () => {
   })
 
   const toggleCases: { name: string; override: AgentOverride; effect: "allow" | "deny"; resource?: string }[] = [
-    { name: "false toggle defeats wildcard allow", override: { tools: { edit: false }, permission: { "*": "allow" } }, effect: "deny" },
-    { name: "false toggle defeats specific allow", override: { tools: { edit: false }, permission: { edit: "allow" } }, effect: "deny" },
-    { name: "true toggle preserves permission deny", override: { tools: { edit: true }, permission: { edit: "deny" } }, effect: "deny" },
+    {
+      name: "false toggle defeats wildcard allow",
+      override: { tools: { edit: false }, permission: { "*": "allow" } },
+      effect: "deny",
+    },
+    {
+      name: "false toggle defeats specific allow",
+      override: { tools: { edit: false }, permission: { edit: "allow" } },
+      effect: "deny",
+    },
+    {
+      name: "true toggle preserves permission deny",
+      override: { tools: { edit: true }, permission: { edit: "deny" } },
+      effect: "deny",
+    },
     { name: "true toggle alone allows", override: { tools: { edit: true } }, effect: "allow" },
     { name: "permission allow alone allows", override: { permission: { edit: "allow" } }, effect: "allow" },
-    { name: "false toggle defeats permission-array allow", override: { tools: { edit: false }, permissions: [{ action: "*", resource: "*", effect: "allow" }] }, effect: "deny" },
-    { name: "true toggle preserves permission-array deny", override: { tools: { edit: true }, permissions: [{ action: "edit", resource: "*", effect: "deny" }] }, effect: "deny" },
-    { name: "specific map allow stays after broad deny", override: { permission: { edit: { "*": "deny", file: "allow" } } }, resource: "file", effect: "allow" },
-    { name: "broad map deny stays after specific allow", override: { permission: { edit: { file: "allow", "*": "deny" } } }, resource: "file", effect: "deny" },
-    { name: "specific array allow stays after broad deny", override: { permissions: [{ action: "edit", resource: "*", effect: "deny" }, { action: "edit", resource: "file", effect: "allow" }] }, resource: "file", effect: "allow" },
-    { name: "broad array deny stays after specific allow", override: { permissions: [{ action: "edit", resource: "file", effect: "allow" }, { action: "edit", resource: "*", effect: "deny" }] }, resource: "file", effect: "deny" },
+    {
+      name: "false toggle defeats permission-array allow",
+      override: { tools: { edit: false }, permissions: [{ action: "*", resource: "*", effect: "allow" }] },
+      effect: "deny",
+    },
+    {
+      name: "true toggle preserves permission-array deny",
+      override: { tools: { edit: true }, permissions: [{ action: "edit", resource: "*", effect: "deny" }] },
+      effect: "deny",
+    },
+    {
+      name: "specific map allow stays after broad deny",
+      override: { permission: { edit: { "*": "deny", file: "allow" } } },
+      resource: "file",
+      effect: "allow",
+    },
+    {
+      name: "broad map deny stays after specific allow",
+      override: { permission: { edit: { file: "allow", "*": "deny" } } },
+      resource: "file",
+      effect: "deny",
+    },
+    {
+      name: "specific array allow stays after broad deny",
+      override: {
+        permissions: [
+          { action: "edit", resource: "*", effect: "deny" },
+          { action: "edit", resource: "file", effect: "allow" },
+        ],
+      },
+      resource: "file",
+      effect: "allow",
+    },
+    {
+      name: "broad array deny stays after specific allow",
+      override: {
+        permissions: [
+          { action: "edit", resource: "file", effect: "allow" },
+          { action: "edit", resource: "*", effect: "deny" },
+        ],
+      },
+      resource: "file",
+      effect: "deny",
+    },
   ]
-  for (const id of ["sisyphus", "native-permission-case"]) for (const row of toggleCases) it(`${id}: ${row.name}`, () => {
-    // given a stock role or a real canonical Native custom identity
-    const { editor } = recordingEditor()
-    // when the registrar combines toggles with authored permission rules
-    applyAgents(editor, { agents: { [id]: row.override }, disabled_agents: [], nativeAgents: { "native-permission-case": {} } })
-    // then source denies hold and authored resource ordering remains intact
-    expect(editor.get(id)).toBeDefined()
-    expect(effective(editor, id, "edit", row.resource)).toBe(row.effect)
-  })
+  for (const id of ["sisyphus", "native-permission-case"])
+    for (const row of toggleCases)
+      it(`${id}: ${row.name}`, () => {
+        // given a stock role or a real canonical Native custom identity
+        const { editor } = recordingEditor()
+        // when the registrar combines toggles with authored permission rules
+        applyAgents(editor, {
+          agents: { [id]: row.override },
+          disabled_agents: [],
+          nativeAgents: { "native-permission-case": {} },
+        })
+        // then source denies hold and authored resource ordering remains intact
+        expect(editor.get(id)).toBeDefined()
+        expect(effective(editor, id, "edit", row.resource)).toBe(row.effect)
+      })
 
   it("rereads config on host replay and disposes its registration", async () => {
     let callback: ((editor: AgentEditor) => void) | undefined
     let disposed = false
     let disabled = false
-    const options = { cwd: fixtureProject, env: { HOME: fixtureHome }, platform: "linux" as const, fileSystem: {
-      existsSync: (path: string) => path === fixtureUserConfig,
-      readFileSync: () => JSON.stringify({ "[opencode]": { disabled_agents: disabled ? ["oracle"] : [] } }),
-    } }
-    const cleanup = await registerAgents({ transform: async (fn) => { callback = fn; return { dispose: async () => { disposed = true } } } }, options)
+    const options = {
+      cwd: fixtureProject,
+      env: { HOME: fixtureHome },
+      platform: "linux" as const,
+      fileSystem: {
+        existsSync: (path: string) => path === fixtureUserConfig,
+        readFileSync: () => JSON.stringify({ "[opencode]": { disabled_agents: disabled ? ["oracle"] : [] } }),
+      },
+    }
+    const cleanup = await registerAgents(
+      {
+        transform: async (fn) => {
+          callback = fn
+          return {
+            dispose: async () => {
+              disposed = true
+            },
+          }
+        },
+      },
+      options,
+    )
     const { editor } = recordingEditor()
     callback?.(editor)
     expect(editor.get("oracle")).toBeDefined()
@@ -273,12 +433,24 @@ describe("native v2 agents", () => {
     let callback: ((editor: AgentEditor) => void) | undefined
     let broken = true
     const warnings = spyOn(console, "warn").mockImplementation(() => undefined)
-    const cleanup = await registerAgents({ transform: async fn => { callback = fn; return { dispose: async () => undefined } } }, {
-      cwd: fixtureProject, env: { HOME: fixtureHome }, platform: "linux", fileSystem: {
-        existsSync: path => path === fixtureUserConfig,
-        readFileSync: () => JSON.stringify({ agents: { "custom-model": { model: broken ? "invalid" : "mock/valid" } } }),
+    const cleanup = await registerAgents(
+      {
+        transform: async (fn) => {
+          callback = fn
+          return { dispose: async () => undefined }
+        },
       },
-    })
+      {
+        cwd: fixtureProject,
+        env: { HOME: fixtureHome },
+        platform: "linux",
+        fileSystem: {
+          existsSync: (path) => path === fixtureUserConfig,
+          readFileSync: () =>
+            JSON.stringify({ agents: { "custom-model": { model: broken ? "invalid" : "mock/valid" } } }),
+        },
+      },
+    )
     try {
       const { editor } = recordingEditor()
       callback?.(editor)
@@ -291,28 +463,61 @@ describe("native v2 agents", () => {
       callback?.(editor)
       expect(editor.get("custom-model")).toBeUndefined()
       expect(warnings.mock.calls).toHaveLength(2)
-    } finally { await cleanup(); warnings.mockRestore() }
+    } finally {
+      await cleanup()
+      warnings.mockRestore()
+    }
   })
 })
 
 describe("unified native agents config", () => {
   it("merges global/project layers, OpenCode blocks and selected profiles with core catalog resolution", () => {
     const files: Record<string, string> = {
-      [fixtureUserConfig]: JSON.stringify({ agents: { sisyphus: { prompt: "global" } }, models: { chosen: { model: "mock/catalog", reasoning: "high" } }, "[opencode]": { agents: { sisyphus: { displayName: "Global Name", permission: { edit: "deny" } } }, disabled_agents: ["explore"] } }),
-      [fixtureProjectConfig]: JSON.stringify({ agents: { sisyphus: { model: "chosen", prompt: "project" } }, "[opencode]": { agents: { sisyphus: { displayName: "Project Name" } } }, profiles: { test: { "[opencode]": { agents: { sisyphus: { prompt_append: "profile" } } } } } }),
+      [fixtureUserConfig]: JSON.stringify({
+        agents: { sisyphus: { prompt: "global" } },
+        models: { chosen: { model: "mock/catalog", reasoning: "high" } },
+        "[opencode]": {
+          agents: { sisyphus: { displayName: "Global Name", permission: { edit: "deny" } } },
+          disabled_agents: ["explore"],
+        },
+      }),
+      [fixtureProjectConfig]: JSON.stringify({
+        agents: { sisyphus: { model: "chosen", prompt: "project" } },
+        "[opencode]": { agents: { sisyphus: { displayName: "Project Name" } } },
+        profiles: { test: { "[opencode]": { agents: { sisyphus: { prompt_append: "profile" } } } } },
+      }),
     }
-    const config = loadAgentsConfig({ cwd: fixtureProject, env: { HOME: fixtureHome, OMO_PROFILE: "test" }, platform: "linux", fileSystem: {
-      existsSync: (path) => path in files, readFileSync: (path) => files[path],
-    } })
-    expect(config.agents.sisyphus).toMatchObject({ prompt: "project", model: "mock/catalog", reasoning: "high", displayName: "Project Name", prompt_append: "profile", permission: { edit: "deny" } })
+    const config = loadAgentsConfig({
+      cwd: fixtureProject,
+      env: { HOME: fixtureHome, OMO_PROFILE: "test" },
+      platform: "linux",
+      fileSystem: {
+        existsSync: (path) => path in files,
+        readFileSync: (path) => files[path],
+      },
+    })
+    expect(config.agents.sisyphus).toMatchObject({
+      prompt: "project",
+      model: "mock/catalog",
+      reasoning: "high",
+      displayName: "Project Name",
+      prompt_append: "profile",
+      permission: { edit: "deny" },
+    })
     expect(config.disabled_agents).toEqual(["explore"])
   })
 
   it("keeps valid agents when another OpenCode override is invalid", () => {
-    const config = loadAgentsConfig({ cwd: fixtureProject, env: { HOME: fixtureHome }, platform: "linux", fileSystem: {
-      existsSync: (path) => path === fixtureUserConfig,
-      readFileSync: () => JSON.stringify({ "[opencode]": { agents: { oracle: { model: 4 }, explore: { prompt: "valid" } } } }),
-    } })
+    const config = loadAgentsConfig({
+      cwd: fixtureProject,
+      env: { HOME: fixtureHome },
+      platform: "linux",
+      fileSystem: {
+        existsSync: (path) => path === fixtureUserConfig,
+        readFileSync: () =>
+          JSON.stringify({ "[opencode]": { agents: { oracle: { model: 4 }, explore: { prompt: "valid" } } } }),
+      },
+    })
     expect(config.agents.oracle).toBeUndefined()
     expect(config.agents.explore?.prompt).toBe("valid")
     expect(AGENT_DEFINITIONS.every((agent) => agent.system.length > 450)).toBe(true)

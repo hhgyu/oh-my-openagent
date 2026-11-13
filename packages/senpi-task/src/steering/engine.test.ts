@@ -21,48 +21,139 @@ import { InputUncertainError } from "../runners/input-effects"
 
 afterEach(cleanupSteering)
 
-test("prepared follow-up completes preparation before any epoch publication and bypasses legacy dispatch",async()=>{
- const h=makeHarness(),r=h.seedRecord();toCompleted(h,r);const fake=makeFakeHandle(r.task_id,"in-process"),order:string[]=[]
- Object.assign(fake.handle,{prepareFollowUp:async(prior:TaskRecord,epoch:number)=>{
-  expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(0);expect(epoch).toBe(1);order.push("prepare")
-  return {stamp:(next:TaskRecord)=>{order.push("stamp");return next},dispatch:async()=>{expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(1);order.push("dispatch");return {kind:"accepted" as const}},
-   restoreOwnedReference:()=>prior.owned_session,retainFailure:()=>{},release:async()=>{order.push("release")}}
- }})
- h.setLive(r.task_id,fake.handle);expect((await h.engine.sendToTask({idOrName:r.task_id,message:"next"})).kind).toBe("revived")
- expect(order).toEqual(["prepare","stamp","dispatch"]);expect(fake.followUpCalls).toEqual([])
+test("prepared follow-up completes preparation before any epoch publication and bypasses legacy dispatch", async () => {
+  const h = makeHarness(),
+    r = h.seedRecord()
+  toCompleted(h, r)
+  const fake = makeFakeHandle(r.task_id, "in-process"),
+    order: string[] = []
+  Object.assign(fake.handle, {
+    prepareFollowUp: async (prior: TaskRecord, epoch: number) => {
+      expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(0)
+      expect(epoch).toBe(1)
+      order.push("prepare")
+      return {
+        stamp: (next: TaskRecord) => {
+          order.push("stamp")
+          return next
+        },
+        dispatch: async () => {
+          expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(1)
+          order.push("dispatch")
+          return { kind: "accepted" as const }
+        },
+        restoreOwnedReference: () => prior.owned_session,
+        retainFailure: () => {},
+        release: async () => {
+          order.push("release")
+        },
+      }
+    },
+  })
+  h.setLive(r.task_id, fake.handle)
+  expect((await h.engine.sendToTask({ idOrName: r.task_id, message: "next" })).kind).toBe("revived")
+  expect(order).toEqual(["prepare", "stamp", "dispatch"])
+  expect(fake.followUpCalls).toEqual([])
 })
 
-test("preparation rejection changes no epoch and sends no legacy input",async()=>{
- const h=makeHarness(),r=h.seedRecord();toCompleted(h,r);const fake=makeFakeHandle(r.task_id,"in-process")
- Object.assign(fake.handle,{prepareFollowUp:async()=>{throw Error("real preparation refused")}});h.setLive(r.task_id,fake.handle)
- const before=h.store.load(r.task_id)
- expect((await h.engine.sendToTask({idOrName:r.task_id,message:"next"})).kind).toBe("not_continuable")
- expect(h.store.load(r.task_id)).toEqual(before);expect(fake.followUpCalls).toEqual([]);expect(h.reviveCalls).toEqual([])
+test("preparation rejection changes no epoch and sends no legacy input", async () => {
+  const h = makeHarness(),
+    r = h.seedRecord()
+  toCompleted(h, r)
+  const fake = makeFakeHandle(r.task_id, "in-process")
+  Object.assign(fake.handle, {
+    prepareFollowUp: async () => {
+      throw Error("real preparation refused")
+    },
+  })
+  h.setLive(r.task_id, fake.handle)
+  const before = h.store.load(r.task_id)
+  expect((await h.engine.sendToTask({ idOrName: r.task_id, message: "next" })).kind).toBe("not_continuable")
+  expect(h.store.load(r.task_id)).toEqual(before)
+  expect(fake.followUpCalls).toEqual([])
+  expect(h.reviveCalls).toEqual([])
 })
 
-test.each(["stamp","invoked"] as const)("canonical uncertainty at %s respects the actual dispatch boundary",async boundary=>{
- const h=makeHarness(),r=h.seedRecord();toCompleted(h,r);const fake=makeFakeHandle(r.task_id,"in-process");let releases=0,restores=0
- fake.handle.prepareFollowUp=async()=>({stamp:next=>{if(boundary==="stamp")throw new InputUncertainError("private-effect",new Error("unacknowledged"));return next},
-  dispatch:async()=>{throw new InputUncertainError("private-effect",new Error("unacknowledged"))},restoreOwnedReference:()=>{restores++;return undefined},retainFailure:()=>{},release:async()=>{releases++}})
- h.setLive(r.task_id,fake.handle);const answer=await h.engine.sendToTask({idOrName:r.task_id,message:"new"})
- expect(answer.kind).toBe(boundary==="stamp"?"not_continuable":"uncertain")
- expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(boundary==="stamp"?0:1)
- expect(h.reviveCalls).toHaveLength(boundary==="stamp"?0:1);expect(releases).toBe(boundary==="stamp"?1:0);expect(restores).toBe(0)
+test.each(["stamp", "invoked"] as const)(
+  "canonical uncertainty at %s respects the actual dispatch boundary",
+  async (boundary) => {
+    const h = makeHarness(),
+      r = h.seedRecord()
+    toCompleted(h, r)
+    const fake = makeFakeHandle(r.task_id, "in-process")
+    let releases = 0,
+      restores = 0
+    fake.handle.prepareFollowUp = async () => ({
+      stamp: (next) => {
+        if (boundary === "stamp") throw new InputUncertainError("private-effect", new Error("unacknowledged"))
+        return next
+      },
+      dispatch: async () => {
+        throw new InputUncertainError("private-effect", new Error("unacknowledged"))
+      },
+      restoreOwnedReference: () => {
+        restores++
+        return undefined
+      },
+      retainFailure: () => {},
+      release: async () => {
+        releases++
+      },
+    })
+    h.setLive(r.task_id, fake.handle)
+    const answer = await h.engine.sendToTask({ idOrName: r.task_id, message: "new" })
+    expect(answer.kind).toBe(boundary === "stamp" ? "not_continuable" : "uncertain")
+    expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(boundary === "stamp" ? 0 : 1)
+    expect(h.reviveCalls).toHaveLength(boundary === "stamp" ? 0 : 1)
+    expect(releases).toBe(boundary === "stamp" ? 1 : 0)
+    expect(restores).toBe(0)
+  },
+)
+
+test("cancel during preparation wins before stamp or epoch publication", async () => {
+  const h = makeHarness(),
+    r = h.seedRecord()
+  toCompleted(h, r)
+  const fake = makeFakeHandle(r.task_id, "in-process")
+  let stamps = 0,
+    dispatches = 0,
+    releases = 0
+  fake.handle.prepareFollowUp = async () => {
+    h.store.mutate(r.task_id, (f) => ({ ...f, status: "cancelled" }))
+    return {
+      stamp: (next) => {
+        stamps++
+        return next
+      },
+      dispatch: async () => {
+        dispatches++
+        return { kind: "accepted" }
+      },
+      restoreOwnedReference: () => undefined,
+      retainFailure: () => {},
+      release: async () => {
+        releases++
+      },
+    }
+  }
+  h.setLive(r.task_id, fake.handle)
+  expect((await h.engine.sendToTask({ idOrName: r.task_id, message: "new" })).kind).toBe("not_continuable")
+  expect(h.store.load(r.task_id)?.status).toBe("cancelled")
+  expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(0)
+  expect(stamps).toBe(0)
+  expect(dispatches).toBe(0)
+  expect(releases).toBe(1)
 })
 
-test("cancel during preparation wins before stamp or epoch publication",async()=>{
- const h=makeHarness(),r=h.seedRecord();toCompleted(h,r);const fake=makeFakeHandle(r.task_id,"in-process");let stamps=0,dispatches=0,releases=0
- fake.handle.prepareFollowUp=async()=>{h.store.mutate(r.task_id,f=>({...f,status:"cancelled"}));return {stamp:next=>{stamps++;return next},dispatch:async()=>{dispatches++;return {kind:"accepted"}},restoreOwnedReference:()=>undefined,retainFailure:()=>{},release:async()=>{releases++}}}
- h.setLive(r.task_id,fake.handle);expect((await h.engine.sendToTask({idOrName:r.task_id,message:"new"})).kind).toBe("not_continuable")
- expect(h.store.load(r.task_id)?.status).toBe("cancelled");expect(h.store.load(r.task_id)?.notification.run_epoch).toBe(0)
- expect(stamps).toBe(0);expect(dispatches).toBe(0);expect(releases).toBe(1)
-})
-
-test("absent prepared ticket preserves synchronous legacy follow-up invocation without an extra await tick",async()=>{
- const h=makeHarness(),r=h.seedRecord();toCompleted(h,r);const fake=makeFakeHandle(r.task_id,"in-process");h.setLive(r.task_id,fake.handle)
- const sending=h.engine.sendToTask({idOrName:r.task_id,message:"legacy immediate"})
- expect(fake.followUpCalls).toEqual(["legacy immediate"])
- expect((await sending).kind).toBe("revived")
+test("absent prepared ticket preserves synchronous legacy follow-up invocation without an extra await tick", async () => {
+  const h = makeHarness(),
+    r = h.seedRecord()
+  toCompleted(h, r)
+  const fake = makeFakeHandle(r.task_id, "in-process")
+  h.setLive(r.task_id, fake.handle)
+  const sending = h.engine.sendToTask({ idOrName: r.task_id, message: "legacy immediate" })
+  expect(fake.followUpCalls).toEqual(["legacy immediate"])
+  expect((await sending).kind).toBe("revived")
 })
 
 function toRunning(harness: SteeringHarness, record: TaskRecord): void {
@@ -71,7 +162,11 @@ function toRunning(harness: SteeringHarness, record: TaskRecord): void {
 
 function toCompleted(harness: SteeringHarness, record: TaskRecord): void {
   toRunning(harness, record)
-  harness.store.transition(record.task_id, { type: "complete", timestamp: new Date().toISOString(), final_response: "first pass" })
+  harness.store.transition(record.task_id, {
+    type: "complete",
+    timestamp: new Date().toISOString(),
+    final_response: "first pass",
+  })
 }
 
 const flavors: RunnerFlavor[] = ["in-process", "rpc"]
@@ -86,7 +181,11 @@ describe.each(flavors)("steering engine over the %s runner fake", (flavor) => {
     harness.setLive(record.task_id, fake.handle)
 
     // when
-    const outcome = await harness.engine.sendToTask({ idOrName: record.task_id, message: "keep going", deliverAs: "steer" })
+    const outcome = await harness.engine.sendToTask({
+      idOrName: record.task_id,
+      message: "keep going",
+      deliverAs: "steer",
+    })
 
     // then
     expect(outcome.kind).toBe("steered")
@@ -103,7 +202,11 @@ describe.each(flavors)("steering engine over the %s runner fake", (flavor) => {
     harness.setLive(record.task_id, fake.handle)
     harness.setEvicting(record.task_id, true)
 
-    const outcome = await harness.engine.sendToTask({ idOrName: record.task_id, message: "too late", deliverAs: "steer" })
+    const outcome = await harness.engine.sendToTask({
+      idOrName: record.task_id,
+      message: "too late",
+      deliverAs: "steer",
+    })
 
     expect(outcome.kind).toBe("not_continuable")
     expect(fake.steerCalls).toEqual([])
@@ -129,18 +232,27 @@ describe.each(flavors)("steering engine over the %s runner fake", (flavor) => {
   test("#given two overlapping sends #when the first settles #then pending state remains true until the second settles", async () => {
     let releaseFirst!: () => void
     let releaseSecond!: () => void
-    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
-    const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve })
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve
+    })
     const harness = makeHarness()
     const record = harness.seedRecord()
     toRunning(harness, record)
     let started = 0
     let bothStarted!: () => void
-    const startedSignal = new Promise<void>((resolve) => { bothStarted = resolve })
-    const fake = makeFakeHandle(record.task_id, flavor, { followUpGates: [firstGate, secondGate], onFollowUpStart: () => {
-      started += 1
-      if (started === 2) bothStarted()
-    } })
+    const startedSignal = new Promise<void>((resolve) => {
+      bothStarted = resolve
+    })
+    const fake = makeFakeHandle(record.task_id, flavor, {
+      followUpGates: [firstGate, secondGate],
+      onFollowUpStart: () => {
+        started += 1
+        if (started === 2) bothStarted()
+      },
+    })
     harness.setLive(record.task_id, fake.handle)
     const first = harness.engine.sendToTask({ idOrName: record.task_id, message: "one" })
     const second = harness.engine.sendToTask({ idOrName: record.task_id, message: "two" })
@@ -296,7 +408,11 @@ describe("steering engine scope + resolution guards", () => {
     harness.setLive(record.task_id, makeFakeHandle(record.task_id, "in-process").handle)
 
     // when
-    const outcome = await harness.engine.sendToTask({ idOrName: record.task_id, message: "hi", callerSessionId: "parent-2" })
+    const outcome = await harness.engine.sendToTask({
+      idOrName: record.task_id,
+      message: "hi",
+      callerSessionId: "parent-2",
+    })
 
     // then
     if (outcome.kind !== "scope_denied") throw new Error("expected scope_denied")
@@ -312,7 +428,12 @@ describe("steering engine scope + resolution guards", () => {
     harness.setLive(record.task_id, fake.handle)
 
     // when
-    const outcome = await harness.engine.sendToTask({ idOrName: record.task_id, message: "hi", callerSessionId: "parent-2", allScope: true })
+    const outcome = await harness.engine.sendToTask({
+      idOrName: record.task_id,
+      message: "hi",
+      callerSessionId: "parent-2",
+      allScope: true,
+    })
 
     // then
     expect(outcome.kind).toBe("steered")

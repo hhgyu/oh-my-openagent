@@ -3,8 +3,21 @@ import { createRpcPeer, type RpcHandler, type RpcPort } from "./codemode-rpc"
 
 function pair() {
   const channel = new MessageChannel()
-  const port = (side: MessagePort): RpcPort => ({ postMessage: message => side.postMessage(message), addEventListener: (_type, listener) => { side.addEventListener("message", listener); side.start() } })
-  return { a: port(channel.port1), b: port(channel.port2), close: () => { channel.port1.close(); channel.port2.close() } }
+  const port = (side: MessagePort): RpcPort => ({
+    postMessage: (message) => side.postMessage(message),
+    addEventListener: (_type, listener) => {
+      side.addEventListener("message", listener)
+      side.start()
+    },
+  })
+  return {
+    a: port(channel.port1),
+    b: port(channel.port2),
+    close: () => {
+      channel.port1.close()
+      channel.port2.close()
+    },
+  }
 }
 
 describe("codemode rpc peer", () => {
@@ -12,15 +25,20 @@ describe("codemode rpc peer", () => {
     // given
     const ports = pair()
     const handlers: Record<string, RpcHandler> = {
-      echo: (params, call) => { call.update("half"); return { echoed: params } },
-      fail: () => { throw Object.assign(Error("stale"), { name: "KernelError", code: "kernel_tool_stale" }) },
+      echo: (params, call) => {
+        call.update("half")
+        return { echoed: params }
+      },
+      fail: () => {
+        throw Object.assign(Error("stale"), { name: "KernelError", code: "kernel_tool_stale" })
+      },
     }
     createRpcPeer(ports.b, handlers)
     const caller = createRpcPeer(ports.a, {})
     const updates: unknown[] = []
 
     // when
-    const value = await caller.call("echo", 7, { onUpdate: update => updates.push(update) })
+    const value = await caller.call("echo", 7, { onUpdate: (update) => updates.push(update) })
     const error = await caller.call("fail", null).catch((caught: unknown) => caught)
     const unknown = await caller.call("nope", null).catch((caught: unknown) => caught)
 
@@ -38,14 +56,27 @@ describe("codemode rpc peer", () => {
     const ports = pair()
     const reasons: string[] = []
     createRpcPeer(ports.b, {
-      wait: (_params, call) => new Promise((_resolve, reject) => call.signal.addEventListener("abort", () => { reasons.push((call.signal.reason as Error).message); reject(Error("cell stopped")) }, { once: true })),
+      wait: (_params, call) =>
+        new Promise((_resolve, reject) =>
+          call.signal.addEventListener(
+            "abort",
+            () => {
+              reasons.push((call.signal.reason as Error).message)
+              reject(Error("cell stopped"))
+            },
+            { once: true },
+          ),
+        ),
     })
     const caller = createRpcPeer(ports.a, {})
-    const quick = new AbortController(), graceful = new AbortController()
+    const quick = new AbortController(),
+      graceful = new AbortController()
 
     // when
     const first = caller.call("wait", null, { signal: quick.signal }).catch((caught: unknown) => caught)
-    const second = caller.call("wait", null, { signal: graceful.signal, abortGraceMs: 1_000 }).catch((caught: unknown) => caught)
+    const second = caller
+      .call("wait", null, { signal: graceful.signal, abortGraceMs: 1_000 })
+      .catch((caught: unknown) => caught)
     await Bun.sleep(5)
     quick.abort(Error("now"))
     graceful.abort(Error("later"))

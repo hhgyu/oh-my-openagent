@@ -4,10 +4,22 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { openTeamDeliveryJournal, type TeamDeliveryJournal } from "./team-delivery-journal"
 
-const dirs: string[] = [], journals: TeamDeliveryJournal[] = []
-afterEach(() => { for (const journal of journals.splice(0)) journal.close(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
-function file() { const dir = mkdtempSync(join(tmpdir(), "omo-team-delivery-")); dirs.push(dir); return join(dir, "team-deliveries.sqlite") }
-function open(path = file(), namespace = "/unit/project:lead") { const journal = openTeamDeliveryJournal({ path, namespace }); journals.push(journal); return journal }
+const dirs: string[] = [],
+  journals: TeamDeliveryJournal[] = []
+afterEach(() => {
+  for (const journal of journals.splice(0)) journal.close()
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+function file() {
+  const dir = mkdtempSync(join(tmpdir(), "omo-team-delivery-"))
+  dirs.push(dir)
+  return join(dir, "team-deliveries.sqlite")
+}
+function open(path = file(), namespace = "/unit/project:lead") {
+  const journal = openTeamDeliveryJournal({ path, namespace })
+  journals.push(journal)
+  return journal
+}
 const key = { teamRunId: "run-1", recipient: "lead", messageId: "m-1" }
 
 describe("team delivery journal", () => {
@@ -39,7 +51,9 @@ describe("team delivery journal", () => {
     expect(() => journal.recordIntent(key, "ses_lead", "msg_omo_team_b")).toThrow("another input id")
     expect(() => journal.markAcked(intent, { id: "msg_other", sessionID: "ses_lead" })).toThrow("ACK differs")
     expect(() => journal.markAcked(intent, { id: "msg_omo_team_a", sessionID: "ses_foreign" })).toThrow("ACK differs")
-    expect(() => journal.recordIntent({ ...key, messageId: "m-2" }, "ses_lead", "not-a-host-id")).toThrow("Invalid team delivery record")
+    expect(() => journal.recordIntent({ ...key, messageId: "m-2" }, "ses_lead", "not-a-host-id")).toThrow(
+      "Invalid team delivery record",
+    )
     expect(journal.isAcked(key)).toBe(false)
   })
 
@@ -68,7 +82,12 @@ describe("team delivery journal", () => {
     const acked = journal.markAcked(moved, { id: "msg_omo_team_a", sessionID: "ses_member_new" })
 
     // then
-    expect(moved).toMatchObject({ receiverSessionID: "ses_member_new", inputID: "msg_omo_team_a", previousReceivers: ["ses_member_old"], phase: "intent" })
+    expect(moved).toMatchObject({
+      receiverSessionID: "ses_member_new",
+      inputID: "msg_omo_team_a",
+      previousReceivers: ["ses_member_old"],
+      phase: "intent",
+    })
     expect(acked.phase).toBe("acked")
     expect(() => journal.recordIntent(key, "ses_member_third", "msg_omo_team_a")).toThrow("already ACKed")
     expect(journal.listIntents()).toEqual([])

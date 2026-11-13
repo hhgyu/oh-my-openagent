@@ -30,8 +30,11 @@ export function createDeviceSessionResolver(options: {
     if (account === null) return null
     if (account.kind === "unavailable") return { idle: account.reason }
     const runtime = await options.loadRuntime()
-    if (account.kind === "desktop" && (account.signal.aborted || !await account.isCurrent())) return null
-    const resolved = runtime.resolveSpace(new runtime.GitSpaceConfig(paths.repo), { profile: space.profile, remotes: runtime.listRemotes(space.projectDir) })
+    if (account.kind === "desktop" && (account.signal.aborted || !(await account.isCurrent()))) return null
+    const resolved = runtime.resolveSpace(new runtime.GitSpaceConfig(paths.repo), {
+      profile: space.profile,
+      remotes: runtime.listRemotes(space.projectDir),
+    })
     const ended = new Set<() => void>()
     if (account.kind === "desktop") {
       const opened = await runtime.openAccountSession({
@@ -43,7 +46,7 @@ export function createDeviceSessionResolver(options: {
         pinDir: options.pinDir,
         spaceId: Uint8Array.from(Buffer.from(resolved.spaceId, "hex")),
       })
-      if (account.signal.aborted || !await account.isCurrent()) return null
+      if (account.signal.aborted || !(await account.isCurrent())) return null
       if (!opened.ok) return { idle: opened.reason }
       return {
         ...opened.session,
@@ -56,7 +59,7 @@ export function createDeviceSessionResolver(options: {
     const token = async (): Promise<string> => {
       try {
         const accessToken = await account.accessToken()
-        if (!await account.isCurrent()) {
+        if (!(await account.isCurrent())) {
           for (const notify of [...ended]) notify()
           throw new Error("memory sync: the account identity changed")
         }

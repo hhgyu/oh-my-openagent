@@ -1,6 +1,9 @@
 import type {
-  BuildDynamicSystemPromptOptions, ModelWithPromptPresetMetadata, PromptPresetSettings,
-  ResolvedPresetName, ResolvedPromptPreset,
+  BuildDynamicSystemPromptOptions,
+  ModelWithPromptPresetMetadata,
+  PromptPresetSettings,
+  ResolvedPresetName,
+  ResolvedPromptPreset,
 } from "@code-yeongyu/senpi/prompt-presets"
 
 export type PromptOptions = BuildDynamicSystemPromptOptions & {
@@ -29,7 +32,11 @@ export type PromptRenderResult = {
 type PublicPresets = typeof import("@code-yeongyu/senpi/prompt-presets")
 export interface PromptPresetPort {
   resolvePresetName: PublicPresets["resolvePresetName"]
-  resolvePreset(model: ModelWithPromptPresetMetadata, settings: PromptPresetSettings, options: PromptOptions): ResolvedPromptPreset | undefined
+  resolvePreset(
+    model: ModelWithPromptPresetMetadata,
+    settings: PromptPresetSettings,
+    options: PromptOptions,
+  ): ResolvedPromptPreset | undefined
   buildPreset(name: ResolvedPresetName, options: PromptOptions): ResolvedPromptPreset
   buildDynamicSystemPrompt(options: PromptOptions): string
   render(input: PromptRenderInput): PromptRenderResult
@@ -48,10 +55,12 @@ export async function createPromptPresetPort(): Promise<PromptPresetPort> {
       // Native base builder treats even an empty explicit prompt as a replacement.
       // The preset extension's guard uses Boolean(customPrompt), however: an
       // eligible model preset replaces an empty custom prompt. Preserve both.
-      const preset = !input.customPrompt && input.model
-        ? presets.resolvePreset(input.model, input.settings, input.options)
-        : undefined
-      if (preset) return { prompt: preset.prompt + (append ? `\n\n${append}` : ""), preset: preset.name, source: "preset" }
+      const preset =
+        !input.customPrompt && input.model
+          ? presets.resolvePreset(input.model, input.settings, input.options)
+          : undefined
+      if (preset)
+        return { prompt: preset.prompt + (append ? `\n\n${append}` : ""), preset: preset.name, source: "preset" }
       if (input.customPrompt !== undefined) {
         return { prompt: input.customPrompt + (append === undefined ? "" : `\n\n${append}`), source: "custom" }
       }

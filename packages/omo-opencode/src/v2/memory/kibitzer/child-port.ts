@@ -20,7 +20,7 @@ export type KibitzerChildPortDeps = Omit<MemoryChildPortDeps, "backendID" | "pre
 export function createKibitzerChildPort(deps: KibitzerChildPortDeps): KibitzerChildPort {
   const port = createMemoryChildPort({ ...deps, backendID: KIBITZER_BACKEND_ID, prefix: "kibitzer", label: "Kibitzer" })
   return {
-    start: input => port.start({ generation: input.generation, prompt: input.prompt }),
+    start: (input) => port.start({ generation: input.generation, prompt: input.prompt }),
     close: () => port.close(),
   }
 }

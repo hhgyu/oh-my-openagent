@@ -19,11 +19,20 @@ async function fixture() {
   roots.push(root)
   const paths = buildIdentityPaths(root, "agent")
   const store = new FactsFailureStore({ identityPaths: paths })
-  await store.recordFailure({ targets: [{ conversationId: "conv", endMessageId: "m1", endSnapshotLine: 1 }], failureId: "run-1", reason: "child_exit" })
+  await store.recordFailure({
+    targets: [{ conversationId: "conv", endMessageId: "m1", endSnapshotLine: 1 }],
+    failureId: "run-1",
+    reason: "child_exit",
+  })
   let launches = 0
   const deps: MemoryCommandDeps = {
-    contextForSession: () => ({ identity: "agent", identityPaths: paths }), bustPromptCache: () => undefined,
-    factsSink: { reconcile: async () => { launches += 1 } },
+    contextForSession: () => ({ identity: "agent", identityPaths: paths }),
+    bustPromptCache: () => undefined,
+    factsSink: {
+      reconcile: async () => {
+        launches += 1
+      },
+    },
   }
   return { paths, deps, launches: () => launches, ctx: { sessionManager: { getSessionId: () => "root" } } }
 }
@@ -52,7 +61,9 @@ test("#given contention after the retry read #when clearing records #then retry 
   // given
   const f = await fixture()
   const before = await readFile(factsQueuePaths(f.paths).failuresPath, "utf8")
-  const clear = spyOn(FactsFailureStore.prototype, "clearForRetry").mockRejectedValue(new LockContentionError("facts-queue.lock", null))
+  const clear = spyOn(FactsFailureStore.prototype, "clearForRetry").mockRejectedValue(
+    new LockContentionError("facts-queue.lock", null),
+  )
   // when / then
   try {
     expect(await runFactsCommand(f.deps, "retry", f.ctx)).toContain("busy")

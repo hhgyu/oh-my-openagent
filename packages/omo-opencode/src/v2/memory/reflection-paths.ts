@@ -14,10 +14,22 @@ import type { Dirent } from "@oh-my-opencode/memory-core/fs"
 import { readdir, realpath, stat } from "@oh-my-opencode/memory-core/fs"
 import { isAbsolute, join, relative, sep } from "node:path"
 
-export type ReflectionPathErrorCode = "path_absolute" | "path_traversal" | "path_git" | "path_escape" | "not_found" | "not_file" | "not_directory" | "invalid_input" | "pattern_unsafe"
+export type ReflectionPathErrorCode =
+  | "path_absolute"
+  | "path_traversal"
+  | "path_git"
+  | "path_escape"
+  | "not_found"
+  | "not_file"
+  | "not_directory"
+  | "invalid_input"
+  | "pattern_unsafe"
 
 export class ReflectionPathError extends Error {
-  constructor(readonly code: ReflectionPathErrorCode, message: string) {
+  constructor(
+    readonly code: ReflectionPathErrorCode,
+    message: string,
+  ) {
     super(message)
     this.name = "ReflectionPathError"
   }
@@ -27,16 +39,23 @@ export class ReflectionPathError extends Error {
 export function normalizeReflectionPath(input: string): string {
   const trimmed = input.trim()
   if (isAbsolute(trimmed) || /^[A-Za-z]:/.test(trimmed) || trimmed.startsWith("/") || trimmed.startsWith("\\")) {
-    throw new ReflectionPathError("path_absolute", "paths are relative to the memory worktree; absolute paths are refused")
+    throw new ReflectionPathError(
+      "path_absolute",
+      "paths are relative to the memory worktree; absolute paths are refused",
+    )
   }
-  const segments = trimmed.split(/[\\/]+/).filter(segment => segment.length > 0 && segment !== ".")
+  const segments = trimmed.split(/[\\/]+/).filter((segment) => segment.length > 0 && segment !== ".")
   if (segments.includes("..")) throw new ReflectionPathError("path_traversal", "paths cannot contain '..' segments")
-  if (segments.some(isGitSegment)) throw new ReflectionPathError("path_git", "Git administration files are not readable")
+  if (segments.some(isGitSegment))
+    throw new ReflectionPathError("path_git", "Git administration files are not readable")
   return segments.join("/")
 }
 
 /** The realpath of `relativePath` under `root`, refused when it escapes the root or lands in `.git`. */
-export async function resolveConfinedPath(root: string, relativePath: string): Promise<{ readonly realRoot: string; readonly real: string; readonly display: string }> {
+export async function resolveConfinedPath(
+  root: string,
+  relativePath: string,
+): Promise<{ readonly realRoot: string; readonly real: string; readonly display: string }> {
   const display = normalizeReflectionPath(relativePath)
   const realRoot = await realpath(root)
   const candidate = display === "" ? realRoot : join(realRoot, ...display.split("/"))
@@ -44,7 +63,8 @@ export async function resolveConfinedPath(root: string, relativePath: string): P
   try {
     real = await realpath(candidate)
   } catch (error) {
-    if (isMissing(error)) throw new ReflectionPathError("not_found", `${display || "."} does not exist in the memory worktree`)
+    if (isMissing(error))
+      throw new ReflectionPathError("not_found", `${display || "."} does not exist in the memory worktree`)
     throw error
   }
   assertInside(realRoot, real)
@@ -60,7 +80,8 @@ export async function resolveTranscriptPath(transcriptPath: string): Promise<str
     if (isMissing(error)) throw new ReflectionPathError("not_found", "the run transcript does not exist")
     throw error
   }
-  if (!(await stat(real)).isFile()) throw new ReflectionPathError("not_file", "the run transcript is not a regular file")
+  if (!(await stat(real)).isFile())
+    throw new ReflectionPathError("not_file", "the run transcript is not a regular file")
   return real
 }
 
@@ -70,7 +91,8 @@ function assertInside(realRoot: string, real: string): void {
   if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
     throw new ReflectionPathError("path_escape", "the path resolves outside the memory worktree")
   }
-  if (rel.split(sep).some(isGitSegment)) throw new ReflectionPathError("path_git", "Git administration files are not readable")
+  if (rel.split(sep).some(isGitSegment))
+    throw new ReflectionPathError("path_git", "Git administration files are not readable")
 }
 
 export interface ReflectionWalkEntry {
@@ -86,7 +108,9 @@ export interface ReflectionWalkEntry {
  * is entered once. Stops after `maxEntries` entries and reports whether it was cut short.
  */
 export async function walkConfined(
-  realRoot: string, start: { readonly real: string; readonly display: string }, options: { readonly maxDepth: number; readonly maxEntries: number },
+  realRoot: string,
+  start: { readonly real: string; readonly display: string },
+  options: { readonly maxDepth: number; readonly maxEntries: number },
 ): Promise<{ readonly entries: readonly ReflectionWalkEntry[]; readonly truncated: boolean }> {
   const entries: ReflectionWalkEntry[] = []
   const seen = new Set<string>([start.real])
@@ -121,7 +145,10 @@ export async function walkConfined(
   return { entries, truncated }
 }
 
-async function confinedChild(realRoot: string, path: string): Promise<{ readonly real: string; readonly kind: "file" | "directory" } | undefined> {
+async function confinedChild(
+  realRoot: string,
+  path: string,
+): Promise<{ readonly real: string; readonly kind: "file" | "directory" } | undefined> {
   try {
     const real = await realpath(path)
     assertInside(realRoot, real)

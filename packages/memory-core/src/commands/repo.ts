@@ -4,13 +4,7 @@
 import { join } from "node:path"
 
 import { existsSync } from "../fs/resilient"
-import {
-  GitMemoryRepo,
-  createNodeGitExec,
-  installHooks,
-  type GitExec,
-  type GitExecResult,
-} from "../index"
+import { GitMemoryRepo, createNodeGitExec, installHooks, type GitExec, type GitExecResult } from "../index"
 
 import type { MemoryCommandDeps, MemoryCommandIdentity } from "./types"
 
@@ -26,13 +20,21 @@ export function openRepo(deps: RepoDeps, identity: MemoryCommandIdentity): GitMe
     // installHooks returns the installed hook list; the repo option expects void.
     ...(hookChecker === undefined
       ? {}
-      : { installHooks: (dir: string) => { installHooks(dir, { checker: hookChecker() }) } }),
+      : {
+          installHooks: (dir: string) => {
+            installHooks(dir, { checker: hookChecker() })
+          },
+        }),
     ...(deps.exec === undefined ? {} : { exec: deps.exec }),
   })
 }
 
 /** Raw git for read-only queries GitMemoryRepo does not expose (diff, worktree list). */
-export function runGit(deps: Pick<MemoryCommandDeps, "exec">, dir: string, argv: readonly string[]): Promise<GitExecResult> {
+export function runGit(
+  deps: Pick<MemoryCommandDeps, "exec">,
+  dir: string,
+  argv: readonly string[],
+): Promise<GitExecResult> {
   const exec: GitExec = deps.exec ?? createNodeGitExec()
   return exec.run(argv, {
     cwd: dir,

@@ -68,21 +68,23 @@ const RAW_PROMPT_ALLOWLIST = new Map<string, string>([
 
 async function listSourceFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true })
-  const nestedFiles = await Promise.all(entries.map(async (entry) => {
-    const entryPath = path.join(directory, entry.name)
-    if (entry.isDirectory()) {
-      return listSourceFiles(entryPath)
-    }
-    if (
-      entry.isFile()
-      && entry.name.endsWith(".ts")
-      && !entry.name.endsWith(".test.ts")
-      && !entry.name.endsWith(".d.ts")
-    ) {
-      return [entryPath]
-    }
-    return []
-  }))
+  const nestedFiles = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(directory, entry.name)
+      if (entry.isDirectory()) {
+        return listSourceFiles(entryPath)
+      }
+      if (
+        entry.isFile() &&
+        entry.name.endsWith(".ts") &&
+        !entry.name.endsWith(".test.ts") &&
+        !entry.name.endsWith(".d.ts")
+      ) {
+        return [entryPath]
+      }
+      return []
+    }),
+  )
 
   return nestedFiles.flat()
 }
@@ -96,21 +98,23 @@ async function listPackageSourceFiles(): Promise<string[]> {
     return []
   }
 
-  const nestedFiles = await Promise.all(packageNames.map(async (name) => {
-    if (name === "omo-opencode") {
-      return []
-    }
-    const packageSrc = path.join(packagesDir, name, "src")
-    try {
-      const s = await stat(packageSrc)
-      if (!s.isDirectory()) {
+  const nestedFiles = await Promise.all(
+    packageNames.map(async (name) => {
+      if (name === "omo-opencode") {
         return []
       }
-    } catch {
-      return []
-    }
-    return listSourceFiles(packageSrc)
-  }))
+      const packageSrc = path.join(packagesDir, name, "src")
+      try {
+        const s = await stat(packageSrc)
+        if (!s.isDirectory()) {
+          return []
+        }
+      } catch {
+        return []
+      }
+      return listSourceFiles(packageSrc)
+    }),
+  )
 
   return nestedFiles.flat()
 }
@@ -210,7 +214,9 @@ function isPromptBindingPattern(node: ts.Node): boolean {
   return node.name.elements.some((element) => {
     const keyName = element.propertyName
       ? getPropertyName(element.propertyName)
-      : ts.isIdentifier(element.name) ? getPropertyName(element.name) : null
+      : ts.isIdentifier(element.name)
+        ? getPropertyName(element.name)
+        : null
     return keyName === "prompt" || keyName === "promptAsync"
   })
 }
@@ -307,9 +313,9 @@ function findPromptGateCallsWithoutQueueBehaviorInSourceFile(sourceFile: ts.Sour
       if (callExpressionName(node.expression) === "dispatchInternalPrompt") {
         const firstArgument = node.arguments[0]
         if (
-          !firstArgument
-          || !ts.isObjectLiteralExpression(firstArgument)
-          || !objectLiteralHasQueueBehavior(firstArgument, sourceFile)
+          !firstArgument ||
+          !ts.isObjectLiteralExpression(firstArgument) ||
+          !objectLiteralHasQueueBehavior(firstArgument, sourceFile)
         ) {
           offenders.push(sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1)
         }
@@ -334,7 +340,11 @@ function findPromptRetryCallsWithoutQueueBehaviorInSourceFile(sourceFile: ts.Sou
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && guardedNames.has(callExpressionName(node.expression) ?? "")) {
       const optionsArgument = node.arguments[2]
-      if (!optionsArgument || !ts.isObjectLiteralExpression(optionsArgument) || !objectLiteralHasQueueBehavior(optionsArgument, sourceFile)) {
+      if (
+        !optionsArgument ||
+        !ts.isObjectLiteralExpression(optionsArgument) ||
+        !objectLiteralHasQueueBehavior(optionsArgument, sourceFile)
+      ) {
         offenders.push(sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1)
       }
     }
@@ -407,14 +417,16 @@ await dispatchInternalPrompt(options)
 
   test("#given production TypeScript sources #when prompt routes are audited #then only the shared gate may call raw OpenCode prompt APIs", async () => {
     // given
-    const files = [...await listSourceFiles(SOURCE_ROOT), ...await listPackageSourceFiles()]
-    const candidates = await Promise.all(files.map(async (filePath) => {
-      if (PROMPT_GATE_FILES.has(filePath) || RAW_PROMPT_ALLOWLIST.has(filePath)) {
-        return null
-      }
-      const contents = await readFile(filePath, "utf8")
-      return contents.includes("prompt") ? filePath : null
-    }))
+    const files = [...(await listSourceFiles(SOURCE_ROOT)), ...(await listPackageSourceFiles())]
+    const candidates = await Promise.all(
+      files.map(async (filePath) => {
+        if (PROMPT_GATE_FILES.has(filePath) || RAW_PROMPT_ALLOWLIST.has(filePath)) {
+          return null
+        }
+        const contents = await readFile(filePath, "utf8")
+        return contents.includes("prompt") ? filePath : null
+      }),
+    )
     const parsedSourceFiles = await parser.parse(candidates.filter((filePath): filePath is string => filePath !== null))
     const offenders: string[] = []
 
@@ -438,7 +450,7 @@ await dispatchInternalPrompt(options)
 
   test("#given production TypeScript sources #when prompt gate callers are audited #then callers cannot disable the post-dispatch reservation hold", async () => {
     // given
-    const files = [...await listSourceFiles(SOURCE_ROOT), ...await listPackageSourceFiles()]
+    const files = [...(await listSourceFiles(SOURCE_ROOT)), ...(await listPackageSourceFiles())]
     const offenders: string[] = []
 
     // when
@@ -455,7 +467,7 @@ await dispatchInternalPrompt(options)
 
   test("#given production TypeScript sources #when prompt gate callers are audited #then callers cannot bypass the central prompt queue", async () => {
     // given
-    const files = [...await listSourceFiles(SOURCE_ROOT), ...await listPackageSourceFiles()]
+    const files = [...(await listSourceFiles(SOURCE_ROOT)), ...(await listPackageSourceFiles())]
     const offenders: string[] = []
 
     // when
@@ -472,11 +484,13 @@ await dispatchInternalPrompt(options)
 
   test("#given production TypeScript sources #when prompt gate callers are audited #then every route declares queue behavior explicitly", async () => {
     // given
-    const files = [...await listSourceFiles(SOURCE_ROOT), ...await listPackageSourceFiles()]
-    const candidates = await Promise.all(files.map(async (filePath) => {
-      const contents = await readFile(filePath, "utf8")
-      return contents.includes("dispatchInternalPrompt") ? filePath : null
-    }))
+    const files = [...(await listSourceFiles(SOURCE_ROOT)), ...(await listPackageSourceFiles())]
+    const candidates = await Promise.all(
+      files.map(async (filePath) => {
+        const contents = await readFile(filePath, "utf8")
+        return contents.includes("dispatchInternalPrompt") ? filePath : null
+      }),
+    )
     const parsedSourceFiles = await parser.parse(candidates.filter((filePath): filePath is string => filePath !== null))
     const offenders: string[] = []
 
@@ -501,13 +515,16 @@ await dispatchInternalPrompt(options)
 
   test("#given production TypeScript sources #when model-suggestion prompt wrappers are audited #then every retry caller declares queue behavior explicitly", async () => {
     // given
-    const files = [...await listSourceFiles(SOURCE_ROOT), ...await listPackageSourceFiles()]
-    const candidates = await Promise.all(files.map(async (filePath) => {
-      const contents = await readFile(filePath, "utf8")
-      return contents.includes("promptWithModelSuggestionRetry") || contents.includes("promptSyncWithModelSuggestionRetry")
-        ? filePath
-        : null
-    }))
+    const files = [...(await listSourceFiles(SOURCE_ROOT)), ...(await listPackageSourceFiles())]
+    const candidates = await Promise.all(
+      files.map(async (filePath) => {
+        const contents = await readFile(filePath, "utf8")
+        return contents.includes("promptWithModelSuggestionRetry") ||
+          contents.includes("promptSyncWithModelSuggestionRetry")
+          ? filePath
+          : null
+      }),
+    )
     const parsedSourceFiles = await parser.parse(candidates.filter((filePath): filePath is string => filePath !== null))
     const offenders: string[] = []
 

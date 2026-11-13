@@ -9,17 +9,34 @@ type Callback = (event: Record<string, unknown>) => void | Promise<void>
 
 function fakeHost(options: Record<string, unknown> = {}) {
   const hooks = new Map<string, Callback>()
-  let registrations = 0, disposals = 0
+  let registrations = 0,
+    disposals = 0
   const host = {
     options,
-    tool: { hook: async (name: string, callback: Callback) => {
-      hooks.set(name, callback); registrations++
-      return { dispose: async () => { disposals++; hooks.delete(name) } }
-    } },
-    session: { hook: async (name: string, callback: Callback) => {
-      hooks.set(`session.${name}`, callback); registrations++
-      return { dispose: async () => { disposals++; hooks.delete(`session.${name}`) } }
-    } },
+    tool: {
+      hook: async (name: string, callback: Callback) => {
+        hooks.set(name, callback)
+        registrations++
+        return {
+          dispose: async () => {
+            disposals++
+            hooks.delete(name)
+          },
+        }
+      },
+    },
+    session: {
+      hook: async (name: string, callback: Callback) => {
+        hooks.set(`session.${name}`, callback)
+        registrations++
+        return {
+          dispose: async () => {
+            disposals++
+            hooks.delete(`session.${name}`)
+          },
+        }
+      },
+    },
   } as unknown as Parameters<typeof registerQuestionGates>[0]
   let call = 0
   const ask = (input: Record<string, unknown>, settle: Record<string, unknown>, tool = "question") => {
@@ -32,26 +49,40 @@ function fakeHost(options: Record<string, unknown> = {}) {
     return { before, after }
   }
   const beforeOnly = (input: Record<string, unknown>, sessionID = "s1") => {
-    void hooks.get("execute.before")?.({ tool: "question", sessionID, agent: "build", messageID: "m", id: `call-${++call}`, input })
+    void hooks.get("execute.before")?.({
+      tool: "question",
+      sessionID,
+      agent: "build",
+      messageID: "m",
+      id: `call-${++call}`,
+      input,
+    })
   }
   const context = (sessionID = "s1") => {
     const value = { sessionID, system: [] as { type: string; text: string; metadata?: Record<string, unknown> }[] }
     void hooks.get("session.context")?.(value)
-    return value.system.filter(part => part.text === GATED_NO_ANSWER).length
+    return value.system.filter((part) => part.text === GATED_NO_ANSWER).length
   }
   return { host, hooks, ask, beforeOnly, context, counts: () => [registrations, disposals] }
 }
 
 function fork(header: string, question: string, labels: readonly string[]): Record<string, unknown> {
-  return { header, question, multiple: false, options: labels.map(label => ({ label, description: label })) }
+  return { header, question, multiple: false, options: labels.map((label) => ({ label, description: label })) }
 }
 
 // The ulw-plan approval gate as recorded in the Senpi live QA (#9775), in OpenCode 2's question shape.
 function gateInput(): Record<string, unknown> {
-  return { questions: [fork("Approval", "Approve this plan approach?", ["Approve", "Approve, skip review", "Change approach"])] }
+  return {
+    questions: [
+      fork("Approval", "Approve this plan approach?", ["Approve", "Approve, skip review", "Change approach"]),
+    ],
+  }
 }
 
-const dismissed = () => ({ status: "error", error: new ToolError({ message: "The user dismissed this question", metadata: { keep: 1 } }) })
+const dismissed = () => ({
+  status: "error",
+  error: new ToolError({ message: "The user dismissed this question", metadata: { keep: 1 } }),
+})
 
 describe("v2 question-gates", () => {
   test("#given a gated question dismissed with no execute.after #when the session's next model request is built #then it carries the refusal exactly once", async () => {
@@ -61,7 +92,9 @@ describe("v2 question-gates", () => {
     f.beforeOnly(gateInput())
 
     // when
-    const other = f.context("s2"), first = f.context(), second = f.context()
+    const other = f.context("s2"),
+      first = f.context(),
+      second = f.context()
 
     // then
     expect([other, first, second]).toEqual([0, 1, 0])
@@ -84,41 +117,55 @@ describe("v2 question-gates", () => {
     ["pinned header", gateInput(), "header", "Approval"],
     ["lowercase british header", { questions: [fork("authorise", "Proceed?", ["Yes", "No"])] }, "header", "authorise"],
     ["korean header", { questions: [fork("승인", "진행할까요?", ["예", "아니오"])] }, "header", "승인"],
-    ["approve label without pinned header", { questions: [fork("Next step", "Pick one", ["Approve and run", "Stop"])] }, "label", "Next step"],
-  ])("#given a gating question with a %s #when it settles without an answer #then the tool error refuses the gated action", async (_label, input, rule, header) => {
-    // given
-    const f = fakeHost()
-    await registerQuestionGates(f.host)
-    const snapshot = structuredClone(input)
+    [
+      "approve label without pinned header",
+      { questions: [fork("Next step", "Pick one", ["Approve and run", "Stop"])] },
+      "label",
+      "Next step",
+    ],
+  ])(
+    "#given a gating question with a %s #when it settles without an answer #then the tool error refuses the gated action",
+    async (_label, input, rule, header) => {
+      // given
+      const f = fakeHost()
+      await registerQuestionGates(f.host)
+      const snapshot = structuredClone(input)
 
-    // when
-    const { after } = f.ask(input, dismissed())
+      // when
+      const { after } = f.ask(input, dismissed())
 
-    // then
-    const error = after.error as ToolError
-    expect(error).toBeInstanceOf(ToolError)
-    expect(error.message.startsWith("The user dismissed this question")).toBe(true)
-    expect(error.message.endsWith(GATED_NO_ANSWER)).toBe(true)
-    expect(error.metadata).toEqual({ keep: 1, omoQuestionGate: { rule, header } })
-    expect(input).toEqual(snapshot)
-  })
+      // then
+      const error = after.error as ToolError
+      expect(error).toBeInstanceOf(ToolError)
+      expect(error.message.startsWith("The user dismissed this question")).toBe(true)
+      expect(error.message.endsWith(GATED_NO_ANSWER)).toBe(true)
+      expect(error.metadata).toEqual({ keep: 1, omoQuestionGate: { rule, header } })
+      expect(input).toEqual(snapshot)
+    },
+  )
 
   test.each([
-    ["question text that mentions approval", { questions: [fork("Scope", "Do you approve this plan?", ["Full", "Minimal"])] }],
+    [
+      "question text that mentions approval",
+      { questions: [fork("Scope", "Do you approve this plan?", ["Full", "Minimal"])] },
+    ],
     ["header that only contains a gate word", { questions: [fork("Approval flow", "Pick", ["Yes", "No"])] }],
     ["label that only continues a gate word", { questions: [fork("Pick", "Pick", ["Approved list", "Other"])] }],
-  ])("#given a fork whose %s #when it settles without an answer #then the error is untouched", async (_label, input) => {
-    // given
-    const f = fakeHost()
-    await registerQuestionGates(f.host)
-    const settle = dismissed()
+  ])(
+    "#given a fork whose %s #when it settles without an answer #then the error is untouched",
+    async (_label, input) => {
+      // given
+      const f = fakeHost()
+      await registerQuestionGates(f.host)
+      const settle = dismissed()
 
-    // when
-    const { after } = f.ask(input, settle)
+      // when
+      const { after } = f.ask(input, settle)
 
-    // then
-    expect(after.error).toBe(settle.error)
-  })
+      // then
+      expect(after.error).toBe(settle.error)
+    },
+  )
 
   test("#given a gating question #when the user answers #then the result passes through untouched", async () => {
     // given
@@ -176,37 +223,58 @@ describe("v2 question-gates", () => {
       const g = fakeHost()
       await registerQuestionGates(g.host)
       expect(g.counts()).toEqual([0, 0])
-    } finally { if (prior === undefined) delete process.env.OMO_SENPI_DISABLED; else process.env.OMO_SENPI_DISABLED = prior }
+    } finally {
+      if (prior === undefined) delete process.env.OMO_SENPI_DISABLED
+      else process.env.OMO_SENPI_DISABLED = prior
+    }
   })
 
   test("#given a registration #when cleanup runs twice #then every hook is disposed once and captured hooks go inert", async () => {
     // given
     const f = fakeHost()
     const close = await registerQuestionGates(f.host)
-    const before = f.hooks.get("execute.before"), after = f.hooks.get("execute.after")
+    const before = f.hooks.get("execute.before"),
+      after = f.hooks.get("execute.after")
 
     // when
-    await close(); await close()
+    await close()
+    await close()
 
     // then
     expect(f.counts()).toEqual([3, 3])
     const settle = dismissed()
     const event = { tool: "question", sessionID: "s1", id: "late", input: gateInput(), ...settle }
-    await before?.(event); await after?.(event)
+    await before?.(event)
+    await after?.(event)
     expect(event.error).toBe(settle.error)
   })
 })
 
 describe("v2 question-gates parity with the Senpi component", () => {
-  const senpiComponents = join(dirname(dirname(dirname(dirname(dirname(import.meta.dir))))), "omo-senpi", "src", "components")
+  const senpiComponents = join(
+    dirname(dirname(dirname(dirname(dirname(import.meta.dir))))),
+    "omo-senpi",
+    "src",
+    "components",
+  )
 
   test("#given Senpi's gate rule #when both classify the same inputs #then headers and matches agree", async () => {
     // given
-    const senpi = await import(pathToFileURL(join(senpiComponents, "question-gates", "gate-rule.ts")).href) as { PINNED_GATE_HEADERS: readonly string[]; matchGate(input: unknown): unknown }
+    const senpi = (await import(pathToFileURL(join(senpiComponents, "question-gates", "gate-rule.ts")).href)) as {
+      PINNED_GATE_HEADERS: readonly string[]
+      matchGate(input: unknown): unknown
+    }
     const inputs: unknown[] = [
-      gateInput(), null, [], { questions: "x" }, { questions: [null, 3] },
-      { questions: [fork("  Authorize  ", "q", ["a"])] }, { questions: [fork("x", "q", ["authorize-ish"]), fork("Approval", "q", [])] },
-      { questions: [fork("x", "q", ["Approve"])] }, { questions: [fork("Approvals", "q", ["Approver"])] }, { questions: [{ options: [{ label: 4 }, { label: " APPROVE " }] }] },
+      gateInput(),
+      null,
+      [],
+      { questions: "x" },
+      { questions: [null, 3] },
+      { questions: [fork("  Authorize  ", "q", ["a"])] },
+      { questions: [fork("x", "q", ["authorize-ish"]), fork("Approval", "q", [])] },
+      { questions: [fork("x", "q", ["Approve"])] },
+      { questions: [fork("Approvals", "q", ["Approver"])] },
+      { questions: [{ options: [{ label: 4 }, { label: " APPROVE " }] }] },
     ]
 
     // when
@@ -214,7 +282,7 @@ describe("v2 question-gates parity with the Senpi component", () => {
 
     // then
     expect([...PINNED_GATE_HEADERS]).toEqual([...senpi.PINNED_GATE_HEADERS])
-    expect(v2).toEqual(inputs.map(input => senpi.matchGate(input)))
+    expect(v2).toEqual(inputs.map((input) => senpi.matchGate(input)))
   })
 
   test("#given senpi's shipped ask-user formatter #when its gated no-answer constant is read #then the V2 refusal is the same string", () => {

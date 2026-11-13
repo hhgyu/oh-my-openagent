@@ -22,7 +22,11 @@ export interface CodemodeReadonlyCall {
   readonly messageID: string
   readonly id: string
 }
-type CodemodeReadonlyDispatch = (call: CodemodeReadonlyCall, input: NativeLsInput, signal: AbortSignal) => Promise<NativeLsOutput>
+type CodemodeReadonlyDispatch = (
+  call: CodemodeReadonlyCall,
+  input: NativeLsInput,
+  signal: AbortSignal,
+) => Promise<NativeLsOutput>
 
 // The SAME parameter shape and descriptions as the Native `ls` schema.
 const LsParams = Type.Object({
@@ -45,14 +49,23 @@ export function createCodemodeReadonlyToolInfo(dispatch: CodemodeReadonlyDispatc
     description: NATIVE_LS_DESCRIPTION,
     input: LsParams as unknown as ToolInfo["input"],
     options: { codemode: true, permission: CODEMODE_READONLY_PERMISSION },
-    execute: (input, context) => Effect.tryPromise({
-      try: async (signal): Promise<Result> => {
-        if (!checkInput.Check(input)) throw new ToolError({ message: "Invalid directory listing input" })
-        const call: CodemodeReadonlyCall = Object.freeze({ sessionID: context.sessionID, agent: context.agent, messageID: context.messageID, id: context.id })
-        const output = await dispatch(call, input, signal)
-        return { content: [{ type: "text", text: output.text }], ...(output.details && { metadata: { ...output.details } }) }
-      },
-      catch: toToolError,
-    }),
+    execute: (input, context) =>
+      Effect.tryPromise({
+        try: async (signal): Promise<Result> => {
+          if (!checkInput.Check(input)) throw new ToolError({ message: "Invalid directory listing input" })
+          const call: CodemodeReadonlyCall = Object.freeze({
+            sessionID: context.sessionID,
+            agent: context.agent,
+            messageID: context.messageID,
+            id: context.id,
+          })
+          const output = await dispatch(call, input, signal)
+          return {
+            content: [{ type: "text", text: output.text }],
+            ...(output.details && { metadata: { ...output.details } }),
+          }
+        },
+        catch: toToolError,
+      }),
   }
 }

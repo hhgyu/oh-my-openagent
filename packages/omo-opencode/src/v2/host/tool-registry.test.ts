@@ -10,8 +10,14 @@ function defined<T>(value: T): NonNullable<T> {
 }
 
 function fixture() {
-  const tool = { id: "native", name: "native", description: "native", input: { type: "object", properties: { prompt: { type: "string" } } }, execute: async () => ({ content: "ok" }) }
-  const input = issueToolValueCodec(tool, "input", { schema: tool.input, decodeUnknown: value => value })
+  const tool = {
+    id: "native",
+    name: "native",
+    description: "native",
+    input: { type: "object", properties: { prompt: { type: "string" } } },
+    execute: async () => ({ content: "ok" }),
+  }
+  const input = issueToolValueCodec(tool, "input", { schema: tool.input, decodeUnknown: (value) => value })
   const registry = createToolRegistry([tool], { native: () => [] }, [{ tool, input }])
   return { tool, input, registry }
 }
@@ -49,20 +55,37 @@ test("failed associations and duplicate replacement are atomic", () => {
   expect(registry.get("native", old).tool).toBe(entry.tool)
 })
 
-test("successful replacement retires the old signal synchronously after committing the new snapshot",()=>{
- const {tool}=fixture(),registry=createToolRegistry([tool],{native:()=>[],next:()=>[]}),old=registry.generation,signal=registry.retirementSignal(old)
- let observed=false
- signal.addEventListener("abort",()=>{observed=true;expect(registry.generation).toBe(old+1);expect(registry.get("next",registry.generation).tool.name).toBe("next")},{once:true})
- registry.replace([{...tool,id:"next",name:"next"}])
- expect(observed).toBe(true);expect(signal.aborted).toBe(true)
- expect(registry.retirementSignal(registry.generation).aborted).toBe(false)
- expect(()=>registry.retirementSignal(old)).toThrow("Retired")
+test("successful replacement retires the old signal synchronously after committing the new snapshot", () => {
+  const { tool } = fixture(),
+    registry = createToolRegistry([tool], { native: () => [], next: () => [] }),
+    old = registry.generation,
+    signal = registry.retirementSignal(old)
+  let observed = false
+  signal.addEventListener(
+    "abort",
+    () => {
+      observed = true
+      expect(registry.generation).toBe(old + 1)
+      expect(registry.get("next", registry.generation).tool.name).toBe("next")
+    },
+    { once: true },
+  )
+  registry.replace([{ ...tool, id: "next", name: "next" }])
+  expect(observed).toBe(true)
+  expect(signal.aborted).toBe(true)
+  expect(registry.retirementSignal(registry.generation).aborted).toBe(false)
+  expect(() => registry.retirementSignal(old)).toThrow("Retired")
 })
-test("invalid replacement does not abort current generation or revoke its codec",async()=>{
- const {tool,registry}=fixture(),generation=registry.generation,signal=registry.retirementSignal(generation)
- expect(()=>registry.replace([tool,tool])).toThrow("Ambiguous")
- expect(signal.aborted).toBe(false);expect(registry.retirementSignal(generation)).toBe(signal)
- expect(await defined(registry.get("native",generation).inputDecoder)({prompt:"valid"})).toEqual({prompt:"valid"})
+test("invalid replacement does not abort current generation or revoke its codec", async () => {
+  const { tool, registry } = fixture(),
+    generation = registry.generation,
+    signal = registry.retirementSignal(generation)
+  expect(() => registry.replace([tool, tool])).toThrow("Ambiguous")
+  expect(signal.aborted).toBe(false)
+  expect(registry.retirementSignal(generation)).toBe(signal)
+  expect(await defined(registry.get("native", generation).inputDecoder)({ prompt: "valid" })).toEqual({
+    prompt: "valid",
+  })
 })
 
 test("actual SDK identifiers differ from names and ambiguous identifier replacement is atomic", () => {
@@ -80,7 +103,10 @@ test("actual SDK identifiers differ from names and ambiguous identifier replacem
 
 test("explicit normalizers bind the original definition and retire only after valid commit", async () => {
   const { tool } = fixture()
-  const input = issueToolArgumentNormalizer(tool, { schema: tool.input, normalizeUnknown: () => ({ prompt: "prepared" }) })
+  const input = issueToolArgumentNormalizer(tool, {
+    schema: tool.input,
+    normalizeUnknown: () => ({ prompt: "prepared" }),
+  })
   const registry = createToolRegistry([tool], { native: () => [] }, [], [{ tool, input }])
   const entry = registry.getById(tool.id, registry.generation)
   expect(await defined(entry.normalizeInput)({ prompt: 123 })).toEqual({ prompt: "prepared" })
@@ -97,29 +123,35 @@ test("explicit normalizers bind the original definition and retire only after va
   expect(await defined(registry.get("native", registry.generation).normalizeInput)({})).toEqual({ prompt: "prepared" })
 })
 
-test("actual Native owner association binds exact target and registry generation atomically",async()=>{
- await withNativeTargetPermissionService(async({service,registry,targets})=>{
-  const target=defined(targets.tools[0])
-  const permission=service.targetPermission(target),association={tool:target,permission}
-  registry.replace([target],[],[],[association])
-  const generation=registry.generation,entry=registry.get("task",generation)
-  defined(entry.nativeTaskPermission).assertOwner(service);expect(entry.adapter).toBeUndefined()
-  expect(()=>registry.replace([target],[],[],[association,association])).toThrow("Ambiguous")
-  expect(registry.generation).toBe(generation);defined(entry.nativeTaskPermission).assertCurrent()
-  expect(()=>registry.replace([target],[],[],[{tool:target,permission:{} as typeof permission}])).toThrow("Unissued")
-  expect(()=>registry.replace([Object.freeze({...target})],[],[],[association])).toThrow("Ambiguous")
-  registry.replace([])
-  expect(()=>defined(entry.nativeTaskPermission).assertCurrent()).toThrow()
-  expect(()=>registry.get("task",generation)).toThrow("Retired")
- })
+test("actual Native owner association binds exact target and registry generation atomically", async () => {
+  await withNativeTargetPermissionService(async ({ service, registry, targets }) => {
+    const target = defined(targets.tools[0])
+    const permission = service.targetPermission(target),
+      association = { tool: target, permission }
+    registry.replace([target], [], [], [association])
+    const generation = registry.generation,
+      entry = registry.get("task", generation)
+    defined(entry.nativeTaskPermission).assertOwner(service)
+    expect(entry.adapter).toBeUndefined()
+    expect(() => registry.replace([target], [], [], [association, association])).toThrow("Ambiguous")
+    expect(registry.generation).toBe(generation)
+    defined(entry.nativeTaskPermission).assertCurrent()
+    expect(() => registry.replace([target], [], [], [{ tool: target, permission: {} as typeof permission }])).toThrow(
+      "Unissued",
+    )
+    expect(() => registry.replace([Object.freeze({ ...target })], [], [], [association])).toThrow("Ambiguous")
+    registry.replace([])
+    expect(() => defined(entry.nativeTaskPermission).assertCurrent()).toThrow()
+    expect(() => registry.get("task", generation)).toThrow("Retired")
+  })
 })
 
-test("Native target phase cannot override an ordinary explicit resource adapter",async()=>{
- await withNativeTargetPermissionService(async({service,targets})=>{
-  const target=defined(targets.tools[1])
-  const association={tool:target,permission:service.targetPermission(target)}
-  expect(()=>createToolRegistry([target],{task_output:()=>[]},[],[],[association])).toThrow("Ambiguous")
-  const ordinary=createToolRegistry([target],{})
-  expect(()=>ordinary.get("task_output",ordinary.generation)).toThrow("Unsupported resource permission mapping")
- })
+test("Native target phase cannot override an ordinary explicit resource adapter", async () => {
+  await withNativeTargetPermissionService(async ({ service, targets }) => {
+    const target = defined(targets.tools[1])
+    const association = { tool: target, permission: service.targetPermission(target) }
+    expect(() => createToolRegistry([target], { task_output: () => [] }, [], [], [association])).toThrow("Ambiguous")
+    const ordinary = createToolRegistry([target], {})
+    expect(() => ordinary.get("task_output", ordinary.generation)).toThrow("Unsupported resource permission mapping")
+  })
 })

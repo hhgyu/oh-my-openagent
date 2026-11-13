@@ -1,8 +1,19 @@
 import type * as EffectPlugin from "@opencode/plugin/effect/plugin"
 import type * as PromisePlugin from "@opencode/plugin/promise/plugin"
 import { readEventLogTranscriptResult } from "@oh-my-opencode/orchestration-core/transcript/event-log"
-import { buildSkillPrepend, CHILD_HOST_TOOLS, childStructuralToolNames, parseTaskId, resolveTaskAgents, syncTaskIdFloor } from "@oh-my-opencode/senpi-task/task-operations"
-import { createTeamMailboxReconciler, teamStorageBaseDir, toTeamCoreConfig } from "@oh-my-opencode/senpi-task/team-operations"
+import {
+  buildSkillPrepend,
+  CHILD_HOST_TOOLS,
+  childStructuralToolNames,
+  parseTaskId,
+  resolveTaskAgents,
+  syncTaskIdFloor,
+} from "@oh-my-opencode/senpi-task/task-operations"
+import {
+  createTeamMailboxReconciler,
+  teamStorageBaseDir,
+  toTeamCoreConfig,
+} from "@oh-my-opencode/senpi-task/team-operations"
 import { listActiveTeams } from "@oh-my-opencode/team-core/team-state-store"
 import { OmoTaskSettingsSchema, type OmoConfig } from "@oh-my-opencode/omo-config-core"
 import { Effect, type Scope } from "effect"
@@ -26,7 +37,12 @@ import { watchLocationShutdown } from "./location-shutdown"
 import { acquireTeamMemberOwner, type TeamMemberOwner } from "./live-member-owner"
 import { acquireReadonlyBroker, type ReadonlyBrokerOwner } from "./live-readonly-producer"
 import { acquireCodemodeReadonly, type CodemodeReadonlyOwner } from "./live-codemode-readonly"
-import { acquireKernelToolOwner, applyKernelToolSurface, createKernelCallLedger, type KernelToolOwner } from "./kernel-binding"
+import {
+  acquireKernelToolOwner,
+  applyKernelToolSurface,
+  createKernelCallLedger,
+  type KernelToolOwner,
+} from "./kernel-binding"
 import { KERNEL_TOOL_TOOL_NAME } from "../../tools/kernel-tool"
 import type { EvalTaskPort } from "../../tools/eval-task-host-tool"
 import { CODEMODE_READONLY_NATIVE_NAME } from "../../tools/codemode-readonly"
@@ -66,13 +82,19 @@ export interface NativeTaskEffectOwners {
 /** The task settings of a lead's per-lead team service: its team storage lives in the lead's own
  * Native task state directory. */
 export function nativeTeamSettings(projectDirectory: string, leadSessionID: string, config: OmoConfig) {
-  return { ...OmoTaskSettingsSchema.parse(config.task ?? {}), state_dir: nativeTaskStateDir(projectDirectory, leadSessionID) }
+  return {
+    ...OmoTaskSettingsSchema.parse(config.task ?? {}),
+    state_dir: nativeTaskStateDir(projectDirectory, leadSessionID),
+  }
 }
 
 /** The team-core config of a lead's team storage: the same root its per-lead team service writes. */
 export function nativeTeamConfig(projectDirectory: string, leadSessionID: string, config: OmoConfig) {
   const settings = nativeTeamSettings(projectDirectory, leadSessionID, config)
-  return toTeamCoreConfig(settings, teamStorageBaseDir({ project_dir: projectDirectory, task: { state_dir: settings.state_dir } }))
+  return toTeamCoreConfig(
+    settings,
+    teamStorageBaseDir({ project_dir: projectDirectory, task: { state_dir: settings.state_dir } }),
+  )
 }
 
 /** Leads with an active team in this project's Native state: each candidate comes from a team's own
@@ -87,7 +109,9 @@ export async function discoverTeamLeads(projectDirectory: string, config: OmoCon
     if (!entry.isDirectory() || !/^[0-9a-f]{64}$/.test(entry.name)) continue
     const stateDir = join(root, entry.name)
     const settings = { ...OmoTaskSettingsSchema.parse(config.task ?? {}), state_dir: stateDir }
-    const teams = await listActiveTeams(toTeamCoreConfig(settings, teamStorageBaseDir({ project_dir: projectDirectory, task: { state_dir: stateDir } })))
+    const teams = await listActiveTeams(
+      toTeamCoreConfig(settings, teamStorageBaseDir({ project_dir: projectDirectory, task: { state_dir: stateDir } })),
+    )
     for (const team of teams) {
       const lead = team.leadSessionId
       if (lead !== undefined && nativeTaskStateDir(projectDirectory, lead) === stateDir) leads.add(lead)
@@ -96,7 +120,10 @@ export async function discoverTeamLeads(projectDirectory: string, config: OmoCon
   return [...leads]
 }
 
-export function acquireNativeTaskEffectOwners(context: EffectPlugin.Context, session: JoinedSession): Effect.Effect<NativeTaskEffectOwners, never, Scope.Scope> {
+export function acquireNativeTaskEffectOwners(
+  context: EffectPlugin.Context,
+  session: JoinedSession,
+): Effect.Effect<NativeTaskEffectOwners, never, Scope.Scope> {
   return Effect.gen(function* () {
     const metadataSource = yield* acquireEffectToolMetadataSource(context.tool)
     const permission = yield* acquireEffectPermissionApi(context.permission)
@@ -112,7 +139,7 @@ export function acquireNativeTaskEffectOwners(context: EffectPlugin.Context, ses
 
 /** Non-builtin Native child names. Counterparts are resolved by the ORIGINAL host-grant
  * algorithm against the actual catalog; absent names stay unavailable, never invented. */
-const CUSTOM_CANDIDATES = CHILD_HOST_TOOLS.filter(tool => tool.sessionBuiltin !== true).map(tool => tool.name)
+const CUSTOM_CANDIDATES = CHILD_HOST_TOOLS.filter((tool) => tool.sessionBuiltin !== true).map((tool) => tool.name)
 
 /** The public Native targets: the 4 task tools, the 6 lead team tools and `workflow`. Never child catalog grants. */
 const PUBLIC_TOOLS: readonly string[] = [...NATIVE_TASK_TOOL_NAMES, ...NATIVE_TEAM_TOOL_NAMES, NATIVE_DAG_TOOL_NAME]
@@ -141,7 +168,13 @@ export function seedTaskIdFloor(projectDirectory: string): void {
 }
 
 export function nativeTaskStateDir(projectDirectory: string, parentSessionID: string): string {
-  return join(projectDirectory, ".omo", "tasks", "opencode-v2", createHash("sha256").update(parentSessionID).digest("hex"))
+  return join(
+    projectDirectory,
+    ".omo",
+    "tasks",
+    "opencode-v2",
+    createHash("sha256").update(parentSessionID).digest("hex"),
+  )
 }
 
 /** Unnamespaced actual catalog entries a Native child may be granted. Namespaced CodeMode tools,
@@ -150,7 +183,18 @@ export function nativeTaskStateDir(projectDirectory: string, parentSessionID: st
  * (bound only through its `member-live-bindings` slot) and the kernel tool dispatcher (bound only
  * through its `kernel-live-bindings` slots) are never catalog grants. */
 export function childCatalog(actual: readonly ListedTool[]): ListedTool[] {
-  return actual.filter(tool => tool.options?.namespace === undefined && !["subagent", "execute", READONLY_BROKER_TOOL_NAME, TEAM_MEMBER_SEND_TOOL_NAME, KERNEL_TOOL_TOOL_NAME, ...PUBLIC_TOOLS].includes(tool.name))
+  return actual.filter(
+    (tool) =>
+      tool.options?.namespace === undefined &&
+      ![
+        "subagent",
+        "execute",
+        READONLY_BROKER_TOOL_NAME,
+        TEAM_MEMBER_SEND_TOOL_NAME,
+        KERNEL_TOOL_TOOL_NAME,
+        ...PUBLIC_TOOLS,
+      ].includes(tool.name),
+  )
 }
 
 type ModelContext = { readonly sessionID: string; readonly tools: Record<string, unknown> }
@@ -161,17 +205,26 @@ function hideUnbound(context: ModelContext, owner: BoundOwner): void {
 }
 
 /** Parents and non-curated children never see the broker; a bound curated child keeps it. */
-export function hideUnboundReadonlyBroker(context: ModelContext, owner: Pick<ReadonlyBrokerOwner, "hostID" | "isBound">): void {
+export function hideUnboundReadonlyBroker(
+  context: ModelContext,
+  owner: Pick<ReadonlyBrokerOwner, "hostID" | "isBound">,
+): void {
   hideUnbound(context, owner)
 }
 
 /** Parents and non-member sessions never see the member send; a bound in-process member keeps it. */
-export function hideUnboundTeamMemberSend(context: ModelContext, owner: Pick<TeamMemberOwner, "hostID" | "isBound">): void {
+export function hideUnboundTeamMemberSend(
+  context: ModelContext,
+  owner: Pick<TeamMemberOwner, "hostID" | "isBound">,
+): void {
   hideUnbound(context, owner)
 }
 
 /** Parents and children without the `ls` grant never see the CodeMode counterpart. */
-export function hideUnboundCodemodeReadonly(context: ModelContext, owner: Pick<CodemodeReadonlyOwner, "hostID" | "isBound">): void {
+export function hideUnboundCodemodeReadonly(
+  context: ModelContext,
+  owner: Pick<CodemodeReadonlyOwner, "hostID" | "isBound">,
+): void {
   hideUnbound(context, owner)
 }
 
@@ -184,13 +237,23 @@ export interface NativeTaskComponentOptions {
   readonly evalTask?: EvalTaskPort
 }
 
-export async function registerNativeTaskComponent(control: PromisePlugin.Context, owners: NativeTaskEffectOwners, options: NativeTaskComponentOptions = {}): Promise<() => Promise<void>> {
+export async function registerNativeTaskComponent(
+  control: PromisePlugin.Context,
+  owners: NativeTaskEffectOwners,
+  options: NativeTaskComponentOptions = {},
+): Promise<() => Promise<void>> {
   const directory = control.location.directory
-  const lifetime = new AbortController(), scopes = createSessionScopes(), handover = enterNativeGeneration(directory)
+  const lifetime = new AbortController(),
+    scopes = createSessionScopes(),
+    handover = enterNativeGeneration(directory)
   // Aborted when the HOST closes this component: OpenCode does that only once no step borrows the location.
   const locationReleased = new AbortController()
-  let accepting = true, generation = 1
-  const current = () => { if (!accepting) throw Error("Native task component is closing"); lifetime.signal.throwIfAborted() }
+  let accepting = true,
+    generation = 1
+  const current = () => {
+    if (!accepting) throw Error("Native task component is closing")
+    lifetime.signal.throwIfAborted()
+  }
   const closers: (() => Promise<void> | void)[] = []
   async function close() {
     accepting = false
@@ -199,7 +262,12 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     // Failed closers stay retained so a later close retries them; distinct failures are aggregated.
     const errors: unknown[] = []
     for (const closer of [...closers].reverse()) {
-      try { await closer(); closers.splice(closers.indexOf(closer), 1) } catch (error) { errors.push(error) }
+      try {
+        await closer()
+        closers.splice(closers.indexOf(closer), 1)
+      } catch (error) {
+        errors.push(error)
+      }
     }
     if (errors.length === 1) throw errors[0]
     if (errors.length > 1) throw new AggregateError(errors, "Native task component cleanup incomplete")
@@ -208,141 +276,291 @@ export async function registerNativeTaskComponent(control: PromisePlugin.Context
     const invocations = await registerSkillInvocations(control)
     closers.push(invocations.close)
     seedTaskIdFloor(directory)
-    const prepared = await prepareNativeTaskRuntime({ cwd: directory, models: control, skills: control.skill,
-      canonical: { resolveTaskAgents, buildSkillPrepend }, signal: lifetime.signal, assertCurrent: current, permission: owners.permission })
+    const prepared = await prepareNativeTaskRuntime({
+      cwd: directory,
+      models: control,
+      skills: control.skill,
+      canonical: { resolveTaskAgents, buildSkillPrepend },
+      signal: lifetime.signal,
+      assertCurrent: current,
+      permission: owners.permission,
+    })
     const preparedGeneration = generation
     const initial = childCatalog(await control.tool.list())
     current()
     // The dedicated broker is exposed to a model request only in a session with a live bound producer.
-    const brokerVisibility = await control.session.hook("context", context => hideUnboundReadonlyBroker(context, owners.readonly))
+    const brokerVisibility = await control.session.hook("context", (context) =>
+      hideUnboundReadonlyBroker(context, owners.readonly),
+    )
     closers.push(() => brokerVisibility.dispose())
     current()
     // The member send is exposed to a model request only in a session with a live bound member producer.
-    const memberVisibility = await control.session.hook("context", context => hideUnboundTeamMemberSend(context, owners.member))
+    const memberVisibility = await control.session.hook("context", (context) =>
+      hideUnboundTeamMemberSend(context, owners.member),
+    )
     closers.push(() => memberVisibility.dispose())
     current()
-    const listingVisibility = await control.session.hook("context", context => hideUnboundCodemodeReadonly(context, owners.codemodeReadonly))
+    const listingVisibility = await control.session.hook("context", (context) =>
+      hideUnboundCodemodeReadonly(context, owners.codemodeReadonly),
+    )
     closers.push(() => listingVisibility.dispose())
     current()
     // The kernel tool dispatcher is exposed only to a bound child, described with that child's own grant.
-    const kernelVisibility = await control.session.hook("context", context => applyKernelToolSurface(context, owners.kernel))
+    const kernelVisibility = await control.session.hook("context", (context) =>
+      applyKernelToolSurface(context, owners.kernel),
+    )
     closers.push(() => kernelVisibility.dispose())
     current()
     const kernelCalls = createKernelCallLedger()
-    const routable = [...PUBLIC_TOOLS, ...initial.map(tool => tool.id)]
+    const routable = [...PUBLIC_TOOLS, ...initial.map((tool) => tool.id)]
     const registry = createToolRegistry([], {})
-    const kernel = createToolKernel({ registry, scopes, pipeline: createPolicyPipeline(), permission: owners.permission })
+    const kernel = createToolKernel({
+      registry,
+      scopes,
+      pipeline: createPolicyPipeline(),
+      permission: owners.permission,
+    })
     const host = { ...control, session: { ...control.session, ...owners.session } }
-    const assertGeneration = () => { current(); if (generation !== preparedGeneration) throw Error("Retired Native task generation") }
+    const assertGeneration = () => {
+      current()
+      if (generation !== preparedGeneration) throw Error("Retired Native task generation")
+    }
     // The team component is assembled after the service; a member bound before it exists gets no delivery.
     let teamComponent: NativeTeamComponent | undefined
     const service = createNativeTaskService(host, {
-      scopes, callAuthority: kernel.callAuthority, metadataSource: owners.metadataSource,
-      agents: prepared.agents, config: () => prepared.config, stateDirFor: id => nativeTaskStateDir(directory, id),
-      policy: { tools: routable, authorize(call) {
-        if (call.requested !== call.routed || !routable.includes(call.requested)) throw Error("Native task route outside the owned surface")
-      } },
-      hostGrant: { permission: owners.permission, assertCurrent: assertGeneration, async preparationFor(_spec, _plan, signal) {
-        signal.throwIfAborted(); assertGeneration()
-        const catalog = childCatalog(await control.tool.list())
-        signal.throwIfAborted(); assertGeneration()
-        // Native `ls` maps to the CodeMode counterpart only while its registration is in the actual catalog.
-        const listing = owners.codemodeReadonly.hostID
-        const customCounterparts = catalog.some(tool => tool.id === listing) ? [{ nativeName: CODEMODE_READONLY_NATIVE_NAME, hostID: listing }] : []
-        return { nativeTools: childStructuralToolNames(CUSTOM_CANDIDATES).map(name => ({ name })), catalog, customCounterparts }
-      } },
-      childToolGuard: owners.guard, predecessors: handover, locationReleased: locationReleased.signal,
+      scopes,
+      callAuthority: kernel.callAuthority,
+      metadataSource: owners.metadataSource,
+      agents: prepared.agents,
+      config: () => prepared.config,
+      stateDirFor: (id) => nativeTaskStateDir(directory, id),
+      policy: {
+        tools: routable,
+        authorize(call) {
+          if (call.requested !== call.routed || !routable.includes(call.requested))
+            throw Error("Native task route outside the owned surface")
+        },
+      },
+      hostGrant: {
+        permission: owners.permission,
+        assertCurrent: assertGeneration,
+        async preparationFor(_spec, _plan, signal) {
+          signal.throwIfAborted()
+          assertGeneration()
+          const catalog = childCatalog(await control.tool.list())
+          signal.throwIfAborted()
+          assertGeneration()
+          // Native `ls` maps to the CodeMode counterpart only while its registration is in the actual catalog.
+          const listing = owners.codemodeReadonly.hostID
+          const customCounterparts = catalog.some((tool) => tool.id === listing)
+            ? [{ nativeName: CODEMODE_READONLY_NATIVE_NAME, hostID: listing }]
+            : []
+          return {
+            nativeTools: childStructuralToolNames(CUSTOM_CANDIDATES).map((name) => ({ name })),
+            catalog,
+            customCounterparts,
+          }
+        },
+      },
+      childToolGuard: owners.guard,
+      predecessors: handover,
+      locationReleased: locationReleased.signal,
       // The read-only broker, member task_send, CodeMode `ls` and parent kernel-tool producers are
       // installed; CodeMode fetch GET is bound only for a child granted Native `webfetch`, deny-all
       // otherwise. Other member slots stay unbound, so a selection needing one is refused by the runner.
-      childGuardBinding: createNativeChildGuardBinding({ assertGeneration, readonly: owners.readonly,
-        codemodeReadonly: owners.codemodeReadonly, kernel: owners.kernel, network: { guard: owners.guard },
-        member: { owner: owners.member, teamConfigFor: lead => nativeTeamConfig(directory, lead, prepared.config),
-          onBound: member => teamComponent?.memberBound(member) ?? (() => {}) } }),
+      childGuardBinding: createNativeChildGuardBinding({
+        assertGeneration,
+        readonly: owners.readonly,
+        codemodeReadonly: owners.codemodeReadonly,
+        kernel: owners.kernel,
+        network: { guard: owners.guard },
+        member: {
+          owner: owners.member,
+          teamConfigFor: (lead) => nativeTeamConfig(directory, lead, prepared.config),
+          onBound: (member) => teamComponent?.memberBound(member) ?? (() => {}),
+        },
+      }),
     })
     closers.push(() => service.close())
     // The team targets join the task targets in ONE registry generation; the team bridge waits for it.
     const teamTargets = Promise.withResolvers<NativeTeamTargets | undefined>()
     const teamRegistered = Promise.withResolvers<readonly NativeTaskTargetPermissionAssociation[]>()
     void teamRegistered.promise.catch(() => {})
-    const team = options.team?.({ tool: control.tool, directory, prepared, registry, kernel, service, assertCurrent: current,
-      delivery: { session: owners.session, assertGeneration, isMemberBound: sessionID => owners.member.isBound(sessionID),
-        teamConfigFor: lead => nativeTeamConfig(directory, lead, prepared.config),
-        journalPathFor: lead => join(nativeTaskStateDir(directory, lead), "team-deliveries.sqlite"),
+    const team = options.team?.({
+      tool: control.tool,
+      directory,
+      prepared,
+      registry,
+      kernel,
+      service,
+      assertCurrent: current,
+      delivery: {
+        session: owners.session,
+        assertGeneration,
+        isMemberBound: (sessionID) => owners.member.isBound(sessionID),
+        teamConfigFor: (lead) => nativeTeamConfig(directory, lead, prepared.config),
+        journalPathFor: (lead) => join(nativeTaskStateDir(directory, lead), "team-deliveries.sqlite"),
         discoverLeads: () => discoverTeamLeads(directory, prepared.config),
-        reconcileMailbox: lead => createTeamMailboxReconciler({ cwd: directory, settings: nativeTeamSettings(directory, lead, prepared.config), leadSessionId: () => lead })() },
-      register(targets) { teamTargets.resolve(targets); return teamRegistered.promise } })
+        reconcileMailbox: (lead) =>
+          createTeamMailboxReconciler({
+            cwd: directory,
+            settings: nativeTeamSettings(directory, lead, prepared.config),
+            leadSessionId: () => lead,
+          })(),
+      },
+      register(targets) {
+        teamTargets.resolve(targets)
+        return teamRegistered.promise
+      },
+    })
     teamComponent = team
     if (!team) teamTargets.resolve(undefined)
     // The workflow target joins the same registry generation, the same way.
     const dagTargets = Promise.withResolvers<NativeDagTargets | undefined>()
     const dagRegistered = Promise.withResolvers<readonly NativeTaskTargetPermissionAssociation[]>()
     void dagRegistered.promise.catch(() => {})
-    const dag = options.dag?.({ tool: control.tool, directory, prepared, registry, kernel, service, assertCurrent: current,
+    const dag = options.dag?.({
+      tool: control.tool,
+      directory,
+      prepared,
+      registry,
+      kernel,
+      service,
+      assertCurrent: current,
       resolveSkillInvocations: invocations.stateFor,
       delivery: { session: owners.session, assertGeneration },
-      register(targets) { dagTargets.resolve(targets); return dagRegistered.promise } })
+      register(targets) {
+        dagTargets.resolve(targets)
+        return dagRegistered.promise
+      },
+    })
     if (!dag) dagTargets.resolve(undefined)
     const closeTeam = async () => {
-      teamRegistered.reject(Error("Native task component closed")); dagRegistered.reject(Error("Native task component closed"))
-      try { await dag?.close() } finally { await team?.close() }
+      teamRegistered.reject(Error("Native task component closed"))
+      dagRegistered.reject(Error("Native task component closed"))
+      try {
+        await dag?.close()
+      } finally {
+        await team?.close()
+      }
     }
     closers.push(closeTeam)
-    const bridge = createNativeTaskBridge({ tool: control.tool, prepared, async rollbackAcquisition() { await service.close() }, async acquire(targets) {
-      current()
-      let teamPermissions: NativeTaskTargetPermissionAssociation[] = [], dagPermissions: NativeTaskTargetPermissionAssociation[] = []
-      let targetPermissions: NativeTaskTargetPermissionAssociation[]
-      try {
-        const [teamDefinitions, dagDefinitions] = await Promise.all([teamTargets.promise, dagTargets.promise])
+    const bridge = createNativeTaskBridge({
+      tool: control.tool,
+      prepared,
+      async rollbackAcquisition() {
+        await service.close()
+      },
+      async acquire(targets) {
         current()
-        targetPermissions = targets.tools.map(tool => ({ tool, permission: service.targetPermission(tool) }))
-        teamPermissions = teamDefinitions?.tools.map(tool => ({ tool, permission: service.targetPermission(tool) })) ?? []
-        dagPermissions = dagDefinitions?.tools.map(tool => ({ tool, permission: service.targetPermission(tool) })) ?? []
-        registry.replace([...targets.tools, ...teamDefinitions?.tools ?? [], ...dagDefinitions?.tools ?? []],
-          [...targets.codecs, ...teamDefinitions?.codecs ?? [], ...dagDefinitions?.codecs ?? []], targets.normalizers,
-          [...targetPermissions, ...teamPermissions, ...dagPermissions])
-      } catch (error) { teamRegistered.reject(error); dagRegistered.reject(error); throw error }
-      teamRegistered.resolve(teamPermissions)
-      dagRegistered.resolve(dagPermissions)
-      return { registry, kernel, service, targetPermissions,
-        ...(team && { teamRouting: (caller: Parameters<NativeTeamComponent["teamRouting"]>[0], call: Parameters<NativeTeamComponent["teamRouting"]>[1]) => team.teamRouting(caller, call) }),
-        async context(caller, signal) {
-          const actual = await owners.session.get({ sessionID: caller.sessionID }, { signal })
-          signal.throwIfAborted(); current()
-          if (actual.id !== caller.sessionID || actual.location.directory !== directory) throw Error("Foreign Native task context")
-          // Only an eval cell's `tools.task` lends a capability; senpi-task decides the grant against it.
-          const kernelTools = kernelCalls.read(caller)
-          return { cwd: actual.location.directory, sessionManager: { getSessionId: () => actual.id }, ...(kernelTools !== undefined && { kernelTools }) }
-        },
-        taskDependencies: () => ({ resolveChildToolNames: () => childStructuralToolNames(CUSTOM_CANDIDATES), resolveSkillInvocations: invocations.stateFor }),
-        outputDependencies: caller => ({ stateDir: nativeTaskStateDir(directory, caller.sessionID), transcriptReader: ({ stateDir, taskId }) => readEventLogTranscriptResult(stateDir, taskId) }),
-        async release() { scopes.dispose() } }
-    } })
+        let teamPermissions: NativeTaskTargetPermissionAssociation[] = [],
+          dagPermissions: NativeTaskTargetPermissionAssociation[] = []
+        let targetPermissions: NativeTaskTargetPermissionAssociation[]
+        try {
+          const [teamDefinitions, dagDefinitions] = await Promise.all([teamTargets.promise, dagTargets.promise])
+          current()
+          targetPermissions = targets.tools.map((tool) => ({ tool, permission: service.targetPermission(tool) }))
+          teamPermissions =
+            teamDefinitions?.tools.map((tool) => ({ tool, permission: service.targetPermission(tool) })) ?? []
+          dagPermissions =
+            dagDefinitions?.tools.map((tool) => ({ tool, permission: service.targetPermission(tool) })) ?? []
+          registry.replace(
+            [...targets.tools, ...(teamDefinitions?.tools ?? []), ...(dagDefinitions?.tools ?? [])],
+            [...targets.codecs, ...(teamDefinitions?.codecs ?? []), ...(dagDefinitions?.codecs ?? [])],
+            targets.normalizers,
+            [...targetPermissions, ...teamPermissions, ...dagPermissions],
+          )
+        } catch (error) {
+          teamRegistered.reject(error)
+          dagRegistered.reject(error)
+          throw error
+        }
+        teamRegistered.resolve(teamPermissions)
+        dagRegistered.resolve(dagPermissions)
+        return {
+          registry,
+          kernel,
+          service,
+          targetPermissions,
+          ...(team && {
+            teamRouting: (
+              caller: Parameters<NativeTeamComponent["teamRouting"]>[0],
+              call: Parameters<NativeTeamComponent["teamRouting"]>[1],
+            ) => team.teamRouting(caller, call),
+          }),
+          async context(caller, signal) {
+            const actual = await owners.session.get({ sessionID: caller.sessionID }, { signal })
+            signal.throwIfAborted()
+            current()
+            if (actual.id !== caller.sessionID || actual.location.directory !== directory)
+              throw Error("Foreign Native task context")
+            // Only an eval cell's `tools.task` lends a capability; senpi-task decides the grant against it.
+            const kernelTools = kernelCalls.read(caller)
+            return {
+              cwd: actual.location.directory,
+              sessionManager: { getSessionId: () => actual.id },
+              ...(kernelTools !== undefined && { kernelTools }),
+            }
+          },
+          taskDependencies: () => ({
+            resolveChildToolNames: () => childStructuralToolNames(CUSTOM_CANDIDATES),
+            resolveSkillInvocations: invocations.stateFor,
+          }),
+          outputDependencies: (caller) => ({
+            stateDir: nativeTaskStateDir(directory, caller.sessionID),
+            transcriptReader: ({ stateDir, taskId }) => readEventLogTranscriptResult(stateDir, taskId),
+          }),
+          async release() {
+            scopes.dispose()
+          },
+        }
+      },
+    })
     // Same order the actual public campaign proved: original service operations end first,
     // then the bridge joins public callbacks and disposes its registrations.
-    closers.splice(closers.length - 2, 2, async () => { await service.close(); await closeTeam(); await bridge.close() })
+    closers.splice(closers.length - 2, 2, async () => {
+      await service.close()
+      await closeTeam()
+      await bridge.close()
+    })
     await bridge.ready
     await team?.ready
     await dag?.ready
     if (options.evalTask) {
-      closers.push(options.evalTask.attach(async (input, caller, kernelTools) => {
-        current()
-        const giveBack = kernelTools === undefined ? undefined : kernelCalls.lend(caller, kernelTools)
-        try { return await bridge.invokeTask(input, caller) } finally { giveBack?.() }
-      }))
+      closers.push(
+        options.evalTask.attach(async (input, caller, kernelTools) => {
+          current()
+          const giveBack = kernelTools === undefined ? undefined : kernelCalls.lend(caller, kernelTools)
+          try {
+            return await bridge.invokeTask(input, caller)
+          } finally {
+            giveBack?.()
+          }
+        }),
+      )
     }
   } catch (error) {
-    try { await close() } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Native task component setup failed and cleanup is incomplete") }
+    try {
+      await close()
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Native task component setup failed and cleanup is incomplete")
+    }
     throw error
   }
   let closing: Promise<void> | undefined
   const closeOnce = () => {
-    closing ??= handover.retire(close).catch(error => { closing = undefined; throw error })
+    closing ??= handover.retire(close).catch((error) => {
+      closing = undefined
+      throw error
+    })
     return closing
   }
   // Park on the host's shutdown signal: OpenCode runs this close only once no step borrows the location.
   closers.push(watchLocationShutdown(control, closeOnce))
   // The host's own close runs inside the teardown of the last step that borrowed the location, so a
   // park still waiting for that step's session to go idle could never finish: release it here.
-  return () => { locationReleased.abort(Error("OpenCode closed the plugin location")); return closeOnce() }
+  return () => {
+    locationReleased.abort(Error("OpenCode closed the plugin location"))
+    return closeOnce()
+  }
 }

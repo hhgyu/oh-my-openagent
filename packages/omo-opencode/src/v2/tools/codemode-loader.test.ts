@@ -7,7 +7,14 @@ const EXPORTS: Record<string, Record<string, unknown>> = {
   "session-manager-proxy.ts": { SessionManagerProxy: class {} },
   "handle-registry.ts": { HandleRegistry: class {} },
   "detached-cell-manager.ts": { EvalDetachedCellManager: class {} },
-  "settings.ts": { defaultCodemodeSettings: {}, resolveEnabledLanguages: () => ({}), resolveForegroundWindowSeconds: () => 1, resolveRunBudgetSeconds: () => 1, resolveHardLimitSeconds: () => 1, resolveMaxDetachedCells: () => 1 },
+  "settings.ts": {
+    defaultCodemodeSettings: {},
+    resolveEnabledLanguages: () => ({}),
+    resolveForegroundWindowSeconds: () => 1,
+    resolveRunBudgetSeconds: () => 1,
+    resolveHardLimitSeconds: () => 1,
+    resolveMaxDetachedCells: () => 1,
+  },
   "detect.ts": { getInterpreterAvailability: () => ({}), createInterpreterDetector: () => ({}) },
   "runtime-factory.ts": { enabledLanguagesFrom: () => ({}) },
   "runtime-info.ts": { jsRuntimeInfo: () => ({}), runtimesFromAvailability: () => ({}) },
@@ -20,12 +27,16 @@ function fakeImport(log: string[], override?: (url: string) => Promise<Record<st
     log.push(url)
     const custom = override?.(url)
     if (custom) return custom
-    const file = Object.keys(EXPORTS).find(name => url.endsWith(`/${name}`))
+    const file = Object.keys(EXPORTS).find((name) => url.endsWith(`/${name}`))
     return file ? Promise.resolve(EXPORTS[file] ?? {}) : Promise.reject(Error(`unexpected import ${url}`))
   }
 }
 
-const base = { resolveRoot: () => "/opt/codemode", readVersion: () => CODEMODE_VERSION, resolveSenpi: () => "/opt/senpi/dist/index.js" }
+const base = {
+  resolveRoot: () => "/opt/codemode",
+  readVersion: () => CODEMODE_VERSION,
+  resolveSenpi: () => "/opt/senpi/dist/index.js",
+}
 
 describe("codemode loader", () => {
   test("#given concurrent callers #when the package loads #then one import graph is shared and memoized", async () => {
@@ -42,7 +53,7 @@ describe("codemode loader", () => {
     expect(third).toBe(first)
     expect(loader.loaded()).toBe(first)
     expect(log).toHaveLength(11)
-    expect(log.every(url => url.startsWith("file:"))).toBe(true)
+    expect(log.every((url) => url.startsWith("file:"))).toBe(true)
     expect(first.version).toBe(CODEMODE_VERSION)
     expect(first.kernelRegistry.list()).toEqual([{ pid: 4242 }])
   })
@@ -51,7 +62,11 @@ describe("codemode loader", () => {
     // given
     const log: string[] = []
     const gate = Promise.withResolvers<Record<string, unknown>>()
-    const loader = createCodemodeLoader({ ...base, timeoutMs: 20, importModule: fakeImport(log, url => url.endsWith("/eval-tool.ts") ? gate.promise : undefined) })
+    const loader = createCodemodeLoader({
+      ...base,
+      timeoutMs: 20,
+      importModule: fakeImport(log, (url) => (url.endsWith("/eval-tool.ts") ? gate.promise : undefined)),
+    })
 
     // when
     const first = await loader.load().catch((error: unknown) => error)
@@ -68,7 +83,12 @@ describe("codemode loader", () => {
 
   test("#given the package is not installed #when loading #then the error names the missing runtime dependency", async () => {
     // given
-    const loader = createCodemodeLoader({ ...base, resolveRoot: () => { throw Error("Cannot find package") } })
+    const loader = createCodemodeLoader({
+      ...base,
+      resolveRoot: () => {
+        throw Error("Cannot find package")
+      },
+    })
 
     // when
     const error = await loader.load().catch((caught: unknown) => caught)
@@ -93,7 +113,12 @@ describe("codemode loader", () => {
     // given
     const log: string[] = []
     let fail = true
-    const loader = createCodemodeLoader({ ...base, importModule: fakeImport(log, url => url.endsWith("/detect.ts") && fail ? Promise.reject(Error("boom")) : undefined) })
+    const loader = createCodemodeLoader({
+      ...base,
+      importModule: fakeImport(log, (url) =>
+        url.endsWith("/detect.ts") && fail ? Promise.reject(Error("boom")) : undefined,
+      ),
+    })
 
     // when
     const error = await loader.load().catch((caught: unknown) => caught)
@@ -107,7 +132,10 @@ describe("codemode loader", () => {
 
   test("#given a module without a required export #when loading #then the shape mismatch is reported", async () => {
     // given
-    const loader = createCodemodeLoader({ ...base, importModule: fakeImport([], url => url.endsWith("/index.js") ? Promise.resolve({}) : undefined) })
+    const loader = createCodemodeLoader({
+      ...base,
+      importModule: fakeImport([], (url) => (url.endsWith("/index.js") ? Promise.resolve({}) : undefined)),
+    })
 
     // when
     const error = await loader.load().catch((caught: unknown) => caught)

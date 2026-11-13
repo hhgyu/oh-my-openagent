@@ -1,5 +1,9 @@
 import type { Result } from "@opencode/plugin/promise/tool"
-import type { ToolResultContentBlock, ToolResultContextLike, ToolResultEventLike } from "@oh-my-opencode/comment-checker-core"
+import type {
+  ToolResultContentBlock,
+  ToolResultContextLike,
+  ToolResultEventLike,
+} from "@oh-my-opencode/comment-checker-core"
 
 export interface CompletedToolCall {
   readonly tool: string
@@ -27,15 +31,18 @@ function checkerToolName(tool: string): string {
 function checkerInput(input: Record<string, unknown>): Record<string, unknown> {
   const normalized: Record<string, unknown> = { ...input }
   if (normalized.path === undefined && typeof input.filePath === "string") normalized.path = input.filePath
-  if (normalized.old_string === undefined && typeof input.oldString === "string") normalized.old_string = input.oldString
-  if (normalized.new_string === undefined && typeof input.newString === "string") normalized.new_string = input.newString
-  if (Array.isArray(input.edits)) normalized.edits = input.edits.map(item => isRecord(item) ? checkerInput(item) : item)
+  if (normalized.old_string === undefined && typeof input.oldString === "string")
+    normalized.old_string = input.oldString
+  if (normalized.new_string === undefined && typeof input.newString === "string")
+    normalized.new_string = input.newString
+  if (Array.isArray(input.edits))
+    normalized.edits = input.edits.map((item) => (isRecord(item) ? checkerInput(item) : item))
   return normalized
 }
 
 function checkerContent(content: Result["content"]): ToolResultContentBlock[] {
   if (typeof content === "string") return content.length > 0 ? [{ type: "text", text: content }] : []
-  return (content ?? []).map(part => ({ ...part }))
+  return (content ?? []).map((part) => ({ ...part }))
 }
 
 export function toCheckerToolResult(call: CompletedToolCall, cwd: string): CheckerToolResult | undefined {
@@ -57,8 +64,9 @@ export function toCheckerToolResult(call: CompletedToolCall, cwd: string): Check
 /** Appends feedback the way V2 decorates tool results (string joined by newline, arrays get text parts). */
 export function withFeedback(result: Result, feedback: readonly string[]): Result {
   if (feedback.length === 0) return result
-  const content = typeof result.content === "string"
-    ? [...(result.content.length > 0 ? [result.content] : []), ...feedback].join("\n")
-    : [...(result.content ?? []), ...feedback.map(text => ({ type: "text" as const, text }))]
+  const content =
+    typeof result.content === "string"
+      ? [...(result.content.length > 0 ? [result.content] : []), ...feedback].join("\n")
+      : [...(result.content ?? []), ...feedback.map((text) => ({ type: "text" as const, text }))]
   return { ...result, content }
 }

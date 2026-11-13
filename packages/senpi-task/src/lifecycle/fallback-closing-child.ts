@@ -18,8 +18,11 @@ export async function endClosingFallbackChild(context: LifecycleContext, record:
   if (closing === undefined) return true
   if (closing.owned_session !== undefined) {
     if (!context.ownedSessions) throw new Error("Owned session lifecycle port required")
-    await context.ownedSessions.destroy({ ...record, owned_session: closing.owned_session, runner_kind: "owned-session" }, "fallback_handoff")
-    context.store.mutate(record.task_id, fresh => forgetClosedChild(fresh, closing))
+    await context.ownedSessions.destroy(
+      { ...record, owned_session: closing.owned_session, runner_kind: "owned-session" },
+      "fallback_handoff",
+    )
+    context.store.mutate(record.task_id, (fresh) => forgetClosedChild(fresh, closing))
     return true
   }
   if (closing.requires_confirmation === true && closing.host_session !== undefined) {
@@ -61,15 +64,20 @@ export async function endClosingFallbackChild(context: LifecycleContext, record:
     closingAttempts.set(key, attempt)
     return attempt
   }
-  const ended = closing.host_session === undefined
-    ? await signalClosingProcess(context, record.task_id, closing.pid)
-    : await closeClosingSession(context, record, closing.host_session)
+  const ended =
+    closing.host_session === undefined
+      ? await signalClosingProcess(context, record.task_id, closing.pid)
+      : await closeClosingSession(context, record, closing.host_session)
   if (!ended) return false
   context.store.mutate(record.task_id, (fresh) => forgetClosedChild(fresh, closing))
   return true
 }
 
-async function signalClosingProcess(context: LifecycleContext, taskId: string, pid: number | undefined): Promise<boolean> {
+async function signalClosingProcess(
+  context: LifecycleContext,
+  taskId: string,
+  pid: number | undefined,
+): Promise<boolean> {
   if (pid === undefined || !context.signaller.isAlive(pid)) return true
   context.signaller.signal(pid, "SIGTERM")
   context.store.appendEvent(taskId, { type: "reconcile_terminated", payload: { pid, signal: "SIGTERM" } })
@@ -81,7 +89,11 @@ async function signalClosingProcess(context: LifecycleContext, taskId: string, p
   return !context.signaller.isAlive(pid)
 }
 
-async function closeClosingSession(context: LifecycleContext, record: TaskRecord, hostSession: HostSessionIdentity): Promise<boolean> {
+async function closeClosingSession(
+  context: LifecycleContext,
+  record: TaskRecord,
+  hostSession: HostSessionIdentity,
+): Promise<boolean> {
   // An unreachable daemon took its sessions with it. A reachable one is asked to close even when it no
   // longer lists the path: closing an absent session is harmless, a skipped close is never retried.
   if (!(await context.hostSessionProbe.daemonAlive(hostSession))) return true

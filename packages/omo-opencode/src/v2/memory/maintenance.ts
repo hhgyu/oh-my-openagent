@@ -4,12 +4,20 @@
 // and never keeps the host alive; one pass per identity per 12 hours across every process, under the
 // identity's `memory-maintenance` lock. The empty-journal sweep runs at once on the first bind.
 
-import { createMemoryMaintenance, type MemoryMaintenance, type MemoryMaintenanceContext, type MemoryMaintenanceOptions } from "@oh-my-opencode/memory-core/maintenance"
+import {
+  createMemoryMaintenance,
+  type MemoryMaintenance,
+  type MemoryMaintenanceContext,
+  type MemoryMaintenanceOptions,
+} from "@oh-my-opencode/memory-core/maintenance"
 import type { BoundMemorySession } from "./binding"
 import type { MemoryLogger } from "./config"
 
 /** Test seams over the scheduler's timing and packing thresholds. */
-export type MemoryMaintenanceSeams = Pick<MemoryMaintenanceOptions, "delayMs" | "intervalMs" | "minLooseObjects" | "timeoutMs" | "now" | "createRepo">
+export type MemoryMaintenanceSeams = Pick<
+  MemoryMaintenanceOptions,
+  "delayMs" | "intervalMs" | "minLooseObjects" | "timeoutMs" | "now" | "createRepo"
+>
 
 export interface V2MemoryMaintenance {
   /** Schedules this identity's pass (a no-op once scheduled in this component instance). */
@@ -18,14 +26,24 @@ export interface V2MemoryMaintenance {
   close(): Promise<void>
 }
 
-export function createV2MemoryMaintenance(logger: MemoryLogger, seams: MemoryMaintenanceSeams = {}): V2MemoryMaintenance {
+export function createV2MemoryMaintenance(
+  logger: MemoryLogger,
+  seams: MemoryMaintenanceSeams = {},
+): V2MemoryMaintenance {
   // Sessions this component bound: the empty-journal sweep never removes a live session's journal.
   const bound = new Set<string>()
   const maintenance: MemoryMaintenance = createMemoryMaintenance<MemoryMaintenanceContext>({
     ...seams,
-    isLiveSession: sessionID => bound.has(sessionID),
+    isLiveSession: (sessionID) => bound.has(sessionID),
     logPrefix: "memory",
-    logger: { info: (message, data) => { logger.info?.(message, data) }, warn: (message, data) => { logger.warn(message, data) } },
+    logger: {
+      info: (message, data) => {
+        logger.info?.(message, data)
+      },
+      warn: (message, data) => {
+        logger.warn(message, data)
+      },
+    },
   })
   return {
     onBound(session) {

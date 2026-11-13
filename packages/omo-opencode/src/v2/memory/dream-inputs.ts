@@ -24,7 +24,8 @@ async function readJsonOrEmpty(path: string): Promise<unknown> {
   } catch {
     return {}
   }
-  if (Buffer.byteLength(raw, "utf8") > LEDGER_MAX_BYTES) return { truncated: `ledger exceeds ${LEDGER_MAX_BYTES} bytes; not included` }
+  if (Buffer.byteLength(raw, "utf8") > LEDGER_MAX_BYTES)
+    return { truncated: `ledger exceeds ${LEDGER_MAX_BYTES} bytes; not included` }
   try {
     return JSON.parse(raw)
   } catch {
@@ -33,11 +34,19 @@ async function readJsonOrEmpty(path: string): Promise<unknown> {
 }
 
 function redactStrings(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value, (_key, entry: unknown) => typeof entry === "string" ? redactSecretLikeMaterial(entry) : entry))
+  return JSON.parse(
+    JSON.stringify(value, (_key, entry: unknown) =>
+      typeof entry === "string" ? redactSecretLikeMaterial(entry) : entry,
+    ),
+  )
 }
 
 /** The dream run's first user input for a launch whose worktree is `worktreeDir`. */
-export async function buildDreamLaunchPrompt(bound: BoundMemorySession, run: ReservedRun, worktreeDir: string): Promise<string> {
+export async function buildDreamLaunchPrompt(
+  bound: BoundMemorySession,
+  run: ReservedRun,
+  worktreeDir: string,
+): Promise<string> {
   const { budget, target } = dreamTokenBudget(bound)
   const runtime = bound.paths.runtime
   const people = { ...bound.settings.people, ...bound.settings.agents[bound.identity]?.people }

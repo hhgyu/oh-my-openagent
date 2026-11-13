@@ -1,6 +1,12 @@
 import { join } from "node:path"
 import {
-  GitMemoryRepo, PendingNudges, RecallLedger, planRecallQueries, selectRecallCandidates, type RecallCandidate, type RecallCorpusCache,
+  GitMemoryRepo,
+  PendingNudges,
+  RecallLedger,
+  planRecallQueries,
+  selectRecallCandidates,
+  type RecallCandidate,
+  type RecallCorpusCache,
 } from "@oh-my-opencode/memory-core"
 import type { OmoMemoryRecall } from "@oh-my-opencode/omo-config-core"
 import { existsSync } from "@oh-my-opencode/memory-core/fs"
@@ -17,13 +23,18 @@ export interface RecallStores {
 }
 
 export const fileRecallStores: RecallStores = {
-  ledger: bound => new RecallLedger(bound.paths.recallLedger),
-  pending: bound => new PendingNudges(bound.paths.recallPending),
+  ledger: (bound) => new RecallLedger(bound.paths.recallLedger),
+  pending: (bound) => new PendingNudges(bound.paths.recallPending),
 }
 
 /** The resident Kibitzer judge: the only voice that turns a lexical candidate into a nudge. */
 export interface RecallJudge {
-  offer(bound: BoundMemorySession, candidates: readonly RecallCandidate[], surfaced: ReadonlySet<string>, recall: OmoMemoryRecall): Promise<unknown>
+  offer(
+    bound: BoundMemorySession,
+    candidates: readonly RecallCandidate[],
+    surfaced: ReadonlySet<string>,
+    recall: OmoMemoryRecall,
+  ): Promise<unknown>
 }
 
 export interface MemoryRecallCollectorDeps {
@@ -60,7 +71,9 @@ export function createRecallCollector(deps: MemoryRecallCollectorDeps): MemoryRe
       deps.logger.warn("memory recall collection skipped", { sessionID, error: describeError(error) })
     })
     chains.set(sessionID, next)
-    void next.then(() => { if (chains.get(sessionID) === next) chains.delete(sessionID) })
+    void next.then(() => {
+      if (chains.get(sessionID) === next) chains.delete(sessionID)
+    })
   }
 
   async function collect(sessionID: string, prompt: string | undefined, toolText: string | undefined): Promise<void> {

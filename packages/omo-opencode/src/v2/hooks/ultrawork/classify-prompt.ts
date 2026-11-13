@@ -13,7 +13,7 @@ const ULTRAWORK_SKILL_NAME = "ultrawork"
 
 function attachesUltraworkSkill(skills: UltraworkPromptInput["skills"]): boolean {
   if (!skills) return false
-  return skills.some(skill => skill.id.split(/[/:]/).at(-1) === ULTRAWORK_SKILL_NAME)
+  return skills.some((skill) => skill.id.split(/[/:]/).at(-1) === ULTRAWORK_SKILL_NAME)
 }
 
 /**

@@ -19,9 +19,12 @@ function jsonDetails(details: unknown): unknown {
 /** senpi `AgentToolResult` of a cell to the SDK result: text stays text, images become data-URI files,
  * `isError` becomes a tool error the model reads. */
 export function adaptEvalResult(value: unknown): Result {
-  if (!value || typeof value !== "object" || !Array.isArray((value as { content?: unknown }).content)) throw Error("eval returned no content")
+  if (!value || typeof value !== "object" || !Array.isArray((value as { content?: unknown }).content))
+    throw Error("eval returned no content")
   const result = value as { content: unknown[]; details?: unknown; isError?: unknown }
-  type Part = { readonly type: "text"; readonly text: string } | { readonly type: "file"; readonly uri: string; readonly mime: string }
+  type Part =
+    | { readonly type: "text"; readonly text: string }
+    | { readonly type: "file"; readonly uri: string; readonly mime: string }
   const content = result.content.flatMap((part): Part[] => {
     if (!part || typeof part !== "object") return []
     const item = part as { type?: unknown; text?: unknown; data?: unknown; mimeType?: unknown }
@@ -34,7 +37,10 @@ export function adaptEvalResult(value: unknown): Result {
   const details = jsonDetails(result.details)
   const metadata = details === undefined ? {} : { nativeEval: details }
   if (result.isError === true) {
-    throw new ToolError({ message: content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n") || "eval cell failed", metadata })
+    throw new ToolError({
+      message: content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n") || "eval cell failed",
+      metadata,
+    })
   }
   return { content, metadata }
 }
@@ -42,7 +48,16 @@ export function adaptEvalResult(value: unknown): Result {
 export function progressText(update: unknown): string | undefined {
   const content = (update as { content?: unknown } | undefined)?.content
   if (!Array.isArray(content)) return undefined
-  const text = content.flatMap(part => part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string" ? [(part as { text: string }).text] : []).join("\n")
+  const text = content
+    .flatMap((part) =>
+      part &&
+      typeof part === "object" &&
+      (part as { type?: unknown }).type === "text" &&
+      typeof (part as { text?: unknown }).text === "string"
+        ? [(part as { text: string }).text]
+        : [],
+    )
+    .join("\n")
   return text ? text.slice(-2048) : undefined
 }
 

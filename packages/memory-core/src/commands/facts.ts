@@ -26,7 +26,8 @@ async function runRetry(
   try {
     before = await store.readFailures()
   } catch (error) {
-    if (error instanceof LockContentionError) return respond(ctx, "cannot retry: the failure ledger is busy; try /facts retry again shortly", "info")
+    if (error instanceof LockContentionError)
+      return respond(ctx, "cannot retry: the failure ledger is busy; try /facts retry again shortly", "info")
     return respond(
       ctx,
       `cannot retry: the failure ledger is unreadable (${error instanceof Error ? error.message : String(error)}); repair or remove failures.json first`,
@@ -47,7 +48,8 @@ async function runRetry(
   try {
     removed = await store.clearForRetry(filter)
   } catch (error) {
-    if (error instanceof LockContentionError) return respond(ctx, "cannot retry: the failure ledger is busy; try /facts retry again shortly", "info")
+    if (error instanceof LockContentionError)
+      return respond(ctx, "cannot retry: the failure ledger is busy; try /facts retry again shortly", "info")
     throw error
   }
   // ONE attempt: the extractor owns its own re-entrancy latch, so the command never loops.
@@ -57,16 +59,18 @@ async function runRetry(
   await deps.factsSink?.reconcile()
   const names = conversationsIn(matching)
   const unparked = matching.filter((record) => record.state === "parked").length
-  const unparkedNote = unparked === 0
-    ? ""
-    : `; ${unparked} parked ${unparked === 1 ? "batch" : "batches"} unparked`
+  const unparkedNote = unparked === 0 ? "" : `; ${unparked} parked ${unparked === 1 ? "batch" : "batches"} unparked`
   return respond(
     ctx,
     `cleared ${removed} record${removed === 1 ? "" : "s"} for ${names.join(", ")}; one retry attempt was started${unparkedNote}; run /facts again to check whether any batch parked again`,
   )
 }
 
-export async function runFactsCommand(deps: MemoryCommandDeps, args: string, ctx: MemoryCommandContext): Promise<string> {
+export async function runFactsCommand(
+  deps: MemoryCommandDeps,
+  args: string,
+  ctx: MemoryCommandContext,
+): Promise<string> {
   const identity = requireIdentity(deps, ctx)
   if (typeof identity === "string") return respond(ctx, identity, "error")
 

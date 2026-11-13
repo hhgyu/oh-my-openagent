@@ -33,7 +33,9 @@ export interface DownloadCommentCheckerBinaryOptions {
   readonly resolveAssetUrl?: (asset: CommentCheckerReleaseAsset) => string
 }
 
-export async function downloadCommentCheckerBinary(options: DownloadCommentCheckerBinaryOptions): Promise<string | null> {
+export async function downloadCommentCheckerBinary(
+  options: DownloadCommentCheckerBinaryOptions,
+): Promise<string | null> {
   const { archive, logLabel } = options
   const platform = options.platform ?? process.platform
   const arch = options.arch ?? process.arch

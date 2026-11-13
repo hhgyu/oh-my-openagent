@@ -22,7 +22,7 @@ export const GATE_CONFIG = {
     // stamp-release-changelog.ts writes the fragments' log blocks into their logs in the release commit.
     /^packages\/[^/]+\/changes\.md$/,
   ],
-} as const;
+} as const
 
 /** The upstream this fork merges. A PR labelled `label` that merges new upstream commits may carry upstream's own
  * changelog and log edits, but only byte-for-byte as upstream wrote them (check-pr-changelog.ts). */
@@ -31,4 +31,4 @@ export const UPSTREAM_SYNC = {
   url: "https://github.com/code-yeongyu/oh-my-openagent",
   branch: "dev",
   ref: "refs/changelog-gate/upstream",
-} as const;
+} as const

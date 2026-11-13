@@ -4,18 +4,33 @@ import type { RedispatchOutcome } from "../../steering"
 import { TaskSendParams } from "./send-schema"
 import type { ToolArgumentDiagnostic } from "../argument-validation"
 
-export function mapRedispatchOutcome(manager: SendManager, outcome: RedispatchOutcome, callerSessionId: string | undefined): SendToolResult {
+export function mapRedispatchOutcome(
+  manager: SendManager,
+  outcome: RedispatchOutcome,
+  callerSessionId: string | undefined,
+): SendToolResult {
   switch (outcome.kind) {
     case "redispatched":
-      return toolResult(`Re-dispatched ${outcome.task_id} onto a fresh live session (run epoch ${outcome.run_epoch}); its persisted prompt is replaying.`, {
-        kind: "redispatched",
-        task_id: outcome.task_id,
-        run_epoch: outcome.run_epoch,
-      })
+      return toolResult(
+        `Re-dispatched ${outcome.task_id} onto a fresh live session (run epoch ${outcome.run_epoch}); its persisted prompt is replaying.`,
+        {
+          kind: "redispatched",
+          task_id: outcome.task_id,
+          run_epoch: outcome.run_epoch,
+        },
+      )
     case "invalid_state":
-      return toolErrorResult(outcome.reason, { kind: "invalid_state", task_id: outcome.task_id, reason: outcome.reason })
+      return toolErrorResult(outcome.reason, {
+        kind: "invalid_state",
+        task_id: outcome.task_id,
+        reason: outcome.reason,
+      })
     case "respawn_failed":
-      return toolErrorResult(outcome.reason, { kind: "respawn_failed", task_id: outcome.task_id, reason: outcome.reason })
+      return toolErrorResult(outcome.reason, {
+        kind: "respawn_failed",
+        task_id: outcome.task_id,
+        reason: outcome.reason,
+      })
     case "capacity_deferred":
       return toolResult(outcome.reason, { kind: "capacity_deferred", task_id: outcome.task_id, reason: outcome.reason })
     case "scope_denied":
@@ -33,8 +48,14 @@ export function mapRedispatchOutcome(manager: SendManager, outcome: RedispatchOu
 export function invalidArguments(reason: string, fields?: readonly string[]): SendToolResult {
   if (fields !== undefined) {
     const diagnostic: ToolArgumentDiagnostic = {
-      code: "invalid_arguments", fields, expected_fields: Object.keys(TaskSendParams.properties),
-      issues: fields.map(field => ({ code: "invalid_field", path: `/${field.replaceAll(".", "/")}`, fields: [field] })),
+      code: "invalid_arguments",
+      fields,
+      expected_fields: Object.keys(TaskSendParams.properties),
+      issues: fields.map((field) => ({
+        code: "invalid_field",
+        path: `/${field.replaceAll(".", "/")}`,
+        fields: [field],
+      })),
     }
     return toolErrorResult(JSON.stringify({ reason, ...diagnostic }), { kind: "invalid_arguments", reason, diagnostic })
   }
@@ -47,7 +68,10 @@ export function notFound(manager: SendManager, reason: string, callerSessionId: 
 }
 
 function knownTaskNames(manager: SendManager, callerSessionId: string | undefined): readonly string[] {
-  const scope = callerSessionId === undefined ? ({ scope: "all" } as const) : ({ scope: "parent-session", session_id: callerSessionId } as const)
+  const scope =
+    callerSessionId === undefined
+      ? ({ scope: "all" } as const)
+      : ({ scope: "parent-session", session_id: callerSessionId } as const)
   const names: string[] = []
   for (const listed of manager.list(scope)) {
     names.push(listed.record.name ?? listed.record.task_id)
@@ -55,22 +79,36 @@ function knownTaskNames(manager: SendManager, callerSessionId: string | undefine
   return names
 }
 
-export function scopeDenied(manager: SendManager, to: string, callerSessionId: string | undefined, allScope: boolean | undefined): SendToolResult | undefined {
+export function scopeDenied(
+  manager: SendManager,
+  to: string,
+  callerSessionId: string | undefined,
+  allScope: boolean | undefined,
+): SendToolResult | undefined {
   if (callerSessionId === undefined || allScope === true) return undefined
   const record = resolveListedTask(manager, to)
   if (record === undefined) return undefined
   if (callerSessionId === record.parent_session_id || callerSessionId === record.root_session_id) return undefined
-  return toolResult(`Task ${record.task_id} belongs to session ${record.parent_session_id}; pass all_scope to send across sessions.`, {
-    kind: "scope_denied",
-    task_id: record.task_id,
-    owning_session_id: record.parent_session_id,
-    reason: `Task ${record.task_id} belongs to session ${record.parent_session_id}; pass all_scope to send across sessions.`,
-  })
+  return toolResult(
+    `Task ${record.task_id} belongs to session ${record.parent_session_id}; pass all_scope to send across sessions.`,
+    {
+      kind: "scope_denied",
+      task_id: record.task_id,
+      owning_session_id: record.parent_session_id,
+      reason: `Task ${record.task_id} belongs to session ${record.parent_session_id}; pass all_scope to send across sessions.`,
+    },
+  )
 }
 
-function resolveListedTask(manager: SendManager, to: string): ReturnType<SendManager["list"]>[number]["record"] | undefined {
+function resolveListedTask(
+  manager: SendManager,
+  to: string,
+): ReturnType<SendManager["list"]>[number]["record"] | undefined {
   const listed = manager.list({ scope: "all" })
-  return listed.find((entry) => entry.record.task_id === to)?.record ?? listed.find((entry) => entry.record.name === to)?.record
+  return (
+    listed.find((entry) => entry.record.task_id === to)?.record ??
+    listed.find((entry) => entry.record.name === to)?.record
+  )
 }
 
 export function mapSendOutcome(outcome: Awaited<ReturnType<SendManager["sendToTask"]>>): SendToolResult {
@@ -113,12 +151,15 @@ export function mapSendOutcome(outcome: Awaited<ReturnType<SendManager["sendToTa
     case "capacity_deferred":
       return toolResult(outcome.reason, { kind: "capacity_deferred", task_id: outcome.task_id, reason: outcome.reason })
     case "held":
-      return toolResult(`Held for ${outcome.task_id}: its run is stopped, and the message is delivered when the run resumes.`, {
-        kind: "held",
-        task_id: outcome.task_id,
-        pause_seq: outcome.pause_seq,
-        entry_id: outcome.entry_id,
-      })
+      return toolResult(
+        `Held for ${outcome.task_id}: its run is stopped, and the message is delivered when the run resumes.`,
+        {
+          kind: "held",
+          task_id: outcome.task_id,
+          pause_seq: outcome.pause_seq,
+          entry_id: outcome.entry_id,
+        },
+      )
     case "queued":
       return toolResult(`Queued for ${outcome.task_id} at position ${outcome.queue_position}.`, {
         kind: "queued",
@@ -135,7 +176,12 @@ export function mapSendOutcome(outcome: Awaited<ReturnType<SendManager["sendToTa
     case "stale": {
       // task_send never names a run, so only a handle-fenced caller reaches this; keep the tool's result shapes.
       const suggestion = "Fetch the task's current run before sending."
-      return toolResult(`${outcome.reason} ${suggestion}`, { kind: "not_continuable", task_id: outcome.task_id, reason: outcome.reason, suggestion })
+      return toolResult(`${outcome.reason} ${suggestion}`, {
+        kind: "not_continuable",
+        task_id: outcome.task_id,
+        reason: outcome.reason,
+        suggestion,
+      })
     }
     case "one_shot_agent":
       return toolResult(outcome.message, {

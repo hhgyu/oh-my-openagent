@@ -16,9 +16,7 @@ afterAll(cleanupPalaceFixtures)
 const LIMITS = { maxEntries: 40, maxEntryChars: 200 } as const
 
 function inlineJson(html: string): Record<string, unknown> {
-  const match = html.match(
-    /<script type="application\/json" id="omo-palace-data">([\s\S]*?)<\/script>/,
-  )
+  const match = html.match(/<script type="application\/json" id="omo-palace-data">([\s\S]*?)<\/script>/)
   if (match?.[1] === undefined) throw new Error("palace html has no inline data script")
   const decoded = match[1]
     .replace(/\\u003c/g, "<")
@@ -191,7 +189,10 @@ describe("/people miss line", () => {
     // then
     expect(fewLine).toBe('no person matches "nobody-here"; known slugs: human, jane-doe, sam-rivers')
     expect(manyLine).toBe(
-      `no person matches "nobody-here"; known slugs: ${many.slice(0, 10).map((node) => node.slug).join(", ")} (+2 more)`,
+      `no person matches "nobody-here"; known slugs: ${many
+        .slice(0, 10)
+        .map((node) => node.slug)
+        .join(", ")} (+2 more)`,
     )
   })
 })

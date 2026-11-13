@@ -102,7 +102,13 @@ describe("DAG lease watch", () => {
     const timers = new ManualTimers()
     const probed: number[] = []
     let alive = true
-    const lease = { holder: () => 5150, isAlive: (holder: number) => { probed.push(holder); return alive } }
+    const lease = {
+      holder: () => 5150,
+      isAlive: (holder: number) => {
+        probed.push(holder)
+        return alive
+      },
+    }
     const watch = createDagLeaseWatch({ lease, isProcessAlive: () => false, timers, intervalMs: 250 })
     let fired = 0
     watch.watch(9001, () => {

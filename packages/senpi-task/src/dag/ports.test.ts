@@ -30,12 +30,29 @@ function recordFor(input: DagDefinition): DagRunRecordV1 {
   const compiled = compileDag(input, { at: createdAt })
   if (!compiled.ok) throw new Error("test DAG did not compile")
   return {
-    schemaVersion: 1, checkpointSeq: 0, runId, runKey: input.key, name: input.name,
-    parentSessionId, rootSessionId: parentSessionId, definitionFingerprint: "definition-fingerprint",
-    definition: { key: input.key, name: input.name, nodes: input.nodes.map((entry) => ({ ...entry, effectivePrompt: entry.prompt })) },
-    status: "pending", generation: 1, createdAt, updatedAt: createdAt,
-    nodes: compiled.nodes, edges: compiled.edges, waves: compiled.waves,
-    criticalPath: compiled.criticalPath, bottlenecks: compiled.bottlenecks, diagnostics: compiled.diagnostics,
+    schemaVersion: 1,
+    checkpointSeq: 0,
+    runId,
+    runKey: input.key,
+    name: input.name,
+    parentSessionId,
+    rootSessionId: parentSessionId,
+    definitionFingerprint: "definition-fingerprint",
+    definition: {
+      key: input.key,
+      name: input.name,
+      nodes: input.nodes.map((entry) => ({ ...entry, effectivePrompt: entry.prompt })),
+    },
+    status: "pending",
+    generation: 1,
+    createdAt,
+    updatedAt: createdAt,
+    nodes: compiled.nodes,
+    edges: compiled.edges,
+    waves: compiled.waves,
+    criticalPath: compiled.criticalPath,
+    bottlenecks: compiled.bottlenecks,
+    diagnostics: compiled.diagnostics,
   }
 }
 
@@ -50,10 +67,21 @@ function minimalPort(): { readonly port: DagTaskPort; readonly admitted: string[
       const taskId = `task-${owner.nodeId}`
       admitted.push(String(owner.nodeId))
       tasks.set(taskId, {
-        task_id: taskId, name: String(owner.nodeId), parent_session_id: spec.parent_session_id,
-        root_session_id: parentSessionId, depth: 1, category: "quick", execution_mode: "in-process",
-        model: "fake-model", notify_on_terminal: true, owner, status: "completed", residency_state: "resident",
-        created_at: createdAt, updated_at: createdAt, final_response: `done ${owner.nodeId}`,
+        task_id: taskId,
+        name: String(owner.nodeId),
+        parent_session_id: spec.parent_session_id,
+        root_session_id: parentSessionId,
+        depth: 1,
+        category: "quick",
+        execution_mode: "in-process",
+        model: "fake-model",
+        notify_on_terminal: true,
+        owner,
+        status: "completed",
+        residency_state: "resident",
+        created_at: createdAt,
+        updated_at: createdAt,
+        final_response: `done ${owner.nodeId}`,
         notification: { run_epoch: 1, notified_epoch: 0 },
       })
       return { kind: "started", reused: false, task_id: taskId, status: "running", name: String(owner.nodeId) }
@@ -79,8 +107,12 @@ describe("DagTaskPort", () => {
     // given
     const store = createDagFileStore({ project_dir: tempProject() })
     const initialRecord = recordFor({
-      key: "ports", name: "ports",
-      nodes: [{ id: "A", prompt: "do A", category: "quick" }, { id: "B", prompt: "do B", category: "quick", dependsOn: ["A"] }],
+      key: "ports",
+      name: "ports",
+      nodes: [
+        { id: "A", prompt: "do A", category: "quick" },
+        { id: "B", prompt: "do B", category: "quick", dependsOn: ["A"] },
+      ],
     })
     store.writeCheckpoint(runId, initialRecord)
     const { port, admitted } = minimalPort()
@@ -101,7 +133,13 @@ describe("DagLeasePort defaults", () => {
     const probed: number[] = []
 
     // when
-    const lease = resolveDagLease({ hostPid: 4242, isProcessAlive: (pid) => { probed.push(pid); return pid === 7 } })
+    const lease = resolveDagLease({
+      hostPid: 4242,
+      isProcessAlive: (pid) => {
+        probed.push(pid)
+        return pid === 7
+      },
+    })
 
     // then
     expect(lease.holder()).toBe(4242)

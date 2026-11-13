@@ -41,10 +41,10 @@ async function fixture(seedFiles: Record<string, string> = {}) {
 async function rawCommit(dir: string, paths: readonly string[], message: string): Promise<string> {
   const exec = createNodeGitExec()
   await exec.run(["add", "-A", "--", ...paths], { cwd: dir, timeoutMs: 30_000 })
-  await exec.run(
-    ["-c", "user.email=fixture@example.com", "-c", "user.name=fixture", "commit", "-qm", message],
-    { cwd: dir, timeoutMs: 30_000 },
-  )
+  await exec.run(["-c", "user.email=fixture@example.com", "-c", "user.name=fixture", "commit", "-qm", message], {
+    cwd: dir,
+    timeoutMs: 30_000,
+  })
   const head = await exec.run(["rev-parse", "HEAD"], { cwd: dir, timeoutMs: 30_000 })
   return head.stdout.trim()
 }
@@ -63,10 +63,18 @@ async function failureDetail(result: Awaited<ReturnType<typeof validateCompletio
 }
 
 /** The branch is merged --no-ff with its whole history, so an introduced secret must be gone from every commit, not only the tip. */
-async function expectScrubbed(result: Awaited<ReturnType<typeof validateCompletion>>, dir: string, base: string, needle: string) {
+async function expectScrubbed(
+  result: Awaited<ReturnType<typeof validateCompletion>>,
+  dir: string,
+  base: string,
+  needle: string,
+) {
   expect(["valid", "no_changes"]).toContain(result.status)
   expect("dropped" in result ? result.dropped : undefined).toBeUndefined()
-  const log = await createNodeGitExec().run(["log", "--format=%H", "--name-only", "-p", `${base}..HEAD`], { cwd: dir, timeoutMs: 30_000 })
+  const log = await createNodeGitExec().run(["log", "--format=%H", "--name-only", "-p", `${base}..HEAD`], {
+    cwd: dir,
+    timeoutMs: 30_000,
+  })
   expect(log.stdout).not.toContain(needle)
 }
 
@@ -79,9 +87,16 @@ describe("reflection completion secret screening", () => {
 
     // Both real Git operations must settle before the existing fixture teardown removes the repository.
     const results = await Promise.allSettled([
-      findSecretLikeFailures((argv, stdin) => worktree.exec.run(argv, {
-        cwd: worktree.dir, timeoutMs: 30_000, ...(stdin === undefined ? {} : { stdin }),
-      }), worktree.baseSha, tip),
+      findSecretLikeFailures(
+        (argv, stdin) =>
+          worktree.exec.run(argv, {
+            cwd: worktree.dir,
+            timeoutMs: 30_000,
+            ...(stdin === undefined ? {} : { stdin }),
+          }),
+        worktree.baseSha,
+        tip,
+      ),
       commitCount(worktree.exec, worktree.dir, worktree.baseSha, tip),
     ])
     expect(results).toEqual([
@@ -95,10 +110,16 @@ describe("reflection completion secret screening", () => {
     const { worktree } = await fixture()
     const exec = createNodeGitExec()
     const head = (await exec.run(["rev-parse", "HEAD"], { cwd: worktree.dir, timeoutMs: 30_000 })).stdout.trim()
-    await exec.run(["update-index", "--add", "--cacheinfo", `160000,${head},reference/token=abc123456`], { cwd: worktree.dir, timeoutMs: 30_000 })
+    await exec.run(["update-index", "--add", "--cacheinfo", `160000,${head},reference/token=abc123456`], {
+      cwd: worktree.dir,
+      timeoutMs: 30_000,
+    })
     // an empty directory is an uninitialised submodule checkout, so the worktree stays clean
     await mkdir(join(worktree.dir, "reference/token=abc123456"), { recursive: true })
-    await exec.run(["-c", "user.email=fixture@example.com", "-c", "user.name=fixture", "commit", "-qm", "add gitlink"], { cwd: worktree.dir, timeoutMs: 30_000 })
+    await exec.run(
+      ["-c", "user.email=fixture@example.com", "-c", "user.name=fixture", "commit", "-qm", "add gitlink"],
+      { cwd: worktree.dir, timeoutMs: 30_000 },
+    )
 
     // when
     const result = await validateCompletion(worktree, worktree.baseSha, worktree.exec)
@@ -201,7 +222,9 @@ describe("reflection completion secret screening", () => {
     await exec.run(["checkout", "-q", branch], { cwd: wt, timeoutMs: 30_000 })
     await writeAt(wt, "reference/m.md", "---\ndescription: M\n---\n\nmain change\n")
     await rawCommit(wt, ["reference/m.md"], "main change")
-    await exec.run(["merge", "--no-ff", "-m", "merge side", "memory/side-probe"], { cwd: wt, timeoutMs: 30_000 }).catch(() => undefined)
+    await exec
+      .run(["merge", "--no-ff", "-m", "merge side", "memory/side-probe"], { cwd: wt, timeoutMs: 30_000 })
+      .catch(() => undefined)
     await writeAt(wt, "reference/m.md", "---\ndescription: M\n---\n\nresolved token=abc123456\n")
     const mergeSha = await rawCommit(wt, ["reference/m.md"], "merge side")
     await writeAt(wt, "reference/m.md", "---\ndescription: M\n---\n\nresolved clean\n")

@@ -22,26 +22,42 @@ import * as oldTerminal from "../../../omo-senpi/src/components/task/terminal-ob
 function withStore(run: (backing: ReturnType<typeof createTaskRecordStore>, dir: string) => void) {
   const dir = mkdtempSync(join(tmpdir(), "omo-a5-store-"))
   const backing = createTaskRecordStore({ project_dir: dir })
-  try { run(backing, dir) } finally { backing.close(); rmSync(dir, { recursive: true, force: true }) }
+  try {
+    run(backing, dir)
+  } finally {
+    backing.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
 }
-const draft = () => createTaskRecord({ parent_session_id: "parent", root_session_id: "parent", depth: 0,
-  execution_mode: "in-process", model: "qa/model", notify_on_terminal: false, task_seq: 0 })
+const draft = () =>
+  createTaskRecord({
+    parent_session_id: "parent",
+    root_session_id: "parent",
+    depth: 0,
+    execution_mode: "in-process",
+    model: "qa/model",
+    notify_on_terminal: false,
+    task_seq: 0,
+  })
 
 test("old, moved and support paths expose the same definitions, not forwarding lambdas", () => {
   for (const pair of [
     [oldObserving.createCompletionObservingStore, observing.createCompletionObservingStore],
     [oldMutation.createMutationNotifyingStore, mutation.createMutationNotifyingStore],
-    [oldStatus.watchStatusEdge, status.watchStatusEdge], [oldStatus.isTerminalStatus, status.isTerminalStatus],
+    [oldStatus.watchStatusEdge, status.watchStatusEdge],
+    [oldStatus.isTerminalStatus, status.isTerminalStatus],
     [oldGeneration.createConfigGenerationStampingStore, generation.createConfigGenerationStampingStore],
     [oldTerminal.createTaskTerminalObservers, terminal.createTaskTerminalObservers],
     [oldTerminal.sharedTaskTerminalObservers, terminal.sharedTaskTerminalObservers],
     [support.createCompletionObservingStore, observing.createCompletionObservingStore],
     [support.createMutationNotifyingStore, mutation.createMutationNotifyingStore],
-    [support.watchStatusEdge, status.watchStatusEdge], [support.isTerminalStatus, status.isTerminalStatus],
+    [support.watchStatusEdge, status.watchStatusEdge],
+    [support.isTerminalStatus, status.isTerminalStatus],
     [support.createConfigGenerationStampingStore, generation.createConfigGenerationStampingStore],
     [support.createTaskTerminalObservers, terminal.createTaskTerminalObservers],
     [support.sharedTaskTerminalObservers, terminal.sharedTaskTerminalObservers],
-  ]) expect(pair[0]).toBe(pair[1])
+  ])
+    expect(pair[0]).toBe(pair[1])
   expect(oldTerminal.TASK_TERMINAL_OBSERVERS_KEY).toBe(terminal.TASK_TERMINAL_OBSERVERS_KEY)
   expect(support.TASK_TERMINAL_OBSERVERS_KEY).toBe(terminal.TASK_TERMINAL_OBSERVERS_KEY)
 })
@@ -49,13 +65,37 @@ test("old, moved and support paths expose the same definitions, not forwarding l
 test("real-store chain preserves notify/liveness/mutation/ledger order and terminal epoch distinction", () => {
   withStore((backing, dir) => {
     const order: string[] = []
-    const notifier = createCompletionNotifier({ store: backing, stateDir: dir, notifier: { enqueue() { throw Error("foreground must not enqueue") } } })
-    const observedNotifier = new Proxy(notifier, { get(target, key, receiver) {
-      const original = Reflect.get(target, key, receiver)
-      return key === "notifyTerminal" ? new Proxy(original, { apply(fn, thisArg, args) { order.push("notify"); return Reflect.apply(fn, thisArg, args) } }) : original
-    } })
-    const observed = observing.createCompletionObservingStore(backing, { notifier: observedNotifier, parentState: () => ({ kind: "idle" }), wasBackground: () => false,
-      currentSessionId: () => "parent", onTerminal() { order.push("liveness") } })
+    const notifier = createCompletionNotifier({
+      store: backing,
+      stateDir: dir,
+      notifier: {
+        enqueue() {
+          throw Error("foreground must not enqueue")
+        },
+      },
+    })
+    const observedNotifier = new Proxy(notifier, {
+      get(target, key, receiver) {
+        const original = Reflect.get(target, key, receiver)
+        return key === "notifyTerminal"
+          ? new Proxy(original, {
+              apply(fn, thisArg, args) {
+                order.push("notify")
+                return Reflect.apply(fn, thisArg, args)
+              },
+            })
+          : original
+      },
+    })
+    const observed = observing.createCompletionObservingStore(backing, {
+      notifier: observedNotifier,
+      parentState: () => ({ kind: "idle" }),
+      wasBackground: () => false,
+      currentSessionId: () => "parent",
+      onTerminal() {
+        order.push("liveness")
+      },
+    })
     const stamped = generation.createConfigGenerationStampingStore(observed, () => 7)
     const ledger = terminal.createTaskTerminalObservers()
     ledger.subscribe(() => order.push("ledger"))
@@ -64,26 +104,39 @@ test("real-store chain preserves notify/liveness/mutation/ledger order and termi
     store.save(row)
     expect(store.load(row.task_id)?.config_generation).toBe(7)
     order.length = 0
-    store.mutate(row.task_id, fresh => ({ ...fresh, status: "lost" }))
+    store.mutate(row.task_id, (fresh) => ({ ...fresh, status: "lost" }))
     expect(order).toEqual(["notify", "liveness", "mutation", "ledger"])
     order.length = 0
-    store.mutate(row.task_id, fresh => ({ ...fresh, notification: { ...fresh.notification, run_epoch: fresh.notification.run_epoch + 1 } }))
+    store.mutate(row.task_id, (fresh) => ({
+      ...fresh,
+      notification: { ...fresh.notification, run_epoch: fresh.notification.run_epoch + 1 },
+    }))
     expect(order).toEqual(["notify", "liveness", "mutation"])
     order.length = 0
-    store.mutate(row.task_id, fresh => ({ ...fresh, name: "terminal bookkeeping" }))
+    store.mutate(row.task_id, (fresh) => ({ ...fresh, name: "terminal bookkeeping" }))
     expect(order).toEqual(["mutation"])
   })
 })
 
 test("all seven real TTL methods preserve owners/results and never generate a terminal edge", () => {
-  withStore(backing => {
-    const changes: (string | null)[] = [], edges: string[] = []
-    const ledger = terminal.createTaskTerminalObservers(); ledger.subscribe(edge => edges.push(edge.record.status))
-    const store = mutation.createMutationNotifyingStore(backing, change => changes.push(change.record?.task_id ?? null), ledger)
-    const row = { ...draft(), status: "running" as const }, owner = { pid: process.pid, token: "a5-first" }, next = { pid: process.pid, token: "a5-next" }
-    store.save(row); changes.length = 0
+  withStore((backing) => {
+    const changes: (string | null)[] = [],
+      edges: string[] = []
+    const ledger = terminal.createTaskTerminalObservers()
+    ledger.subscribe((edge) => edges.push(edge.record.status))
+    const store = mutation.createMutationNotifyingStore(
+      backing,
+      (change) => changes.push(change.record?.task_id ?? null),
+      ledger,
+    )
+    const row = { ...draft(), status: "running" as const },
+      owner = { pid: process.pid, token: "a5-first" },
+      next = { pid: process.pid, token: "a5-next" }
+    store.save(row)
+    changes.length = 0
     store.appendEvent(row.task_id, { type: "a5-read-only-to-wrapper", payload: {} })
-    store.load(row.task_id); store.list()
+    store.load(row.task_id)
+    store.list()
     expect(changes).toEqual([])
     expect(store.tombstoneIfExpired(row.task_id, () => true, owner).kind).toBe("retained")
     expect(changes).toEqual([])
@@ -108,19 +161,29 @@ test("all seven real TTL methods preserve owners/results and never generate a te
 })
 
 test("shared ledger identity and existing reporter-throw boundary remain unchanged", () => {
-  const globals = globalThis as unknown as Record<symbol, unknown>, key = terminal.TASK_TERMINAL_OBSERVERS_KEY, previous = globals[key]
+  const globals = globalThis as unknown as Record<symbol, unknown>,
+    key = terminal.TASK_TERMINAL_OBSERVERS_KEY,
+    previous = globals[key]
   try {
     delete globals[key]
     expect(oldTerminal.sharedTaskTerminalObservers()).toBe(terminal.sharedTaskTerminalObservers())
     expect(support.sharedTaskTerminalObservers()).toBe(terminal.sharedTaskTerminalObservers())
-    withStore(backing => {
-      const record = { ...draft(), status: "lost" as const }; backing.save(record)
+    withStore((backing) => {
+      const record = { ...draft(), status: "lost" as const }
+      backing.save(record)
       const reporterFault = Error("original reporter throws")
-      const ledger = terminal.createTaskTerminalObservers(() => { throw reporterFault })
-      ledger.subscribe(() => { throw Error("observer throws") })
+      const ledger = terminal.createTaskTerminalObservers(() => {
+        throw reporterFault
+      })
+      ledger.subscribe(() => {
+        throw Error("observer throws")
+      })
       expect(() => ledger.notify({ record })).toThrow(reporterFault)
     })
-  } finally { if (previous === undefined) delete globals[key]; else globals[key] = previous }
+  } finally {
+    if (previous === undefined) delete globals[key]
+    else globals[key] = previous
+  }
 })
 
 test("fresh process executes moved store/ledger support without SDK/UI/adapter runtime", () => {

@@ -67,12 +67,20 @@ export function createDreamTriggers(deps: DreamTriggerDeps) {
   const work = new Set<Promise<void>>()
   let closed = false
 
-  const eligible = (sessionID: string): boolean => !closed && !deps.isOwnedSession(sessionID) && deps.hasUserActivity(sessionID)
+  const eligible = (sessionID: string): boolean =>
+    !closed && !deps.isOwnedSession(sessionID) && deps.hasUserActivity(sessionID)
 
   function track(task: () => Promise<unknown>): void {
-    const promise = task().then(() => undefined, (error: unknown) => { deps.logger.warn("memory dream trigger failed", { error: describeError(error) }) })
+    const promise = task().then(
+      () => undefined,
+      (error: unknown) => {
+        deps.logger.warn("memory dream trigger failed", { error: describeError(error) })
+      },
+    )
     work.add(promise)
-    void promise.finally(() => { work.delete(promise) })
+    void promise.finally(() => {
+      work.delete(promise)
+    })
   }
 
   function clear(sessionID: string): void {
@@ -103,7 +111,9 @@ export function createDreamTriggers(deps: DreamTriggerDeps) {
     if (closed || idleMinutes <= 0 || (epochs.get(sessionID) ?? 0) !== epoch) return
     const previous = armed.get(sessionID)
     if (previous !== undefined) timers.clear(previous)
-    const handle: unknown = timers.set(() => { fire(sessionID, handle) }, idleMinutes * 60_000)
+    const handle: unknown = timers.set(() => {
+      fire(sessionID, handle)
+    }, idleMinutes * 60_000)
     armed.set(sessionID, handle)
   }
 

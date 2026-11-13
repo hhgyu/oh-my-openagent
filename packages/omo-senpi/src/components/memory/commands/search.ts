@@ -10,6 +10,7 @@ import type { MemoryCommandContext, MemoryCommandDeps } from "./types"
 export function registerSearchCommand(pi: MemoryCommandPort, deps: MemoryCommandDeps): void {
   pi.registerCommand("search", {
     ...LAZY_MEMORY_COMMANDS.search,
-    handler: (args: string, ctx: MemoryCommandContext): Promise<string> => runSearchCommand(senpiCommandDeps(deps), args, ctx),
+    handler: (args: string, ctx: MemoryCommandContext): Promise<string> =>
+      runSearchCommand(senpiCommandDeps(deps), args, ctx),
   })
 }

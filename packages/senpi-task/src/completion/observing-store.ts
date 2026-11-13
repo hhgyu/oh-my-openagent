@@ -2,13 +2,7 @@ import type { CompletionNotifier, ParentState } from "./types"
 import type { TaskRecord, TaskStatus, TaskTransition } from "../state/types"
 import type { TaskRecordStore } from "../store/types"
 
-const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set([
-  "completed",
-  "error",
-  "cancelled",
-  "interrupted",
-  "lost",
-])
+const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set(["completed", "error", "cancelled", "interrupted", "lost"])
 
 export interface CompletionBridgeDeps {
   readonly notifier: CompletionNotifier
@@ -67,20 +61,22 @@ export function createCompletionObservingStore(backing: TaskRecordStore, deps: C
         const next = mutation(fresh)
         // A fenced fail (a start the task host refused after the caller stopped waiting, #10042) ends
         // a run through mutate, not transition; the notifier's epoch fence keeps every edge exactly-once.
-        becameTerminal = (TERMINAL_STATUSES.has(next.status) && !TERMINAL_STATUSES.has(fresh.status)
-          && next.notification.run_epoch >= fresh.notification.run_epoch)
-          || (TERMINAL_STATUSES.has(next.status) && next.notification.run_epoch > fresh.notification.run_epoch)
+        becameTerminal =
+          (TERMINAL_STATUSES.has(next.status) &&
+            !TERMINAL_STATUSES.has(fresh.status) &&
+            next.notification.run_epoch >= fresh.notification.run_epoch) ||
+          (TERMINAL_STATUSES.has(next.status) && next.notification.run_epoch > fresh.notification.run_epoch)
         return next
       })
       if (becameTerminal && record !== null && record.parent_session_id === deps.currentSessionId?.()) {
         if (deps.ownsTerminal !== undefined || deps.notificationReady !== undefined) guardedTerminal(record, taskId)
         else {
-        deps.notifier.notifyTerminal({
-          record,
-          parentState: deps.parentState(),
-          runInBackground: deps.wasBackground(taskId),
-        })
-        deps.onTerminal?.(record)
+          deps.notifier.notifyTerminal({
+            record,
+            parentState: deps.parentState(),
+            runInBackground: deps.wasBackground(taskId),
+          })
+          deps.onTerminal?.(record)
         }
       }
       return record
@@ -92,14 +88,15 @@ export function createCompletionObservingStore(backing: TaskRecordStore, deps: C
     transition: (taskId, transition) => {
       const result = backing.transition(taskId, transition)
       if (isTerminalApplied(result.applied, result.record.status, transition)) {
-        if (deps.ownsTerminal !== undefined || deps.notificationReady !== undefined) guardedTerminal(result.record, taskId)
+        if (deps.ownsTerminal !== undefined || deps.notificationReady !== undefined)
+          guardedTerminal(result.record, taskId)
         else {
-        deps.notifier.notifyTerminal({
-          record: result.record,
-          parentState: deps.parentState(),
-          runInBackground: deps.wasBackground(taskId),
-        })
-        deps.onTerminal?.(result.record)
+          deps.notifier.notifyTerminal({
+            record: result.record,
+            parentState: deps.parentState(),
+            runInBackground: deps.wasBackground(taskId),
+          })
+          deps.onTerminal?.(result.record)
         }
       }
       return result
@@ -119,6 +116,11 @@ export function createCompletionObservingStore(backing: TaskRecordStore, deps: C
 function isTerminalApplied(applied: boolean, status: TaskStatus, transition: TaskTransition): boolean {
   // Residency bookkeeping transitions (evict/dispose/...) also touch terminal records but must not
   // re-notify; only the status-reaching transitions count.
-  const statusChanging = transition.type === "complete" || transition.type === "fail" || transition.type === "cancel" || transition.type === "interrupt" || transition.type === "lose"
+  const statusChanging =
+    transition.type === "complete" ||
+    transition.type === "fail" ||
+    transition.type === "cancel" ||
+    transition.type === "interrupt" ||
+    transition.type === "lose"
   return applied && statusChanging && TERMINAL_STATUSES.has(status)
 }

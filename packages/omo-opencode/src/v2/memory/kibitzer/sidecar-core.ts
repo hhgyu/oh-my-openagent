@@ -2,12 +2,29 @@
 // locking of its own: every transition runs under the per-session mutex `serialized`.
 
 import type { RecallCandidate, RecallNudge } from "@oh-my-opencode/memory-core"
-import { createAcceptedNudgeCooldown, type AcceptedNudgeCooldown, type KibitzerReseedInput, type KibitzerWakeLease } from "@oh-my-opencode/memory-core/recall-sidecar"
 import {
-  KIBITZER_RESEED_FRACTION, KIBITZER_SIDECAR_MAX_TOKENS, KIBITZER_WAKE_DEADLINE_MS, KIBITZER_WAKE_TOOL_BUDGET,
-  type KibitzerChild, type KibitzerChildTurnReport, type KibitzerSidecarOptions, type KibitzerSidecarState, type KibitzerSidecarTimers,
+  createAcceptedNudgeCooldown,
+  type AcceptedNudgeCooldown,
+  type KibitzerReseedInput,
+  type KibitzerWakeLease,
+} from "@oh-my-opencode/memory-core/recall-sidecar"
+import {
+  KIBITZER_RESEED_FRACTION,
+  KIBITZER_SIDECAR_MAX_TOKENS,
+  KIBITZER_WAKE_DEADLINE_MS,
+  KIBITZER_WAKE_TOOL_BUDGET,
+  type KibitzerChild,
+  type KibitzerChildTurnReport,
+  type KibitzerSidecarOptions,
+  type KibitzerSidecarState,
+  type KibitzerSidecarTimers,
 } from "./contract"
-import { createKibitzerEventStream, type KibitzerEvent, type KibitzerEventDigest, type KibitzerEventStream } from "./events"
+import {
+  createKibitzerEventStream,
+  type KibitzerEvent,
+  type KibitzerEventDigest,
+  type KibitzerEventStream,
+} from "./events"
 import type { KibitzerWakeAbort } from "./outcome"
 
 export interface Payload {

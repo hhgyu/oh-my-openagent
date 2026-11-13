@@ -12,7 +12,10 @@ describe("codemode worker client", () => {
   test("#given no eval call yet #when the backend exists #then no worker is spawned, and the first call loads, runs and relays progress", async () => {
     // given
     const fake = connectFakeWorker({
-      execute: async (_input, _id, params, _signal, onUpdate) => { onUpdate?.({ content: [{ type: "text", text: "working" }], details: { fn: "dropped" } }); return { content: [{ type: "text", text: JSON.stringify(params) }], details: { language: "js" } } },
+      execute: async (_input, _id, params, _signal, onUpdate) => {
+        onUpdate?.({ content: [{ type: "text", text: "working" }], details: { fn: "dropped" } })
+        return { content: [{ type: "text", text: JSON.stringify(params) }], details: { language: "js" } }
+      },
     })
     expect(fake.state.spawned).toBe(0)
     const updates: unknown[] = []
@@ -20,12 +23,14 @@ describe("codemode worker client", () => {
     // when
     await fake.backend.load()
     const session = await fake.backend.acquire("ses_1", new AbortController().signal)
-    const result = await session.run("call_1", { code: "6*7" }, new AbortController().signal, update => updates.push(update))
+    const result = await session.run("call_1", { code: "6*7" }, new AbortController().signal, (update) =>
+      updates.push(update),
+    )
 
     // then
     expect(fake.state.spawned).toBe(1)
     expect(fake.backend.definition()).toEqual({ description: "codemode description", parameters: { type: "object" } })
-    expect(result).toEqual({ content: [{ type: "text", text: "{\"code\":\"6*7\"}" }], details: { language: "js" } })
+    expect(result).toEqual({ content: [{ type: "text", text: '{"code":"6*7"}' }], details: { language: "js" } })
     expect(updates).toEqual([{ content: [{ type: "text", text: "working" }] }])
     expect(fake.state.created).toEqual(["ses_1"])
     await fake.backend.dispose()
@@ -36,9 +41,17 @@ describe("codemode worker client", () => {
     // given
     const seen: string[] = []
     const fake = connectFakeWorker({
-      execute: (_input, _id, _params, signal) => new Promise((resolve, reject) => {
-        signal?.addEventListener("abort", () => { seen.push(String((signal.reason as Error).message)); reject(signal.reason) }, { once: true })
-      }),
+      execute: (_input, _id, _params, signal) =>
+        new Promise((resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              seen.push(String((signal.reason as Error).message))
+              reject(signal.reason)
+            },
+            { once: true },
+          )
+        }),
     })
     const session = await fake.backend.acquire("ses_1", new AbortController().signal)
     const controller = new AbortController()
@@ -94,7 +107,10 @@ describe("codemode worker client", () => {
   test("#given the worker crashes mid-call #when the error event fires #then the call fails, its kernels are killed and the next call starts a new worker", async () => {
     // given
     let hang = true
-    const fake = connectFakeWorker({ kernels: () => [{ pid: 777 }], execute: () => hang ? new Promise(() => {}) : Promise.resolve({ content: [] }) })
+    const fake = connectFakeWorker({
+      kernels: () => [{ pid: 777 }],
+      execute: () => (hang ? new Promise(() => {}) : Promise.resolve({ content: [] })),
+    })
     const session = await fake.backend.acquire("ses_1", new AbortController().signal)
     const pending = session.run("call_1", {}, new AbortController().signal, () => {})
     await Bun.sleep(5)
@@ -116,7 +132,7 @@ describe("codemode worker client", () => {
 })
 
 describe("codemode worker spawn", () => {
-  test("#given a host process.on(\"worker\") listener that calls worker.on #when the real codemode worker spawns #then the listener gets an EventEmitter Worker and the RPC channel still round-trips", async () => {
+  test('#given a host process.on("worker") listener that calls worker.on #when the real codemode worker spawns #then the listener gets an EventEmitter Worker and the RPC channel still round-trips', async () => {
     // given
     const seen: { readonly hasOn: boolean; readonly error?: string }[] = []
     const listener = (worker: unknown) => {
@@ -134,7 +150,9 @@ describe("codemode worker spawn", () => {
     try {
       // when
       port = spawnCodemodeWorker()
-      const exited = new Promise<string | undefined>(resolve => port?.addEventListener("close", event => resolve(event.message)))
+      const exited = new Promise<string | undefined>((resolve) =>
+        port?.addEventListener("close", (event) => resolve(event.message)),
+      )
       const peer = createRpcPeer(port, {})
       const released = await peer.call(CODEMODE_RPC.release, { sessionID: "ses_spawn" })
       port.terminate()
@@ -163,7 +181,13 @@ describe("codemode worker entry location", () => {
     // given
     const dir = mkdtempSync(join(tmpdir(), "omo-eval-worker-entry-"))
     try {
-      const missing = (() => { try { return locateCodemodeWorker(dir) } catch (caught) { return caught } })()
+      const missing = (() => {
+        try {
+          return locateCodemodeWorker(dir)
+        } catch (caught) {
+          return caught
+        }
+      })()
       writeFileSync(join(dir, "codemode-worker.ts"), "")
       writeFileSync(join(dir, "codemode-worker.js"), "")
 

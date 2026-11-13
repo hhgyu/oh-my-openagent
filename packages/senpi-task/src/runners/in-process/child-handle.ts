@@ -1,5 +1,14 @@
-import type { ChildCompletionPolicy, RunnerFailure, RunnerOutcome } from "@oh-my-opencode/orchestration-core/contracts/child-outcome"
-export type { ChildCompletionPolicy, RunnerFailureReason, RunnerFailure, RunnerOutcome } from "@oh-my-opencode/orchestration-core/contracts/child-outcome"
+import type {
+  ChildCompletionPolicy,
+  RunnerFailure,
+  RunnerOutcome,
+} from "@oh-my-opencode/orchestration-core/contracts/child-outcome"
+export type {
+  ChildCompletionPolicy,
+  RunnerFailureReason,
+  RunnerFailure,
+  RunnerOutcome,
+} from "@oh-my-opencode/orchestration-core/contracts/child-outcome"
 import type { AgentSession } from "@code-yeongyu/senpi"
 import { reportedEffectiveModel, type CatalogModelIdentity, type EffectiveModel } from "../pinned-model-equivalence"
 
@@ -121,10 +130,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // Derive the settled turn's outcome from what it emitted. The session-level getLastAssistantText()
 // is only trusted when it CHANGED during this turn (baseline diff): on a revive, the previous run's
 // text must never masquerade as a fresh completion.
-function turnOutcome(session: ChildSession, observation: TurnObservation, completion: ChildCompletionPolicy): RunnerOutcome {
-  const provenance = observation.provider !== undefined && observation.model !== undefined
-    ? { model: `${observation.provider}/${observation.model}` }
-    : {}
+function turnOutcome(
+  session: ChildSession,
+  observation: TurnObservation,
+  completion: ChildCompletionPolicy,
+): RunnerOutcome {
+  const provenance =
+    observation.provider !== undefined && observation.model !== undefined
+      ? { model: `${observation.provider}/${observation.model}` }
+      : {}
   if (observation.stopReason === "error" || observation.stopReason === "aborted") {
     return {
       status: "error",
@@ -211,7 +225,12 @@ function createTrackedChildHandle(
   // Seeded for the restored case; createChildHandle's beginTurn replaces it immediately.
   let running: Promise<RunnerOutcome> = Promise.resolve(settledSessionOutcome(session, completion))
   const observation: TurnObservation = {
-    text: undefined, stopReason: undefined, errorMessage: undefined, baseline: undefined, provider: undefined, model: undefined,
+    text: undefined,
+    stopReason: undefined,
+    errorMessage: undefined,
+    baseline: undefined,
+    provider: undefined,
+    model: undefined,
   }
   const unsubscribeObserver = session.subscribe((event) => observeTurnEvent(observation, event))
 
@@ -310,7 +329,10 @@ export function createChildHandle(input: CreateChildHandleInput): ChildHandle {
 
 // A created child whose first prompt has not been sent: the launch decides, after creation, whether
 // to begin that turn or hold the prompt for the run's Resume.
-export function createStagedChildHandle(input: CreateChildHandleInput): { readonly handle: ChildHandle; begin(): void } {
+export function createStagedChildHandle(input: CreateChildHandleInput): {
+  readonly handle: ChildHandle
+  begin(): void
+} {
   const tracked = createTrackedChildHandle(input.taskId, input.session, input.completion)
   return { handle: tracked.handle, begin: () => tracked.beginTurn(input.promptText) }
 }
@@ -340,7 +362,8 @@ async function shutDownChildSession(session: ChildSession): Promise<void> {
   let shutdownFailure: { error: unknown } | undefined
   try {
     const runner = session.extensionRunner
-    if (runner?.hasHandlers("session_shutdown") === true) await runner.emit({ type: "session_shutdown", reason: "quit" })
+    if (runner?.hasHandlers("session_shutdown") === true)
+      await runner.emit({ type: "session_shutdown", reason: "quit" })
   } catch (error) {
     shutdownFailure = { error }
   }
@@ -350,7 +373,10 @@ async function shutDownChildSession(session: ChildSession): Promise<void> {
     const join = session.whenToolChildClosed
     if (join !== undefined) await join.call(session)
   } catch (error) {
-    if (shutdownFailure) throw new AggregateError([shutdownFailure.error, error], "Child shutdown and tool close failed", { cause: shutdownFailure.error })
+    if (shutdownFailure)
+      throw new AggregateError([shutdownFailure.error, error], "Child shutdown and tool close failed", {
+        cause: shutdownFailure.error,
+      })
     throw error
   }
   if (shutdownFailure) throw shutdownFailure.error

@@ -6,7 +6,9 @@ import { createCountingSlot, createManualTimers, createScriptedPort, type Script
 import { createMemoryFixture, partsWith, type MemoryFixture } from "./test-support"
 
 const fixtures: MemoryFixture[] = []
-afterEach(() => { for (const created of fixtures.splice(0)) created.cleanup() })
+afterEach(() => {
+  for (const created of fixtures.splice(0)) created.cleanup()
+})
 
 const HINT = "The note records that the usual coffee is an oat milk flat white."
 
@@ -19,29 +21,45 @@ async function seeded(settings: Record<string, unknown> = {}) {
   const slot = createCountingSlot()
   const outcomes: KibitzerWakeOutcome[] = []
   const waiters: ((outcome: KibitzerWakeOutcome) => void)[] = []
-  const cleanup = await registerMemoryComponent(f.host, f.options({
-    kibitzer: {
-      createPort: request => {
-        const port = createScriptedPort(request)
-        ports.push(port)
-        return port
+  const cleanup = await registerMemoryComponent(
+    f.host,
+    f.options({
+      kibitzer: {
+        createPort: (request) => {
+          const port = createScriptedPort(request)
+          ports.push(port)
+          return port
+        },
+        createWakeSlot: () => slot,
+        timers: createManualTimers(),
+        onWake: (outcome) => {
+          outcomes.push(outcome)
+          waiters.shift()?.(outcome)
+        },
       },
-      createWakeSlot: () => slot,
-      timers: createManualTimers(),
-      onWake: outcome => { outcomes.push(outcome); waiters.shift()?.(outcome) },
-    },
-  }))
+    }),
+  )
   await f.runTool("memory", "root", {
-    command: "create", reason: "coffee", file_path: "reference/coffee.md",
-    description: "Coffee order preference: oat milk flat white", file_text: "The usual coffee is an oat milk flat white.",
+    command: "create",
+    reason: "coffee",
+    file_path: "reference/coffee.md",
+    description: "Coffee order preference: oat milk flat white",
+    file_text: "The usual coffee is an oat milk flat white.",
   })
   await f.runTool("memory", "root", {
-    command: "create", reason: "deploy", file_path: "reference/kubernetes-rollout.md",
-    description: "Kubernetes rollout goes through the staging cluster first", file_text: "Staging cluster before production rollout.",
+    command: "create",
+    reason: "deploy",
+    file_path: "reference/kubernetes-rollout.md",
+    description: "Kubernetes rollout goes through the staging cluster first",
+    file_text: "Staging cluster before production rollout.",
   })
-  const nextWake = () => new Promise<KibitzerWakeOutcome>(resolve => { waiters.push(resolve) })
+  const nextWake = () =>
+    new Promise<KibitzerWakeOutcome>((resolve) => {
+      waiters.push(resolve)
+    })
   const child = async () => {
-    for (let attempt = 0; attempt < 200 && ports[0] === undefined; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10))
+    for (let attempt = 0; attempt < 200 && ports[0] === undefined; attempt += 1)
+      await new Promise((resolve) => setTimeout(resolve, 10))
     const port = ports[0]
     if (port === undefined) throw new Error("no kibitzer port was created")
     return port.started(1)
@@ -50,7 +68,7 @@ async function seeded(settings: Record<string, unknown> = {}) {
 }
 
 const recalledPaths = (system: Awaited<ReturnType<MemoryFixture["context"]>>) =>
-  partsWith(system, RECALL_PART_MARKER).flatMap(part => {
+  partsWith(system, RECALL_PART_MARKER).flatMap((part) => {
     const paths = part.metadata?.paths
     return Array.isArray(paths) ? paths : []
   })
@@ -121,7 +139,12 @@ describe("memory recall through the resident Kibitzer judge", () => {
     const s = await seeded()
     await s.f.prompt("root", "which coffee do I usually order")
     const child = await s.child()
-    const tools = Object.fromEntries(["read", "grep", "session_entries", "memory", "nudge", "edit", "shell", "memory_apply_patch"].map(name => [name, { description: name, input: {} }]))
+    const tools = Object.fromEntries(
+      ["read", "grep", "session_entries", "memory", "nudge", "edit", "shell", "memory_apply_patch"].map((name) => [
+        name,
+        { description: name, input: {} },
+      ]),
+    )
     // when
     const childSystem = await s.f.context(child.sessionID, [], { tools })
     const parentNudge = s.f.runTool("nudge", "root", { path: "reference/coffee.md", hint: HINT })
@@ -142,7 +165,13 @@ describe("memory recall through the resident Kibitzer judge", () => {
     const s = await seeded()
     await s.f.prompt("root", "which coffee do I usually order")
     const child = await s.child()
-    const offered = () => Object.fromEntries(["read", "grep", "session_entries", "memory", "nudge", "edit"].map(name => [name, { description: name, input: {} }]))
+    const offered = () =>
+      Object.fromEntries(
+        ["read", "grep", "session_entries", "memory", "nudge", "edit"].map((name) => [
+          name,
+          { description: name, input: {} },
+        ]),
+      )
     const parentContext = offered()
     const parentCompaction = offered()
     const childCompaction = offered()

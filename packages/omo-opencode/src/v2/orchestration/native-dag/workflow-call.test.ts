@@ -36,10 +36,21 @@ function harness() {
   const drives: string[] = []
   const fake = createFakeDagOperation(PARENT)
   const call = { port: nativeDagCallPort(fake.operation), signal: new AbortController().signal }
-  const spied = { manager: runtime.manager, managerFor: runtime.managerFor, drive: (runId: DagRunId, borrowed: typeof call) => { drives.push(runId); return runtime.drive(runId, borrowed) },
-    admit: (runId: DagRunId, borrowed: typeof call) => { drives.push(runId); return runtime.admit(runId, borrowed) },
-    control: runtime.control }
-  const run = (params: DagToolInput) => runNativeWorkflow({ runtime: spied, parentSessionID: PARENT, call, executionMode }, params)
+  const spied = {
+    manager: runtime.manager,
+    managerFor: runtime.managerFor,
+    drive: (runId: DagRunId, borrowed: typeof call) => {
+      drives.push(runId)
+      return runtime.drive(runId, borrowed)
+    },
+    admit: (runId: DagRunId, borrowed: typeof call) => {
+      drives.push(runId)
+      return runtime.admit(runId, borrowed)
+    },
+    control: runtime.control,
+  }
+  const run = (params: DagToolInput) =>
+    runNativeWorkflow({ runtime: spied, parentSessionID: PARENT, call, executionMode }, params)
   return { runtime, drives, fake, run }
 }
 
@@ -57,12 +68,19 @@ describe("OpenCode 2 workflow refusals", () => {
     const { run, runtime } = harness()
 
     // when
-    const refused = errorOf(await run({ action: "start", definition: definition([{ id: "a", prompt: "p", category: "quick", load_skills: ["git-master"] }]) }))
+    const refused = errorOf(
+      await run({
+        action: "start",
+        definition: definition([{ id: "a", prompt: "p", category: "quick", load_skills: ["git-master"] }]),
+      }),
+    )
 
     // then
     expect(refused.code).toBe("invalid_definition")
     expect(refused.node_ids).toEqual(["a"])
-    expect(refused.text).toContain(`Node(s) "a" name skills in load_skills, but this workflow call holds no skill authorization`)
+    expect(refused.text).toContain(
+      `Node(s) "a" name skills in load_skills, but this workflow call holds no skill authorization`,
+    )
     expect(runtime.manager.list(PARENT)).toEqual([])
   })
 
@@ -71,18 +89,32 @@ describe("OpenCode 2 workflow refusals", () => {
     const { run, runtime } = harness()
 
     // when
-    const refused = errorOf(await run({ action: "start", definition: definition([{ id: "a", prompt: "p", category: "quick" }, { id: "b", prompt: "p", subagent_type: "process-worker" }]) }))
+    const refused = errorOf(
+      await run({
+        action: "start",
+        definition: definition([
+          { id: "a", prompt: "p", category: "quick" },
+          { id: "b", prompt: "p", subagent_type: "process-worker" },
+        ]),
+      }),
+    )
 
     // then
     expect(refused.node_ids).toEqual(["b"])
-    expect(refused.text).toBe(`Node(s) "b" resolve to process execution mode. OpenCode 2 runs DAG nodes in-process only; pick an agent or category that runs in-process.`)
+    expect(refused.text).toBe(
+      `Node(s) "b" resolve to process execution mode. OpenCode 2 runs DAG nodes in-process only; pick an agent or category that runs in-process.`,
+    )
     expect(runtime.manager.list(PARENT)).toEqual([])
   })
 
   test("#given guide #when called #then the original tool's own refusal is returned", async () => {
     // given
     const { run, runtime } = harness()
-    const started = await runtime.manager.start({ definition: oneNodeRun, parentSessionId: PARENT, rootSessionId: PARENT })
+    const started = await runtime.manager.start({
+      definition: oneNodeRun,
+      parentSessionId: PARENT,
+      rootSessionId: PARENT,
+    })
 
     // when
     const refused = errorOf(await run({ action: "guide", run_id: started.snapshot.runId, text: "focus" }))
@@ -106,10 +138,12 @@ describe("OpenCode 2 workflow refusals", () => {
 
   test("#given a host catalog listing workflow #when a child catalog is derived #then workflow is never a child grant", () => {
     // given
-    const catalog = [NATIVE_DAG_TOOL_NAME, "read"].map(name => ({ id: name, name, description: name }) as unknown as ListedTool)
+    const catalog = [NATIVE_DAG_TOOL_NAME, "read"].map(
+      (name) => ({ id: name, name, description: name }) as unknown as ListedTool,
+    )
 
     // when
-    const granted = childCatalog(catalog).map(tool => tool.name)
+    const granted = childCatalog(catalog).map((tool) => tool.name)
 
     // then
     expect(granted).toEqual(["read"])

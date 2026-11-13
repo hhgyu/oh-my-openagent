@@ -13,17 +13,31 @@
 
 import { ReflectionPathError } from "./reflection-paths"
 
-export const REFLECTION_GREP_LIMITS = { patternChars: 256, unboundedQuantifiers: 3, matchChars: 1_000, budgetMs: 2_000 } as const
+export const REFLECTION_GREP_LIMITS = {
+  patternChars: 256,
+  unboundedQuantifiers: 3,
+  matchChars: 1_000,
+  budgetMs: 2_000,
+} as const
 
 const LARGE_REPEAT = 16
 
-interface GroupState { quantified: boolean; alternation: boolean }
-
-function refuse(message: string): never {
-  throw new ReflectionPathError("pattern_unsafe", `${message}; simplify the pattern (literal text or a single quantifier per group)`)
+interface GroupState {
+  quantified: boolean
+  alternation: boolean
 }
 
-interface Quantifier { readonly length: number; readonly upper: number }
+function refuse(message: string): never {
+  throw new ReflectionPathError(
+    "pattern_unsafe",
+    `${message}; simplify the pattern (literal text or a single quantifier per group)`,
+  )
+}
+
+interface Quantifier {
+  readonly length: number
+  readonly upper: number
+}
 
 /** The quantifier starting at `index`, if any: its length and its upper repeat bound. */
 function quantifierAt(pattern: string, index: number): Quantifier | undefined {
@@ -34,7 +48,12 @@ function quantifierAt(pattern: string, index: number): Quantifier | undefined {
   if (char !== "{") return undefined
   const match = /^\{(\d+)(,(\d*))?\}\??/.exec(pattern.slice(index))
   if (match === null) return undefined
-  const upper = match[2] === undefined ? Number(match[1]) : match[3] === "" || match[3] === undefined ? Number.POSITIVE_INFINITY : Number(match[3])
+  const upper =
+    match[2] === undefined
+      ? Number(match[1])
+      : match[3] === "" || match[3] === undefined
+        ? Number.POSITIVE_INFINITY
+        : Number(match[3])
   return { length: match[0].length, upper }
 }
 
@@ -42,7 +61,8 @@ function quantifierAt(pattern: string, index: number): Quantifier | undefined {
 const GROUP_PREFIX = /^\?(?::|=|!|<=|<!|<[A-Za-z_$][\w$]*>)/
 
 export function assertSafeGrepPattern(pattern: string): void {
-  if (pattern.length > REFLECTION_GREP_LIMITS.patternChars) refuse(`the pattern is longer than ${REFLECTION_GREP_LIMITS.patternChars} characters`)
+  if (pattern.length > REFLECTION_GREP_LIMITS.patternChars)
+    refuse(`the pattern is longer than ${REFLECTION_GREP_LIMITS.patternChars} characters`)
   const stack: GroupState[] = [{ quantified: false, alternation: false }]
   let unbounded = 0
   let closedGroup: GroupState | undefined
@@ -53,10 +73,15 @@ export function assertSafeGrepPattern(pattern: string): void {
     if (quantifier !== undefined) {
       // A group repeated at most once cannot backtrack across repetitions.
       if (closedGroup !== undefined && quantifier.upper > 1 && (closedGroup.quantified || closedGroup.alternation)) {
-        refuse(closedGroup.quantified ? "a quantified group contains another quantifier" : "a quantified group contains an alternation")
+        refuse(
+          closedGroup.quantified
+            ? "a quantified group contains another quantifier"
+            : "a quantified group contains an alternation",
+        )
       }
       if (quantifier.upper > LARGE_REPEAT) unbounded += 1
-      if (unbounded > REFLECTION_GREP_LIMITS.unboundedQuantifiers) refuse(`the pattern has more than ${REFLECTION_GREP_LIMITS.unboundedQuantifiers} unbounded quantifiers`)
+      if (unbounded > REFLECTION_GREP_LIMITS.unboundedQuantifiers)
+        refuse(`the pattern has more than ${REFLECTION_GREP_LIMITS.unboundedQuantifiers} unbounded quantifiers`)
       top.quantified = true
       closedGroup = undefined
       index += quantifier.length - 1

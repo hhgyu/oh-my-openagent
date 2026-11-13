@@ -14,15 +14,21 @@ export function createOwnedTaskLifecyclePort(options: {
 }): OwnedSessionLifecyclePort {
   async function control(record: TaskRecord) {
     let current = options.controls.get(record.task_id)
-    if (!current) { await options.recover(record); current = options.controls.get(record.task_id) }
+    if (!current) {
+      await options.recover(record)
+      current = options.controls.get(record.task_id)
+    }
     if (!current) throw new Error("Owned cleanup could not reacquire its exact session")
     return current
   }
   /** A failed park is retried as an END only when the host itself says the child is gone: nothing
    * is left to park or restore, and END closes custody on that genuine removal. */
   async function hostRemoved(current: OwnedTaskControl, cause: unknown): Promise<boolean> {
-    try { return await current.backend.hostRemoved(current.child) }
-    catch (probe) { throw new AggregateError([cause, probe], "Owned child park failed and its host presence is unknown") }
+    try {
+      return await current.backend.hostRemoved(current.child)
+    } catch (probe) {
+      throw new AggregateError([cause, probe], "Owned child park failed and its host presence is unknown")
+    }
   }
   return {
     async destroy(record, cause) {
@@ -36,11 +42,17 @@ export function createOwnedTaskLifecyclePort(options: {
         options.controls.delete(record.task_id)
         return
       }
-      if (cause === "recovery_detach") { const current = await control(record); options.beforeDetach(record); await current.detach(); await options.releaseControl?.(record, current) }
-      else {
+      if (cause === "recovery_detach") {
+        const current = await control(record)
+        options.beforeDetach(record)
+        await current.detach()
+        await options.releaseControl?.(record, current)
+      } else {
         const current = options.controls.get(record.task_id)
-        if (current) { await current.end(); await options.releaseControl?.(record, current) }
-        else await options.closeRetained(record)
+        if (current) {
+          await current.end()
+          await options.releaseControl?.(record, current)
+        } else await options.closeRetained(record)
       }
       options.controls.delete(record.task_id)
     },
@@ -48,20 +60,32 @@ export function createOwnedTaskLifecyclePort(options: {
       await options.beforeRetire?.(record, "detach")
       const current = await control(record)
       options.beforeDetach(record)
-      try { await current.detach() }
-      catch (cause) {
+      try {
+        await current.detach()
+      } catch (cause) {
         if (!(await hostRemoved(current, cause))) throw cause
         options.report?.("owned child was removed by the host; closing its custody instead of parking it", {
-          taskId: record.task_id, childSessionId: record.child_session_id, parkFailure: cause instanceof Error ? cause.message : String(cause) })
-        try { await current.end() }
-        catch (failure) { throw new AggregateError([cause, failure], "Host-removed owned child custody did not close") }
+          taskId: record.task_id,
+          childSessionId: record.child_session_id,
+          parkFailure: cause instanceof Error ? cause.message : String(cause),
+        })
+        try {
+          await current.end()
+        } catch (failure) {
+          throw new AggregateError([cause, failure], "Host-removed owned child custody did not close")
+        }
       }
-      await options.releaseControl?.(record, current); options.controls.delete(record.task_id)
+      await options.releaseControl?.(record, current)
+      options.controls.delete(record.task_id)
     },
     async reconcile(record) {
       try {
         await options.recover(record)
-        return { task_id: record.task_id, kind: "resumed", reason: "Owned host control reacquired; prior observation coverage remains explicitly uncertain" }
+        return {
+          task_id: record.task_id,
+          kind: "resumed",
+          reason: "Owned host control reacquired; prior observation coverage remains explicitly uncertain",
+        }
       } catch {
         return { task_id: record.task_id, kind: "deferred", reason: "session_unavailable", retryable: true }
       }

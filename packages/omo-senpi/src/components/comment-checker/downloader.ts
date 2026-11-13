@@ -20,6 +20,8 @@ const archive: CommentCheckerArchiveOps = {
   cleanupArchive,
 }
 
-export async function downloadSenpiCommentCheckerBinary(options: SenpiCommentCheckerDownloadOptions): Promise<string | null> {
+export async function downloadSenpiCommentCheckerBinary(
+  options: SenpiCommentCheckerDownloadOptions,
+): Promise<string | null> {
   return downloadCommentCheckerBinary({ ...options, logLabel: COMMENT_CHECKER_LOG_LABEL, archive })
 }

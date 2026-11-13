@@ -11,7 +11,10 @@ import type { ToolContext } from "@opencode/plugin/promise/tool"
 
 /** senpi `AgentToolResult` shape the codemode bridge expects back from a host tool. */
 export interface EvalHostToolResult {
-  readonly content: readonly ({ readonly type: "text"; readonly text: string } | { readonly type: "image"; readonly data: string; readonly mimeType: string })[]
+  readonly content: readonly (
+    | { readonly type: "text"; readonly text: string }
+    | { readonly type: "image"; readonly data: string; readonly mimeType: string }
+  )[]
   readonly details?: unknown
 }
 
@@ -40,11 +43,21 @@ export class EvalHostToolRefusedError extends Error {
   readonly code = "eval_host_tool_refused"
 }
 
-type ExecuteOptions = { readonly signal?: AbortSignal; readonly onUpdate?: (update: unknown) => void; readonly activateInactiveTool?: boolean }
+type ExecuteOptions = {
+  readonly signal?: AbortSignal
+  readonly onUpdate?: (update: unknown) => void
+  readonly activateInactiveTool?: boolean
+}
 
 export interface OwnedHostToolBridge {
-  readonly executeTool: ((name: string, params: unknown, options?: ExecuteOptions) => Promise<EvalHostToolResult>) & { readonly isToolAvailable: (name: string) => boolean }
-  readonly listTools: () => readonly { readonly name: string; readonly description: string; readonly parameters: unknown }[]
+  readonly executeTool: ((name: string, params: unknown, options?: ExecuteOptions) => Promise<EvalHostToolResult>) & {
+    readonly isToolAvailable: (name: string) => boolean
+  }
+  readonly listTools: () => readonly {
+    readonly name: string
+    readonly description: string
+    readonly parameters: unknown
+  }[]
 }
 
 export function createOwnedHostToolBridge(input: {
@@ -57,13 +70,21 @@ export function createOwnedHostToolBridge(input: {
     if (owned.has(tool.name)) throw Error(`Duplicate eval host tool ${tool.name}`)
     owned.set(tool.name, tool)
   }
-  const catalog = Object.freeze([...owned.values()].map(tool => Object.freeze({ name: tool.name, description: tool.description, parameters: tool.parameters })))
+  const catalog = Object.freeze(
+    [...owned.values()].map((tool) =>
+      Object.freeze({ name: tool.name, description: tool.description, parameters: tool.parameters }),
+    ),
+  )
   const executeTool = (name: string, params: unknown, options: ExecuteOptions = {}): Promise<EvalHostToolResult> => {
     // Read BEFORE any await: the capability lives only in the cell's synchronous async context.
     const kernelTools = input.readKernelTools()
     const tool = owned.get(name)
     if (!tool) {
-      return Promise.reject(new EvalHostToolRefusedError(`Tool "${name}" is not available inside an OpenCode eval cell. Only oh-my-openagent eval host tools can be called from a cell${owned.size ? ` (${[...owned.keys()].join(", ")})` : ""}; call OpenCode tools directly instead.`))
+      return Promise.reject(
+        new EvalHostToolRefusedError(
+          `Tool "${name}" is not available inside an OpenCode eval cell. Only oh-my-openagent eval host tools can be called from a cell${owned.size ? ` (${[...owned.keys()].join(", ")})` : ""}; call OpenCode tools directly instead.`,
+        ),
+      )
     }
     return tool.execute(params, {
       sessionID: input.sessionID,
@@ -72,5 +93,8 @@ export function createOwnedHostToolBridge(input: {
       ...(kernelTools !== undefined && { kernelTools }),
     })
   }
-  return { executeTool: Object.assign(executeTool, { isToolAvailable: (name: string) => owned.has(name) }), listTools: () => catalog }
+  return {
+    executeTool: Object.assign(executeTool, { isToolAvailable: (name: string) => owned.has(name) }),
+    listTools: () => catalog,
+  }
 }

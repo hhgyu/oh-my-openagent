@@ -2,8 +2,18 @@ import type { ToolDomain } from "@opencode/plugin/effect/tool"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import { Effect, type Scope } from "effect"
 import { hasJoinedPermissionCancellation, type JoinedPermissionApi } from "../../host/effect-permission-api"
-import { CODEMODE_READONLY_PERMISSION, CODEMODE_READONLY_TOOL_NAME, createCodemodeReadonlyToolInfo, type CodemodeReadonlyCall } from "../../tools/codemode-readonly"
-import { resolveNativeLsPath, runNativeLs, type NativeLsInput, type NativeLsOutput } from "../../tools/codemode-readonly-ls"
+import {
+  CODEMODE_READONLY_PERMISSION,
+  CODEMODE_READONLY_TOOL_NAME,
+  createCodemodeReadonlyToolInfo,
+  type CodemodeReadonlyCall,
+} from "../../tools/codemode-readonly"
+import {
+  resolveNativeLsPath,
+  runNativeLs,
+  type NativeLsInput,
+  type NativeLsOutput,
+} from "../../tools/codemode-readonly-ls"
 
 /** Trusted composition only: the original backend child and its approved agent and cwd. */
 export interface CodemodeReadonlyChildInput {
@@ -51,7 +61,9 @@ function createProducer(input: CodemodeReadonlyChildInput, permission: JoinedPer
   }
   return {
     assertCurrent,
-    get revoked() { return revoked },
+    get revoked() {
+      return revoked
+    },
     async list(call: CodemodeReadonlyCall, request: NativeLsInput, callerSignal: AbortSignal): Promise<NativeLsOutput> {
       // The ticket is owned before any await, so a revoke and join during the request waits for it.
       const { promise: ticket, resolve: settle } = Promise.withResolvers<void>()
@@ -60,8 +72,16 @@ function createProducer(input: CodemodeReadonlyChildInput, permission: JoinedPer
         assertCall(call)
         const signal = AbortSignal.any([callerSignal, lifetime.signal])
         const directory = resolveNativeLsPath(request.path, cwd)
-        await permission.assert({ sessionID, agent, action: CODEMODE_READONLY_PERMISSION, resources: [directory],
-          source: { type: "tool", messageID: call.messageID, id: call.id } }, { signal })
+        await permission.assert(
+          {
+            sessionID,
+            agent,
+            action: CODEMODE_READONLY_PERMISSION,
+            resources: [directory],
+            source: { type: "tool", messageID: call.messageID, id: call.id },
+          },
+          { signal },
+        )
         signal.throwIfAborted()
         assertCall(call)
         return await runNativeLs(directory, request, signal)
@@ -85,7 +105,8 @@ export function acquireCodemodeReadonly(
   permission: JoinedPermissionApi,
 ): Effect.Effect<CodemodeReadonlyOwner, never, Scope.Scope> {
   return Effect.gen(function* () {
-    if (!hasJoinedPermissionCancellation(permission)) return yield* Effect.die(Error("Original genuine joined permission owner required"))
+    if (!hasJoinedPermissionCancellation(permission))
+      return yield* Effect.die(Error("Original genuine joined permission owner required"))
     const producers = new Map<string, ReturnType<typeof createProducer>>()
     let closed = false
     const info = createCodemodeReadonlyToolInfo((call, input, signal) => {
@@ -93,32 +114,54 @@ export function acquireCodemodeReadonly(
       if (!producer || producer.revoked) return Promise.reject(new ToolError({ message: FOREIGN_SESSION }))
       return producer.list(call, input, signal)
     })
-    yield* domains.tool.transform(editor => { editor.add(info) })
-    const listed = (yield* domains.tool.list()).filter(tool => tool.name === CODEMODE_READONLY_TOOL_NAME && tool.options?.namespace === undefined)
+    yield* domains.tool.transform((editor) => {
+      editor.add(info)
+    })
+    const listed = (yield* domains.tool.list()).filter(
+      (tool) => tool.name === CODEMODE_READONLY_TOOL_NAME && tool.options?.namespace === undefined,
+    )
     const registered = listed[0]
-    if (listed.length !== 1 || !registered?.id) return yield* Effect.die(Error("Directory listing registration is absent or ambiguous"))
+    if (listed.length !== 1 || !registered?.id)
+      return yield* Effect.die(Error("Directory listing registration is absent or ambiguous"))
     const hostID = registered.id
     // LIFO: producers are revoked and joined before the SDK registration is removed.
-    yield* Effect.addFinalizer(() => Effect.promise(async () => {
-      closed = true
-      await Promise.allSettled([...producers.values()].map(producer => producer.join()))
-    }))
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        closed = true
+        await Promise.allSettled([...producers.values()].map((producer) => producer.join()))
+      }),
+    )
     const owner: CodemodeReadonlyOwner = {
       hostID,
-      isBound(sessionID) { const producer = producers.get(sessionID); return !closed && producer !== undefined && !producer.revoked },
+      isBound(sessionID) {
+        const producer = producers.get(sessionID)
+        return !closed && producer !== undefined && !producer.revoked
+      },
       bindChild(input) {
         if (closed) throw Error("Directory listing owner is closing")
-        if (!input.child || !input.sessionID || !input.agent || !input.cwd) throw Error("Incomplete directory listing producer custody")
-        if (producers.has(input.sessionID)) throw Error("Directory listing producer for this child session is still bound or unjoined")
+        if (!input.child || !input.sessionID || !input.agent || !input.cwd)
+          throw Error("Incomplete directory listing producer custody")
+        if (producers.has(input.sessionID))
+          throw Error("Directory listing producer for this child session is still bound or unjoined")
         input.assertCurrent()
         const producer = createProducer(input, permission)
         producers.set(input.sessionID, producer)
         // Retained until joined, so owner close still joins a revoked producer's in-flight listing.
-        const forget = () => { if (producers.get(input.sessionID) === producer) producers.delete(input.sessionID) }
+        const forget = () => {
+          if (producers.get(input.sessionID) === producer) producers.delete(input.sessionID)
+        }
         return Object.freeze({
           assertCurrent: () => producer.assertCurrent(),
-          revoke() { producer.revoke() },
-          async join() { try { await producer.join() } finally { forget() } },
+          revoke() {
+            producer.revoke()
+          },
+          async join() {
+            try {
+              await producer.join()
+            } finally {
+              forget()
+            }
+          },
         })
       },
     }

@@ -43,9 +43,7 @@ export interface PendingDeviceApproval {
   readonly revealed: boolean
 }
 
-export type SyncPendingResponse =
-  | { readonly pending: readonly PendingDeviceApproval[] }
-  | SyncRpcProblem
+export type SyncPendingResponse = { readonly pending: readonly PendingDeviceApproval[] } | SyncRpcProblem
 
 export type SyncApproveRequest =
   | { readonly action: "begin"; readonly pendingId: PendingId }

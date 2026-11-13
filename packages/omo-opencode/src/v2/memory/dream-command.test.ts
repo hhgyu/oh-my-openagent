@@ -7,7 +7,9 @@ import { createDreamCommand } from "./dream-command"
 import { createBoundIdentity } from "./reflection.test-support"
 
 const cleanups: (() => void)[] = []
-afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup() })
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup()
+})
 
 function setup(outcome: DreamFireOutcome = { fired: true, runId: "dream-1", status: "active" }) {
   const identity = createBoundIdentity()
@@ -15,8 +17,18 @@ function setup(outcome: DreamFireOutcome = { fired: true, runId: "dream-1", stat
   mkdirSync(identity.bound.paths.repo, { recursive: true })
   const requests: DreamRequest[] = []
   const command = createDreamCommand({
-    request: async (_bound, request) => { requests.push(request); return outcome },
-    settings: () => ({ enabled: true, idleMinutes: 30, minHoursBetween: 24, shutdownLaunch: false, autoSelectMax: 5, autoSelectMaxChars: 150_000 }),
+    request: async (_bound, request) => {
+      requests.push(request)
+      return outcome
+    },
+    settings: () => ({
+      enabled: true,
+      idleMinutes: 30,
+      minHoursBetween: 24,
+      shutdownLaunch: false,
+      autoSelectMax: 5,
+      autoSelectMaxChars: 150_000,
+    }),
   })
   return { bound: identity.bound, command, requests }
 }
@@ -29,7 +41,9 @@ describe("/dream", () => {
     const result = await command.run(bound, "--conversation ses_a,ses_b,ses_a --to reference/build.md build notes")
     // then
     expect(command.name).toBe("dream")
-    expect(requests).toEqual([{ focus: "build notes", conversationIds: ["ses_a", "ses_b"], targetDoc: "reference/build.md" }])
+    expect(requests).toEqual([
+      { focus: "build notes", conversationIds: ["ses_a", "ses_b"], targetDoc: "reference/build.md" },
+    ])
     expect(result).toEqual({ text: "dream run dream-1 reserved", level: "info" })
   })
 
@@ -45,11 +59,16 @@ describe("/dream", () => {
   test("#given recent journals #when /dream --recent 1 runs #then the most recently active unreflected journal is requested", async () => {
     // given
     const { bound, command, requests } = setup()
-    for (const [id, at] of [["ses_old", "2026-11-01T00:00:00.000Z"], ["ses_new", "2026-11-10T00:00:00.000Z"]] as const) {
-      await new TranscriptJournal({ journalDir: join(bound.paths.transcripts, id), now: () => new Date(at) }).reconcile([
-        { kind: "user", messageId: `${id}-u`, text: "question" },
-        { kind: "assistant", messageId: `${id}-a`, textBlocks: ["answer"], reasoningBlocks: [], toolCalls: [] },
-      ])
+    for (const [id, at] of [
+      ["ses_old", "2026-11-01T00:00:00.000Z"],
+      ["ses_new", "2026-11-10T00:00:00.000Z"],
+    ] as const) {
+      await new TranscriptJournal({ journalDir: join(bound.paths.transcripts, id), now: () => new Date(at) }).reconcile(
+        [
+          { kind: "user", messageId: `${id}-u`, text: "question" },
+          { kind: "assistant", messageId: `${id}-a`, textBlocks: ["answer"], reasoningBlocks: [], toolCalls: [] },
+        ],
+      )
     }
     // when
     await command.run(bound, "--recent 1")
@@ -68,14 +87,17 @@ describe("/dream", () => {
       ["--recent 0", "--recent expects a positive integer"],
       ["--recent 3", "--recent found no unreflected conversations"],
       ["--conversation ../x", "--conversation ids must be plain conversation ids"],
-      ["--from transcript:a.jsonl", "--from transcript:<path> stages Senpi session JSONL and is not available on OpenCode; use --conversation or --recent"],
+      [
+        "--from transcript:a.jsonl",
+        "--from transcript:<path> stages Senpi session JSONL and is not available on OpenCode; use --conversation or --recent",
+      ],
     ]
     // when
     const results = await Promise.all(cases.map(([args]) => command.run(bound, args)))
     const unbound = await command.run(undefined, "")
     // then
-    expect(results.map(result => result.text)).toEqual(cases.map(([, text]) => text))
-    expect(results.every(result => result.level === "error")).toBe(true)
+    expect(results.map((result) => result.text)).toEqual(cases.map(([, text]) => text))
+    expect(results.every((result) => result.level === "error")).toBe(true)
     expect(unbound).toEqual({ text: "dreaming is not available without a bound memory session", level: "error" })
     expect(requests).toEqual([])
   })

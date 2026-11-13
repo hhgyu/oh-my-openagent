@@ -16,7 +16,9 @@ import { REFLECTION_TOOL_NAMES } from "./reflection-tools"
 setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
 
 const fixtures: ReturnType<typeof createMemoryFixture>[] = []
-afterEach(() => { for (const created of fixtures.splice(0)) created.cleanup() })
+afterEach(() => {
+  for (const created of fixtures.splice(0)) created.cleanup()
+})
 
 function setup(seams: Partial<MemoryReflectionSeams> = {}) {
   const f = createMemoryFixture({ reflection: { trigger: { step_count: 1, on_compaction: true } } })
@@ -30,34 +32,53 @@ function setup(seams: Partial<MemoryReflectionSeams> = {}) {
 }
 
 describe("memory reflection wiring", () => {
-  test.each(["request", "session.compaction.ended", "session.compaction.failed", "session.execution.interrupted"] as const)(
+  test.each([
+    "request",
+    "session.compaction.ended",
+    "session.compaction.failed",
+    "session.execution.interrupted",
+  ] as const)(
     "#given held Kibitzer nudges and step-eligible reflection #when %s occurs #then only acceptance drops nudges and chooses a compaction reservation",
-    async outcome => {
+    async (outcome) => {
       // given
       const { f, ports, options } = setup()
       f.addSession("root", { messages: conversation("coffee preference", "noted") })
       const judges: ScriptedPort[] = []
       let delivered: (() => void) | undefined
-      const wake = new Promise<void>(resolve => { delivered = resolve })
+      const wake = new Promise<void>((resolve) => {
+        delivered = resolve
+      })
       const cleanup = await registerMemoryComponent(f.host, {
         ...options,
         kibitzer: {
-          createPort: request => { const port = createScriptedPort(request); judges.push(port); return port },
-          createWakeSlot: () => createCountingSlot(), timers: createManualTimers(), onWake: () => delivered?.(),
+          createPort: (request) => {
+            const port = createScriptedPort(request)
+            judges.push(port)
+            return port
+          },
+          createWakeSlot: () => createCountingSlot(),
+          timers: createManualTimers(),
+          onWake: () => delivered?.(),
         },
       })
       try {
         await f.runTool("memory", "root", {
-          command: "create", reason: "coffee", file_path: "reference/coffee.md",
-          description: "Coffee preference is oat milk flat white", file_text: "The usual coffee is an oat milk flat white.",
+          command: "create",
+          reason: "coffee",
+          file_path: "reference/coffee.md",
+          description: "Coffee preference is oat milk flat white",
+          file_text: "The usual coffee is an oat milk flat white.",
         })
         await f.prompt("root", "coffee preference")
         await until(() => judges.length === 1)
         const judge = judges[0]
         if (judge === undefined) throw new Error("no Kibitzer port was created")
         const child = await judge.started(1)
-        await new Promise<void>(resolve => setImmediate(resolve))
-        await f.runTool("nudge", child.sessionID, { path: "reference/coffee.md", hint: "The note records that the usual coffee is an oat milk flat white." })
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        await f.runTool("nudge", child.sessionID, {
+          path: "reference/coffee.md",
+          hint: "The note records that the usual coffee is an oat milk flat white.",
+        })
         child.finish()
         await wake
         const binding = f.sessions.get("root")?.metadata?.[MEMORY_BINDING_KEY] as { identity: string }
@@ -72,13 +93,17 @@ describe("memory reflection wiring", () => {
         if (outcome !== "request") await f.emitEvent(outcome, "root")
         await f.idle("root")
         await until(() => ports.children.length === 1)
-        const payload = JSON.parse(readFileSync(join(paths.reflection, "runs", "run-1", "transcript-payload.json"), "utf8")) as { request: { trigger: string } }
+        const payload = JSON.parse(
+          readFileSync(join(paths.reflection, "runs", "run-1", "transcript-payload.json"), "utf8"),
+        ) as { request: { trigger: string } }
         await cleanup()
         // then
         expect(payload.request.trigger).toBe(outcome === "session.compaction.ended" ? "compaction" : "step-count")
         expect(existsSync(pending)).toBe(outcome !== "session.compaction.ended")
         expect(judges).toHaveLength(1)
-      } finally { await cleanup() }
+      } finally {
+        await cleanup()
+      }
     },
   )
 
@@ -88,7 +113,9 @@ describe("memory reflection wiring", () => {
     // when
     const cleanup = await registerMemoryComponent(f.host, options)
     // then
-    expect(f.commands.get("reflect")?.description).toBe("Request a memory reflection run now, optionally scoped and focused.")
+    expect(f.commands.get("reflect")?.description).toBe(
+      "Request a memory reflection run now, optionally scoped and focused.",
+    )
     await cleanup()
   })
 
@@ -104,7 +131,7 @@ describe("memory reflection wiring", () => {
     await f.idle("root")
     await cleanup()
     // then
-    expect(ports.children.map(child => [child.start.prompt.length > 0, child.disposed])).toEqual([[true, true]])
+    expect(ports.children.map((child) => [child.start.prompt.length > 0, child.disposed])).toEqual([[true, true]])
   })
 
   test("#given a root session without user input this process #when it goes idle #then no reflection child is launched", async () => {
@@ -120,8 +147,14 @@ describe("memory reflection wiring", () => {
   })
   test("#given memory.reflection.category names a category with an available model #when a reflection launches #then the child runs on that model, not the host default", async () => {
     // given
-    const config = OmoConfigSchema.parse({ memory: { reflection: { category: "writing" } }, categories: { writing: { model: "acme/writer" } } })
-    const { f, ports, options } = setup({ loadConfig: () => config, catalog: async () => [catalogModel("acme", "large"), catalogModel("acme", "writer")] })
+    const config = OmoConfigSchema.parse({
+      memory: { reflection: { category: "writing" } },
+      categories: { writing: { model: "acme/writer" } },
+    })
+    const { f, ports, options } = setup({
+      loadConfig: () => config,
+      catalog: async () => [catalogModel("acme", "large"), catalogModel("acme", "writer")],
+    })
     f.addSession("root", { messages: conversation("use tabs", "noted, tabs it is") })
     const cleanup = await registerMemoryComponent(f.host, options)
     await f.prompt("root", "use tabs")
@@ -140,15 +173,29 @@ describe("memory reflection wiring", () => {
     f.addSession("root", { messages: conversation("use tabs", "noted, tabs it is") })
     const cleanup = await registerMemoryComponent(f.host, {
       ...options,
-      facts: { createPort: request => factsPorts.createPort(request), catalog: async () => [catalogModel("test", "model")], loadConfig: () => OmoConfigSchema.parse({}) },
-      kibitzer: { createPort: request => createScriptedPort(request), createWakeSlot: () => createCountingSlot(), timers: createManualTimers() },
+      facts: {
+        createPort: (request) => factsPorts.createPort(request),
+        catalog: async () => [catalogModel("test", "model")],
+        loadConfig: () => OmoConfigSchema.parse({}),
+      },
+      kibitzer: {
+        createPort: (request) => createScriptedPort(request),
+        createWakeSlot: () => createCountingSlot(),
+        timers: createManualTimers(),
+      },
     })
     await f.prompt("root", "use tabs")
     await f.idle("root")
     await until(() => ports.children.length === 1)
     const child = ports.children[0]
     if (child === undefined) throw new Error("no reflection child")
-    const offered = () => Object.fromEntries(["read", "edit", ...REFLECTION_TOOL_NAMES, FACTS_RECORD_TOOL_NAME, "session_entries", "nudge"].map(name => [name, { description: name, input: {} }]))
+    const offered = () =>
+      Object.fromEntries(
+        ["read", "edit", ...REFLECTION_TOOL_NAMES, FACTS_RECORD_TOOL_NAME, "session_entries", "nudge"].map((name) => [
+          name,
+          { description: name, input: {} },
+        ]),
+      )
     const rootTools = offered()
     const childTools = offered()
     // when

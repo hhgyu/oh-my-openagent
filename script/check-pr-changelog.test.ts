@@ -17,9 +17,12 @@ afterEach(() => {
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "changelog-cli-"))
   roots.push(root)
-  const git = (...args: string[]) => execFileSync("git", args, {
-    cwd: root, encoding: "utf8", env: { ...process.env, GIT_MASTER: "1" },
-  }).trim()
+  const git = (...args: string[]) =>
+    execFileSync("git", args, {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, GIT_MASTER: "1" },
+    }).trim()
   const write = (path: string, content: string) => {
     mkdirSync(dirname(join(root, path)), { recursive: true })
     writeFileSync(join(root, path), content)
@@ -40,17 +43,61 @@ function fixture() {
 describe("changelog gate CLI", () => {
   test.each([
     { name: "fragment-only PR", files: { "changes/unreleased/7.md": "Fragment. (#7)\n" }, status: 0 },
-    { name: "user-facing PR with its fragment", files: { "packages/fixture/src/index.ts": "export const value = 2\n", "changes/unreleased/7.md": "Fragment. (#7)\n" }, status: 0 },
-    { name: "user-facing PR without a fragment or exemption", files: { "packages/fixture/src/index.ts": "export const value = 2\n" }, status: 1 },
-    { name: "non-release Unreleased edit", files: { "CHANGELOG.md": changelog.replace("## [Unreleased]\n", "## [Unreleased]\n\nHand edit.\n") }, status: 1 },
-    { name: "fragment cannot exempt a non-release Unreleased edit", files: { "changes/unreleased/7.md": "Fragment. (#7)\n", "CHANGELOG.md": changelog.replace("## [Unreleased]\n", "## [Unreleased]\n\nHand edit.\n") }, status: 1 },
+    {
+      name: "user-facing PR with its fragment",
+      files: {
+        "packages/fixture/src/index.ts": "export const value = 2\n",
+        "changes/unreleased/7.md": "Fragment. (#7)\n",
+      },
+      status: 0,
+    },
+    {
+      name: "user-facing PR without a fragment or exemption",
+      files: { "packages/fixture/src/index.ts": "export const value = 2\n" },
+      status: 1,
+    },
+    {
+      name: "non-release Unreleased edit",
+      files: { "CHANGELOG.md": changelog.replace("## [Unreleased]\n", "## [Unreleased]\n\nHand edit.\n") },
+      status: 1,
+    },
+    {
+      name: "fragment cannot exempt a non-release Unreleased edit",
+      files: {
+        "changes/unreleased/7.md": "Fragment. (#7)\n",
+        "CHANGELOG.md": changelog.replace("## [Unreleased]\n", "## [Unreleased]\n\nHand edit.\n"),
+      },
+      status: 1,
+    },
     // #10841: user-facing means shipped (changelog-shipping-policy.mjs), the same classification the Unreleased-line gate used.
-    { name: "test support under a shipped package needs no fragment", files: { "packages/fixture/src/seed.test-support.ts": "export const seed = 1\n" }, status: 0 },
-    { name: "a CI-only script may carry the no-changelog label", files: { "script/ci-only.mjs": "export {}\n" }, labels: ["no-changelog"], status: 0 },
-    { name: "a shipped file outside the package directories needs a fragment", files: { "launcher.mjs": "export const v = 2\n" }, status: 1 },
-    { name: "a shipped file refuses the no-changelog label", files: { "launcher.mjs": "export const v = 2\n" }, labels: ["no-changelog"], status: 1 },
+    {
+      name: "test support under a shipped package needs no fragment",
+      files: { "packages/fixture/src/seed.test-support.ts": "export const seed = 1\n" },
+      status: 0,
+    },
+    {
+      name: "a CI-only script may carry the no-changelog label",
+      files: { "script/ci-only.mjs": "export {}\n" },
+      labels: ["no-changelog"],
+      status: 0,
+    },
+    {
+      name: "a shipped file outside the package directories needs a fragment",
+      files: { "launcher.mjs": "export const v = 2\n" },
+      status: 1,
+    },
+    {
+      name: "a shipped file refuses the no-changelog label",
+      files: { "launcher.mjs": "export const v = 2\n" },
+      labels: ["no-changelog"],
+      status: 1,
+    },
     // Removing a shipped file and its manifest entry together is still a shipped change: the base's manifest decides.
-    { name: "a removed shipped file needs a fragment", files: { "package.json": JSON.stringify({ files: ["packages/fixture/src"] }), "launcher.mjs": null }, status: 1 },
+    {
+      name: "a removed shipped file needs a fragment",
+      files: { "package.json": JSON.stringify({ files: ["packages/fixture/src"] }), "launcher.mjs": null },
+      status: 1,
+    },
   ])("$name", ({ files, status, labels = [] }) => {
     // given: committed base and head trees, not a mocked path inventory
     const { root, git, write, base } = fixture()
@@ -63,7 +110,9 @@ describe("changelog gate CLI", () => {
 
     // when: the workflow's real entry point evaluates this PR
     const result = spawnSync(process.execPath, [runner], {
-      cwd: root, encoding: "utf8", timeout: 10_000,
+      cwd: root,
+      encoding: "utf8",
+      timeout: 10_000,
       env: {
         ...process.env,
         GIT_MASTER: "1",
@@ -86,8 +135,18 @@ describe("changelog gate CLI", () => {
 
   // #11554: CI checks out refs/pull/<n>/merge, the release head merged into a base that gained fragments after the cut.
   test.each([
-    { name: "a release merged into a moved base owes only the cut's fragments", deleted: ["1.md", "2.md"], status: 0, verdict: /changelog-gate: PASS/ },
-    { name: "a release that leaves a cut fragment still fails on the merge tree", deleted: ["1.md"], status: 1, verdict: /changelog-gate: FAIL - a release PR must delete every fragment it consumes/ },
+    {
+      name: "a release merged into a moved base owes only the cut's fragments",
+      deleted: ["1.md", "2.md"],
+      status: 0,
+      verdict: /changelog-gate: PASS/,
+    },
+    {
+      name: "a release that leaves a cut fragment still fails on the merge tree",
+      deleted: ["1.md"],
+      status: 1,
+      verdict: /changelog-gate: FAIL - a release PR must delete every fragment it consumes/,
+    },
   ])("$name", ({ deleted, status, verdict }) => {
     // given: the cut holds two fragments, the release consumes them, and the base then gains five more
     const { root, git, write } = fixture()
@@ -96,7 +155,10 @@ describe("changelog gate CLI", () => {
     git("commit", "-qm", "cut")
     git("checkout", "-qb", "release-side")
     git("rm", "-q", ...deleted.map((name) => `changes/unreleased/${name}`))
-    write("CHANGELOG.md", changelog.replace("## [Unreleased]\n", "## [Unreleased]\n\n## [5.1.50] - 2026-10-28\n\nStamped.\n"))
+    write(
+      "CHANGELOG.md",
+      changelog.replace("## [Unreleased]\n", "## [Unreleased]\n\n## [5.1.50] - 2026-10-28\n\nStamped.\n"),
+    )
     git("commit", "-qam", "release: v5.1.50")
     git("checkout", "-q", "-")
     for (const name of ["3.md", "4.md", "5.md", "6.md", "7.md"]) write(`changes/unreleased/${name}`, `Next ${name}.\n`)
@@ -123,10 +185,34 @@ describe("changelog gate CLI", () => {
 
   // #11704: publish.yml reuses any open PR on its fixed branch, so the author does not identify the release-state PR.
   test.each([
-    { name: "a marked release PR opened by a maintainer account passes", actor: "maintainer", release: "1", title: "release: v5.1.51", status: 0 },
-    { name: "a marked release PR opened by the release bot passes", actor: "sisyphus-dev-ai", release: "1", title: "release: v5.1.51", status: 0 },
-    { name: "a hand-made release branch without the marker still fails", actor: "sisyphus-dev-ai", release: "1", title: "chore: stamp the changelog", status: 1 },
-    { name: "a marked release branch whose head is not in this repository still fails", actor: "maintainer", release: "0", title: "release: v5.1.51", status: 1 },
+    {
+      name: "a marked release PR opened by a maintainer account passes",
+      actor: "maintainer",
+      release: "1",
+      title: "release: v5.1.51",
+      status: 0,
+    },
+    {
+      name: "a marked release PR opened by the release bot passes",
+      actor: "sisyphus-dev-ai",
+      release: "1",
+      title: "release: v5.1.51",
+      status: 0,
+    },
+    {
+      name: "a hand-made release branch without the marker still fails",
+      actor: "sisyphus-dev-ai",
+      release: "1",
+      title: "chore: stamp the changelog",
+      status: 1,
+    },
+    {
+      name: "a marked release branch whose head is not in this repository still fails",
+      actor: "maintainer",
+      release: "0",
+      title: "release: v5.1.51",
+      status: 1,
+    },
   ])("$name", ({ actor, release, title, status }) => {
     // given: a release commit that stamps the changelog and a package log and consumes the only fragment
     const { root, git, write } = fixture()
@@ -136,7 +222,10 @@ describe("changelog gate CLI", () => {
     git("commit", "-qm", "cut")
     const base = git("rev-parse", "HEAD")
     git("rm", "-q", "changes/unreleased/1.md")
-    write("CHANGELOG.md", changelog.replace("## [Unreleased]\n", "## [Unreleased]\n\n## [5.1.51] - 2026-10-31\n\nFragment. (#1)\n"))
+    write(
+      "CHANGELOG.md",
+      changelog.replace("## [Unreleased]\n", "## [Unreleased]\n\n## [5.1.51] - 2026-10-31\n\nFragment. (#1)\n"),
+    )
     write("packages/fixture/changes.md", "# fixture\n\n## 2026-10-31 - Stamped\n")
     git("commit", "-qam", "release: v5.1.51")
 
@@ -163,7 +252,10 @@ describe("changelog gate CLI", () => {
 describe("changelog gate upstream-sync label", () => {
   type Change = Record<string, string | null>
   const upstreamRelease: Change = {
-    "CHANGELOG.md": changelog.replace("## [Unreleased]\n", "## [Unreleased]\n\n## [5.1.64] - 2026-11-10\n\nOld. (#1)\n"),
+    "CHANGELOG.md": changelog.replace(
+      "## [Unreleased]\n",
+      "## [Unreleased]\n\n## [5.1.64] - 2026-11-10\n\nOld. (#1)\n",
+    ),
     "packages/fixture/changes.md": "# fixture\n\n## 2026-11-10 - Upstream entry\n",
     "changes/unreleased/1.md": null,
     "changes/unreleased/2.md": "Upstream fragment. (#2)\n",
@@ -201,20 +293,70 @@ describe("changelog gate upstream-sync label", () => {
   }
 
   const own: Change = { "changes/unreleased/7.md": "Sync upstream. (#7)\n" }
-  const verdicts = (stdout: string) => stdout.split("\n").filter((line) => /^changelog-gate: (?:PASS|FAIL|package logs)/.test(line))
+  const verdicts = (stdout: string) =>
+    stdout.split("\n").filter((line) => /^changelog-gate: (?:PASS|FAIL|package logs)/.test(line))
 
   test.each([
-    { name: "upstream's changelog bytes plus the PR's own fragment pass", labels: [UPSTREAM_SYNC.label], merge: true, after: own, status: 0, verdict: /changelog-gate: PASS - added fragment #7[\s\S]*package logs PASS/ },
-    { name: "one changed byte in an upstream log names the path and keeps today's verdict", labels: [UPSTREAM_SYNC.label], merge: true, after: { ...own, "packages/fixture/changes.md": "# fixture\n\n## 2026-11-10 - Upstream entry!\n" }, status: 1, verdict: /upstream-sync not applied - [^\n]*packages\/fixture\/changes\.md/, today: true },
-    { name: "a fork fragment deleted inside the merge names the path and keeps today's verdict", labels: [UPSTREAM_SYNC.label], merge: true, after: { ...own, "changes/unreleased/40.md": null }, status: 1, verdict: /upstream-sync not applied - [^\n]*changes\/unreleased\/40\.md/, today: true },
-    { name: "the same diff without the label fails as today", labels: [], merge: true, after: own, status: 1, verdict: /changelog-gate: FAIL - only the release PR may edit the changelog/ },
-    { name: "the label on a PR that merges no upstream commit keeps today's verdict", labels: [UPSTREAM_SYNC.label], merge: false, after: own, status: 1, verdict: /upstream-sync not applied/, today: true },
-    { name: "the label still requires the PR's own fragment", labels: [UPSTREAM_SYNC.label], merge: true, after: {}, status: 1, verdict: /changelog-gate: FAIL - a user-facing PR adds exactly one fragment \(found 0\)/ },
+    {
+      name: "upstream's changelog bytes plus the PR's own fragment pass",
+      labels: [UPSTREAM_SYNC.label],
+      merge: true,
+      after: own,
+      status: 0,
+      verdict: /changelog-gate: PASS - added fragment #7[\s\S]*package logs PASS/,
+    },
+    {
+      name: "one changed byte in an upstream log names the path and keeps today's verdict",
+      labels: [UPSTREAM_SYNC.label],
+      merge: true,
+      after: { ...own, "packages/fixture/changes.md": "# fixture\n\n## 2026-11-10 - Upstream entry!\n" },
+      status: 1,
+      verdict: /upstream-sync not applied - [^\n]*packages\/fixture\/changes\.md/,
+      today: true,
+    },
+    {
+      name: "a fork fragment deleted inside the merge names the path and keeps today's verdict",
+      labels: [UPSTREAM_SYNC.label],
+      merge: true,
+      after: { ...own, "changes/unreleased/40.md": null },
+      status: 1,
+      verdict: /upstream-sync not applied - [^\n]*changes\/unreleased\/40\.md/,
+      today: true,
+    },
+    {
+      name: "the same diff without the label fails as today",
+      labels: [],
+      merge: true,
+      after: own,
+      status: 1,
+      verdict: /changelog-gate: FAIL - only the release PR may edit the changelog/,
+    },
+    {
+      name: "the label on a PR that merges no upstream commit keeps today's verdict",
+      labels: [UPSTREAM_SYNC.label],
+      merge: false,
+      after: own,
+      status: 1,
+      verdict: /upstream-sync not applied/,
+      today: true,
+    },
+    {
+      name: "the label still requires the PR's own fragment",
+      labels: [UPSTREAM_SYNC.label],
+      merge: true,
+      after: {},
+      status: 1,
+      verdict: /changelog-gate: FAIL - a user-facing PR adds exactly one fragment \(found 0\)/,
+    },
   ])("$name", ({ labels, merge, after, status, verdict, today = false }) => {
     const { root, forkBase } = syncFixture({ merge, after })
 
     // when: the workflow's real entry point judges the sync PR with and without the label
-    const result = runGate(root, { CHANGELOG_GATE_BASE: forkBase, CHANGELOG_GATE_PR: "7", CHANGELOG_GATE_LABELS: JSON.stringify(labels) })
+    const result = runGate(root, {
+      CHANGELOG_GATE_BASE: forkBase,
+      CHANGELOG_GATE_PR: "7",
+      CHANGELOG_GATE_LABELS: JSON.stringify(labels),
+    })
 
     // then: the label passes only upstream's exact bytes; anything else is the unlabelled verdict
     expect(result.status, result.stdout + result.stderr).toBe(status)
@@ -228,7 +370,9 @@ describe("changelog gate upstream-sync label", () => {
 
 function runGate(cwd: string, env: Record<string, string>) {
   return spawnSync(process.execPath, [runner], {
-    cwd, encoding: "utf8", timeout: 10_000,
+    cwd,
+    encoding: "utf8",
+    timeout: 10_000,
     env: { ...process.env, GIT_MASTER: "1", CHANGELOG_GATE_BASE_REF: "", CHANGELOG_GATE_LABELS: "[]", ...env },
   })
 }

@@ -1,7 +1,11 @@
 import { join } from "node:path"
 import {
-  JournalLockTimeoutError, TranscriptJournal,
-  type AppendResult, type ProjectedReasoning, type ProjectedToolCall, type TranscriptProjection,
+  JournalLockTimeoutError,
+  TranscriptJournal,
+  type AppendResult,
+  type ProjectedReasoning,
+  type ProjectedToolCall,
+  type TranscriptProjection,
 } from "@oh-my-opencode/memory-core"
 import type * as Plugin from "@opencode/plugin/promise/plugin"
 import { describeError, type BoundMemorySession, type MemoryBinder } from "./binding"
@@ -75,7 +79,11 @@ export function createMemoryJournal(deps: MemoryJournalDeps): MemoryJournal {
     const previous = chains.get(sessionID) ?? Promise.resolve(NOOP)
     const next = previous.then(run, run)
     chains.set(sessionID, next)
-    void next.finally(() => { if (chains.get(sessionID) === next) chains.delete(sessionID) }).catch(() => undefined)
+    void next
+      .finally(() => {
+        if (chains.get(sessionID) === next) chains.delete(sessionID)
+      })
+      .catch(() => undefined)
     return next
   }
 
@@ -119,7 +127,8 @@ function projectSessionMessages(messages: readonly SessionMessage[]): Transcript
     }
     projections.push({ kind: "assistant", messageId: message.id, textBlocks, reasoningBlocks, toolCalls })
     const error = message.error?.message
-    if (error !== undefined && error.trim().length > 0) projections.push({ kind: "error", messageId: message.id, text: error })
+    if (error !== undefined && error.trim().length > 0)
+      projections.push({ kind: "error", messageId: message.id, text: error })
   }
   return projections
 }

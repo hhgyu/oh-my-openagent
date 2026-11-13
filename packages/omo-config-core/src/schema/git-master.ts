@@ -5,11 +5,9 @@ import type { OmoHarnessId } from "./harness"
 const GIT_ENV_ASSIGNMENT_PATTERN =
   /^(?:[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_-]*)(?: [A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_-]*)*$/
 
-const GitEnvPrefixSchema = z
-  .string()
-  .refine((value) => value === "" || GIT_ENV_ASSIGNMENT_PATTERN.test(value), {
-    message: 'git_env_prefix must be empty or use shell-safe env assignments like "GIT_MASTER=1"',
-  })
+const GitEnvPrefixSchema = z.string().refine((value) => value === "" || GIT_ENV_ASSIGNMENT_PATTERN.test(value), {
+  message: 'git_env_prefix must be empty or use shell-safe env assignments like "GIT_MASTER=1"',
+})
 
 const OmoGitMasterSettingsShape = {
   /** Opt in to an attribution footer in commit bodies (default: false). `true` uses the builtin footer text; a string replaces it. */
@@ -48,4 +46,3 @@ export const GIT_MASTER_HARNESS_SUPPORT: Record<GitMasterSettingPath, readonly O
 export function resolveOmoGitMasterSettings(config: OmoGitMasterConfigView): OmoGitMasterSettings {
   return config.git_master ?? OmoGitMasterSettingsSchema.parse({})
 }
-

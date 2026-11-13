@@ -11,16 +11,26 @@ function liveCapability() {
   let generation = 1
   const capability = {
     capabilities: { invokeScope: true },
-    describe: async (names: readonly string[]) => ({ results: names.map(name => ({ name, ok: true })) }),
+    describe: async (names: readonly string[]) => ({ results: names.map((name) => ({ name, ok: true })) }),
     invoke: (request: { kernel_generation: number; args: { n: number } }, options: Record<string, unknown> = {}) => {
       calls.push({ request, options })
-      if (request.kernel_generation !== generation) return Promise.reject(Object.assign(Error("kernel was reset"), { code: "kernel_tool_stale" }))
+      if (request.kernel_generation !== generation)
+        return Promise.reject(Object.assign(Error("kernel was reset"), { code: "kernel_tool_stale" }))
       const signal = options.signal as AbortSignal | undefined
-      if (request.args.n < 0) return new Promise((_resolve, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }))
+      if (request.args.n < 0)
+        return new Promise((_resolve, reject) =>
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true }),
+        )
       return Promise.resolve(request.args.n * 2)
     },
   }
-  return { capability, calls, reset: () => { generation++ } }
+  return {
+    capability,
+    calls,
+    reset: () => {
+      generation++
+    },
+  }
 }
 
 describe("kernel tools capability across the worker boundary", () => {
@@ -30,18 +40,30 @@ describe("kernel tools capability across the worker boundary", () => {
     const received: { call?: OwnedEvalHostToolCall; proxy?: KernelToolsCapabilityProxy } = {}
     let outcome: unknown
     const fake = connectFakeWorker({
-      ownedTools: [{
-        name: "probe", description: "p", parameters: {},
-        async execute(_params, call) {
-          const proxy = call.kernelTools as KernelToolsCapabilityProxy
-          Object.assign(received, { call, proxy })
-          const doubled = await proxy.invoke(REQUEST, { scope: { tools: { allow: ["read"], deny: ["bash"] } }, invoker: { sessionId: "ses_child" }, signal: new AbortController().signal })
-          const described = await proxy.describe(["double"])
-          return { content: [{ type: "text", text: JSON.stringify({ doubled, described }) }] }
+      ownedTools: [
+        {
+          name: "probe",
+          description: "p",
+          parameters: {},
+          async execute(_params, call) {
+            const proxy = call.kernelTools as KernelToolsCapabilityProxy
+            Object.assign(received, { call, proxy })
+            const doubled = await proxy.invoke(REQUEST, {
+              scope: { tools: { allow: ["read"], deny: ["bash"] } },
+              invoker: { sessionId: "ses_child" },
+              signal: new AbortController().signal,
+            })
+            const described = await proxy.describe(["double"])
+            return { content: [{ type: "text", text: JSON.stringify({ doubled, described }) }] }
+          },
         },
-      }],
-      execute: async input => {
-        const bridge = createOwnedHostToolBridge({ sessionID: input.sessionID, tools: input.ownedTools, readKernelTools: () => live.capability })
+      ],
+      execute: async (input) => {
+        const bridge = createOwnedHostToolBridge({
+          sessionID: input.sessionID,
+          tools: input.ownedTools,
+          readKernelTools: () => live.capability,
+        })
         outcome = await bridge.executeTool("probe", { x: 1 })
         return { content: [] }
       },
@@ -55,7 +77,11 @@ describe("kernel tools capability across the worker boundary", () => {
     expect(received.call?.sessionID).toBe("ses_root")
     expect(received.proxy?.ownerSessionID).toBe("ses_root")
     expect(received.proxy?.capabilities).toEqual({ invokeScope: true })
-    expect(outcome).toEqual({ content: [{ type: "text", text: JSON.stringify({ doubled: 42, described: { results: [{ name: "double", ok: true }] } }) }] })
+    expect(outcome).toEqual({
+      content: [
+        { type: "text", text: JSON.stringify({ doubled: 42, described: { results: [{ name: "double", ok: true }] } }) },
+      ],
+    })
     expect(live.calls).toHaveLength(1)
     expect(live.calls[0]?.request).toEqual(REQUEST)
     expect(live.calls[0]?.options.scope).toEqual({ tools: { allow: ["read"], deny: ["bash"] } })
@@ -70,9 +96,23 @@ describe("kernel tools capability across the worker boundary", () => {
     const live = liveCapability()
     let proxy: KernelToolsCapabilityProxy | undefined
     const fake = connectFakeWorker({
-      ownedTools: [{ name: "probe", description: "p", parameters: {}, async execute(_params, call) { proxy = call.kernelTools as KernelToolsCapabilityProxy; return { content: [] } } }],
-      execute: async input => {
-        await createOwnedHostToolBridge({ sessionID: input.sessionID, tools: input.ownedTools, readKernelTools: () => live.capability }).executeTool("probe", {})
+      ownedTools: [
+        {
+          name: "probe",
+          description: "p",
+          parameters: {},
+          async execute(_params, call) {
+            proxy = call.kernelTools as KernelToolsCapabilityProxy
+            return { content: [] }
+          },
+        },
+      ],
+      execute: async (input) => {
+        await createOwnedHostToolBridge({
+          sessionID: input.sessionID,
+          tools: input.ownedTools,
+          readKernelTools: () => live.capability,
+        }).executeTool("probe", {})
         return { content: [] }
       },
     })
@@ -106,9 +146,23 @@ describe("kernel tools capability across the worker boundary", () => {
     // given
     const seen: unknown[] = []
     const fake = connectFakeWorker({
-      ownedTools: [{ name: "probe", description: "p", parameters: {}, async execute(_params, call) { seen.push(call.kernelTools); return { content: [] } } }],
-      execute: async input => {
-        await createOwnedHostToolBridge({ sessionID: input.sessionID, tools: input.ownedTools, readKernelTools: () => undefined }).executeTool("probe", {})
+      ownedTools: [
+        {
+          name: "probe",
+          description: "p",
+          parameters: {},
+          async execute(_params, call) {
+            seen.push(call.kernelTools)
+            return { content: [] }
+          },
+        },
+      ],
+      execute: async (input) => {
+        await createOwnedHostToolBridge({
+          sessionID: input.sessionID,
+          tools: input.ownedTools,
+          readKernelTools: () => undefined,
+        }).executeTool("probe", {})
         return { content: [] }
       },
     })

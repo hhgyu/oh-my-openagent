@@ -15,7 +15,9 @@ import { createBoundIdentity, runTool, toolContext } from "./reflection.test-sup
 setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
 
 const cleanups: (() => void)[] = []
-afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup() })
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup()
+})
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim()
@@ -27,43 +29,81 @@ function setup(options: { readonly deadlineMs?: number; readonly model?: Reflect
   const ports = createScriptedFactsPorts()
   const timers = createManualTimers()
   const warnings: string[] = []
-  const warn = (message: string): void => { warnings.push(message) }
-  const hosting = createReflectionChildHosting({ host: { session: {} }, createPort: request => ports.createPort(request), timers, warn })
+  const warn = (message: string): void => {
+    warnings.push(message)
+  }
+  const hosting = createReflectionChildHosting({
+    host: { session: {} },
+    createPort: (request) => ports.createPort(request),
+    timers,
+    warn,
+  })
   const resolution = options.model
   const runner = createReflectionRunner({
-    launch: hosting.launch, warn, createRunId: () => "run-a",
+    launch: hosting.launch,
+    warn,
+    createRunId: () => "run-a",
     ...(options.deadlineMs === undefined ? {} : { deadlineMs: options.deadlineMs }),
     ...(resolution === undefined ? {} : { resolveModel: async () => resolution }),
   })
   const tool = (name: string) => {
-    const found = hosting.tools().find(entry => entry.name === name)
+    const found = hosting.tools().find((entry) => entry.name === name)
     if (found === undefined) throw new Error(`${name} missing`)
     return found
   }
-  const run = (request: Partial<ReflectionRequest> = {}) => runner.runReflection(identity.bound, {
-    parentSessionId: "ses_root", request: { trigger: "manual", conversationIds: [], snapshots: [], focus: "tabs", ...request },
-  })
-  const prelaunch = (): { worktreeDir: string; worktreeBranch: string } => JSON.parse(readFileSync(join(reflectionRunDir(identity.bound, "run-a"), "prelaunch.json"), "utf8"))
+  const run = (request: Partial<ReflectionRequest> = {}) =>
+    runner.runReflection(identity.bound, {
+      parentSessionId: "ses_root",
+      request: { trigger: "manual", conversationIds: [], snapshots: [], focus: "tabs", ...request },
+    })
+  const prelaunch = (): { worktreeDir: string; worktreeBranch: string } =>
+    JSON.parse(readFileSync(join(reflectionRunDir(identity.bound, "run-a"), "prelaunch.json"), "utf8"))
   return { bound: identity.bound, ports, timers, warnings, tool, run, prelaunch }
 }
 
-const createInput = { command: "create", reason: "feat(reflection): tabs", file_path: "reference/tabs.md", description: "Indentation preference", file_text: "Tabs.\n" }
+const createInput = {
+  command: "create",
+  reason: "feat(reflection): tabs",
+  file_path: "reference/tabs.md",
+  description: "Indentation preference",
+  file_text: "Tabs.\n",
+}
 
 describe("reflection runner", () => {
-  test.each(["manual", "dream"] as const)("#given %s model fallback #then variants reach launch and attempted models persist on the final record", async trigger => {
-    const { bound, ports, run } = setup({ model: { kind: "resolved", category: "custom", model: "test/first", variant: "high", fallbacks: [{ model: "test/second", variant: "low" }] } })
-    const running = run({ trigger, ...(trigger === "dream" ? { origin: "manual" } : {}) })
-    const first = await ports.started(1)
-    expect(first.start.model).toMatchObject({ id: "first", variant: "high" })
-    first.finish({ status: "error", error: { name: "APIError", data: { statusCode: 429, message: "limit reached" } } })
-    const second = await ports.started(2)
-    expect(first.disposed).toBe(true)
-    expect(second.start.model).toMatchObject({ id: "second", variant: "low" })
-    second.finish()
-    const result = await running
-    expect(result.status === "finished" ? result.runs[0] : undefined).toMatchObject({ outcome: "no_changes", detail: "attempted models: test/first -> test/second" })
-    expect(JSON.parse(readFileSync(join(reflectionRunDir(bound, "run-a"), "final.json"), "utf8"))).toMatchObject({ outcome: "no_changes", detail: "attempted models: test/first -> test/second" })
-  })
+  test.each(["manual", "dream"] as const)(
+    "#given %s model fallback #then variants reach launch and attempted models persist on the final record",
+    async (trigger) => {
+      const { bound, ports, run } = setup({
+        model: {
+          kind: "resolved",
+          category: "custom",
+          model: "test/first",
+          variant: "high",
+          fallbacks: [{ model: "test/second", variant: "low" }],
+        },
+      })
+      const running = run({ trigger, ...(trigger === "dream" ? { origin: "manual" } : {}) })
+      const first = await ports.started(1)
+      expect(first.start.model).toMatchObject({ id: "first", variant: "high" })
+      first.finish({
+        status: "error",
+        error: { name: "APIError", data: { statusCode: 429, message: "limit reached" } },
+      })
+      const second = await ports.started(2)
+      expect(first.disposed).toBe(true)
+      expect(second.start.model).toMatchObject({ id: "second", variant: "low" })
+      second.finish()
+      const result = await running
+      expect(result.status === "finished" ? result.runs[0] : undefined).toMatchObject({
+        outcome: "no_changes",
+        detail: "attempted models: test/first -> test/second",
+      })
+      expect(JSON.parse(readFileSync(join(reflectionRunDir(bound, "run-a"), "final.json"), "utf8"))).toMatchObject({
+        outcome: "no_changes",
+        detail: "attempted models: test/first -> test/second",
+      })
+    },
+  )
   test("#given a child that edits through reflection_memory #when the run finishes #then the branch is merged into the memory repo, the worktree is removed and the reservation completes", async () => {
     // given
     const { bound, ports, tool, run, prelaunch } = setup()
@@ -72,14 +112,18 @@ describe("reflection runner", () => {
     const { worktreeDir, worktreeBranch } = prelaunch()
 
     // when
-    const transcript = await runTool(tool(REFLECTION_READ_TOOL_NAME), { target: "transcript" }, toolContext(child.sessionID))
+    const transcript = await runTool(
+      tool(REFLECTION_READ_TOOL_NAME),
+      { target: "transcript" },
+      toolContext(child.sessionID),
+    )
     await runTool(tool(REFLECTION_MEMORY_TOOL_NAME), createInput, toolContext(child.sessionID))
     child.finish()
     const report = await running
 
     // then
-    expect(String(transcript.content)).toContain("\"schemaVersion\": 1")
-    expect(String(transcript.content)).toContain("\"runId\": \"run-a\"")
+    expect(String(transcript.content)).toContain('"schemaVersion": 1')
+    expect(String(transcript.content)).toContain('"runId": "run-a"')
     expect(report.status).toBe("finished")
     const result = report.status === "finished" ? report.runs[0] : undefined
     expect(result).toMatchObject({ runId: "run-a", outcome: "merged", cleanedUp: true })
@@ -89,12 +133,17 @@ describe("reflection runner", () => {
     expect(existsSync(worktreeDir)).toBe(false)
     expect(git(bound.paths.repo, "branch", "--list", worktreeBranch)).toBe("")
     expect((await reflectionStore(bound).readState()).active).toBeUndefined()
-    expect(JSON.parse(readFileSync(join(reflectionRunDir(bound, "run-a"), "final.json"), "utf8"))).toMatchObject({ runId: "run-a", outcome: "merged" })
+    expect(JSON.parse(readFileSync(join(reflectionRunDir(bound, "run-a"), "final.json"), "utf8"))).toMatchObject({
+      runId: "run-a",
+      outcome: "merged",
+    })
   })
 
   test("#given a child that committed and then failed #when the run finishes #then nothing merges, the worktree is removed and the failure is parked like Senpi's", async () => {
     // given
-    const { bound, ports, tool, run, prelaunch } = setup({ model: { kind: "resolved", category: "custom", model: "test/first", fallbacks: [{ model: "test/second" }] } })
+    const { bound, ports, tool, run, prelaunch } = setup({
+      model: { kind: "resolved", category: "custom", model: "test/first", fallbacks: [{ model: "test/second" }] },
+    })
     const running = run({ trigger: "step-count" })
     const child = await ports.started(1)
     const { worktreeDir } = prelaunch()
@@ -105,7 +154,11 @@ describe("reflection runner", () => {
     const report = await running
 
     // then
-    expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({ outcome: "failed", reason: "child_exit", cleanedUp: true })
+    expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({
+      outcome: "failed",
+      reason: "child_exit",
+      cleanedUp: true,
+    })
     expect(ports.children).toHaveLength(1)
     expect(existsSync(join(bound.paths.repo, "reference", "tabs.md"))).toBe(false)
     expect(existsSync(worktreeDir)).toBe(false)
@@ -130,7 +183,11 @@ describe("reflection runner", () => {
     const report = await running
 
     // then
-    expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({ outcome: "timed_out", reason: "deadline_exceeded", cleanedUp: true })
+    expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({
+      outcome: "timed_out",
+      reason: "deadline_exceeded",
+      cleanedUp: true,
+    })
     expect(child.aborts).toBe(1)
     expect(existsSync(join(bound.paths.repo, "reference", "tabs.md"))).toBe(false)
     expect(existsSync(worktreeDir)).toBe(false)
@@ -141,7 +198,11 @@ describe("reflection runner", () => {
   test("#given a run already holding the reservation #when another run is requested #then it is queued as pending and nothing launches", async () => {
     // given
     const { bound, ports, run } = setup()
-    await reflectionStore(bound, { createRunId: () => "run-held" }).tryReserve({ trigger: "manual", conversationIds: [], snapshots: [] })
+    await reflectionStore(bound, { createRunId: () => "run-held" }).tryReserve({
+      trigger: "manual",
+      conversationIds: [],
+      snapshots: [],
+    })
 
     // when
     const report = await run()
@@ -166,20 +227,27 @@ describe("reflection runner", () => {
 
   test("#given the reflection category has no usable model #when a run is requested #then no child launches and the run settles failed with category_unavailable like Native", async () => {
     // given
-    const { bound, ports, warnings, run } = setup({ model: { kind: "unavailable", category: "quick", cause: "model_unavailable", missingProviders: ["anthropic"] } })
+    const { bound, ports, warnings, run } = setup({
+      model: { kind: "unavailable", category: "quick", cause: "model_unavailable", missingProviders: ["anthropic"] },
+    })
 
     // when
     const report = await run({ trigger: "step-count" })
 
     // then
     expect(ports.requests).toHaveLength(0)
-    expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({ outcome: "failed", reason: "category_unavailable", cleanedUp: true })
+    expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({
+      outcome: "failed",
+      reason: "category_unavailable",
+      cleanedUp: true,
+    })
     expect(warnings).toContain("memory reflection not launched: no usable model for the reflection category")
     const store = reflectionStore(bound)
     expect((await store.readState()).active).toBeUndefined()
     expect((await store.readPark()).lastFailure).toMatchObject({
       reason: "category_unavailable",
-      detail: "Reflection category \"quick\" could not resolve a usable model (cause: model_unavailable); missing providers: anthropic",
+      detail:
+        'Reflection category "quick" could not resolve a usable model (cause: model_unavailable); missing providers: anthropic',
     })
   })
 })

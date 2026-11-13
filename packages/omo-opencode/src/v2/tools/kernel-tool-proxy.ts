@@ -12,8 +12,14 @@
 // parent's eval call, never as the child.
 
 import {
-  KERNEL_TOOL_ERROR_CODES, kernelToolKey, normalizeKernelToolName, supportsInvokeScope,
-  type KernelToolDescriptor, type KernelToolErrorCode, type KernelToolGrant, type KernelToolInvokeScope,
+  KERNEL_TOOL_ERROR_CODES,
+  kernelToolKey,
+  normalizeKernelToolName,
+  supportsInvokeScope,
+  type KernelToolDescriptor,
+  type KernelToolErrorCode,
+  type KernelToolGrant,
+  type KernelToolInvokeScope,
 } from "@oh-my-opencode/senpi-task"
 
 /** Plugin-owned eval host tools a closure invoked on a child's behalf must never reach. */
@@ -57,7 +63,11 @@ export function kernelToolOutcomeCode(error: unknown): KernelToolErrorCode {
 }
 
 function success(name: string, value: unknown): KernelToolOutcome {
-  return { text: JSON.stringify({ kernel_tool: name, value: value ?? null }), isError: false, details: { kernel_tool: name } }
+  return {
+    text: JSON.stringify({ kernel_tool: name, value: value ?? null }),
+    isError: false,
+    details: { kernel_tool: name },
+  }
 }
 
 export function kernelToolFailure(name: string, code: KernelToolErrorCode, message: string): KernelToolOutcome {
@@ -72,7 +82,7 @@ export function childKernelScope(grant: KernelToolGrant): KernelToolInvokeScope 
   const denied = new Set(CHILD_DENIED_EVAL_HOST_TOOLS)
   return {
     tools: {
-      ...(tools?.allow !== undefined && { allow: tools.allow.filter(name => !denied.has(name)) }),
+      ...(tools?.allow !== undefined && { allow: tools.allow.filter((name) => !denied.has(name)) }),
       deny: [...new Set([...(tools?.deny ?? []), ...CHILD_DENIED_EVAL_HOST_TOOLS])],
     },
   }
@@ -86,28 +96,43 @@ export function createKernelToolInvoker(input: {
   readonly isCurrent?: () => boolean
 }): KernelToolInvoker {
   const { grant } = input
-  const byKey = new Map(grant.descriptors.map(descriptor => [kernelToolKey(descriptor.name), descriptor]))
+  const byKey = new Map(grant.descriptors.map((descriptor) => [kernelToolKey(descriptor.name), descriptor]))
   const scope = childKernelScope(grant)
   return Object.freeze({
     descriptors: grant.descriptors,
     async invoke(call: KernelToolInvokeInput): Promise<KernelToolOutcome> {
       const descriptor = byKey.get(kernelToolKey(normalizeKernelToolName(call.name)))
       if (!descriptor) {
-        const granted = grant.descriptors.map(entry => entry.name).join(", ")
-        return kernelToolFailure(call.name, "kernel_tool_missing", `Parent kernel tool "${call.name}" was not granted to this child${granted ? ` (granted: ${granted})` : ""}.`)
+        const granted = grant.descriptors.map((entry) => entry.name).join(", ")
+        return kernelToolFailure(
+          call.name,
+          "kernel_tool_missing",
+          `Parent kernel tool "${call.name}" was not granted to this child${granted ? ` (granted: ${granted})` : ""}.`,
+        )
       }
       if (input.isCurrent?.() === false) {
-        return kernelToolFailure(descriptor.name, "tools_unavailable", `Parent kernel tool "${descriptor.name}" is no longer bound to this child.`)
+        return kernelToolFailure(
+          descriptor.name,
+          "tools_unavailable",
+          `Parent kernel tool "${descriptor.name}" is no longer bound to this child.`,
+        )
       }
       const request = {
-        name: descriptor.name, kernel_generation: descriptor.kernel_generation,
-        definition_revision: descriptor.definition_revision, args: call.args, call_id: call.callID,
+        name: descriptor.name,
+        kernel_generation: descriptor.kernel_generation,
+        definition_revision: descriptor.definition_revision,
+        args: call.args,
+        call_id: call.callID,
       }
       const options = { signal: call.signal, ...(scope && { scope }), invoker: { sessionId: input.invokerSessionID } }
       try {
         return success(descriptor.name, await grant.capability.invoke(request, options))
       } catch (error) {
-        return kernelToolFailure(descriptor.name, kernelToolOutcomeCode(error), error instanceof Error ? error.message : String(error))
+        return kernelToolFailure(
+          descriptor.name,
+          kernelToolOutcomeCode(error),
+          error instanceof Error ? error.message : String(error),
+        )
       }
     },
   })

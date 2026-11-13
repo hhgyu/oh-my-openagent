@@ -13,7 +13,10 @@ export interface GateMatch {
   readonly header: string | undefined
 }
 
-const GATE_HEADERS: ReadonlySet<string> = new Set([...PINNED_GATE_HEADERS.map(header => header.toLowerCase()), "authorise"])
+const GATE_HEADERS: ReadonlySet<string> = new Set([
+  ...PINNED_GATE_HEADERS.map((header) => header.toLowerCase()),
+  "authorise",
+])
 const GATE_LABEL = /^(?:approve|authori[sz]e)(?![a-z])/i
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -27,7 +30,7 @@ function trimmedString(value: unknown): string | undefined {
 function optionLabels(question: Record<string, unknown>): string[] {
   const options = question.options
   if (!Array.isArray(options)) return []
-  return options.flatMap(option => {
+  return options.flatMap((option) => {
     const label = isRecord(option) ? trimmedString(option.label) : undefined
     return label === undefined ? [] : [label]
   })
@@ -43,7 +46,7 @@ export function matchGate(input: unknown): GateMatch | undefined {
     if (header !== undefined && GATE_HEADERS.has(header.toLowerCase())) return { rule: "header", header }
   }
   for (const question of records) {
-    if (optionLabels(question).some(label => GATE_LABEL.test(label))) {
+    if (optionLabels(question).some((label) => GATE_LABEL.test(label))) {
       return { rule: "label", header: trimmedString(question.header) }
     }
   }

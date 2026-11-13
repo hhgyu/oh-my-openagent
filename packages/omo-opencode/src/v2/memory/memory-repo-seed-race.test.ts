@@ -15,7 +15,9 @@ setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
 
 const LOCK_WAIT_MS = 30_000
 const cleanups: (() => void)[] = []
-afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup() })
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup()
+})
 
 function identity(): BoundMemorySession {
   const created = createBoundIdentity()
@@ -27,9 +29,13 @@ function identity(): BoundMemorySession {
 async function holdWriterLock(bound: BoundMemorySession) {
   mkdirSync(bound.paths.locks, { recursive: true })
   let release = (): void => undefined
-  const gate = new Promise<void>(resolve => { release = resolve })
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
   let entered = (): void => undefined
-  const holding = new Promise<void>(resolve => { entered = resolve })
+  const holding = new Promise<void>((resolve) => {
+    entered = resolve
+  })
   const held = withLock(memoryWriterLockPath(bound.paths.locks), await createLockRecord("test writer"), async () => {
     entered()
     await gate
@@ -39,34 +45,70 @@ async function holdWriterLock(bound: BoundMemorySession) {
 }
 
 function message(id: string): TranscriptEntry {
-  return { kind: "user", text: `I always use tabs ${id}`, source_message_id: id, source_line_id: id, captured_at: new Date().toISOString() }
+  return {
+    kind: "user",
+    text: `I always use tabs ${id}`,
+    source_message_id: id,
+    source_line_id: id,
+    captured_at: new Date().toISOString(),
+  }
 }
 
 function factsRunner(bound: BoundMemorySession) {
   const launched: FactsChildLaunch[] = []
   let modelResolved = (): void => undefined
-  const resolved = new Promise<void>(resolve => { modelResolved = resolve })
+  const resolved = new Promise<void>((resolve) => {
+    modelResolved = resolve
+  })
   const runner = createFactsRunner({
-    identity: bound.identity, paths: bound.paths, owner: "test-owner", now: () => new Date(), logger: { warn: () => undefined },
+    identity: bound.identity,
+    paths: bound.paths,
+    owner: "test-owner",
+    now: () => new Date(),
+    logger: { warn: () => undefined },
     people: () => ({ enabled: false, maxEntries: 0, maxEntryChars: 0 }),
     // The model is resolved immediately before the run opens (and, on a new identity, seeds) the repo.
-    resolveModel: async () => { modelResolved(); return { kind: "resolved", model: "test/model", fallbacks: [] } },
-    launchChild: async input => { launched.push(input); return { status: "failed", detail: "test child" } },
-    deadlineMs: 60_000, ownerAlive: () => false, lockWaitTimeoutMs: LOCK_WAIT_MS,
+    resolveModel: async () => {
+      modelResolved()
+      return { kind: "resolved", model: "test/model", fallbacks: [] }
+    },
+    launchChild: async (input) => {
+      launched.push(input)
+      return { status: "failed", detail: "test child" }
+    },
+    deadlineMs: 60_000,
+    ownerAlive: () => false,
+    lockWaitTimeoutMs: LOCK_WAIT_MS,
   })
   return { runner, launched, resolved }
 }
 
 function reflectionRunner(bound: BoundMemorySession) {
   const ports = createScriptedFactsPorts()
-  const hosting = createReflectionChildHosting({ host: { session: {} }, createPort: request => ports.createPort(request), timers: createManualTimers(), warn: () => undefined })
-  const reflection = createReflectionRunner({ launch: hosting.launch, warn: () => undefined, createRunId: () => "run-a", lockWaitTimeoutMs: LOCK_WAIT_MS })
-  const run = () => reflection.runReflection(bound, { parentSessionId: "ses_root", request: { trigger: "manual", conversationIds: [], snapshots: [] } })
+  const hosting = createReflectionChildHosting({
+    host: { session: {} },
+    createPort: (request) => ports.createPort(request),
+    timers: createManualTimers(),
+    warn: () => undefined,
+  })
+  const reflection = createReflectionRunner({
+    launch: hosting.launch,
+    warn: () => undefined,
+    createRunId: () => "run-a",
+    lockWaitTimeoutMs: LOCK_WAIT_MS,
+  })
+  const run = () =>
+    reflection.runReflection(bound, {
+      parentSessionId: "ses_root",
+      request: { trigger: "manual", conversationIds: [], snapshots: [] },
+    })
   return { ports, run }
 }
 
 function rootCommits(bound: BoundMemorySession): string[] {
-  return execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], { cwd: bound.paths.repo, encoding: "utf8" }).split("\n").filter(Boolean)
+  return execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], { cwd: bound.paths.repo, encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean)
 }
 
 describe("seeding a brand-new memory identity from concurrent facts and reflection runs", () => {
@@ -75,7 +117,12 @@ describe("seeding a brand-new memory identity from concurrent facts and reflecti
     const bound = identity()
     const writer = await holdWriterLock(bound)
     const facts = factsRunner(bound)
-    await facts.runner.queue.enqueue({ identity: bound.identity, sessionId: "ses_root", conversationId: "ses_root", entries: [message("m1")] })
+    await facts.runner.queue.enqueue({
+      identity: bound.identity,
+      sessionId: "ses_root",
+      conversationId: "ses_root",
+      entries: [message("m1")],
+    })
     const reflection = reflectionRunner(bound)
 
     // when
@@ -98,6 +145,9 @@ describe("seeding a brand-new memory identity from concurrent facts and reflecti
     expect(facts.launched).toHaveLength(1)
     expect(factsResult).toMatchObject({ status: "failed" })
     expect(child).toBeDefined()
-    expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({ runId: "run-a", outcome: "no_changes" })
+    expect(report.status === "finished" ? report.runs[0] : undefined).toMatchObject({
+      runId: "run-a",
+      outcome: "no_changes",
+    })
   })
 })

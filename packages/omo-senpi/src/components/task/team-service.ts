@@ -1,4 +1,8 @@
-import { parseExtensionEntries, resolveMemberExtensionEntryPath, type TeamToolsService } from "@oh-my-opencode/senpi-task"
+import {
+  parseExtensionEntries,
+  resolveMemberExtensionEntryPath,
+  type TeamToolsService,
+} from "@oh-my-opencode/senpi-task"
 import {
   createTeamMailboxReconciler as createSharedTeamMailboxReconciler,
   createTeamService as createSharedTeamService,

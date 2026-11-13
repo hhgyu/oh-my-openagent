@@ -10,20 +10,24 @@ type Identity = { readonly clientMessageId: string }
  * deliberately excluded: recovery must never mint a replacement for the same semantic input. */
 export function ownedInputID(child: ChildHandle["locator"], nativeID: string): string {
   if (!nativeID || typeof nativeID !== "string") throw new Error("Input identity must be nonempty")
-  return `msg_omo_${createHash("sha256").update(JSON.stringify([child.backendID, child.location, child.parentID, child.sessionID, nativeID])).digest("hex")}`
+  return `msg_omo_${createHash("sha256")
+    .update(JSON.stringify([child.backendID, child.location, child.parentID, child.sessionID, nativeID]))
+    .digest("hex")}`
 }
 
 export function createOwnedManagedInput(options: {
-  backend: Backend; child: ChildHandle;
-  assertOwned(): void;
-  expectInput(id: string): void;
-  identify(nativeID: string): void;
-  synchronize(): Promise<void>;
-  onUncertain(error: InputUncertainError): void;
+  backend: Backend
+  child: ChildHandle
+  assertOwned(): void
+  expectInput(id: string): void
+  identify(nativeID: string): void
+  synchronize(): Promise<void>
+  onUncertain(error: InputUncertainError): void
 }) {
   const invocation = new AsyncLocalStorage<AbortSignal | undefined>()
   const pending = new Map<Promise<void>, AbortController>()
-  let failure: InputUncertainError | undefined, closed = false
+  let failure: InputUncertainError | undefined,
+    closed = false
   let last: { nativeID: string; hostID: string; disposition: "pending" | "accepted" | "uncertain" } | undefined
   const uncertain = (nativeID: string, cause: unknown, reason: string) => {
     const error = new InputUncertainError(nativeID, cause instanceof Error ? cause : new Error(String(cause)))
@@ -34,7 +38,9 @@ export function createOwnedManagedInput(options: {
     return error
   }
   return {
-    withSignal<T>(signal: AbortSignal | undefined, operation: () => Promise<T>): Promise<T> { return invocation.run(signal, operation) },
+    withSignal<T>(signal: AbortSignal | undefined, operation: () => Promise<T>): Promise<T> {
+      return invocation.run(signal, operation)
+    },
     send(text: string, delivery: "steer" | "queue", identity?: Identity): Promise<void> {
       if (closed) return Promise.reject(new Error("Owned input port retired"))
       if (failure) return Promise.reject(failure)
@@ -52,18 +58,34 @@ export function createOwnedManagedInput(options: {
       const work = (async () => {
         let answered = false
         try {
-          await options.backend.promptContinuation(options.child, { id: hostID, text, delivery, resume: true },
-            { signal: AbortSignal.any([controller.signal, ...(signal ? [signal] : [])]) })
+          await options.backend.promptContinuation(
+            options.child,
+            { id: hostID, text, delivery, resume: true },
+            { signal: AbortSignal.any([controller.signal, ...(signal ? [signal] : [])]) },
+          )
           answered = true
           await options.synchronize()
           options.assertOwned()
           last = { nativeID, hostID, disposition: "accepted" }
         } catch (cause) {
           // Refresh only through the actual owner fence; losing it never authorizes a foreign write.
-          try { await options.synchronize() } catch { /* Existing outcome custody checks preserve local refusal. */ }
+          try {
+            await options.synchronize()
+          } catch {
+            /* Existing outcome custody checks preserve local refusal. */
+          }
           last = { nativeID, hostID, disposition: "uncertain" }
-          if (answered || cause instanceof SessionBackendError && (cause.code === "uncertain" || cause.code === "state")) {
-            throw uncertain(nativeID, cause, answered ? "Admission ACK was observed but its local checkpoint could not be confirmed" : "Owned input admission or reserved identity could not be safely confirmed")
+          if (
+            answered ||
+            (cause instanceof SessionBackendError && (cause.code === "uncertain" || cause.code === "state"))
+          ) {
+            throw uncertain(
+              nativeID,
+              cause,
+              answered
+                ? "Admission ACK was observed but its local checkpoint could not be confirmed"
+                : "Owned input admission or reserved identity could not be safely confirmed",
+            )
           }
           throw uncertain(nativeID, cause, "Owned input dispatch did not finish under its verified custody")
         }
@@ -72,13 +94,29 @@ export function createOwnedManagedInput(options: {
       void work.finally(() => pending.delete(work)).catch(() => {})
       return work
     },
-    hasPending() { return pending.size > 0 },
-    settled(): Promise<void> { return Promise.allSettled([...pending.keys()]).then(() => {}) },
-    abortPending(): Promise<void> {
-      for (const controller of pending.values()) controller.abort(new Error("Owned input request stopped by its control owner"))
+    hasPending() {
+      return pending.size > 0
+    },
+    settled(): Promise<void> {
       return Promise.allSettled([...pending.keys()]).then(() => {})
     },
-    async close() { closed = true; for (const controller of pending.values()) controller.abort(new Error("Owned input port closed")); await Promise.allSettled([...pending.keys()]) },
-    diagnostics() { return { pending: pending.size, closed, ...(last ? { last: { ...last } } : {}), ...(failure ? { uncertainEffectID: failure.effectId } : {}) } },
+    abortPending(): Promise<void> {
+      for (const controller of pending.values())
+        controller.abort(new Error("Owned input request stopped by its control owner"))
+      return Promise.allSettled([...pending.keys()]).then(() => {})
+    },
+    async close() {
+      closed = true
+      for (const controller of pending.values()) controller.abort(new Error("Owned input port closed"))
+      await Promise.allSettled([...pending.keys()])
+    },
+    diagnostics() {
+      return {
+        pending: pending.size,
+        closed,
+        ...(last ? { last: { ...last } } : {}),
+        ...(failure ? { uncertainEffectID: failure.effectId } : {}),
+      }
+    },
   }
 }

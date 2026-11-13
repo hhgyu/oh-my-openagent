@@ -24,22 +24,52 @@ describe("control tool factories", () => {
       [{ to: 42, message: "hello" }, ["to"]],
     ] as const) {
       let diagnostic: unknown
-      try { tool.prepareArguments?.(input) }
-      catch (error) { diagnostic = JSON.parse((error as Error).message) }
-      expect(diagnostic).toMatchObject({ code: "invalid_arguments", fields, expected_fields: ["to", "message", "team_run_id", "summary", "all_scope", "redispatch"] })
+      try {
+        tool.prepareArguments?.(input)
+      } catch (error) {
+        diagnostic = JSON.parse((error as Error).message)
+      }
+      expect(diagnostic).toMatchObject({
+        code: "invalid_arguments",
+        fields,
+        expected_fields: ["to", "message", "team_run_id", "summary", "all_scope", "redispatch"],
+      })
       expect(JSON.stringify(diagnostic)).not.toContain("private-value")
     }
   })
 
   test("#given sibling control and lead tools #when an unknown field is prepared #then each uses its own field diagnostic", () => {
-    const member = createMemberScopedTaskSendTool({ manager: sendManager, service: createFakeTeamService(), teamRunId: "run-1", from: "alpha" })
-    const residentMember = createMemberTaskSendTool({ teamRunId: "run-1", memberName: "alpha", taskId: "st_1", members: [], config: TeamModeConfigSchema.parse({}) })
-    const tools = [createTaskCancelTool({ manager: cancelManager }), member, residentMember, ...buildLeadTeamTools({ service: createFakeTeamService() })]
+    const member = createMemberScopedTaskSendTool({
+      manager: sendManager,
+      service: createFakeTeamService(),
+      teamRunId: "run-1",
+      from: "alpha",
+    })
+    const residentMember = createMemberTaskSendTool({
+      teamRunId: "run-1",
+      memberName: "alpha",
+      taskId: "st_1",
+      members: [],
+      config: TeamModeConfigSchema.parse({}),
+    })
+    const tools = [
+      createTaskCancelTool({ manager: cancelManager }),
+      member,
+      residentMember,
+      ...buildLeadTeamTools({ service: createFakeTeamService() }),
+    ]
     for (const tool of tools) {
       let diagnostic: unknown
-      try { tool.prepareArguments?.({ misspelled: "private-value" }) }
-      catch (error) { diagnostic = JSON.parse((error as Error).message) }
-      expect(diagnostic).toMatchObject({ code: "invalid_arguments", fields: expect.arrayContaining(["misspelled"]), expected_fields: Object.keys(tool.parameters.properties) })
+      try {
+        tool.prepareArguments?.({ misspelled: "private-value" })
+      } catch (error) {
+        diagnostic = JSON.parse((error as Error).message)
+      }
+      expect(diagnostic).toMatchObject({
+        code: "invalid_arguments",
+        fields: expect.arrayContaining(["misspelled"]),
+        expected_fields: Object.keys(tool.parameters.properties),
+      })
     }
   })
 

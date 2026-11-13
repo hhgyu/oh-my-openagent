@@ -10,28 +10,54 @@ import { createBoundIdentity } from "./reflection.test-support"
 setDefaultTimeout(process.platform === "win32" ? 60_000 : 20_000)
 
 const cleanups: (() => void)[] = []
-afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup() })
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup()
+})
 
 const user = (id: string, text = "hello") => ({ type: "user", id, text })
-const answer = (id: string, extra: Record<string, unknown> = {}) =>
-  ({ type: "assistant", id, content: [{ type: "text", text: `answer ${id}` }], time: { created: 1, completed: 2 }, ...extra })
+const answer = (id: string, extra: Record<string, unknown> = {}) => ({
+  type: "assistant",
+  id,
+  content: [{ type: "text", text: `answer ${id}` }],
+  time: { created: 1, completed: 2 },
+  ...extra,
+})
 
-function setup(options: { readonly reflection?: Record<string, unknown>; readonly realStore?: boolean; readonly owned?: boolean; readonly active?: boolean; readonly child?: boolean } = {}) {
+function setup(
+  options: {
+    readonly reflection?: Record<string, unknown>
+    readonly realStore?: boolean
+    readonly owned?: boolean
+    readonly active?: boolean
+    readonly child?: boolean
+  } = {},
+) {
   const identity = createBoundIdentity()
   cleanups.push(identity.cleanup)
-  const bound: BoundMemorySession = { ...identity.bound, settings: OmoMemorySettingsSchema.parse({ reflection: options.reflection ?? {} }) }
+  const bound: BoundMemorySession = {
+    ...identity.bound,
+    settings: OmoMemorySettingsSchema.parse({ reflection: options.reflection ?? {} }),
+  }
   const transcript: { messages: unknown[] } = { messages: [] }
   const events: ReflectionEvent[] = []
   const results: (ReservationResult | null)[] = []
   let contextReads = 0
   let runs = 0
   const deps: ReflectionTriggerDeps = {
-    resolve: async sessionID => (options.child === true || sessionID !== bound.sessionID ? undefined : bound),
-    session: { context: async () => { contextReads++; return structuredClone(transcript.messages) as never } },
+    resolve: async (sessionID) => (options.child === true || sessionID !== bound.sessionID ? undefined : bound),
+    session: {
+      context: async () => {
+        contextReads++
+        return structuredClone(transcript.messages) as never
+      },
+    },
     evaluate: async (target, event) => {
       events.push(event)
       if (options.realStore !== true) return null
-      const result = await reflectionStore(target, { createRunId: () => `run-${++runs}` }).evaluate(target.sessionID, event)
+      const result = await reflectionStore(target, { createRunId: () => `run-${++runs}` }).evaluate(
+        target.sessionID,
+        event,
+      )
       results.push(result)
       return result
     },
@@ -40,16 +66,27 @@ function setup(options: { readonly reflection?: Record<string, unknown>; readonl
     logger: { warn: () => undefined },
   }
   const triggers = createReflectionTriggers(deps)
-  cleanups.push(() => { void triggers.close() })
+  cleanups.push(() => {
+    void triggers.close()
+  })
   /** Journals the transcript as the memory journal's idle reconcile does before the trigger runs. */
   const journal = async (steps: number) => {
     const projections = Array.from({ length: steps }, (_, index) => [
       { kind: "user" as const, messageId: `u${index}`, text: `question ${index}` },
-      { kind: "assistant" as const, messageId: `a${index}`, textBlocks: [`answer ${index}`], reasoningBlocks: [], toolCalls: [] },
+      {
+        kind: "assistant" as const,
+        messageId: `a${index}`,
+        textBlocks: [`answer ${index}`],
+        reasoningBlocks: [],
+        toolCalls: [],
+      },
     ]).flat()
     await new TranscriptJournal({ journalDir: join(bound.paths.transcripts, bound.sessionID) }).reconcile(projections)
   }
-  const idle = async () => { triggers.onIdle(bound.sessionID); await triggers.settled() }
+  const idle = async () => {
+    triggers.onIdle(bound.sessionID)
+    await triggers.settled()
+  }
   return { bound, transcript, events, results, triggers, journal, idle, contextReads: () => contextReads }
 }
 
@@ -70,7 +107,13 @@ describe("reflection triggers", () => {
     const endings = [
       [user("u1"), answer("a1", { error: { type: "aborted", message: "interrupted by user" } })],
       [user("u1"), answer("a1", { finish: "error" })],
-      [user("u1"), answer("a1", { retry: { attempt: 1, at: 3, error: { type: "api", message: "overloaded" } }, time: { created: 1 } })],
+      [
+        user("u1"),
+        answer("a1", {
+          retry: { attempt: 1, at: 3, error: { type: "api", message: "overloaded" } },
+          time: { created: 1 },
+        }),
+      ],
       [user("u1"), answer("a1"), user("u2")],
       [],
     ]
@@ -85,7 +128,10 @@ describe("reflection triggers", () => {
 
   test("#given a journal at the step threshold #when the session settles twice #then exactly one step-count run is reserved with this session's snapshot", async () => {
     // given
-    const { bound, transcript, results, journal, idle } = setup({ reflection: { trigger: { step_count: 2, on_compaction: false } }, realStore: true })
+    const { bound, transcript, results, journal, idle } = setup({
+      reflection: { trigger: { step_count: 2, on_compaction: false } },
+      realStore: true,
+    })
     transcript.messages = [user("u1"), answer("a1")]
     await journal(1)
     await idle()
@@ -94,18 +140,21 @@ describe("reflection triggers", () => {
     await idle()
     await idle()
     // then
-    const active = results.filter(result => result?.status === "active")
-    expect(results.map(result => result?.status ?? null)).toEqual([null, "active", null])
+    const active = results.filter((result) => result?.status === "active")
+    expect(results.map((result) => result?.status ?? null)).toEqual([null, "active", null])
     expect(active).toHaveLength(1)
     const run = active[0]?.status === "active" ? active[0].run : undefined
     expect(run?.request.trigger).toBe("step-count")
     expect(run?.request.conversationIds).toEqual([bound.sessionID])
-    expect(run?.request.snapshots.map(snapshot => snapshot.conversationId)).toEqual([bound.sessionID])
+    expect(run?.request.snapshots.map((snapshot) => snapshot.conversationId)).toEqual([bound.sessionID])
   })
 
   test("#given an accepted compaction #when the next turns settle #then compaction is recorded once before the settle and fires a compaction run", async () => {
     // given
-    const { transcript, events, results, triggers, bound, journal, idle } = setup({ reflection: { trigger: { step_count: 0, on_compaction: true } }, realStore: true })
+    const { transcript, events, results, triggers, bound, journal, idle } = setup({
+      reflection: { trigger: { step_count: 0, on_compaction: true } },
+      realStore: true,
+    })
     await journal(1)
     transcript.messages = [user("u1"), answer("a1", { error: { type: "aborted", message: "stop" } })]
     triggers.onCompaction(bound.sessionID)
@@ -115,7 +164,7 @@ describe("reflection triggers", () => {
     await idle()
     await idle()
     // then
-    expect(events.map(event => event.kind)).toEqual(["compaction_accepted", "settled", "settled"])
+    expect(events.map((event) => event.kind)).toEqual(["compaction_accepted", "settled", "settled"])
     const run = results[1]?.status === "active" ? results[1].run : undefined
     expect(run?.request.trigger).toBe("compaction")
   })

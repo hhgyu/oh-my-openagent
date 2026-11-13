@@ -3,7 +3,12 @@
 // runner, the account source or the Loro engine into that chunk (see `./runtime.ts`).
 
 import type { MemoryIdentityPaths } from "@oh-my-opencode/memory-core"
-import type { DeviceAccountSource, MemoryRpcSync, SyncRpcContext, SyncSpaceInputs } from "@oh-my-opencode/memory-core/sync-runner"
+import type {
+  DeviceAccountSource,
+  MemoryRpcSync,
+  SyncRpcContext,
+  SyncSpaceInputs,
+} from "@oh-my-opencode/memory-core/sync-runner"
 import type { BoundMemorySession } from "../binding"
 import type { MemoryEnv, MemoryLogger } from "../config"
 

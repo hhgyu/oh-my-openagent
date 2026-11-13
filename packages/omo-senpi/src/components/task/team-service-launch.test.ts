@@ -48,9 +48,12 @@ function senpiAdapterHarness() {
   const cwd = mkdtempSync(join(tmpdir(), "omo-senpi-team-service-launch-"))
   tempRoots.push(cwd)
   mkdirSync(join(cwd, ".omo"), { recursive: true })
-  writeFileSync(join(cwd, ".omo", "omo.json"), `${JSON.stringify({
-    categories: { quick: { model: "omo-mock/mock-1" } },
-  })}\n`)
+  writeFileSync(
+    join(cwd, ".omo", "omo.json"),
+    `${JSON.stringify({
+      categories: { quick: { model: "omo-mock/mock-1" } },
+    })}\n`,
+  )
   const processStarts: ManagedStartSpec[] = []
   const inProcessStarts: ManagedStartSpec[] = []
   const omoConfig = loadOmoConfig({ cwd }).config
@@ -59,7 +62,10 @@ function senpiAdapterHarness() {
     omoConfig,
     cwd,
     sharedParentTools: () => [],
-    runnerFactories: { inProcess: () => recordingRunner(inProcessStarts), process: () => recordingRunner(processStarts) },
+    runnerFactories: {
+      inProcess: () => recordingRunner(inProcessStarts),
+      process: () => recordingRunner(processStarts),
+    },
   })
   engine.runtime.captureFrom({
     modelRegistry: createTeamServiceTestModelRegistry(),
@@ -108,7 +114,11 @@ describe("createTeamService Senpi adapter member launch", () => {
       expect(processStarts).toHaveLength(1)
       const spec = processStarts[0]
       expect(spec?.extensions).toEqual([resolveMemberExtensionEntryPath(), "/tmp/omo.js", "/tmp/mock-provider.ts"])
-      expect(Object.keys(spec?.memberEnv ?? {}).sort()).toEqual(["SENPI_TASK_MEMBER", "SENPI_TASK_MEMBER_TASK_ID", "SENPI_TASK_TEAM_CONFIG"])
+      expect(Object.keys(spec?.memberEnv ?? {}).sort()).toEqual([
+        "SENPI_TASK_MEMBER",
+        "SENPI_TASK_MEMBER_TASK_ID",
+        "SENPI_TASK_TEAM_CONFIG",
+      ])
       expect(spec?.memberEnv?.SENPI_TASK_MEMBER).toBe(`${created.runtimeState.teamRunId}::beta`)
       expect(spec?.memberEnv?.SENPI_TASK_MEMBER_TASK_ID).toBe(created.memberTaskIds.beta)
       const teamConfig: unknown = JSON.parse(spec?.memberEnv?.SENPI_TASK_TEAM_CONFIG ?? "null")

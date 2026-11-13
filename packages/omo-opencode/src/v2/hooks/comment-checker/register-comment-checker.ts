@@ -39,11 +39,17 @@ interface SessionSlot {
 
 /** Same opt-outs as the Native component: its own flag, the adapter-wide flag, and OMO_SENPI_DISABLED=1. */
 function isDisabled(host: Host, env: Readonly<Record<string, string | undefined>>): boolean {
-  return host.options?.["omo-senpi-comment-checker-disabled"] === true ||
-    host.options?.["omo-senpi-disabled"] === true || env.OMO_SENPI_DISABLED === "1"
+  return (
+    host.options?.["omo-senpi-comment-checker-disabled"] === true ||
+    host.options?.["omo-senpi-disabled"] === true ||
+    env.OMO_SENPI_DISABLED === "1"
+  )
 }
 
-export async function registerCommentChecker(context: Host, options: CommentCheckerRegistrationOptions = {}): Promise<() => Promise<void>> {
+export async function registerCommentChecker(
+  context: Host,
+  options: CommentCheckerRegistrationOptions = {},
+): Promise<() => Promise<void>> {
   if (isDisabled(context, options.env ?? process.env)) return async () => {}
   const cwd = context.location.directory
   const logger = options.logger ?? createConsoleCommentCheckerLogger()
@@ -55,7 +61,11 @@ export async function registerCommentChecker(context: Host, options: CommentChec
 
   function slotFor(sessionID: string): SessionSlot {
     const existing = sessions.get(sessionID)
-    if (existing) { sessions.delete(sessionID); sessions.set(sessionID, existing); return existing }
+    if (existing) {
+      sessions.delete(sessionID)
+      sessions.set(sessionID, existing)
+      return existing
+    }
     const checker = createCommentCheckerSession({
       logger,
       logLabel: V2_COMMENT_CHECKER_LOG_LABEL,
@@ -66,16 +76,22 @@ export async function registerCommentChecker(context: Host, options: CommentChec
     })
     const slot: SessionSlot = { checker, messageID: undefined }
     sessions.set(sessionID, slot)
-    for (const oldest of sessions.keys()) { if (sessions.size <= maxSessions) break; sessions.delete(oldest) }
+    for (const oldest of sessions.keys()) {
+      if (sessions.size <= maxSessions) break
+      sessions.delete(oldest)
+    }
     return slot
   }
 
   // The checker runs on OpenCode 2 `tool.hook("execute.after")` with status "completed": the warning
   // is appended to the tool result the model reads. OpenCode 2 has no turn-start hook; a new
   // assistant `messageID` within a session is the turn boundary that resets per-turn dedupe.
-  const registration = await context.tool.hook("execute.after", event => {
+  const registration = await context.tool.hook("execute.after", (event) => {
     if (closed || event.status !== "completed") return
-    const delivered = toCheckerToolResult({ tool: event.tool, sessionID: event.sessionID, id: event.id, input: event.input, result: event.result }, cwd)
+    const delivered = toCheckerToolResult(
+      { tool: event.tool, sessionID: event.sessionID, id: event.id, input: event.input, result: event.result },
+      cwd,
+    )
     if (!delivered) return
     const slot = slotFor(event.sessionID)
     if (slot.messageID !== event.messageID) slot.checker.startTurn()
@@ -86,15 +102,21 @@ export async function registerCommentChecker(context: Host, options: CommentChec
       if (feedback.length > 0) event.result = withFeedback(event.result, feedback)
     })()
     active.add(work)
-    return work.finally(() => { active.delete(work) })
+    return work.finally(() => {
+      active.delete(work)
+    })
   })
 
   let disposal: Promise<void> | undefined
   return () => {
     disposal ??= (async () => {
       closed = true
-      try { await registration.dispose() }
-      finally { await Promise.allSettled([...active]); sessions.clear() }
+      try {
+        await registration.dispose()
+      } finally {
+        await Promise.allSettled([...active])
+        sessions.clear()
+      }
     })()
     return disposal
   }

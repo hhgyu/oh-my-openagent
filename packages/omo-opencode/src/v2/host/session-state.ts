@@ -35,7 +35,11 @@ export function createSessionScopes() {
       const controller = new AbortController()
       const lease = Object.freeze({ sessionID, generation: ++generation, signal: controller.signal })
       owned.add(lease)
-      current.set(sessionID, { lease, controller, policy: Object.freeze({ tools: Object.freeze([...policy.tools]), authorize: policy.authorize }) })
+      current.set(sessionID, {
+        lease,
+        controller,
+        policy: Object.freeze({ tools: Object.freeze([...policy.tools]), authorize: policy.authorize }),
+      })
       return lease
     },
     assert,
@@ -46,7 +50,8 @@ export function createSessionScopes() {
     },
     async authorize(lease: SessionLease, call: ToolAccess) {
       const { policy } = assert(lease)
-      if (!policy.tools.includes(call.requested) || !policy.tools.includes(call.routed)) throw new Error("Tool outside session scope")
+      if (!policy.tools.includes(call.requested) || !policy.tools.includes(call.routed))
+        throw new Error("Tool outside session scope")
       await policy.authorize(call)
       assert(lease)
     },

@@ -2,7 +2,13 @@ import { isAbsolute, resolve } from "node:path"
 
 import { formatCommentCheckerFeedback, normalizeFeedbackText } from "./feedback"
 import type { CommentCheckerLogger } from "./logger"
-import { stringValue, toApplyPatchHookInputs, toHookInput, type ToolResultContextLike, type ToolResultEventLike } from "./tool-result-input"
+import {
+  stringValue,
+  toApplyPatchHookInputs,
+  toHookInput,
+  type ToolResultContextLike,
+  type ToolResultEventLike,
+} from "./tool-result-input"
 import type { CheckFailure, CheckResult, RunCommentCheckerInput } from "./types"
 
 export interface CommentCheckerSessionOptions<L extends CommentCheckerLogger> {
@@ -31,14 +37,20 @@ export interface CommentCheckerToolResultHooks {
 export interface CommentCheckerSession {
   startTurn(): void
   /** Feedback text blocks to append to the tool result; empty when nothing should be appended. */
-  checkToolResult(event: ToolResultEventLike, context: ToolResultContextLike, hooks?: CommentCheckerToolResultHooks): Promise<string[]>
+  checkToolResult(
+    event: ToolResultEventLike,
+    context: ToolResultContextLike,
+    hooks?: CommentCheckerToolResultHooks,
+  ): Promise<string[]>
 }
 
 function isCommentCheckerMutationTool(toolName: string): toolName is "edit" | "write" | "apply_patch" {
   return toolName === "edit" || toolName === "write" || toolName === "apply_patch"
 }
 
-export function createCommentCheckerSession<L extends CommentCheckerLogger>(options: CommentCheckerSessionOptions<L>): CommentCheckerSession {
+export function createCommentCheckerSession<L extends CommentCheckerLogger>(
+  options: CommentCheckerSessionOptions<L>,
+): CommentCheckerSession {
   const { logger, logLabel } = options
   let binaryPath: string | null | undefined
   let ensuring: Promise<string | null> | undefined
@@ -84,11 +96,22 @@ export function createCommentCheckerSession<L extends CommentCheckerLogger>(opti
       if (event.isError || !isCommentCheckerMutationTool(event.toolName)) return []
 
       const rawPath = stringValue(event.input.path)
-      const patchInputs = event.toolName === "apply_patch" ? toApplyPatchHookInputs(event, context, options.hookEventName) : []
+      const patchInputs =
+        event.toolName === "apply_patch" ? toApplyPatchHookInputs(event, context, options.hookEventName) : []
       if (rawPath === undefined && patchInputs.length === 0) return []
-      const absolutePath = rawPath === undefined ? undefined : (isAbsolute(rawPath) ? rawPath : resolve(context.cwd, rawPath))
-      const paths = patchInputs.length > 0 ? patchInputs.map((input) => input.tool_input.file_path).filter((path): path is string => typeof path === "string") : absolutePath ? [absolutePath] : []
-      const uniquePaths = paths.filter((path, index) => paths.indexOf(path) === index).filter((path) => !reportedFilesThisTurn.has(path))
+      const absolutePath =
+        rawPath === undefined ? undefined : isAbsolute(rawPath) ? rawPath : resolve(context.cwd, rawPath)
+      const paths =
+        patchInputs.length > 0
+          ? patchInputs
+              .map((input) => input.tool_input.file_path)
+              .filter((path): path is string => typeof path === "string")
+          : absolutePath
+            ? [absolutePath]
+            : []
+      const uniquePaths = paths
+        .filter((path, index) => paths.indexOf(path) === index)
+        .filter((path) => !reportedFilesThisTurn.has(path))
       if (uniquePaths.length === 0) return []
 
       ensuring ??= ensureBinaryPath()
@@ -98,7 +121,10 @@ export function createCommentCheckerSession<L extends CommentCheckerLogger>(opti
       }
 
       hooks.onCheckStart?.()
-      const inputs = event.toolName === "apply_patch" ? patchInputs : [toHookInput(event, context, uniquePaths[0], options.hookEventName)]
+      const inputs =
+        event.toolName === "apply_patch"
+          ? patchInputs
+          : [toHookInput(event, context, uniquePaths[0], options.hookEventName)]
       const feedback: string[] = []
       for (const hookInput of inputs) {
         const path = hookInput.tool_input.file_path

@@ -5,10 +5,18 @@
 // memo in `children-reclaim.json`). A live (or unverifiable) owner's row is left alone.
 
 import { FACTS_RECORD_TOOL_NAME } from "./facts-record-tool"
-import { reclaimStrandedMemoryChildren, type MemoryChildReclaimInput, type MemoryChildReclaimReport } from "./memory-child-reclaim"
+import {
+  reclaimStrandedMemoryChildren,
+  type MemoryChildReclaimInput,
+  type MemoryChildReclaimReport,
+} from "./memory-child-reclaim"
 
 export const FACTS_BACKEND_ID = "omo-facts-opencode"
 
 export function reclaimStrandedFactsChildren(input: MemoryChildReclaimInput): Promise<MemoryChildReclaimReport> {
-  return reclaimStrandedMemoryChildren(input, { backendID: FACTS_BACKEND_ID, toolNames: [FACTS_RECORD_TOOL_NAME], label: "facts" })
+  return reclaimStrandedMemoryChildren(input, {
+    backendID: FACTS_BACKEND_ID,
+    toolNames: [FACTS_RECORD_TOOL_NAME],
+    label: "facts",
+  })
 }

@@ -1,6 +1,13 @@
 import type { TaskManager, TaskRecord, TaskRecordStore } from "@oh-my-opencode/senpi-task/manager-kernel"
-import { createCompletionObservingStore, createConfigGenerationStampingStore, createMutationNotifyingStore,
-  type CompletionBridgeDeps, type CompletionNotifier, type StoreMutation, type TaskTerminalObservers } from "@oh-my-opencode/senpi-task/task-operations"
+import {
+  createCompletionObservingStore,
+  createConfigGenerationStampingStore,
+  createMutationNotifyingStore,
+  type CompletionBridgeDeps,
+  type CompletionNotifier,
+  type StoreMutation,
+  type TaskTerminalObservers,
+} from "@oh-my-opencode/senpi-task/task-operations"
 import type { createParentBindings, VerifiedParentBinding } from "./parent-binding"
 
 export type CompletionParentState = ReturnType<CompletionBridgeDeps["parentState"]>
@@ -41,20 +48,20 @@ export interface OwnedCompletionStoreOptions {
 function forwardStore(backing: TaskRecordStore): TaskRecordStore {
   return {
     stateDir: backing.stateDir,
-    save: record => backing.save(record),
-    replace: record => backing.replace(record),
+    save: (record) => backing.save(record),
+    replace: (record) => backing.replace(record),
     mutate: (taskId, mutation) => backing.mutate(taskId, mutation),
     transition: (taskId, transition) => backing.transition(taskId, transition),
-    load: taskId => backing.load(taskId),
+    load: (taskId) => backing.load(taskId),
     list: () => backing.list(),
     appendEvent: (taskId, event) => backing.appendEvent(taskId, event),
-    remove: taskId => backing.remove(taskId),
+    remove: (taskId) => backing.remove(taskId),
     tombstoneIfExpired: (taskId, shouldRetain, owner) => backing.tombstoneIfExpired(taskId, shouldRetain, owner),
     completeExpunge: (taskId, owner) => backing.completeExpunge(taskId, owner),
     listExpunging: () => backing.listExpunging(),
-    loadExpunging: taskId => backing.loadExpunging(taskId),
+    loadExpunging: (taskId) => backing.loadExpunging(taskId),
     restoreExpunging: (taskId, owner) => backing.restoreExpunging(taskId, owner),
-    readExpungeOwner: taskId => backing.readExpungeOwner(taskId),
+    readExpungeOwner: (taskId) => backing.readExpungeOwner(taskId),
     takeOverExpunging: (taskId, from, to) => backing.takeOverExpunging(taskId, from, to),
   }
 }
@@ -67,17 +74,31 @@ export function createOwnedCompletionStore(options: OwnedCompletionStoreOptions)
     ...forwardStore(options.baseStore),
     save(record) {
       const scope = options.creationScope?.()
-      const identity = scope?.identity, callback = scope?.onCreated
+      const identity = scope?.identity,
+        callback = scope?.onCreated
       const originallyOpen = scope?.open === true
       // Copy before INSERT: neither the draft nor a later persisted-row lookup is a witness.
-      const birth: Readonly<TaskBirth> = Object.freeze({ taskId: record.task_id, createdAt: record.created_at,
-        parentSessionId: record.parent_session_id, rootSessionId: record.root_session_id, depth: record.depth })
+      const birth: Readonly<TaskBirth> = Object.freeze({
+        taskId: record.task_id,
+        createdAt: record.created_at,
+        parentSessionId: record.parent_session_id,
+        rootSessionId: record.root_session_id,
+        depth: record.depth,
+      })
       options.baseStore.save(record)
-      if (!scope || !originallyOpen || options.creationScope?.() !== scope || scope.identity !== identity
-        || scope.open !== true || scope.onCreated !== callback) return
+      if (
+        !scope ||
+        !originallyOpen ||
+        options.creationScope?.() !== scope ||
+        scope.identity !== identity ||
+        scope.open !== true ||
+        scope.onCreated !== callback
+      )
+        return
       if (!callback) throw new TypeError("Creation scope has no onCreated callback")
       const result: unknown = callback.call(scope, birth)
-      if (result !== undefined) throw new TypeError("Creation callback must return synchronous undefined", { cause: result })
+      if (result !== undefined)
+        throw new TypeError("Creation callback must return synchronous undefined", { cause: result })
     },
   }
   const wrappers = new WeakMap<ParentCompletionChannel, TaskRecordStore>()
@@ -85,17 +106,25 @@ export function createOwnedCompletionStore(options: OwnedCompletionStoreOptions)
     const cached = wrappers.get(channel)
     if (cached) return cached
     // Immutable association for this channel's lifetime. Changes require a NEW channel object.
-    const { parentSessionId, rootSessionId, notifier, parentState, ownsTerminal, notificationReady, onTerminal } = channel
-    const matches = (record: TaskRecord) => options.bindings.get(parentSessionId) === binding
-      && options.channels.get(binding) === channel && channel.binding === binding
-      && channel.parentSessionId === parentSessionId && channel.rootSessionId === rootSessionId
-      && channel.notifier === notifier && channel.parentState === parentState
-      && channel.ownsTerminal === ownsTerminal && channel.notificationReady === notificationReady && channel.onTerminal === onTerminal
-      && record.parent_session_id === parentSessionId && record.root_session_id === rootSessionId
+    const { parentSessionId, rootSessionId, notifier, parentState, ownsTerminal, notificationReady, onTerminal } =
+      channel
+    const matches = (record: TaskRecord) =>
+      options.bindings.get(parentSessionId) === binding &&
+      options.channels.get(binding) === channel &&
+      channel.binding === binding &&
+      channel.parentSessionId === parentSessionId &&
+      channel.rootSessionId === rootSessionId &&
+      channel.notifier === notifier &&
+      channel.parentState === parentState &&
+      channel.ownsTerminal === ownsTerminal &&
+      channel.notificationReady === notificationReady &&
+      channel.onTerminal === onTerminal &&
+      record.parent_session_id === parentSessionId &&
+      record.root_session_id === rootSessionId
     const observed = createCompletionObservingStore(birthStore, {
       notifier,
       currentSessionId: () => parentSessionId,
-      wasBackground: taskId => options.wasBackground(taskId),
+      wasBackground: (taskId) => options.wasBackground(taskId),
       parentState() {
         const state = parentState.call(channel)
         if (state === undefined) throw new TypeError("Notification ready but original parent state is unknown")
@@ -104,14 +133,15 @@ export function createOwnedCompletionStore(options: OwnedCompletionStoreOptions)
       ownsTerminal(record) {
         if (!matches(record)) return false
         const owned: unknown = ownsTerminal.call(channel, record)
-        if (typeof owned !== "boolean") throw new TypeError("Terminal predicate must return a synchronous boolean", { cause: owned })
+        if (typeof owned !== "boolean")
+          throw new TypeError("Terminal predicate must return a synchronous boolean", { cause: owned })
         if (!owned || !matches(record)) return false
         // Proof errors propagate EXACTLY after commit; a false known-ownership result
         // above does not call a retired private control/journal proof.
         const parent = options.bindings.info(binding)
         return matches(record) && parent.lease.sessionID === parentSessionId && parent.rootSessionId === rootSessionId
       },
-      notificationReady: record => notificationReady.call(channel, record),
+      notificationReady: (record) => notificationReady.call(channel, record),
       ...(onTerminal === undefined ? {} : { onTerminal: (record: TaskRecord) => onTerminal.call(channel, record) }),
     })
     wrappers.set(channel, observed)
@@ -124,7 +154,8 @@ export function createOwnedCompletionStore(options: OwnedCompletionStoreOptions)
     const binding = options.bindings.get(candidate.parent_session_id)
     if (!binding) return birthStore
     const channel = options.channels.get(binding)
-    if (!channel || channel.binding !== binding || channel.parentSessionId !== candidate.parent_session_id) return birthStore
+    if (!channel || channel.binding !== binding || channel.parentSessionId !== candidate.parent_session_id)
+      return birthStore
     return observe(channel, binding)
   }
   const routed: TaskRecordStore = {
@@ -133,8 +164,20 @@ export function createOwnedCompletionStore(options: OwnedCompletionStoreOptions)
     transition: (taskId, transition) => select(taskId).transition(taskId, transition),
   }
   const listeners = new Set<(change: StoreMutation) => void>()
-  const store = createMutationNotifyingStore(createConfigGenerationStampingStore(routed, () => options.currentGeneration()), change => {
-    for (const listener of listeners) listener(change)
-  }, options.terminalObservers)
-  return { store, onMutation(listener: (change: StoreMutation) => void) { listeners.add(listener); return () => { listeners.delete(listener) } } }
+  const store = createMutationNotifyingStore(
+    createConfigGenerationStampingStore(routed, () => options.currentGeneration()),
+    (change) => {
+      for (const listener of listeners) listener(change)
+    },
+    options.terminalObservers,
+  )
+  return {
+    store,
+    onMutation(listener: (change: StoreMutation) => void) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+  }
 }

@@ -23,9 +23,14 @@ export function createAcceptedTurns(binder: MemoryBinder, logger: MemoryLogger) 
 
   function serialized<T>(sessionID: string, run: () => Promise<T>): Promise<T> {
     const result = (chains.get(sessionID) ?? Promise.resolve()).then(run)
-    const pending = result.then(() => undefined, () => undefined)
+    const pending = result.then(
+      () => undefined,
+      () => undefined,
+    )
     chains.set(sessionID, pending)
-    void pending.then(() => { if (chains.get(sessionID) === pending) chains.delete(sessionID) })
+    void pending.then(() => {
+      if (chains.get(sessionID) === pending) chains.delete(sessionID)
+    })
     return result
   }
 
@@ -37,9 +42,16 @@ export function createAcceptedTurns(binder: MemoryBinder, logger: MemoryLogger) 
   async function load(bound: BoundMemorySession): Promise<AcceptedTurns> {
     try {
       const value: unknown = JSON.parse(await readFile(pathFor(bound), "utf8"))
-      if (!isRecord(value) || value.version !== 1 || value.sessionID !== bound.sessionID ||
-          typeof value.turns !== "number" || !Number.isSafeInteger(value.turns) || value.turns < 0 ||
-          typeof value.messageID !== "string") throw new Error("Invalid accepted-turn record")
+      if (
+        !isRecord(value) ||
+        value.version !== 1 ||
+        value.sessionID !== bound.sessionID ||
+        typeof value.turns !== "number" ||
+        !Number.isSafeInteger(value.turns) ||
+        value.turns < 0 ||
+        typeof value.messageID !== "string"
+      )
+        throw new Error("Invalid accepted-turn record")
       return { version: 1, sessionID: bound.sessionID, turns: value.turns, messageID: value.messageID }
     } catch (error) {
       if (!isRecord(error) || error.code !== "ENOENT") throw error
@@ -64,25 +76,31 @@ export function createAcceptedTurns(binder: MemoryBinder, logger: MemoryLogger) 
         if (bound === undefined) return
         const file = pathFor(bound)
         await mkdir(dirname(file), { recursive: true })
-        await withLock(`${file}.lock`, await createLockRecord("v2-memory-accepted-turns"), async () => {
-          const previous = await load(bound)
-          const current: AcceptedTurns = previous.messageID === messageID ? previous : { ...previous, turns: previous.turns + 1, messageID }
-          const temporary = `${file}.${randomUUID()}.tmp`
-          try {
-            await writeFile(temporary, `${JSON.stringify(current)}\n`, { flag: "wx" })
-            await rename(temporary, file)
-          } finally {
-            await rm(temporary, { force: true })
-          }
-          states.set(sessionID, current)
-        }, { waitTimeoutMs: 5_000 })
+        await withLock(
+          `${file}.lock`,
+          await createLockRecord("v2-memory-accepted-turns"),
+          async () => {
+            const previous = await load(bound)
+            const current: AcceptedTurns =
+              previous.messageID === messageID ? previous : { ...previous, turns: previous.turns + 1, messageID }
+            const temporary = `${file}.${randomUUID()}.tmp`
+            try {
+              await writeFile(temporary, `${JSON.stringify(current)}\n`, { flag: "wx" })
+              await rename(temporary, file)
+            } finally {
+              await rm(temporary, { force: true })
+            }
+            states.set(sessionID, current)
+          },
+          { waitTimeoutMs: 5_000 },
+        )
       }).catch((error: unknown) => {
         logger.warn("memory accepted-turn bookkeeping skipped", { sessionID, error: describeError(error) })
       })
     },
     onContext(context: Pick<SessionContext, "sessionID" | "system">): Promise<void> {
       return serialized(context.sessionID, async () => {
-        if (context.system.some(part => part.metadata?.["omo.memory.save-nudge"] === true)) return
+        if (context.system.some((part) => part.metadata?.["omo.memory.save-nudge"] === true)) return
         const bound = await binder.resolve(context.sessionID)
         if (bound === undefined) return
         const settings = { ...bound.settings.nudge, ...bound.settings.agents[bound.identity]?.nudge }
@@ -97,28 +115,44 @@ export function createAcceptedTurns(binder: MemoryBinder, logger: MemoryLogger) 
             const previous = scans.get(context.sessionID)
             saved = previous?.saved ?? 0
             if (previous?.head !== head) {
-              const commits = await repo.log({ grep: ["Omo-Writer: memory-tool", `Omo-Session: ${context.sessionID}`], limit: 20, timeoutMs: 5_000,
-                ...(previous === undefined ? {} : { range: `${previous.head}..${head}` }) })
-              const latest = commits.find(commit => commit.trailers["Omo-Writer"] === "memory-tool" &&
-                commit.trailers["Omo-Session"] === context.sessionID && /^\d+$/.test(commit.trailers["Omo-Turn"] ?? ""))
+              const commits = await repo.log({
+                grep: ["Omo-Writer: memory-tool", `Omo-Session: ${context.sessionID}`],
+                limit: 20,
+                timeoutMs: 5_000,
+                ...(previous === undefined ? {} : { range: `${previous.head}..${head}` }),
+              })
+              const latest = commits.find(
+                (commit) =>
+                  commit.trailers["Omo-Writer"] === "memory-tool" &&
+                  commit.trailers["Omo-Session"] === context.sessionID &&
+                  /^\d+$/.test(commit.trailers["Omo-Turn"] ?? ""),
+              )
               const candidate = Number(latest?.trailers["Omo-Turn"])
               if (Number.isSafeInteger(candidate) && candidate >= 0) saved = candidate
               scans.set(context.sessionID, { head, saved })
             }
           }
           const pending = count - saved
-          if (pending >= settings.every_user_turns) context.system.push({ type: "text",
-            text: `${pending} accepted user turns since your last memory save. Save durable facts now, or decide nothing qualifies.`,
-            metadata: { "omo.memory.save-nudge": true, turns: pending } })
+          if (pending >= settings.every_user_turns)
+            context.system.push({
+              type: "text",
+              text: `${pending} accepted user turns since your last memory save. Save durable facts now, or decide nothing qualifies.`,
+              metadata: { "omo.memory.save-nudge": true, turns: pending },
+            })
         } catch (error) {
           logger.warn("memory save reminder skipped", { sessionID: context.sessionID, error: describeError(error) })
         }
       })
     },
     onDeleted(sessionID: string): Promise<void> {
-      return serialized(sessionID, async () => { states.delete(sessionID); scans.delete(sessionID) })
+      return serialized(sessionID, async () => {
+        states.delete(sessionID)
+        scans.delete(sessionID)
+      })
     },
-    async settled(): Promise<void> { while (chains.size > 0) await Promise.all(chains.values()) },
+    async settled(): Promise<void> {
+      while (chains.size > 0) await Promise.all(chains.values())
+    },
   }
   return {
     turns: counter.turns,
@@ -129,7 +163,10 @@ export function createAcceptedTurns(binder: MemoryBinder, logger: MemoryLogger) 
       const stop = new AbortController()
       const work = (async () => {
         try {
-          for await (const event of events.subscribe({ types: ["session.inbox.enqueued", "session.deleted"], signal: stop.signal })) {
+          for await (const event of events.subscribe({
+            types: ["session.inbox.enqueued", "session.deleted"],
+            signal: stop.signal,
+          })) {
             if (stop.signal.aborted) break
             if (event.type === "session.deleted") {
               await counter.onDeleted(event.data.sessionID)
@@ -140,10 +177,16 @@ export function createAcceptedTurns(binder: MemoryBinder, logger: MemoryLogger) 
             await counter.onPrompt(event.data.sessionID, event.data.inboxID)
           }
         } catch (error) {
-          if (!stop.signal.aborted) logger.warn("memory accepted-turn event stream failed", { error: describeError(error) })
+          if (!stop.signal.aborted)
+            logger.warn("memory accepted-turn event stream failed", { error: describeError(error) })
         }
       })()
-      return { async dispose() { stop.abort(); await work } }
+      return {
+        async dispose() {
+          stop.abort()
+          await work
+        },
+      }
     },
   }
 }

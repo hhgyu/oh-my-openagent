@@ -3,34 +3,100 @@ import { randomUUID } from "node:crypto"
 import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, parse, resolve } from "node:path"
 import { z } from "zod"
-import { getPidLiveness, getProcessStartIdentity, startIdentitiesConflict } from "@oh-my-opencode/memory-core/process-identity"
+import {
+  getPidLiveness,
+  getProcessStartIdentity,
+  startIdentitiesConflict,
+} from "@oh-my-opencode/memory-core/process-identity"
 import { SessionBackendError, type ChildJournal, type ChildRecord } from "./session-backend"
 import { PARKING_MARKER_KEY } from "./child-parking"
 
 const applicationID = 0x4f4d4f32
 const integer = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const text = z.string().min(1).max(4096)
-const recordSchema = z.object({
-  key: z.string().min(1).max(512), owner: text, revision: integer,
-  locator: z.object({ format: z.literal(1), backendID: text, location: text, hostVersion: text, parentID: text, sessionID: text, generation: integer }).strict(),
-  phase: z.enum(["creating", "staged", "admitting", "accepted", "uncertain", "closing", "closed"]),
-  admission: z.enum(["none", "pending", "accepted", "uncertain"]), inboxID: text.optional(),
-  receipts: z.record(text, z.enum(["pending", "accepted", "uncertain"])).refine(value => Object.keys(value).length <= 4096),
-  turn: z.object({ nativeEpoch: integer, observationKey: z.string().min(1).max(512), firstInputID: text.optional() }).strict().optional(),
-  // Parking is NOT closing: phase stays truthful; conflict/intent never become a receipt.
-  parking: z.object({
-    format: z.literal(1), state: z.enum(["intent", "parked", "conflict", "restoring", "restored"]), id: text, owner: text,
-    original: z.object({ present: z.boolean(), rules: z.array(z.object({ action: z.string().max(4096), resource: z.string().max(4096), effect: z.enum(["allow", "deny", "ask"]) }).strict()).max(4096) }).strict(),
-    fingerprint: z.string().regex(/^[0-9a-f]{64}$/), marker: z.literal(PARKING_MARKER_KEY), agent: text.optional(), nativeEpoch: integer.optional(), intentRevision: integer,
-    readback: z.literal("verified").optional(), conflict: z.string().min(1).max(1024).optional(),
-  }).strict().refine(value => (value.state === "parked" || value.state === "restored") === (value.readback === "verified") && (value.state === "conflict") === (value.conflict !== undefined)).optional(),
-}).strict()
-const ownerSchema = z.object({ token: text, pid: integer.refine(pid => pid > 0), start: text.nullable(), released: z.union([z.literal(0), z.literal(1)]) }).strict()
+const recordSchema = z
+  .object({
+    key: z.string().min(1).max(512),
+    owner: text,
+    revision: integer,
+    locator: z
+      .object({
+        format: z.literal(1),
+        backendID: text,
+        location: text,
+        hostVersion: text,
+        parentID: text,
+        sessionID: text,
+        generation: integer,
+      })
+      .strict(),
+    phase: z.enum(["creating", "staged", "admitting", "accepted", "uncertain", "closing", "closed"]),
+    admission: z.enum(["none", "pending", "accepted", "uncertain"]),
+    inboxID: text.optional(),
+    receipts: z
+      .record(text, z.enum(["pending", "accepted", "uncertain"]))
+      .refine((value) => Object.keys(value).length <= 4096),
+    turn: z
+      .object({ nativeEpoch: integer, observationKey: z.string().min(1).max(512), firstInputID: text.optional() })
+      .strict()
+      .optional(),
+    // Parking is NOT closing: phase stays truthful; conflict/intent never become a receipt.
+    parking: z
+      .object({
+        format: z.literal(1),
+        state: z.enum(["intent", "parked", "conflict", "restoring", "restored"]),
+        id: text,
+        owner: text,
+        original: z
+          .object({
+            present: z.boolean(),
+            rules: z
+              .array(
+                z
+                  .object({
+                    action: z.string().max(4096),
+                    resource: z.string().max(4096),
+                    effect: z.enum(["allow", "deny", "ask"]),
+                  })
+                  .strict(),
+              )
+              .max(4096),
+          })
+          .strict(),
+        fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+        marker: z.literal(PARKING_MARKER_KEY),
+        agent: text.optional(),
+        nativeEpoch: integer.optional(),
+        intentRevision: integer,
+        readback: z.literal("verified").optional(),
+        conflict: z.string().min(1).max(1024).optional(),
+      })
+      .strict()
+      .refine(
+        (value) =>
+          (value.state === "parked" || value.state === "restored") === (value.readback === "verified") &&
+          (value.state === "conflict") === (value.conflict !== undefined),
+      )
+      .optional(),
+  })
+  .strict()
+const ownerSchema = z
+  .object({
+    token: text,
+    pid: integer.refine((pid) => pid > 0),
+    start: text.nullable(),
+    released: z.union([z.literal(0), z.literal(1)]),
+  })
+  .strict()
 type Owner = z.infer<typeof ownerSchema>
-interface Row { body: string }
+interface Row {
+  body: string
+}
 
 /** Reuse the neutral OS reader. Missing/incomparable identity never proves death. */
-export async function probeJournalOwner(owner: Readonly<Pick<Owner, "pid" | "start">>): Promise<"alive" | "dead" | "unknown"> {
+export async function probeJournalOwner(
+  owner: Readonly<Pick<Owner, "pid" | "start">>,
+): Promise<"alive" | "dead" | "unknown"> {
   const live = getPidLiveness(owner.pid)
   if (live !== "alive") return live
   if (!owner.start) return "unknown"
@@ -39,10 +105,16 @@ export async function probeJournalOwner(owner: Readonly<Pick<Owner, "pid" | "sta
   return startIdentitiesConflict(owner.start, actual) ? "dead" : actual === owner.start ? "alive" : "unknown"
 }
 
-function fail(message: string): never { throw new SessionBackendError("conflict", message) }
+function fail(message: string): never {
+  throw new SessionBackendError("conflict", message)
+}
 function validate(record: ChildRecord): ChildRecord {
   if (JSON.stringify(record).length > 2_097_152) fail("Child journal record too large")
-  if (record.receipts && Object.keys(record.receipts).some(key => ["__proto__", "prototype", "constructor"].includes(key))) fail("Unsafe child journal receipt key")
+  if (
+    record.receipts &&
+    Object.keys(record.receipts).some((key) => ["__proto__", "prototype", "constructor"].includes(key))
+  )
+    fail("Unsafe child journal receipt key")
   const parsed = recordSchema.safeParse(record)
   if (!parsed.success) fail("Invalid child journal record")
   return parsed.data as ChildRecord
@@ -71,15 +143,23 @@ export function resolveTrustedChildStatePath(path: string) {
   let current = parse(absolute).root
   for (const part of absolute.slice(current.length).split(/[\\/]/).filter(Boolean)) {
     current = resolve(current, part)
-    try { if (lstatSync(current).isSymbolicLink()) fail("Child journal path traverses a link") }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error }
+    try {
+      if (lstatSync(current).isSymbolicLink()) fail("Child journal path traverses a link")
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    }
   }
   mkdirSync(dirname(absolute), { recursive: true, mode: 0o700 })
-  const physical = realpathSync(dirname(absolute)), parent = dirname(absolute)
-  if (process.platform === "win32" ? physical.toLowerCase() !== parent.toLowerCase() : physical !== parent) fail("Child journal state directory differs from its physical path")
+  const physical = realpathSync(dirname(absolute)),
+    parent = dirname(absolute)
+  if (process.platform === "win32" ? physical.toLowerCase() !== parent.toLowerCase() : physical !== parent)
+    fail("Child journal state directory differs from its physical path")
   for (const suffix of ["", "-wal", "-shm", "-journal"]) {
-    try { if (!lstatSync(absolute + suffix).isFile()) fail("Child journal database or sidecar is not a regular file") }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error }
+    try {
+      if (!lstatSync(absolute + suffix).isFile()) fail("Child journal database or sidecar is not a regular file")
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    }
   }
   return absolute
 }
@@ -102,12 +182,18 @@ export function readStoredLocatorGenerationFloor(path: string): number {
     for (const row of db.query<Row, []>("SELECT body FROM children").all()) {
       // A corrupt row stays for inspection; it cannot lower the floor of the readable ones.
       let body: unknown
-      try { body = JSON.parse(row.body) } catch { continue }
+      try {
+        body = JSON.parse(row.body)
+      } catch {
+        continue
+      }
       const parsed = recordSchema.safeParse(body)
       if (parsed.success && parsed.data.locator.generation > floor) floor = parsed.data.locator.generation
     }
     return floor
-  } finally { db.close() }
+  } finally {
+    db.close()
+  }
 }
 
 export interface DurableChildJournal extends ChildJournal {
@@ -132,7 +218,10 @@ export async function openChildJournal(options: ChildJournalOptions): Promise<Du
   const start = await getProcessStartIdentity(process.pid)
   const owner: Owner = { token: randomUUID(), pid: process.pid, start, released: 0 }
   if (typeof constants.SQLITE_OPEN_NOFOLLOW !== "number") fail("SQLite no-follow open support is unavailable")
-  const db = new Database(path, constants.SQLITE_OPEN_READWRITE | constants.SQLITE_OPEN_CREATE | constants.SQLITE_OPEN_NOFOLLOW)
+  const db = new Database(
+    path,
+    constants.SQLITE_OPEN_READWRITE | constants.SQLITE_OPEN_CREATE | constants.SQLITE_OPEN_NOFOLLOW,
+  )
   let closed = false
   try {
     db.exec("PRAGMA busy_timeout=2000")
@@ -144,30 +233,57 @@ export async function openChildJournal(options: ChildJournalOptions): Promise<Du
     db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL")
     db.transaction(() => {
       db.exec(`PRAGMA application_id=${applicationID}; PRAGMA user_version=1`)
-      db.exec("CREATE TABLE IF NOT EXISTS owners (token TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS children (key TEXT PRIMARY KEY, body TEXT NOT NULL)")
+      db.exec(
+        "CREATE TABLE IF NOT EXISTS owners (token TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS children (key TEXT PRIMARY KEY, body TEXT NOT NULL)",
+      )
       db.query("INSERT INTO owners (token,body) VALUES (?,?)").run(owner.token, JSON.stringify(owner))
     }).immediate()
-    function active() { if (closed) fail("Child journal is closed") }
+    function active() {
+      if (closed) fail("Child journal is closed")
+    }
     function read(key: string): ChildRecord | undefined {
       active()
       const row = db.query<Row, [string]>("SELECT body FROM children WHERE key=?").get(key)
       if (!row) return undefined
-      try { const record = validate(JSON.parse(row.body)); if (record.key !== key) fail("Child journal key mismatch"); return record }
-      catch { return fail("Corrupt child journal record") }
+      try {
+        const record = validate(JSON.parse(row.body))
+        if (record.key !== key) fail("Child journal key mismatch")
+        return record
+      } catch {
+        return fail("Corrupt child journal record")
+      }
     }
     function readOwner(token: string): Owner {
       const row = db.query<Row, [string]>("SELECT body FROM owners WHERE token=?").get(token)
-      try { const value = ownerSchema.parse(JSON.parse(row?.body ?? "null")); if (value.token !== token) fail("Child journal owner mismatch"); return value }
-      catch { return fail("Corrupt or missing child journal owner") }
+      try {
+        const value = ownerSchema.parse(JSON.parse(row?.body ?? "null"))
+        if (value.token !== token) fail("Child journal owner mismatch")
+        return value
+      } catch {
+        return fail("Corrupt or missing child journal owner")
+      }
     }
-    function store(record: ChildRecord) { db.query("INSERT INTO children (key,body) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET body=excluded.body").run(record.key, JSON.stringify(record)) }
+    function store(record: ChildRecord) {
+      db.query("INSERT INTO children (key,body) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET body=excluded.body").run(
+        record.key,
+        JSON.stringify(record),
+      )
+    }
     function writeSync(previous: ChildRecord, next: ChildRecord): undefined {
       active()
-      const before = validate(previous), value = validate(next)
-      if (before.owner !== owner.token || value.owner !== owner.token || before.key !== value.key || value.revision !== advance(before.revision)) fail("Invalid child journal fence transition")
+      const before = validate(previous),
+        value = validate(next)
+      if (
+        before.owner !== owner.token ||
+        value.owner !== owner.token ||
+        before.key !== value.key ||
+        value.revision !== advance(before.revision)
+      )
+        fail("Invalid child journal fence transition")
       const { generation: oldGeneration, ...oldLocator } = before.locator
       const { generation: newGeneration, ...newLocator } = value.locator
-      if (JSON.stringify(oldLocator) !== JSON.stringify(newLocator) || newGeneration < oldGeneration) fail("Child locator identity cannot change")
+      if (JSON.stringify(oldLocator) !== JSON.stringify(newLocator) || newGeneration < oldGeneration)
+        fail("Child locator identity cannot change")
       db.transaction(() => {
         active()
         const current = read(before.key)
@@ -178,7 +294,9 @@ export async function openChildJournal(options: ChildJournalOptions): Promise<Du
     }
     return {
       owner: owner.token,
-      async read(key) { return read(key) },
+      async read(key) {
+        return read(key)
+      },
       assertCurrent(expected) {
         active()
         const value = validate(expected)
@@ -194,42 +312,71 @@ export async function openChildJournal(options: ChildJournalOptions): Promise<Du
         const observed = read(key)
         if (initial) {
           const value = validate(initial)
-          if (value.key !== key || value.owner !== owner.token || value.revision !== 0) fail("Invalid initial child custody")
-          return db.transaction(() => { active(); if (read(key)) fail("Child custody already exists"); store(value); return value }).immediate()
+          if (value.key !== key || value.owner !== owner.token || value.revision !== 0)
+            fail("Invalid initial child custody")
+          return db
+            .transaction(() => {
+              active()
+              if (read(key)) fail("Child custody already exists")
+              store(value)
+              return value
+            })
+            .immediate()
         }
         if (!observed) fail("Child custody does not exist")
         const observedOwner = readOwner(observed.owner)
-        const dead = observed.owner === owner.token || observedOwner.released === 1 || await (options.probeOwner ?? probeJournalOwner)(observedOwner) === "dead"
+        const dead =
+          observed.owner === owner.token ||
+          observedOwner.released === 1 ||
+          (await (options.probeOwner ?? probeJournalOwner)(observedOwner)) === "dead"
         active()
         if (!dead) fail("Child custody owner is live or unverified")
-        return db.transaction(() => {
-          active()
-          const current = read(key)
-          // No asynchronous probe is inside the write lock. Recheck the exact snapshot.
-          if (JSON.stringify(current) !== JSON.stringify(observed) || JSON.stringify(readOwner(observed.owner)) !== JSON.stringify(observedOwner)) fail("Child custody changed during owner probe")
-          const next = validate({ ...observed, owner: owner.token, revision: advance(observed.revision) })
-          store(next); return next
-        }).immediate()
+        return db
+          .transaction(() => {
+            active()
+            const current = read(key)
+            // No asynchronous probe is inside the write lock. Recheck the exact snapshot.
+            if (
+              JSON.stringify(current) !== JSON.stringify(observed) ||
+              JSON.stringify(readOwner(observed.owner)) !== JSON.stringify(observedOwner)
+            )
+              fail("Child custody changed during owner probe")
+            const next = validate({ ...observed, owner: owner.token, revision: advance(observed.revision) })
+            store(next)
+            return next
+          })
+          .immediate()
       },
       writeSync,
-      async write(previous, next) { writeSync(previous, next) },
+      async write(previous, next) {
+        writeSync(previous, next)
+      },
       async list() {
         active()
         const records: ChildRecord[] = []
         for (const row of db.query<Row & { key: string }, []>("SELECT key, body FROM children ORDER BY key").all()) {
           let record: ChildRecord | undefined
           // A corrupt row stays for inspection; it never blocks the readable ones.
-          try { record = read(row.key) } catch { continue }
+          try {
+            record = read(row.key)
+          } catch {
+            continue
+          }
           if (record !== undefined) records.push(record)
         }
         return records
       },
       close() {
         if (closed) return
-        db.transaction(() => { db.query("UPDATE owners SET body=? WHERE token=?").run(JSON.stringify({ ...owner, released: 1 }), owner.token) }).immediate()
+        db.transaction(() => {
+          db.query("UPDATE owners SET body=? WHERE token=?").run(JSON.stringify({ ...owner, released: 1 }), owner.token)
+        }).immediate()
         closed = true
         db.close()
       },
     }
-  } catch (error) { db.close(); throw error }
+  } catch (error) {
+    db.close()
+    throw error
+  }
 }

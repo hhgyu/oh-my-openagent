@@ -12,9 +12,7 @@ export interface FactsFailureReadPort {
   readFailures(): Promise<FactsFailuresFile>
 }
 
-export type FactsFailuresRead =
-  | { readonly ok: true; readonly failures: FactsFailuresFile }
-  | { readonly ok: false }
+export type FactsFailuresRead = { readonly ok: true; readonly failures: FactsFailuresFile } | { readonly ok: false }
 
 export function hasFailureReader(candidate: unknown): candidate is FactsFailureReadPort {
   return (
@@ -32,13 +30,16 @@ export async function readLaunchableFailures(
   try {
     return { ok: true, failures: await port.readFailures() }
   } catch (error) {
-    warn(error instanceof LockContentionError
-      ? "facts failure ledger is busy; launch deferred"
-      : "facts failure ledger is unreadable; refusing to launch", {
-      error: error instanceof Error ? error.name : "unknown",
-      detail: error instanceof Error ? error.message : String(error),
-      corrupt: error instanceof FactsFailuresCorruptError,
-    })
+    warn(
+      error instanceof LockContentionError
+        ? "facts failure ledger is busy; launch deferred"
+        : "facts failure ledger is unreadable; refusing to launch",
+      {
+        error: error instanceof Error ? error.name : "unknown",
+        detail: error instanceof Error ? error.message : String(error),
+        corrupt: error instanceof FactsFailuresCorruptError,
+      },
+    )
     return { ok: false }
   }
 }

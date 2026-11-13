@@ -26,10 +26,7 @@ export {
 export { resolveVariant } from "./variant-resolver"
 export type { ResolveVariantInput } from "./variant-resolver"
 export { loadPrompt, loadPromptSync, PromptFileNotFoundError, PromptPathTraversalError } from "./loader"
-export {
-  HYPERPLAN_MODE_PROMPT,
-  TEAM_MODE_PROMPT,
-} from "./mode-prompts"
+export { HYPERPLAN_MODE_PROMPT, TEAM_MODE_PROMPT } from "./mode-prompts"
 export type {
   ArmingSnapshot,
   UltraworkClassification,

@@ -12,7 +12,7 @@ import { childIdentityOf, hasChildIdentity, isTerminalRecord, nowIso, recordSpaw
  * process child was spawned for this attempt alone and is ended.
  */
 async function letGoOfRejected(handle: ManagedChildHandle): Promise<void> {
-  if ((handle.kind === "host-session" || handle.kind === "owned-session")) await releaseSupersededHandle(handle)
+  if (handle.kind === "host-session" || handle.kind === "owned-session") await releaseSupersededHandle(handle)
   else await discardManagedHandle(handle)
 }
 
@@ -46,7 +46,11 @@ export async function reattachManagedTask(input: {
   // The revival that launched this handle must still hold the claim it launched under: another revival
   // may have claimed the task since (at the same epoch when the task was interrupted or terminal), and
   // an obsolete handle must not attach on that newer claim.
-  if (input.record.residency_claim !== undefined && (fresh.residency_claim !== input.record.residency_claim || fresh.notification.run_epoch !== input.record.notification.run_epoch)) {
+  if (
+    input.record.residency_claim !== undefined &&
+    (fresh.residency_claim !== input.record.residency_claim ||
+      fresh.notification.run_epoch !== input.record.notification.run_epoch)
+  ) {
     await letGoOfRejected(input.handle)
     return { ok: false, kind: "failed", reason: "the revival's residency claim was superseded" }
   }
@@ -95,7 +99,13 @@ export async function reattachManagedTask(input: {
     const timestamp = nowIso(input.now)
     const sessionId = input.handle.sessionId
     // A revived daemon child is identified by its session, exactly as a fresh spawn stamps it.
-    const withRunner = recordSpawnedRunner(rest, input.handle.kind, input.handle.hostSession, input.handle.ownedSession === undefined ? undefined : { ...input.handle.ownedSession, runEpoch: epoch }) ?? rest
+    const withRunner =
+      recordSpawnedRunner(
+        rest,
+        input.handle.kind,
+        input.handle.hostSession,
+        input.handle.ownedSession === undefined ? undefined : { ...input.handle.ownedSession, runEpoch: epoch },
+      ) ?? rest
     const reattached: TaskRecord = {
       ...withRunner,
       status: "running",
@@ -104,7 +114,9 @@ export async function reattachManagedTask(input: {
       notification: { ...fresh.notification, run_epoch: epoch },
       ...(input.handle.pid === undefined ? {} : { pid: input.handle.pid }),
       ...(sessionId === undefined || sessionId.length === 0 ? {} : { child_session_id: sessionId }),
-      ...(input.awaitingInput === undefined ? {} : { awaiting_input: { reason: input.awaitingInput.reason, since: timestamp } }),
+      ...(input.awaitingInput === undefined
+        ? {}
+        : { awaiting_input: { reason: input.awaitingInput.reason, since: timestamp } }),
     }
     input.store.replace(reattached)
     if (input.handle.bindReattachedRun) await input.handle.bindReattachedRun(fresh, reattached)

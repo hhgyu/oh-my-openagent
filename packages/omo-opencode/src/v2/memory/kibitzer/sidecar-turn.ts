@@ -5,7 +5,13 @@
 import { validateNudges, type RecallCandidate, type RecallNudge } from "@oh-my-opencode/memory-core"
 import { backoffDelayMs, type KibitzerWakeAdmission } from "@oh-my-opencode/memory-core/recall-sidecar"
 import { KIBITZER_REJECTED_AFTER_WAKES, KIBITZER_WAKE_MAX_TOTAL_MS, type KibitzerOfferResult } from "./contract"
-import { isDiagnosticWakeEnd, startFailureEnd, type KibitzerWakeAbort, type KibitzerWakeEnd, type KibitzerWakeOutcome } from "./outcome"
+import {
+  isDiagnosticWakeEnd,
+  startFailureEnd,
+  type KibitzerWakeAbort,
+  type KibitzerWakeEnd,
+  type KibitzerWakeOutcome,
+} from "./outcome"
 import { chargeBudget, createWakeBudget, describe, type Child, type SidecarCore, type Turn } from "./sidecar-core"
 
 export type Admission = KibitzerWakeAdmission | { readonly status: "error"; readonly error: unknown }
@@ -23,7 +29,12 @@ export interface TurnLifecycle {
   report(turn: Turn, end: KibitzerWakeEnd, nudges: readonly RecallNudge[], current: Child | undefined): void
   admit(): Promise<Admission>
   releaseLease(turn: Turn): Promise<void>
-  refused(admission: Exclude<Admission, { status: "acquired" }>, generation: number, maxItems: number, candidateCount: number): KibitzerOfferResult
+  refused(
+    admission: Exclude<Admission, { status: "acquired" }>,
+    generation: number,
+    maxItems: number,
+    candidateCount: number,
+  ): KibitzerOfferResult
   prepareReseed(wake: number): void
   enterBackoff(): void
   clearBackoff(): void
@@ -38,9 +49,23 @@ export function createTurnLifecycle(core: SidecarCore): TurnLifecycle {
     core.budget = createWakeBudget(core.toolBudget)
     const startedAt = core.now()
     return {
-      wake: core.wakeSeq, generation, maxItems, startedAt, totalDeadlineAt: startedAt + KIBITZER_WAKE_MAX_TOTAL_MS,
-      accepted: core.accepted, budget: core.budget, envelopes: [], lease: undefined, slotWaitMs: 0, candidateCount,
-      toolStarts: 0, toolEnds: 0, abort: undefined, deadline: undefined, report: undefined, settled: Promise.resolve(),
+      wake: core.wakeSeq,
+      generation,
+      maxItems,
+      startedAt,
+      totalDeadlineAt: startedAt + KIBITZER_WAKE_MAX_TOTAL_MS,
+      accepted: core.accepted,
+      budget: core.budget,
+      envelopes: [],
+      lease: undefined,
+      slotWaitMs: 0,
+      candidateCount,
+      toolStarts: 0,
+      toolEnds: 0,
+      abort: undefined,
+      deadline: undefined,
+      report: undefined,
+      settled: Promise.resolve(),
     }
   }
 
@@ -73,7 +98,13 @@ export function createTurnLifecycle(core: SidecarCore): TurnLifecycle {
   function armDeadline(turn: Turn, onExpire?: () => void): void {
     clearDeadline(turn)
     const quietMs = Math.min(core.wakeDeadlineMs, Math.max(0, turn.totalDeadlineAt - core.now()))
-    turn.deadline = core.timers.set(onExpire ?? (() => { void abortTurn(turn, "deadline") }), quietMs)
+    turn.deadline = core.timers.set(
+      onExpire ??
+        (() => {
+          void abortTurn(turn, "deadline")
+        }),
+      quietMs,
+    )
   }
 
   function clearDeadline(turn: Turn): void {
@@ -109,16 +140,25 @@ export function createTurnLifecycle(core: SidecarCore): TurnLifecycle {
     const cursors = turn.envelopes.reduce<{ first: number; last: number } | undefined>((span, envelope) => {
       const range = envelope.payload.cursors
       if (range === undefined) return span
-      return span === undefined ? { ...range } : { first: Math.min(span.first, range.first), last: Math.max(span.last, range.last) }
+      return span === undefined
+        ? { ...range }
+        : { first: Math.min(span.first, range.first), last: Math.max(span.last, range.last) }
     }, undefined)
     const child = turn.report
     const outcome: KibitzerWakeOutcome = {
-      sessionId: core.sessionId, wake: turn.wake, generation: turn.generation, status: end.status,
+      sessionId: core.sessionId,
+      wake: turn.wake,
+      generation: turn.generation,
+      status: end.status,
       ...("cause" in end ? { cause: end.cause } : {}),
       ...("reason" in end && end.reason !== undefined ? { reason: end.reason } : {}),
       ...(child?.model === undefined || end.status === "cancelled" ? {} : { model: child.model }),
-      nudges, candidateCount: turn.candidateCount, steered: turn.envelopes.filter(envelope => envelope.steered).length,
-      toolCalls: turn.toolStarts, durationMs: Math.max(0, core.now() - turn.startedAt), slotWaitMs: turn.slotWaitMs,
+      nudges,
+      candidateCount: turn.candidateCount,
+      steered: turn.envelopes.filter((envelope) => envelope.steered).length,
+      toolCalls: turn.toolStarts,
+      durationMs: Math.max(0, core.now() - turn.startedAt),
+      slotWaitMs: turn.slotWaitMs,
       ...(cursors === undefined ? {} : { cursors }),
       ...(current === undefined ? {} : { contextTokens: contextEstimate(current) }),
       ...(child?.usage === undefined ? {} : { usage: child.usage }),
@@ -152,23 +192,36 @@ export function createTurnLifecycle(core: SidecarCore): TurnLifecycle {
     if (lease === undefined) return
     turn.lease = undefined
     try {
-      if (!(await lease.release())) core.warn("kibitzer sidecar wake lease was already gone", { wake: turn.wake, slot: lease.slot })
+      if (!(await lease.release()))
+        core.warn("kibitzer sidecar wake lease was already gone", { wake: turn.wake, slot: lease.slot })
     } catch (error) {
-      core.warn("kibitzer sidecar wake lease release failed", { wake: turn.wake, slot: lease.slot, error: describe(error) })
+      core.warn("kibitzer sidecar wake lease release failed", {
+        wake: turn.wake,
+        slot: lease.slot,
+        error: describe(error),
+      })
     }
   }
 
-  function refused(admission: Exclude<Admission, { status: "acquired" }>, generation: number, maxItems: number, candidateCount: number): KibitzerOfferResult {
+  function refused(
+    admission: Exclude<Admission, { status: "acquired" }>,
+    generation: number,
+    maxItems: number,
+    candidateCount: number,
+  ): KibitzerOfferResult {
     switch (admission.status) {
-      case "busy": return { action: "buffered", reason: "slot_busy" }
-      case "aborted": return { action: "buffered", reason: "disposed" }
+      case "busy":
+        return { action: "buffered", reason: "slot_busy" }
+      case "aborted":
+        return { action: "buffered", reason: "disposed" }
       case "error": {
         const turn = newTurn(generation, maxItems, candidateCount)
         report(turn, startFailureEnd(new Error(`wake admission failed: ${describe(admission.error)}`)), [], undefined)
         enterBackoff()
         return { action: "buffered", reason: "backoff" }
       }
-      default: return admission satisfies never
+      default:
+        return admission satisfies never
     }
   }
 
@@ -179,8 +232,11 @@ export function createTurnLifecycle(core: SidecarCore): TurnLifecycle {
       .filter(([path, at]) => !core.delivered.has(path) && wake - at + 1 >= KIBITZER_REJECTED_AFTER_WAKES)
       .map(([path]) => path)
     core.pendingReseed = {
-      sessionId: core.sessionId, lastCursor: core.stream.lastCursor() ?? 0, taskSummary: core.taskSummary ?? "",
-      rejectedPaths: rejected, deliveredPaths: [...core.delivered],
+      sessionId: core.sessionId,
+      lastCursor: core.stream.lastCursor() ?? 0,
+      taskSummary: core.taskSummary ?? "",
+      rejectedPaths: rejected,
+      deliveredPaths: [...core.delivered],
     }
     core.offered.clear()
     for (const path of rejected) core.offered.add(path)
@@ -222,7 +278,23 @@ export function createTurnLifecycle(core: SidecarCore): TurnLifecycle {
   }
 
   return {
-    newTurn, offerPaths, observeTool, contextEstimate, armDeadline, clearDeadline, abortTurn, abortChild, validated, report,
-    admit, releaseLease, refused, prepareReseed, enterBackoff, clearBackoff, disposeChild, disposeHandle,
+    newTurn,
+    offerPaths,
+    observeTool,
+    contextEstimate,
+    armDeadline,
+    clearDeadline,
+    abortTurn,
+    abortChild,
+    validated,
+    report,
+    admit,
+    releaseLease,
+    refused,
+    prepareReseed,
+    enterBackoff,
+    clearBackoff,
+    disposeChild,
+    disposeHandle,
   }
 }

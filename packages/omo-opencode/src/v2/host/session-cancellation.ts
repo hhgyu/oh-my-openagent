@@ -2,8 +2,12 @@
 // An opaque registered token survives trusted object-spread telemetry wrappers.
 const marker = Symbol("joined-session-cancellation")
 const tokens = new WeakSet<object>()
-export function withJoinedSessionCancellation<T extends object>(api: T, provenance: "effect-runtime" | "controlled-test") {
-  if (provenance !== "effect-runtime" && provenance !== "controlled-test") throw new Error("Invalid session cancellation provenance")
+export function withJoinedSessionCancellation<T extends object>(
+  api: T,
+  provenance: "effect-runtime" | "controlled-test",
+) {
+  if (provenance !== "effect-runtime" && provenance !== "controlled-test")
+    throw new Error("Invalid session cancellation provenance")
   const token = Object.freeze({ provenance })
   tokens.add(token)
   return Object.assign(api, { [marker]: token })

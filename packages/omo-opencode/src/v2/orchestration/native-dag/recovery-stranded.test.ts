@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { applyDagSchedulerEvent, createDagJournal, type DagRunId, type DagRunRecordV1 } from "@oh-my-opencode/senpi-task/dag"
+import {
+  applyDagSchedulerEvent,
+  createDagJournal,
+  type DagRunId,
+  type DagRunRecordV1,
+} from "@oh-my-opencode/senpi-task/dag"
 import { RECOVERY_PARENT, createRecoveryFixture, node, type Leased } from "./recovery-fixture"
 
 /** The pid of a second OpenCode process on the same project (a generation lease owner). */
@@ -15,13 +20,27 @@ describe("OpenCode 2 workflow recovery of a stranded or foreign-held run", () =>
     // given
     const directory = fresh()
     const only = generation(directory)
-    const started = await only.dag.runtime.manager.start({ parentSessionId: RECOVERY_PARENT, rootSessionId: RECOVERY_PARENT,
-      definition: { key: "cut", name: "cut", nodes: [node("a")] } })
+    const started = await only.dag.runtime.manager.start({
+      parentSessionId: RECOVERY_PARENT,
+      rootSessionId: RECOVERY_PARENT,
+      definition: { key: "cut", name: "cut", nodes: [node("a")] },
+    })
     const runId = started.snapshot.runId
     const store = only.dag.runtime.store
-    const journal = createDagJournal<DagRunRecordV1>({ store, runId, initialCheckpoint: only.dag.record(runId),
-      applyEvent: (record, event) => applyDagSchedulerEvent(record, event, new Map(), { store, pendingTerminalResults: new Map(), now: Date.now }) })
-    journal.append({ type: "dag.node.transitioned", nodeId: "a", from: "pending", to: "scheduled", reason: { kind: "scheduled" } })
+    const journal = createDagJournal<DagRunRecordV1>({
+      store,
+      runId,
+      initialCheckpoint: only.dag.record(runId),
+      applyEvent: (record, event) =>
+        applyDagSchedulerEvent(record, event, new Map(), { store, pendingTerminalResults: new Map(), now: Date.now }),
+    })
+    journal.append({
+      type: "dag.node.transitioned",
+      nodeId: "a",
+      from: "pending",
+      to: "scheduled",
+      reason: { kind: "scheduled" },
+    })
     await journal.whenIdle()
 
     // when
@@ -31,7 +50,7 @@ describe("OpenCode 2 workflow recovery of a stranded or foreign-held run", () =>
     const result = await pending
 
     // then
-    expect(fake.starts.map(start => start.nodeId)).toEqual(["a"])
+    expect(fake.starts.map((start) => start.nodeId)).toEqual(["a"])
     expect(result.details.kind === "waited" && result.details.result.status).toBe("completed")
   })
 
@@ -39,15 +58,23 @@ describe("OpenCode 2 workflow recovery of a stranded or foreign-held run", () =>
     // given
     const directory = fresh()
     const only = generation(directory)
-    const { result: started } = await only.dag.call({ action: "start", detach: true, definition: { key: "foreign", name: "foreign", nodes: [node("a")] } })
+    const { result: started } = await only.dag.call({
+      action: "start",
+      detach: true,
+      definition: { key: "foreign", name: "foreign", nodes: [node("a")] },
+    })
     const runId = (started.details.kind === "started" ? started.details.run_id : "") as DagRunId
-    const store = only.dag.runtime.store, foreign = 2 ** 41 + 7
-    store.withRunLock(runId, () => { store.writeCheckpoint(runId, { ...only.dag.record(runId), leaseHolderPid: foreign }) })
+    const store = only.dag.runtime.store,
+      foreign = 2 ** 41 + 7
+    store.withRunLock(runId, () => {
+      store.writeCheckpoint(runId, { ...only.dag.record(runId), leaseHolderPid: foreign })
+    })
 
     // when
     const { fake, pending } = only.dag.begin({ action: "wait", run_id: runId, detach: false })
     const holderDuring = async (): Promise<number | undefined> => {
-      for (let turn = 0; turn < 200 && !only.dag.runtime.isDriving(runId); turn++) await new Promise(resolve => setTimeout(resolve, 0))
+      for (let turn = 0; turn < 200 && !only.dag.runtime.isDriving(runId); turn++)
+        await new Promise((resolve) => setTimeout(resolve, 0))
       const during: Leased = only.dag.record(runId)
       return during.leaseHolderPid
     }
@@ -66,7 +93,11 @@ describe("OpenCode 2 workflow recovery of a stranded or foreign-held run", () =>
     // given
     const directory = fresh()
     const first = generation(directory)
-    const { result: started, fake: starter } = await first.dag.call({ action: "start", detach: true, definition: { key: "killed", name: "killed", nodes: [node("a"), node("b"), node("c", ["a", "b"])] } })
+    const { result: started, fake: starter } = await first.dag.call({
+      action: "start",
+      detach: true,
+      definition: { key: "killed", name: "killed", nodes: [node("a"), node("b"), node("c", ["a", "b"])] },
+    })
     const runId = started.details.kind === "started" ? started.details.run_id : ""
     starter.complete("a")
     await first.kill()
@@ -75,8 +106,12 @@ describe("OpenCode 2 workflow recovery of a stranded or foreign-held run", () =>
 
     // when
     const { fake, pending } = second.dag.begin({ action: "wait", run_id: runId, detach: false })
-    const outcome = pending.then(result => result, (error: unknown) => error)
-    for (let turn = 0; turn < 200 && fake.restored.length === 0; turn++) await new Promise(resolve => setTimeout(resolve, 0))
+    const outcome = pending.then(
+      (result) => result,
+      (error: unknown) => error,
+    )
+    for (let turn = 0; turn < 200 && fake.restored.length === 0; turn++)
+      await new Promise((resolve) => setTimeout(resolve, 0))
     fake.complete("b")
     const early = await Promise.race([fake.whenStarted("c"), outcome])
     if (early instanceof Error) throw early
@@ -87,19 +122,22 @@ describe("OpenCode 2 workflow recovery of a stranded or foreign-held run", () =>
     // then
     expect(result.details.kind === "waited" && result.details.result.status).toBe("completed")
     expect(fake.restored).toEqual(["task-2"])
-    expect(fake.starts.map(start => start.nodeId)).toEqual(["c"])
+    expect(fake.starts.map((start) => start.nodeId)).toEqual(["c"])
   })
   test("#given a run a live OpenCode process is still driving #when a second process's call waits on it #then it refuses with run_still_active before pausing, recovering or restoring anything", async () => {
     // given
     const directory = fresh()
     const first = generation(directory, [], { pid: OTHER_PROCESS })
-    const { fake: starter, pending: driving } = first.dag.begin({ action: "start", definition: { key: "two", name: "two", nodes: [node("a")] } })
+    const { fake: starter, pending: driving } = first.dag.begin({
+      action: "start",
+      definition: { key: "two", name: "two", nodes: [node("a")] },
+    })
     await starter.whenStarted("a")
     const runId = first.dag.runtime.manager.list(RECOVERY_PARENT)[0]?.runId ?? ""
     // Both generations share this test process: retire the first one's in-process entry, so only its
     // pid (alive for the second process) can prove its holder live, as across two real processes.
     first.lease.dispose()
-    const second = generation(directory, first.dag.fakes, { isProcessAlive: pid => pid === OTHER_PROCESS })
+    const second = generation(directory, first.dag.fakes, { isProcessAlive: (pid) => pid === OTHER_PROCESS })
 
     // when
     const { fake, result } = await second.dag.call({ action: "wait", run_id: runId, detach: false })
@@ -111,7 +149,9 @@ describe("OpenCode 2 workflow recovery of a stranded or foreign-held run", () =>
     expect(during.status).toBe("running")
     expect(during.leaseHolderPid).toBe(first.lease.holder())
     const store = second.dag.runtime.store
-    expect(store.readEvents(runId as DagRunId, 0, { limit: 1000 }).events.map(event => event.type)).not.toContain("dag.run.paused")
+    expect(store.readEvents(runId as DagRunId, 0, { limit: 1000 }).events.map((event) => event.type)).not.toContain(
+      "dag.run.paused",
+    )
     starter.complete("a")
     await driving
     expect(second.dag.record(runId).status).toBe("completed")
@@ -121,7 +161,10 @@ describe("OpenCode 2 workflow recovery of a stranded or foreign-held run", () =>
     // given
     const directory = fresh()
     const only = generation(directory)
-    const { fake, pending } = only.dag.begin({ action: "start", definition: { key: "fenced", name: "fenced", nodes: [node("a")] } })
+    const { fake, pending } = only.dag.begin({
+      action: "start",
+      definition: { key: "fenced", name: "fenced", nodes: [node("a")] },
+    })
     await fake.whenStarted("a")
     const runId = only.dag.runtime.manager.list(RECOVERY_PARENT)[0]?.runId as DagRunId
     const store = only.dag.runtime.store
@@ -132,12 +175,15 @@ describe("OpenCode 2 workflow recovery of a stranded or foreign-held run", () =>
 
     // when
     fake.complete("a")
-    const outcome = await pending.then(result => result.details.kind, (error: unknown) => String(error))
+    const outcome = await pending.then(
+      (result) => result.details.kind,
+      (error: unknown) => String(error),
+    )
 
     // then
     expect(outcome).toBe("error")
     const after = only.dag.record(runId)
     expect(after.status).toBe("failed")
-    expect(after.nodes.find(entry => entry.id === "a")?.state).not.toBe("completed")
+    expect(after.nodes.find((entry) => entry.id === "a")?.state).not.toBe("completed")
   })
 })

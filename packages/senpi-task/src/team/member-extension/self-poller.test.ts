@@ -90,9 +90,13 @@ describe("member self-poller", () => {
     const value = message("11111111-1111-4111-8111-111111111111")
     await seed(harness, value)
     let releaseHold = (): void => undefined
-    const hold = new Promise<void>((resolve) => { releaseHold = resolve })
+    const hold = new Promise<void>((resolve) => {
+      releaseHold = resolve
+    })
     let reportEntered = (): void => undefined
-    const entered = new Promise<void>((resolve) => { reportEntered = resolve })
+    const entered = new Promise<void>((resolve) => {
+      reportEntered = resolve
+    })
     const selfPoller = createMemberSelfPoller({
       teamRunId: TEAM_RUN_ID,
       memberName: "alice",
@@ -232,7 +236,9 @@ describe("member self-poller with a host delivery evidence port", () => {
       sessionDir: harness.sessionDir,
       inject: (content) => harness.injected.push(content),
       appendEvent: (event) => harness.events.push(event),
-      async afterInject(value) { if (accept) delivered.add(value.messageId) },
+      async afterInject(value) {
+        if (accept) delivered.add(value.messageId)
+      },
       isDelivered: (messageId) => delivered.has(messageId),
     })
   }

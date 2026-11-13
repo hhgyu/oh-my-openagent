@@ -22,14 +22,20 @@ const cleanups: (() => void)[] = []
 const ports: MemoryChildPort[] = []
 afterEach(async () => {
   // The dead owner's port is closed last; its cleanup fails once custody moved, which is the point.
-  await Promise.allSettled(ports.splice(0).map(port => port.close()))
+  await Promise.allSettled(ports.splice(0).map((port) => port.close()))
   for (const cleanup of cleanups.splice(0)) cleanup()
 })
 
 const DEAD_PID = 999_999
 const APP = { name: "opencode", version: "2.2.6", channel: "stable" } as never
-const deadLauncher = async (): Promise<ReflectionLauncherIdentity> => ({ pid: DEAD_PID, hostname: hostname(), processStart: null })
-const probe = (launcher: "alive" | "dead") => ({ getPidLiveness: (pid: number) => pid === DEAD_PID ? launcher : "alive" as const })
+const deadLauncher = async (): Promise<ReflectionLauncherIdentity> => ({
+  pid: DEAD_PID,
+  hostname: hostname(),
+  processStart: null,
+})
+const probe = (launcher: "alive" | "dead") => ({
+  getPidLiveness: (pid: number) => (pid === DEAD_PID ? launcher : ("alive" as const)),
+})
 
 /** A run whose in-process launcher "died" after creating its worktree: reservation held, prelaunch + worktree on disk. */
 async function strandedRun() {
@@ -54,15 +60,39 @@ function fakeSessions(directory: string) {
       sessions.set(value.id, value)
       return value
     },
-    async get({ sessionID }) { const value = sessions.get(sessionID); if (value === undefined) throw new Error("not found"); return value },
-    async list() { return { data: [...sessions.values()], cursor: {} } },
-    async prompt(input) { return { id: String(input.id), sessionID: input.sessionID as Ref["id"] } },
-    async synthetic(input) { return { id: String(input.id), sessionID: input.sessionID as Ref["id"] } },
-    async interrupt() { return { interrupted: true } },
+    async get({ sessionID }) {
+      const value = sessions.get(sessionID)
+      if (value === undefined) throw new Error("not found")
+      return value
+    },
+    async list() {
+      return { data: [...sessions.values()], cursor: {} }
+    },
+    async prompt(input) {
+      return { id: String(input.id), sessionID: input.sessionID as Ref["id"] }
+    },
+    async synthetic(input) {
+      return { id: String(input.id), sessionID: input.sessionID as Ref["id"] }
+    },
+    async interrupt() {
+      return { interrupted: true }
+    },
     async wait() {},
-    async remove({ sessionID }) { sessions.delete(sessionID) },
-    async context() { return [] as never },
-    instructions: { entry: { async list() { return [] }, async put() {}, async remove() {} } },
+    async remove({ sessionID }) {
+      sessions.delete(sessionID)
+    },
+    async context() {
+      return [] as never
+    },
+    instructions: {
+      entry: {
+        async list() {
+          return []
+        },
+        async put() {},
+        async remove() {},
+      },
+    },
   }
   // Controlled fake contract only: these methods accept the test-owned request signals.
   withJoinedSessionCancellation(api, "controlled-test")
@@ -74,7 +104,13 @@ describe("reflection recovery at bind", () => {
     // given
     const { bound, worktree, store } = await strandedRun()
     const warnings: string[] = []
-    const recovery = createReflectionRecovery({ host: { session: {} }, warn: message => { warnings.push(message) }, probe: probe("dead") })
+    const recovery = createReflectionRecovery({
+      host: { session: {} },
+      warn: (message) => {
+        warnings.push(message)
+      },
+      probe: probe("dead"),
+    })
 
     // when
     const report = await recovery.onBound(bound)
@@ -82,7 +118,9 @@ describe("reflection recovery at bind", () => {
     // then
     expect(report).toEqual({ lock: "released" })
     expect(existsSync(worktree.dir)).toBe(false)
-    expect(execFileSync("git", ["branch", "--list", worktree.branch], { cwd: bound.paths.repo, encoding: "utf8" }).trim()).toBe("")
+    expect(
+      execFileSync("git", ["branch", "--list", worktree.branch], { cwd: bound.paths.repo, encoding: "utf8" }).trim(),
+    ).toBe("")
     expect((await store.readState()).active).toBeUndefined()
     expect(existsSync(join(reflectionRunDir(bound, "run-dead"), "abandoned.json"))).toBe(true)
     expect(warnings).toEqual([])
@@ -107,7 +145,13 @@ describe("reflection recovery at bind", () => {
     const { bound, worktree, store } = await strandedRun()
     writeFileSync(join(reflectionRunDir(bound, "run-dead"), "ledger.json"), "{}\n")
     const warnings: string[] = []
-    const recovery = createReflectionRecovery({ host: { session: {} }, warn: message => { warnings.push(message) }, probe: probe("dead") })
+    const recovery = createReflectionRecovery({
+      host: { session: {} },
+      warn: (message) => {
+        warnings.push(message)
+      },
+      probe: probe("dead"),
+    })
 
     // when
     const report = await recovery.onBound(bound)
@@ -116,7 +160,7 @@ describe("reflection recovery at bind", () => {
     expect(report).toEqual({ lock: "reported" })
     expect(existsSync(worktree.dir)).toBe(true)
     expect((await store.readState()).active?.runId).toBe("run-dead")
-    expect(warnings.some(message => message.startsWith("memory reflection is held by run run-dead"))).toBe(true)
+    expect(warnings.some((message) => message.startsWith("memory reflection is held by run run-dead"))).toBe(true)
   })
 
   test("#given a dead host's reflection child row #when the session binds #then the host child is removed and its custody row CLOSED", async () => {
@@ -127,14 +171,27 @@ describe("reflection recovery at bind", () => {
     mkdirSync(dirname(journalPath), { recursive: true })
     const { api, sessions } = fakeSessions(identity.root)
     const port = createMemoryChildPort({
-      host: { app: APP, session: api }, directory: identity.root, parentSessionId: "root", journalPath,
-      backendID: REFLECTION_BACKEND_ID, prefix: REFLECTION_CHILD_PREFIX, label: "Reflection", agent: REFLECTION_AGENT_ID,
-      permissions: REFLECTION_PERMISSIONS.map(rule => ({ ...rule })), toolNames: [...REFLECTION_TOOL_NAMES], scopes: createSessionScopes(),
-      onIssued: () => undefined, onRetired: () => undefined,
+      host: { app: APP, session: api },
+      directory: identity.root,
+      parentSessionId: "root",
+      journalPath,
+      backendID: REFLECTION_BACKEND_ID,
+      prefix: REFLECTION_CHILD_PREFIX,
+      label: "Reflection",
+      agent: REFLECTION_AGENT_ID,
+      permissions: REFLECTION_PERMISSIONS.map((rule) => ({ ...rule })),
+      toolNames: [...REFLECTION_TOOL_NAMES],
+      scopes: createSessionScopes(),
+      onIssued: () => undefined,
+      onRetired: () => undefined,
     })
     ports.push(port)
     const child = await port.start({ generation: 1, prompt: "reflect" })
-    const recovery = createReflectionRecovery({ host: { app: APP, session: api }, warn: () => undefined, probeOwner: async () => "dead" })
+    const recovery = createReflectionRecovery({
+      host: { app: APP, session: api },
+      warn: () => undefined,
+      probeOwner: async () => "dead",
+    })
 
     // when
     await recovery.onBound(identity.bound)
@@ -143,7 +200,9 @@ describe("reflection recovery at bind", () => {
     expect(sessions.has(child.sessionID)).toBe(false)
     const journal = await openChildJournal({ path: journalPath })
     try {
-      expect((await journal.list()).find(record => record.locator.sessionID === child.sessionID)?.phase).toBe("closed")
+      expect((await journal.list()).find((record) => record.locator.sessionID === child.sessionID)?.phase).toBe(
+        "closed",
+      )
     } finally {
       journal.close()
     }

@@ -22,21 +22,29 @@ export function createPolicyPipeline(policies: ToolPolicies = {}) {
       Object.defineProperty(call, "context", { value: context, writable: false, enumerable: true })
       let execution: Promise<Result> | undefined
       return {
-        run(body: (call: Readonly<PolicyCall>) => Promise<Result>, validate?: (result: Result) => void | Promise<void>): Promise<Result> {
-          if (!execution) execution = Promise.resolve().then(async () => {
-            try {
-              await policies.before?.(call)
-              Object.freeze(call)
-              const result = await body(call)
-              const finalResult = (await policies.after?.(call, result)) ?? result
-              await validate?.(finalResult)
-              return finalResult
-            } catch (error) {
-              // Preserve interruptions, denials and original execution errors even if error reporting fails.
-              try { await policies.error?.(call, error) } catch { /* Reporting cannot replace the original failure. */ }
-              throw error
-            }
-          })
+        run(
+          body: (call: Readonly<PolicyCall>) => Promise<Result>,
+          validate?: (result: Result) => void | Promise<void>,
+        ): Promise<Result> {
+          if (!execution)
+            execution = Promise.resolve().then(async () => {
+              try {
+                await policies.before?.(call)
+                Object.freeze(call)
+                const result = await body(call)
+                const finalResult = (await policies.after?.(call, result)) ?? result
+                await validate?.(finalResult)
+                return finalResult
+              } catch (error) {
+                // Preserve interruptions, denials and original execution errors even if error reporting fails.
+                try {
+                  await policies.error?.(call, error)
+                } catch {
+                  /* Reporting cannot replace the original failure. */
+                }
+                throw error
+              }
+            })
           return execution
         },
       }

@@ -37,7 +37,11 @@ export async function checkReflectionHealth(
     }
   }
   const failure = health.lastFailure
-  const hint = reflectionRemediation(failure?.reason, failure?.detail, await locateReflectionChildLog(reflectionDir, failure?.runId))
+  const hint = reflectionRemediation(
+    failure?.reason,
+    failure?.detail,
+    await locateReflectionChildLog(reflectionDir, failure?.runId),
+  )
   const paused = await describeReflectionPark(reflectionDir)
   return {
     name: "reflection-health",

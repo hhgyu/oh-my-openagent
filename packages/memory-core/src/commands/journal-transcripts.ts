@@ -88,7 +88,9 @@ export function journalTranscriptSource(identity: MemoryCommandIdentity | undefi
   }
   const transcriptsDir = identity.identityPaths.transcripts
   if (!existsSync(transcriptsDir)) {
-    return { error: `no transcript journals for ${identity.identity} yet at ${transcriptsDir}; they are written when a session settles` }
+    return {
+      error: `no transcript journals for ${identity.identity} yet at ${transcriptsDir}; they are written when a session settles`,
+    }
   }
   return { provider: new JournalTranscriptProvider(transcriptsDir) }
 }

@@ -77,7 +77,8 @@ export function formatFactsAdvisory(state: FactsOverview): string | undefined {
  * along separately via `factsParkedCauseSummary`, never inside the to-do.
  */
 export function factsRemediationHint(state: FactsOverview): string | undefined {
-  if (state.busy === true) return "facts failure ledger is busy; launch deferred until a later facts trigger; try /facts again shortly"
+  if (state.busy === true)
+    return "facts failure ledger is busy; launch deferred until a later facts trigger; try /facts again shortly"
   if (state.corrupt !== undefined) {
     return `facts failure ledger is unreadable (${state.corrupt}); repair or delete failures.json to resume launches`
   }
@@ -100,7 +101,11 @@ export function factsRemediationHint(state: FactsOverview): string | undefined {
 export function formatFactsStatus(identity: string, state: FactsOverview): string {
   const lines = [`# Facts pipeline: ${identity}`, "", `queued: ${state.pending} pending`]
   if (state.busy === true) {
-    lines.push("", "failure ledger is busy; counts are temporarily unavailable", "launch deferred until a later facts trigger; try /facts again shortly")
+    lines.push(
+      "",
+      "failure ledger is busy; counts are temporarily unavailable",
+      "launch deferred until a later facts trigger; try /facts again shortly",
+    )
     return lines.join("\n")
   }
   if (state.corrupt !== undefined) {
@@ -166,10 +171,12 @@ export async function readFactsOverview(input: ReadFactsOverviewInput): Promise<
     const failures = await store.readFailures()
     return { pending, records: failures.entries, now: input.now, factsDir: input.identityPaths.facts }
   } catch (error) {
-    if (error instanceof LockContentionError) return { pending, records: [], now: input.now, factsDir: input.identityPaths.facts, busy: true }
-    const corrupt = error instanceof FactsFailuresCorruptError
-      ? error.message
-      : `failure ledger unreadable: ${error instanceof Error ? error.message : String(error)}`
+    if (error instanceof LockContentionError)
+      return { pending, records: [], now: input.now, factsDir: input.identityPaths.facts, busy: true }
+    const corrupt =
+      error instanceof FactsFailuresCorruptError
+        ? error.message
+        : `failure ledger unreadable: ${error instanceof Error ? error.message : String(error)}`
     return { pending, records: [], now: input.now, factsDir: input.identityPaths.facts, corrupt }
   }
 }

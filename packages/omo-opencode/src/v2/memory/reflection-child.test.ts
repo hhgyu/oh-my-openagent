@@ -5,14 +5,30 @@ import type { SessionRetry } from "@opencode/plugin/promise/session"
 import { createScriptedFactsPorts } from "./facts.test-support"
 import { createManualTimers, flush } from "./kibitzer/test-support"
 import { REFLECTION_AGENT_ID, REFLECTION_PERMISSIONS } from "./reflection-agent"
-import { createReflectionChildHosting, reflectionChildJournalPath, type ReflectionChildLaunch } from "./reflection-child"
-import { REFLECTION_FOREIGN_SESSION_MESSAGE, REFLECTION_MEMORY_TOOL_NAME, REFLECTION_TOOL_NAMES } from "./reflection-tools"
-import { createReflectionFixture, refusal, runTool, toolContext, type ReflectionFixture } from "./reflection.test-support"
+import {
+  createReflectionChildHosting,
+  reflectionChildJournalPath,
+  type ReflectionChildLaunch,
+} from "./reflection-child"
+import {
+  REFLECTION_FOREIGN_SESSION_MESSAGE,
+  REFLECTION_MEMORY_TOOL_NAME,
+  REFLECTION_TOOL_NAMES,
+} from "./reflection-tools"
+import {
+  createReflectionFixture,
+  refusal,
+  runTool,
+  toolContext,
+  type ReflectionFixture,
+} from "./reflection.test-support"
 
 setDefaultTimeout(process.platform === "win32" ? 30_000 : 10_000)
 
 const fixtures: ReflectionFixture[] = []
-afterEach(() => { for (const fixture of fixtures.splice(0)) fixture.cleanup() })
+afterEach(() => {
+  for (const fixture of fixtures.splice(0)) fixture.cleanup()
+})
 
 async function setup() {
   const fixture = await createReflectionFixture()
@@ -21,20 +37,43 @@ async function setup() {
   const ports = createScriptedFactsPorts()
   const timers = createManualTimers()
   const warnings: string[] = []
-  const hosting = createReflectionChildHosting({ host: { session: {} }, createPort: request => ports.createPort(request), timers, warn: message => { warnings.push(message) } })
-  const launch = (extra: Partial<ReflectionChildLaunch> = {}) => hosting.launch(fixture.bound, {
-    runId: "run-1", parentSessionId: "ses_root", worktreeDir: fixture.worktree.dir, transcriptPath: fixture.transcriptPath,
-    request: { trigger: "manual", focus: "indentation" }, deadlineMs: 60_000, ...extra,
+  const hosting = createReflectionChildHosting({
+    host: { session: {} },
+    createPort: (request) => ports.createPort(request),
+    timers,
+    warn: (message) => {
+      warnings.push(message)
+    },
   })
+  const launch = (extra: Partial<ReflectionChildLaunch> = {}) =>
+    hosting.launch(fixture.bound, {
+      runId: "run-1",
+      parentSessionId: "ses_root",
+      worktreeDir: fixture.worktree.dir,
+      transcriptPath: fixture.transcriptPath,
+      request: { trigger: "manual", focus: "indentation" },
+      deadlineMs: 60_000,
+      ...extra,
+    })
   return { fixture, ports, timers, warnings, hosting, launch }
 }
 
-const createInput = { command: "create", reason: "feat(reflection): tabs", file_path: "reference/tabs.md", description: "Indentation preference", file_text: "Tabs.\n" }
+const createInput = {
+  command: "create",
+  reason: "feat(reflection): tabs",
+  file_path: "reference/tabs.md",
+  description: "Indentation preference",
+  file_text: "Tabs.\n",
+}
 
 describe("reflection child launcher", () => {
   test("#given a retryable first request failure #then the next variant starts after cleanup and attempts are reported", async () => {
     const { ports, launch } = await setup()
-    const running = launch({ model: "test/first", variant: "high", fallbacks: [{ model: "test/second", variant: "low" }] })
+    const running = launch({
+      model: "test/first",
+      variant: "high",
+      fallbacks: [{ model: "test/second", variant: "low" }],
+    })
     const first = await ports.started(1)
     first.finish({ status: "error", message: "503: provider unavailable" })
     await flush()
@@ -50,7 +89,15 @@ describe("reflection child launcher", () => {
     const { hosting, ports, launch } = await setup()
     const running = launch({ model: "test/first", fallbacks: [{ model: "test/second" }] })
     const first = await ports.started(1)
-    const event = (sessionID: string) => ({ sessionID, agent: REFLECTION_AGENT_ID, model: Model.Ref.parse("test/first"), error: { name: "APIError", data: { statusCode: 503, message: "provider unavailable" } }, attempt: 1, decision: { retry: true, delay: 10_000 } }) as SessionRetry
+    const event = (sessionID: string) =>
+      ({
+        sessionID,
+        agent: REFLECTION_AGENT_ID,
+        model: Model.Ref.parse("test/first"),
+        error: { name: "APIError", data: { statusCode: 503, message: "provider unavailable" } },
+        attempt: 1,
+        decision: { retry: true, delay: 10_000 },
+      }) as SessionRetry
     const firstRetry = event(first.sessionID)
     const nextRetry = event(first.sessionID)
     const unrelated = event("ses_root")
@@ -63,23 +110,36 @@ describe("reflection child launcher", () => {
     first.finish()
     await running
   })
-  test.each(["401: unauthorized", "400: invalid request", "403: rate limit permission denied"])("#given %s #then the next model is never started", async message => {
-    const { ports, launch } = await setup()
-    const running = launch({ model: "test/first", fallbacks: [{ model: "test/second" }] })
-    const first = await ports.started(1)
-    first.finish({ status: "error", message })
-    expect(await running).toMatchObject({ status: "failed", attemptedModels: ["test/first"] })
-    expect(ports.children).toHaveLength(1)
-    expect(first.disposed).toBe(true)
-  })
+  test.each(["401: unauthorized", "400: invalid request", "403: rate limit permission denied"])(
+    "#given %s #then the next model is never started",
+    async (message) => {
+      const { ports, launch } = await setup()
+      const running = launch({ model: "test/first", fallbacks: [{ model: "test/second" }] })
+      const first = await ports.started(1)
+      first.finish({ status: "error", message })
+      expect(await running).toMatchObject({ status: "failed", attemptedModels: ["test/first"] })
+      expect(ports.children).toHaveLength(1)
+      expect(first.disposed).toBe(true)
+    },
+  )
   test("#given a model unavailable rejection at start #then cleanup precedes the next model", async () => {
     const { ports, launch } = await setup()
     const create = ports.createPort
     let closed = false
     let calls = 0
-    ports.createPort = request => {
-      if (calls++ > 0) { expect(closed).toBe(true); return create(request) }
-      return { start: async () => { throw Object.assign(new Error("model not found"), { statusCode: 404 }) }, close: async () => { closed = true } }
+    ports.createPort = (request) => {
+      if (calls++ > 0) {
+        expect(closed).toBe(true)
+        return create(request)
+      }
+      return {
+        start: async () => {
+          throw Object.assign(new Error("model not found"), { statusCode: 404 })
+        },
+        close: async () => {
+          closed = true
+        },
+      }
     }
     const running = launch({ model: "test/gone", fallbacks: [{ model: "test/second" }] })
     const child = await ports.started(1)
@@ -89,7 +149,12 @@ describe("reflection child launcher", () => {
   test("#given a child start that never answers #then the run deadline still closes the port", async () => {
     const { ports, timers, launch } = await setup()
     let closed = false
-    ports.createPort = () => ({ start: () => new Promise(() => undefined), close: async () => { closed = true } })
+    ports.createPort = () => ({
+      start: () => new Promise(() => undefined),
+      close: async () => {
+        closed = true
+      },
+    })
     const running = launch({ model: "test/first", deadlineMs: 1000, fallbacks: [{ model: "test/second" }] })
     await flush()
     timers.fire(1000)
@@ -117,7 +182,11 @@ describe("reflection child launcher", () => {
     const { hosting, ports, launch } = await setup()
     const running = launch({ model: "test/first", fallbacks: [{ model: "test/second" }] })
     const first = await ports.started(1)
-    hosting.onContext({ sessionID: first.sessionID, tools: {}, messages: [{ role: "assistant", content: [{ type: "text", text: "Prior work" }] }] })
+    hosting.onContext({
+      sessionID: first.sessionID,
+      tools: {},
+      messages: [{ role: "assistant", content: [{ type: "text", text: "Prior work" }] }],
+    })
     first.finish({ status: "error", message: "503: provider unavailable" })
     expect(await running).toMatchObject({ status: "failed", attemptedModels: ["test/first"] })
     expect(ports.children).toHaveLength(1)
@@ -135,7 +204,7 @@ describe("reflection child launcher", () => {
     // then
     const request = ports.requests[0]
     expect(request?.agent).toBe(REFLECTION_AGENT_ID)
-    expect(request?.permissions).toEqual(REFLECTION_PERMISSIONS.map(rule => ({ ...rule })))
+    expect(request?.permissions).toEqual(REFLECTION_PERMISSIONS.map((rule) => ({ ...rule })))
     expect(request?.toolNames).toEqual([...REFLECTION_TOOL_NAMES])
     expect(request?.journalPath).toBe(join(fixture.bound.paths.reflection, "children.sqlite"))
     expect(request?.journalPath).toBe(reflectionChildJournalPath(fixture.bound))
@@ -148,7 +217,7 @@ describe("reflection child launcher", () => {
   test("#given a live child #when it and another session call the tools #then only the child reaches its run, and its commits are reported", async () => {
     // given
     const { hosting, ports, launch } = await setup()
-    const memory = hosting.tools().find(tool => tool.name === REFLECTION_MEMORY_TOOL_NAME)
+    const memory = hosting.tools().find((tool) => tool.name === REFLECTION_MEMORY_TOOL_NAME)
     if (memory === undefined) throw new Error("reflection_memory missing")
     const running = launch()
     const child = await ports.started(1)
@@ -158,7 +227,9 @@ describe("reflection child launcher", () => {
     const edited = await runTool(memory, createInput, toolContext(child.sessionID))
     child.finish()
     const result = await running
-    const afterRun = await refusal(runTool(memory, { ...createInput, file_path: "reference/late.md" }, toolContext(child.sessionID)))
+    const afterRun = await refusal(
+      runTool(memory, { ...createInput, file_path: "reference/late.md" }, toolContext(child.sessionID)),
+    )
 
     // then
     expect(foreign).toBe(`${REFLECTION_MEMORY_TOOL_NAME}: ${REFLECTION_FOREIGN_SESSION_MESSAGE}`)
@@ -173,7 +244,7 @@ describe("reflection child launcher", () => {
     const { hosting, ports, launch } = await setup()
     const running = launch()
     const child = await ports.started(1)
-    const all = () => Object.fromEntries(["bash", "read", ...REFLECTION_TOOL_NAMES].map(name => [name, {}]))
+    const all = () => Object.fromEntries(["bash", "read", ...REFLECTION_TOOL_NAMES].map((name) => [name, {}]))
     const childRequest = { sessionID: child.sessionID, tools: all() }
     const rootRequest = { sessionID: "ses_root", tools: all() }
 
@@ -211,7 +282,11 @@ describe("reflection child launcher", () => {
     // given
     const { ports, launch } = await setup()
     let cancel: () => void = () => undefined
-    const running = launch({ onCancel: registered => { cancel = registered } })
+    const running = launch({
+      onCancel: (registered) => {
+        cancel = registered
+      },
+    })
     const child = await ports.started(1)
 
     // when

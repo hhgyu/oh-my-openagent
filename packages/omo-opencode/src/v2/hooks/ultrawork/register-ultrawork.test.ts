@@ -16,29 +16,64 @@ function fixture(options: { children?: string[]; hostOptions?: Record<string, un
       hook: async (name: string, callback: (input: unknown) => unknown) => {
         if (name === "context" && options.failContext) throw new Error("context hook unavailable")
         hooks.set(name, callback)
-        return { dispose: async () => { disposals++ } }
+        return {
+          dispose: async () => {
+            disposals++
+          },
+        }
       },
-      get: async ({ sessionID }: { sessionID: string }) => ({ id: sessionID, parentID: options.children?.includes(sessionID) ? "parent" : undefined }),
+      get: async ({ sessionID }: { sessionID: string }) => ({
+        id: sessionID,
+        parentID: options.children?.includes(sessionID) ? "parent" : undefined,
+      }),
     },
-    tool: { hook: async (name: string, callback: (input: unknown) => unknown) => {
-      hooks.set(`tool:${name}`, callback)
-      return { dispose: async () => { hooks.delete(`tool:${name}`) } }
-    } },
-    event: { subscribe: ({ signal }: { signal: AbortSignal }) => ({ [Symbol.asyncIterator]() { return {
-      async next() {
-        await new Promise<void>(resolve => { if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true }) })
-        return { done: true, value: undefined }
+    tool: {
+      hook: async (name: string, callback: (input: unknown) => unknown) => {
+        hooks.set(`tool:${name}`, callback)
+        return {
+          dispose: async () => {
+            hooks.delete(`tool:${name}`)
+          },
+        }
       },
-    } } }) },
+    },
+    event: {
+      subscribe: ({ signal }: { signal: AbortSignal }) => ({
+        [Symbol.asyncIterator]() {
+          return {
+            async next() {
+              await new Promise<void>((resolve) => {
+                if (signal.aborted) resolve()
+                else signal.addEventListener("abort", () => resolve(), { once: true })
+              })
+              return { done: true, value: undefined }
+            },
+          }
+        },
+      }),
+    },
   } as unknown as Host
   async function prompt(sessionID: string, text: string, skills?: { id: string }[]) {
-    const input = { sessionID, messageID: "m", delivery: "queue", prompt: { text, ...(skills ? { skills } : {}) } } as unknown as SessionPrompt
+    const input = {
+      sessionID,
+      messageID: "m",
+      delivery: "queue",
+      prompt: { text, ...(skills ? { skills } : {}) },
+    } as unknown as SessionPrompt
     await hooks.get("prompt")?.(input)
   }
   function request(sessionID: string, modelID = "claude-opus-4-6", agent = "sisyphus") {
-    const context = { sessionID, agent, model: { id: modelID, providerID: "anthropic" }, system: [], messages: [], options: {}, tools: {} } as unknown as SessionContext
+    const context = {
+      sessionID,
+      agent,
+      model: { id: modelID, providerID: "anthropic" },
+      system: [],
+      messages: [],
+      options: {},
+      tools: {},
+    } as unknown as SessionContext
     hooks.get("context")?.(context)
-    return context.system.filter(part => part.metadata?.["omo.ultrawork"] === true)
+    return context.system.filter((part) => part.metadata?.["omo.ultrawork"] === true)
   }
   return { host, prompt, request, hooks, disposals: () => disposals }
 }
@@ -73,7 +108,15 @@ describe("registerUltrawork", () => {
       const f = fixture()
       await registerUltrawork(f.host)
       await f.prompt("s1", "ulw")
-      const context = { sessionID: "s1", agent: "sisyphus", model: { id: "claude-opus-4-6" }, system: [], messages: [], options: {}, tools: {} } as unknown as SessionContext
+      const context = {
+        sessionID: "s1",
+        agent: "sisyphus",
+        model: { id: "claude-opus-4-6" },
+        system: [],
+        messages: [],
+        options: {},
+        tools: {},
+      } as unknown as SessionContext
       f.hooks.get("context")?.(context)
       f.hooks.get("context")?.(context)
       expect(context.system).toHaveLength(1)
@@ -119,18 +162,26 @@ describe("registerUltrawork", () => {
       await f.prompt("shared", "ulw work")
       const fanoutHost = f.host as unknown as Parameters<typeof registerTodoFanoutReminder>[0]
       const fanout = await registerTodoFanoutReminder(fanoutHost)
-      const result = () => ({ tool: "todowrite", sessionID: "shared", input: { todos: [{ content: "work" }] }, status: "completed", result: { content: [{ type: "text", text: "ok" }] } })
+      const result = () => ({
+        tool: "todowrite",
+        sessionID: "shared",
+        input: { todos: [{ content: "work" }] },
+        status: "completed",
+        result: { content: [{ type: "text", text: "ok" }] },
+      })
       const initial = result()
       await f.hooks.get("tool:execute.after")?.(initial)
       expect(initial.result.content).toHaveLength(2)
-      await first(); await fanout()
+      await first()
+      await fanout()
       const next = await registerUltrawork(f.host)
       const nextFanout = await registerTodoFanoutReminder(fanoutHost)
       const repeated = result()
       await f.hooks.get("tool:execute.after")?.(repeated)
       expect(f.request("shared")).toHaveLength(1)
       expect(repeated.result.content).toHaveLength(1)
-      await next(); await nextFanout()
+      await next()
+      await nextFanout()
     })
 
     test("#when a plugin generation is replaced #then the same session retains its directive without repeating the keyword", async () => {

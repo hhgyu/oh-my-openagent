@@ -1,261 +1,266 @@
 export type CheckerEdit = {
-	readonly filePath: string;
-	readonly before: string;
-	readonly after: string;
-};
+  readonly filePath: string
+  readonly before: string
+  readonly after: string
+}
 
 export type ApplyPatchFileMetadata = {
-	readonly filePath: string;
-	readonly movePath?: string;
-	readonly before: string;
-	readonly after: string;
-	readonly type?: string;
-};
+  readonly filePath: string
+  readonly movePath?: string
+  readonly before: string
+  readonly after: string
+  readonly type?: string
+}
 
 export type ApplyPatchAccumulator = {
-	operation: "add" | "update" | "delete";
-	filePath: string;
-	movePath?: string;
-	oldLines: string[];
-	newLines: string[];
-};
+  operation: "add" | "update" | "delete"
+  filePath: string
+  movePath?: string
+  oldLines: string[]
+  newLines: string[]
+}
 
-export type CommentType = "line" | "block" | "docstring";
+export type CommentType = "line" | "block" | "docstring"
 
 export interface CommentInfo {
-	readonly text: string;
-	readonly lineNumber: number;
-	readonly filePath: string;
-	readonly commentType: CommentType;
-	readonly isDocstring: boolean;
-	readonly metadata?: Record<string, string>;
+  readonly text: string
+  readonly lineNumber: number
+  readonly filePath: string
+  readonly commentType: CommentType
+  readonly isDocstring: boolean
+  readonly metadata?: Record<string, string>
 }
 
 export interface PendingCall {
-	readonly filePath: string;
-	readonly content?: string;
-	readonly oldString?: string;
-	readonly newString?: string;
-	readonly edits?: readonly { old_string: string; new_string: string }[];
-	readonly tool: "write" | "edit" | "multiedit";
-	readonly sessionID: string;
-	readonly timestamp: number;
+  readonly filePath: string
+  readonly content?: string
+  readonly oldString?: string
+  readonly newString?: string
+  readonly edits?: readonly { old_string: string; new_string: string }[]
+  readonly tool: "write" | "edit" | "multiedit"
+  readonly sessionID: string
+  readonly timestamp: number
 }
 
 export interface FileComments {
-	readonly filePath: string;
-	readonly comments: readonly CommentInfo[];
+  readonly filePath: string
+  readonly comments: readonly CommentInfo[]
 }
 
 export interface FilterResult {
-	readonly shouldSkip: boolean;
-	readonly reason?: string;
+  readonly shouldSkip: boolean
+  readonly reason?: string
 }
 
-export type CommentFilter = (comment: CommentInfo) => FilterResult;
+export type CommentFilter = (comment: CommentInfo) => FilterResult
 
 export interface HookInput {
-	readonly session_id: string;
-	readonly tool_name: string;
-	readonly transcript_path: string;
-	readonly cwd: string;
-	readonly hook_event_name: string;
-	readonly tool_input: {
-		readonly file_path?: string;
-		readonly content?: string;
-		readonly old_string?: string;
-		readonly new_string?: string;
-		readonly edits?: readonly { old_string: string; new_string: string }[];
-	};
-	readonly tool_response?: unknown;
+  readonly session_id: string
+  readonly tool_name: string
+  readonly transcript_path: string
+  readonly cwd: string
+  readonly hook_event_name: string
+  readonly tool_input: {
+    readonly file_path?: string
+    readonly content?: string
+    readonly old_string?: string
+    readonly new_string?: string
+    readonly edits?: readonly { old_string: string; new_string: string }[]
+  }
+  readonly tool_response?: unknown
 }
 
 export interface CheckResult {
-	readonly hasComments: boolean;
-	readonly message: string;
-	readonly failure?: CheckFailure;
+  readonly hasComments: boolean
+  readonly message: string
+  readonly failure?: CheckFailure
 }
 
 export interface CheckFailure {
-	readonly exitCode: number | null;
-	readonly stderr: string;
+  readonly exitCode: number | null
+  readonly stderr: string
 }
 
-export type SpawnSignal = "SIGTERM" | "SIGKILL";
+export type SpawnSignal = "SIGTERM" | "SIGKILL"
 
 export type SpawnProcess = {
-	readonly stdin: {
-		send(input: string): Promise<void>;
-	};
-	readonly stdout: ReadableStream<Uint8Array>;
-	readonly stderr: ReadableStream<Uint8Array>;
-	readonly exited: Promise<number>;
-	kill(signal: SpawnSignal): void;
-};
+  readonly stdin: {
+    send(input: string): Promise<void>
+  }
+  readonly stdout: ReadableStream<Uint8Array>
+  readonly stderr: ReadableStream<Uint8Array>
+  readonly exited: Promise<number>
+  kill(signal: SpawnSignal): void
+}
 
-export type SpawnFn = (args: readonly string[]) => SpawnProcess;
+export type SpawnFn = (args: readonly string[]) => SpawnProcess
 
 export interface ResolveCommentCheckerBinaryInput {
-	readonly binaryName: string;
-	readonly cachedBinaryPath: string | null;
-	readonly existsSync: (path: string) => boolean;
-	readonly importMetaUrl?: string;
-	readonly packageName?: string;
+  readonly binaryName: string
+  readonly cachedBinaryPath: string | null
+  readonly existsSync: (path: string) => boolean
+  readonly importMetaUrl?: string
+  readonly packageName?: string
 }
 
 export interface FindCommentCheckerPackageBinaryInput {
-	readonly packageJsonPath: string;
-	readonly binaryName: string;
-	readonly existsSync: (path: string) => boolean;
-	readonly packageName?: string;
-	readonly platform?: string;
-	readonly arch?: string;
+  readonly packageJsonPath: string
+  readonly binaryName: string
+  readonly existsSync: (path: string) => boolean
+  readonly packageName?: string
+  readonly platform?: string
+  readonly arch?: string
 }
 
 export interface RunCommentCheckerInput {
-	readonly hookInput: HookInput;
-	readonly binaryPath: string | null;
-	readonly customPrompt?: string;
+  readonly hookInput: HookInput
+  readonly binaryPath: string | null
+  readonly customPrompt?: string
 }
 
 export interface RunCommentCheckerOptions {
-	readonly spawn: SpawnFn;
-	readonly existsSync: (path: string) => boolean;
-	readonly timeoutMs?: number;
-	readonly killGraceMs?: number;
-	readonly setTimeoutFn?: typeof setTimeout;
-	readonly clearTimeoutFn?: typeof clearTimeout;
+  readonly spawn: SpawnFn
+  readonly existsSync: (path: string) => boolean
+  readonly timeoutMs?: number
+  readonly killGraceMs?: number
+  readonly setTimeoutFn?: typeof setTimeout
+  readonly clearTimeoutFn?: typeof clearTimeout
 }
 
-export function extractApplyPatchEdits(details: unknown, args?: Record<string, unknown>): CheckerEdit[];
-export function getApplyPatchMetadataFiles(details: unknown): ApplyPatchFileMetadata[];
-export function readApplyPatchMetadataFiles(value: unknown): ApplyPatchFileMetadata[];
-export function parseApplyPatchRequests(patch: string): CheckerEdit[];
-export function makeAccumulator(
-	operation: ApplyPatchAccumulator["operation"],
-	filePath: string,
-): ApplyPatchAccumulator;
-export function getString(input: Record<string, unknown>, keys: readonly string[]): string | undefined;
-export function joinPatchLines(lines: readonly string[]): string;
-export function isRecord(value: unknown): value is Record<string, unknown>;
-export const COMMENT_CHECKER_RELEASE_VERSION: string;
-export const COMMENT_CHECKER_RELEASE_REPO: string;
-export type CommentCheckerArchiveExtension = "tar.gz" | "zip";
+export function extractApplyPatchEdits(details: unknown, args?: Record<string, unknown>): CheckerEdit[]
+export function getApplyPatchMetadataFiles(details: unknown): ApplyPatchFileMetadata[]
+export function readApplyPatchMetadataFiles(value: unknown): ApplyPatchFileMetadata[]
+export function parseApplyPatchRequests(patch: string): CheckerEdit[]
+export function makeAccumulator(operation: ApplyPatchAccumulator["operation"], filePath: string): ApplyPatchAccumulator
+export function getString(input: Record<string, unknown>, keys: readonly string[]): string | undefined
+export function joinPatchLines(lines: readonly string[]): string
+export function isRecord(value: unknown): value is Record<string, unknown>
+export const COMMENT_CHECKER_RELEASE_VERSION: string
+export const COMMENT_CHECKER_RELEASE_REPO: string
+export type CommentCheckerArchiveExtension = "tar.gz" | "zip"
 export interface CommentCheckerReleaseAsset {
-	readonly os: string;
-	readonly arch: string;
-	readonly ext: CommentCheckerArchiveExtension;
-	readonly assetName: string;
-	readonly url: string;
+  readonly os: string
+  readonly arch: string
+  readonly ext: CommentCheckerArchiveExtension
+  readonly assetName: string
+  readonly url: string
 }
 export interface CommentCheckerCacheDirInput {
-	readonly platform: string;
-	readonly env: Readonly<Record<string, string | undefined>>;
-	readonly homedir: string;
-	readonly cacheDirName: string;
+  readonly platform: string
+  readonly env: Readonly<Record<string, string | undefined>>
+  readonly homedir: string
+  readonly cacheDirName: string
 }
 export function resolveCommentCheckerReleaseAsset(
-	platform: string,
-	arch: string,
-	version?: string,
-): CommentCheckerReleaseAsset | null;
-export function commentCheckerBinaryName(platform: string): string;
-export function commentCheckerCacheDir(input: CommentCheckerCacheDirInput): string;
-export const COMMENT_CHECKER_VERSION_MARKER: string;
-export function isCachedCommentCheckerCurrent(cacheDir: string, readFile?: (path: string) => string): boolean;
-export function recordCachedCommentCheckerRelease(cacheDir: string): void;
-export const COMMENT_CHECKER_PACKAGE_NAME: string;
-export function findCommentCheckerPackageBinary(input: FindCommentCheckerPackageBinaryInput): string | null;
-export function resolveCommentCheckerBinary(input: ResolveCommentCheckerBinaryInput): string | null;
-export function runCommentChecker(input: RunCommentCheckerInput, options: RunCommentCheckerOptions): Promise<CheckResult>;
-export function sendAndCloseStdin(stdin: {
-	on(event: "error", listener: (error: Error) => void): unknown;
-	end(chunk: string, callback: (error?: Error | null) => void): unknown;
-} | {
-	write(chunk: string): unknown;
-	end(): unknown;
-}, input: string): Promise<void>;
+  platform: string,
+  arch: string,
+  version?: string,
+): CommentCheckerReleaseAsset | null
+export function commentCheckerBinaryName(platform: string): string
+export function commentCheckerCacheDir(input: CommentCheckerCacheDirInput): string
+export const COMMENT_CHECKER_VERSION_MARKER: string
+export function isCachedCommentCheckerCurrent(cacheDir: string, readFile?: (path: string) => string): boolean
+export function recordCachedCommentCheckerRelease(cacheDir: string): void
+export const COMMENT_CHECKER_PACKAGE_NAME: string
+export function findCommentCheckerPackageBinary(input: FindCommentCheckerPackageBinaryInput): string | null
+export function resolveCommentCheckerBinary(input: ResolveCommentCheckerBinaryInput): string | null
+export function runCommentChecker(
+  input: RunCommentCheckerInput,
+  options: RunCommentCheckerOptions,
+): Promise<CheckResult>
+export function sendAndCloseStdin(
+  stdin:
+    | {
+        on(event: "error", listener: (error: Error) => void): unknown
+        end(chunk: string, callback: (error?: Error | null) => void): unknown
+      }
+    | {
+        write(chunk: string): unknown
+        end(): unknown
+      },
+  input: string,
+): Promise<void>
 export interface CommentCheckerLogger {
-	info(message: string, details?: unknown): void;
-	warn(message: string, details?: unknown): void;
+  info(message: string, details?: unknown): void
+  warn(message: string, details?: unknown): void
 }
-export const COMMENT_CHECKER_FEEDBACK_HEADER: string;
-export function commentCheckerFailureNotice(binaryPath: string, failure: CheckFailure): string;
-export const COMMENT_CHECKER_CACHE_DIR_NAME: string;
+export const COMMENT_CHECKER_FEEDBACK_HEADER: string
+export function commentCheckerFailureNotice(binaryPath: string, failure: CheckFailure): string
+export const COMMENT_CHECKER_CACHE_DIR_NAME: string
 export interface InstalledCommentCheckerBinaryOptions {
-	readonly env?: Record<string, string | undefined>;
-	readonly existsSync?: (path: string) => boolean;
-	readonly importMetaUrl: string;
-	readonly requireModule?: (moduleName: string) => unknown;
-	readonly pathLookup?: (binaryName: string) => string | null | undefined;
-	readonly platform?: NodeJS.Platform;
-	readonly cacheDir?: string;
+  readonly env?: Record<string, string | undefined>
+  readonly existsSync?: (path: string) => boolean
+  readonly importMetaUrl: string
+  readonly requireModule?: (moduleName: string) => unknown
+  readonly pathLookup?: (binaryName: string) => string | null | undefined
+  readonly platform?: NodeJS.Platform
+  readonly cacheDir?: string
 }
-export function resolveInstalledCommentCheckerBinary(options: InstalledCommentCheckerBinaryOptions): string | null;
+export function resolveInstalledCommentCheckerBinary(options: InstalledCommentCheckerBinaryOptions): string | null
 export function defaultCommentCheckerCacheDir(
-	platform?: NodeJS.Platform,
-	env?: Record<string, string | undefined>,
-	cacheDirName?: string,
-): string;
+  platform?: NodeJS.Platform,
+  env?: Record<string, string | undefined>,
+  cacheDirName?: string,
+): string
 export interface CommentCheckerArchiveOps {
-	ensureCacheDir(cacheDir: string): void;
-	downloadArchive(url: string, archivePath: string): Promise<void>;
-	extractTarGz(archivePath: string, destDir: string): Promise<void>;
-	extractZipArchive(archivePath: string, destDir: string): Promise<void>;
-	ensureExecutable(binaryPath: string): void;
-	cleanupArchive(archivePath: string): void;
+  ensureCacheDir(cacheDir: string): void
+  downloadArchive(url: string, archivePath: string): Promise<void>
+  extractTarGz(archivePath: string, destDir: string): Promise<void>
+  extractZipArchive(archivePath: string, destDir: string): Promise<void>
+  ensureExecutable(binaryPath: string): void
+  cleanupArchive(archivePath: string): void
 }
 export interface DownloadCommentCheckerBinaryOptions {
-	readonly logger: CommentCheckerLogger;
-	readonly logLabel: string;
-	readonly archive: CommentCheckerArchiveOps;
-	readonly platform?: NodeJS.Platform;
-	readonly arch?: string;
-	readonly cacheDir?: string;
-	readonly resolveAssetUrl?: (asset: CommentCheckerReleaseAsset) => string;
+  readonly logger: CommentCheckerLogger
+  readonly logLabel: string
+  readonly archive: CommentCheckerArchiveOps
+  readonly platform?: NodeJS.Platform
+  readonly arch?: string
+  readonly cacheDir?: string
+  readonly resolveAssetUrl?: (asset: CommentCheckerReleaseAsset) => string
 }
-export function downloadCommentCheckerBinary(options: DownloadCommentCheckerBinaryOptions): Promise<string | null>;
-export function runCommentCheckerWithNodeSpawn(input: RunCommentCheckerInput): Promise<CheckResult>;
-export type ToolResultTextBlock = { type: "text"; text: string };
-export type ToolResultContentBlock = ToolResultTextBlock | Record<string, unknown>;
+export function downloadCommentCheckerBinary(options: DownloadCommentCheckerBinaryOptions): Promise<string | null>
+export function runCommentCheckerWithNodeSpawn(input: RunCommentCheckerInput): Promise<CheckResult>
+export type ToolResultTextBlock = { type: "text"; text: string }
+export type ToolResultContentBlock = ToolResultTextBlock | Record<string, unknown>
 export interface ToolResultEventLike {
-	type: "tool_result";
-	toolCallId: string;
-	toolName: string;
-	input: Record<string, unknown>;
-	content: ToolResultContentBlock[];
-	details?: unknown;
-	isError: boolean;
+  type: "tool_result"
+  toolCallId: string
+  toolName: string
+  input: Record<string, unknown>
+  content: ToolResultContentBlock[]
+  details?: unknown
+  isError: boolean
 }
 export interface ToolResultContextLike {
-	cwd: string;
-	sessionManager?: {
-		getSessionId?: () => string;
-		getSessionFile?: () => string | undefined;
-	};
+  cwd: string
+  sessionManager?: {
+    getSessionId?: () => string
+    getSessionFile?: () => string | undefined
+  }
 }
-export function parseToolResultEvent(value: unknown): ToolResultEventLike | undefined;
-export function parseToolResultContext(value: unknown): ToolResultContextLike;
+export function parseToolResultEvent(value: unknown): ToolResultEventLike | undefined
+export function parseToolResultContext(value: unknown): ToolResultContextLike
 export interface CommentCheckerSessionOptions<L extends CommentCheckerLogger> {
-	readonly logger: L;
-	readonly logLabel: string;
-	readonly hookEventName: string;
-	readonly resolveBinary: () => string | null;
-	readonly downloadBinary: (logger: L) => Promise<string | null>;
-	readonly runCommentChecker: (input: RunCommentCheckerInput) => Promise<CheckResult>;
+  readonly logger: L
+  readonly logLabel: string
+  readonly hookEventName: string
+  readonly resolveBinary: () => string | null
+  readonly downloadBinary: (logger: L) => Promise<string | null>
+  readonly runCommentChecker: (input: RunCommentCheckerInput) => Promise<CheckResult>
 }
 export interface CommentCheckerToolResultHooks {
-	onCheckStart?(): void;
-	onCheckFailure?(binaryPath: string, failure: CheckFailure): void;
+  onCheckStart?(): void
+  onCheckFailure?(binaryPath: string, failure: CheckFailure): void
 }
 export interface CommentCheckerSession {
-	startTurn(): void;
-	checkToolResult(
-		event: ToolResultEventLike,
-		context: ToolResultContextLike,
-		hooks?: CommentCheckerToolResultHooks,
-	): Promise<string[]>;
+  startTurn(): void
+  checkToolResult(
+    event: ToolResultEventLike,
+    context: ToolResultContextLike,
+    hooks?: CommentCheckerToolResultHooks,
+  ): Promise<string[]>
 }
 export function createCommentCheckerSession<L extends CommentCheckerLogger>(
-	options: CommentCheckerSessionOptions<L>,
-): CommentCheckerSession;
+  options: CommentCheckerSessionOptions<L>,
+): CommentCheckerSession

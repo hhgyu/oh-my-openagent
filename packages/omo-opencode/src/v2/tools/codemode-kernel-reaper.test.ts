@@ -7,7 +7,12 @@ describe("kernel reaper", () => {
     const runs: { command: string; args: readonly string[] }[] = []
 
     // when
-    killKernelTreesSync([11, 22, 11, 0, -3, process.pid], { platform: "win32", spawnSync: (command, args) => { runs.push({ command, args }) } })
+    killKernelTreesSync([11, 22, 11, 0, -3, process.pid], {
+      platform: "win32",
+      spawnSync: (command, args) => {
+        runs.push({ command, args })
+      },
+    })
 
     // then
     expect(runs).toEqual([{ command: "taskkill", args: ["/T", "/F", "/PID", "11", "/PID", "22"] }])
@@ -18,10 +23,21 @@ describe("kernel reaper", () => {
     const kills: [number, string][] = []
 
     // when
-    killKernelTreesSync([11, 22], { platform: "linux", kill: (pid, signal) => { kills.push([pid, signal]); if (pid === -11) throw Error("ESRCH") } })
+    killKernelTreesSync([11, 22], {
+      platform: "linux",
+      kill: (pid, signal) => {
+        kills.push([pid, signal])
+        if (pid === -11) throw Error("ESRCH")
+      },
+    })
 
     // then
-    expect(kills).toEqual([[-11, "SIGKILL"], [11, "SIGKILL"], [-22, "SIGKILL"], [22, "SIGKILL"]])
+    expect(kills).toEqual([
+      [-11, "SIGKILL"],
+      [11, "SIGKILL"],
+      [-22, "SIGKILL"],
+      [22, "SIGKILL"],
+    ])
   })
 
   test("#given nothing live #when reaping #then no process is spawned", () => {
@@ -29,7 +45,12 @@ describe("kernel reaper", () => {
     let spawned = 0
 
     // when
-    killKernelTreesSync([], { platform: "win32", spawnSync: () => { spawned++ } })
+    killKernelTreesSync([], {
+      platform: "win32",
+      spawnSync: () => {
+        spawned++
+      },
+    })
 
     // then
     expect(spawned).toBe(0)

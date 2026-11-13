@@ -1,5 +1,10 @@
 import type { AgentToolResult } from "@code-yeongyu/senpi"
-import { createMemberTaskSendTool, createToolArgumentValidator, MemberTaskSendParams, type MemberTaskSendInput } from "@oh-my-opencode/senpi-task/task-operations"
+import {
+  createMemberTaskSendTool,
+  createToolArgumentValidator,
+  MemberTaskSendParams,
+  type MemberTaskSendInput,
+} from "@oh-my-opencode/senpi-task/task-operations"
 import type { ToolDomain } from "@opencode/plugin/effect/tool"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import { Effect } from "effect"
@@ -21,12 +26,30 @@ export interface TeamMemberSendCall {
   readonly messageID: string
   readonly id: string
 }
-type TeamMemberSendDispatch = (call: TeamMemberSendCall, input: MemberTaskSendInput) => Promise<AgentToolResult<unknown>>
+type TeamMemberSendDispatch = (
+  call: TeamMemberSendCall,
+  input: MemberTaskSendInput,
+) => Promise<AgentToolResult<unknown>>
 
 // The ORIGINAL Native description and schema; this template's closure is never invoked.
-const native = createMemberTaskSendTool({ teamRunId: "template", memberName: "template", taskId: "template", members: [],
-  config: { enabled: false, tmux_visualization: false, max_parallel_members: 1, max_members: 1, max_messages_per_run: 1, max_wall_clock_minutes: 1,
-    max_member_turns: 1, message_payload_max_bytes: 1024, recipient_unread_max_bytes: 1024, mailbox_poll_interval_ms: 500 } })
+const native = createMemberTaskSendTool({
+  teamRunId: "template",
+  memberName: "template",
+  taskId: "template",
+  members: [],
+  config: {
+    enabled: false,
+    tmux_visualization: false,
+    max_parallel_members: 1,
+    max_members: 1,
+    max_messages_per_run: 1,
+    max_wall_clock_minutes: 1,
+    max_member_turns: 1,
+    message_payload_max_bytes: 1024,
+    recipient_unread_max_bytes: 1024,
+    mailbox_poll_interval_ms: 500,
+  },
+})
 const validateInput = createToolArgumentValidator(MemberTaskSendParams)
 
 function toToolError(error: unknown): ToolError {
@@ -42,13 +65,19 @@ export function createTeamMemberSendToolInfo(dispatch: TeamMemberSendDispatch): 
     // The SAME original static schema object; decoding is checked below, never assumed.
     input: strictPublicInput(native.parameters),
     options: { codemode: false, permission: TEAM_MEMBER_SEND_PERMISSION },
-    execute: (input, context) => Effect.tryPromise({
-      try: async () => {
-        const params = validateInput(input)
-        const call: TeamMemberSendCall = Object.freeze({ sessionID: context.sessionID, agent: context.agent, messageID: context.messageID, id: context.id })
-        return adaptNativeTaskResult(await dispatch(call, params))
-      },
-      catch: toToolError,
-    }),
+    execute: (input, context) =>
+      Effect.tryPromise({
+        try: async () => {
+          const params = validateInput(input)
+          const call: TeamMemberSendCall = Object.freeze({
+            sessionID: context.sessionID,
+            agent: context.agent,
+            messageID: context.messageID,
+            id: context.id,
+          })
+          return adaptNativeTaskResult(await dispatch(call, params))
+        },
+        catch: toToolError,
+      }),
   }
 }

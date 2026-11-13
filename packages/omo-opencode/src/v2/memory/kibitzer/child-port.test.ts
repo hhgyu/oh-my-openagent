@@ -13,7 +13,7 @@ const roots: string[] = []
 const ports: { close(): Promise<void> }[] = []
 afterEach(async () => {
   // The SQLite journal must be released before its directory can be removed (Windows).
-  await Promise.allSettled(ports.splice(0).map(port => port.close()))
+  await Promise.allSettled(ports.splice(0).map((port) => port.close()))
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
@@ -37,15 +37,46 @@ function fixture() {
       sessions.set(value.id, value)
       return value
     },
-    async get({ sessionID }) { const value = sessions.get(sessionID); if (value === undefined) throw new Error("not found"); return value },
-    async list() { return { data: [...sessions.values()], cursor: {} } },
-    async prompt(input) { events.push("prompt"); prompts.push({ id: input.id, delivery: input.delivery, resume: input.resume, text: input.text }); return { id: String(input.id), sessionID: input.sessionID as Ref["id"] } },
-    async synthetic(input) { events.push("synthetic"); return { id: String(input.id), sessionID: input.sessionID as Ref["id"] } },
-    async interrupt() { events.push("interrupt"); return { interrupted: true } },
-    async wait() { events.push("wait") },
-    async remove({ sessionID }) { events.push("remove"); sessions.delete(sessionID) },
-    async context() { return transcript as never },
-    instructions: { entry: { async list() { return [] }, async put() {}, async remove() {} } },
+    async get({ sessionID }) {
+      const value = sessions.get(sessionID)
+      if (value === undefined) throw new Error("not found")
+      return value
+    },
+    async list() {
+      return { data: [...sessions.values()], cursor: {} }
+    },
+    async prompt(input) {
+      events.push("prompt")
+      prompts.push({ id: input.id, delivery: input.delivery, resume: input.resume, text: input.text })
+      return { id: String(input.id), sessionID: input.sessionID as Ref["id"] }
+    },
+    async synthetic(input) {
+      events.push("synthetic")
+      return { id: String(input.id), sessionID: input.sessionID as Ref["id"] }
+    },
+    async interrupt() {
+      events.push("interrupt")
+      return { interrupted: true }
+    },
+    async wait() {
+      events.push("wait")
+    },
+    async remove({ sessionID }) {
+      events.push("remove")
+      sessions.delete(sessionID)
+    },
+    async context() {
+      return transcript as never
+    },
+    instructions: {
+      entry: {
+        async list() {
+          return []
+        },
+        async put() {},
+        async remove() {},
+      },
+    },
   }
   // Controlled fake contract only: these methods accept the test-owned request signals.
   withJoinedSessionCancellation(api, "controlled-test")
@@ -55,13 +86,35 @@ function fixture() {
   let next = 0
   const port = createKibitzerChildPort({
     host: { app: { name: "opencode", version: "2.2.6", channel: "stable" } as never, session: api },
-    directory, parentSessionId: "root", journalPath, agent: KIBITZER_AGENT_ID, permissions: KIBITZER_PERMISSIONS.map(rule => ({ ...rule })),
-    toolNames: ["read", "grep", "session_entries", "memory", "nudge"], scopes,
-    onIssued: child => { issued.push(child.sessionID) }, onRetired: sessionID => { retired.push(sessionID) },
+    directory,
+    parentSessionId: "root",
+    journalPath,
+    agent: KIBITZER_AGENT_ID,
+    permissions: KIBITZER_PERMISSIONS.map((rule) => ({ ...rule })),
+    toolNames: ["read", "grep", "session_entries", "memory", "nudge"],
+    scopes,
+    onIssued: (child) => {
+      issued.push(child.sessionID)
+    },
+    onRetired: (sessionID) => {
+      retired.push(sessionID)
+    },
     newId: () => `id${++next}`,
   })
   ports.push(port)
-  return { port, events, creates, prompts, sessions, issued, retired, journalPath, setTranscript: (value: unknown[]) => { transcript = value } }
+  return {
+    port,
+    events,
+    creates,
+    prompts,
+    sessions,
+    issued,
+    retired,
+    journalPath,
+    setTranscript: (value: unknown[]) => {
+      transcript = value
+    },
+  }
 }
 
 describe("kibitzer child port over the owned session backend", () => {
@@ -75,7 +128,11 @@ describe("kibitzer child port over the owned session backend", () => {
     expect(f.creates[0]).toMatchObject({ agent: "kibitzer", parentID: "root" })
     expect(f.creates[0]?.permissions).toEqual([
       { action: "*", resource: "*", effect: "deny" },
-      ...["read", "grep", "session_entries", "memory", "nudge"].map(action => ({ action, resource: "*", effect: "allow" })),
+      ...["read", "grep", "session_entries", "memory", "nudge"].map((action) => ({
+        action,
+        resource: "*",
+        effect: "allow",
+      })),
     ])
     expect(f.prompts).toEqual([{ id: "msg_kibitzer_id2", delivery: undefined, resume: true, text: "<kibitzer-seed/>" }])
     expect(f.issued).toEqual([child.sessionID])
@@ -91,13 +148,31 @@ describe("kibitzer child port over the owned session backend", () => {
     await child.followUp("wake-3")
     f.setTranscript([
       { type: "user", text: "seed" },
-      { type: "assistant", time: { created: 1 }, tokens: { input: 900, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } },
-      { type: "assistant", time: { created: Date.now() + 1 }, model: { providerID: "anthropic", id: "haiku" }, tokens: { input: 100, output: 7, reasoning: 0, cache: { read: 20, write: 0 } } },
+      {
+        type: "assistant",
+        time: { created: 1 },
+        tokens: { input: 900, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      {
+        type: "assistant",
+        time: { created: Date.now() + 1 },
+        model: { providerID: "anthropic", id: "haiku" },
+        tokens: { input: 100, output: 7, reasoning: 0, cache: { read: 20, write: 0 } },
+      },
     ])
     const report = await child.waitForIdle()
     // then
-    expect(f.prompts.slice(1).map(prompt => [prompt.delivery, prompt.text])).toEqual([["steer", "wake-2"], ["queue", "wake-3"]])
-    expect(report).toEqual({ status: "completed", model: "anthropic/haiku", usage: { input: 100, output: 7, cacheRead: 20, cacheWrite: 0 }, contextTokens: 120, userTexts: ["seed"] })
+    expect(f.prompts.slice(1).map((prompt) => [prompt.delivery, prompt.text])).toEqual([
+      ["steer", "wake-2"],
+      ["queue", "wake-3"],
+    ])
+    expect(report).toEqual({
+      status: "completed",
+      model: "anthropic/haiku",
+      usage: { input: 100, output: 7, cacheRead: 20, cacheWrite: 0 },
+      contextTokens: 120,
+      userTexts: ["seed"],
+    })
     await f.port.close()
   })
 

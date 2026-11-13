@@ -18,15 +18,18 @@ export const FACTS_PERMISSIONS: readonly PermissionRule[] = Object.freeze([
   { action: FACTS_RECORD_TOOL_NAME, resource: "*", effect: "allow" },
 ])
 
-export async function registerFactsAgent(domain: Pick<AgentDomain, "transform">, persona: string): Promise<Registration> {
-  return domain.transform(editor => {
-    editor.update(FACTS_AGENT_ID, agent => {
+export async function registerFactsAgent(
+  domain: Pick<AgentDomain, "transform">,
+  persona: string,
+): Promise<Registration> {
+  return domain.transform((editor) => {
+    editor.update(FACTS_AGENT_ID, (agent) => {
       agent.name = Agent.Name.make("Facts Extractor")
       agent.description = "Extracts durable facts from a settled conversation; records them only through record_fact."
       agent.mode = "subagent"
       agent.hidden = true
       agent.system = persona
-      agent.permissions = FACTS_PERMISSIONS.map(rule => ({ ...rule }))
+      agent.permissions = FACTS_PERMISSIONS.map((rule) => ({ ...rule }))
     })
   })
 }

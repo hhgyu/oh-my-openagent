@@ -3,6 +3,14 @@
 // with it the Loro wasm.
 
 export {
-  approveDevice, deviceKeyringFromMaterial, enableSync, GitSpaceConfig, joinAccount, listRemotes, openAccountSession, openDeviceSync, resolveSpace,
+  approveDevice,
+  deviceKeyringFromMaterial,
+  enableSync,
+  GitSpaceConfig,
+  joinAccount,
+  listRemotes,
+  openAccountSession,
+  openDeviceSync,
+  resolveSpace,
 } from "@oh-my-opencode/memory-core/sync-engine"
 export { failureRpcSync } from "./status-copy"

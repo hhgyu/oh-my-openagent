@@ -29,7 +29,10 @@ const memoryStatusRpc = {
 
 /** The slice of the host RPC domain this definition needs (the generic `register` satisfies it). */
 export interface MemoryStatusRpcPort {
-  register(definition: typeof memoryStatusRpc, handlers: RpcHandlers<typeof memoryStatusRpc>): Promise<RpcRegistration<typeof memoryStatusRpc>>
+  register(
+    definition: typeof memoryStatusRpc,
+    handlers: RpcHandlers<typeof memoryStatusRpc>,
+  ): Promise<RpcRegistration<typeof memoryStatusRpc>>
 }
 
 export interface MemoryStatusRpc {
@@ -64,18 +67,22 @@ export function createMemoryStatusRpc(deps: {
     if (closed || events === undefined || bound === undefined) return
     const emitter = events
     const previous = chains.get(sessionID) ?? Promise.resolve()
-    const next = previous.then(async () => {
-      if (closed) return
-      const current = await snapshot(bound)
-      const fingerprint = JSON.stringify(current)
-      if (closed || published.get(sessionID) === fingerprint) return
-      published.set(sessionID, fingerprint)
-      await emitter.emit(MEMORY_UPDATED_EVENT, { ...current })
-    }).catch((error: unknown) => {
-      deps.logger.warn("memory status update skipped", { sessionID, error: describeError(error) })
-    })
+    const next = previous
+      .then(async () => {
+        if (closed) return
+        const current = await snapshot(bound)
+        const fingerprint = JSON.stringify(current)
+        if (closed || published.get(sessionID) === fingerprint) return
+        published.set(sessionID, fingerprint)
+        await emitter.emit(MEMORY_UPDATED_EVENT, { ...current })
+      })
+      .catch((error: unknown) => {
+        deps.logger.warn("memory status update skipped", { sessionID, error: describeError(error) })
+      })
     chains.set(sessionID, next)
-    void next.finally(() => { if (chains.get(sessionID) === next) chains.delete(sessionID) })
+    void next.finally(() => {
+      if (chains.get(sessionID) === next) chains.delete(sessionID)
+    })
   }
 
   return {
@@ -98,7 +105,7 @@ export function createMemoryStatusRpc(deps: {
         status: async ({ sessionID }) => {
           const bound = sessions.get(sessionID)
           if (closed || bound === undefined) return { kind: "unavailable", reason: "No bound memory session." }
-          return { ...await snapshot(bound) }
+          return { ...(await snapshot(bound)) }
         },
       })
       events = registration.events

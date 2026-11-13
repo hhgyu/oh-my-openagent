@@ -10,9 +10,21 @@
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import {
-  FactsFailureStore, FactsQueue, getProcessStartIdentity, GitMemoryRepo, LockContentionError, readFactsPeoplePayload,
-  selectCappedFactsBatch, selectLaunchable, serializeFactsPayload,
-  type ConsentExchange, type FactsFailuresFile, type FactsPayload, type FactsPeopleRouting, type FactsQueueEntry, type MemoryIdentityPaths,
+  FactsFailureStore,
+  FactsQueue,
+  getProcessStartIdentity,
+  GitMemoryRepo,
+  LockContentionError,
+  readFactsPeoplePayload,
+  selectCappedFactsBatch,
+  selectLaunchable,
+  serializeFactsPayload,
+  type ConsentExchange,
+  type FactsFailuresFile,
+  type FactsPayload,
+  type FactsPeopleRouting,
+  type FactsQueueEntry,
+  type MemoryIdentityPaths,
 } from "@oh-my-opencode/memory-core"
 import { pruneTerminalFactsRuns, sweepFactsRunTombstones } from "@oh-my-opencode/memory-core/facts-run-prune"
 import { writeFile } from "@oh-my-opencode/memory-core/fs"
@@ -24,8 +36,18 @@ import { payloadExchanges } from "./facts-record-tool"
 import { recoverFactsRuns } from "./facts-recovery"
 import { memoryWriterLock, openMemoryRepo } from "./memory-repo-open"
 import {
-  createFactsTerminal, FACTS_EXTRACTION_FILE, FACTS_PAYLOAD_FILE, outcomePath, queueTargets, readRunJson, reserveFactsRunDir, writeRunJson,
-  ledgerPath, type FactsRunLedger, type FactsRunOutcome, type FactsRunTerminal,
+  createFactsTerminal,
+  FACTS_EXTRACTION_FILE,
+  FACTS_PAYLOAD_FILE,
+  outcomePath,
+  queueTargets,
+  readRunJson,
+  reserveFactsRunDir,
+  writeRunJson,
+  ledgerPath,
+  type FactsRunLedger,
+  type FactsRunOutcome,
+  type FactsRunTerminal,
 } from "./facts-run-store"
 
 type FactsLaunchResult =
@@ -81,7 +103,9 @@ function factsPrompt(payloadText: string): string {
 export function createFactsRunner(deps: FactsRunnerDeps) {
   const queue = new FactsQueue({ identityPaths: deps.paths, now: deps.now })
   const failures = new FactsFailureStore({ identityPaths: deps.paths, now: deps.now })
-  const warn = (message: string, details?: Record<string, unknown>): void => { deps.logger.warn(message, { identity: deps.identity, ...details }) }
+  const warn = (message: string, details?: Record<string, unknown>): void => {
+    deps.logger.warn(message, { identity: deps.identity, ...details })
+  }
   const terminal = createFactsTerminal({ queue, failures, now: deps.now, warn })
   let active: Promise<FactsLaunchResult> | undefined
   let activeRunId: string | undefined
@@ -92,32 +116,56 @@ export function createFactsRunner(deps: FactsRunnerDeps) {
     return new GitMemoryRepo({ dir: deps.paths.repo, agentId: deps.identity })
   }
 
-  const finalizeDeps = () => ({ repo: repo(), identity: deps.identity, locksDir: deps.paths.locks, terminal, people: deps.people() })
+  const finalizeDeps = () => ({
+    repo: repo(),
+    identity: deps.identity,
+    locksDir: deps.paths.locks,
+    terminal,
+    people: deps.people(),
+  })
 
   /** Native retention (P-15): keep the last 20 terminal runs under 128 MiB; a failure only warns. */
   async function prune(): Promise<void> {
     try {
-      await pruneTerminalFactsRuns({ factsDir: deps.paths.facts, locksDir: deps.paths.locks, warn: (message, fields) => { warn(message, fields) } })
+      await pruneTerminalFactsRuns({
+        factsDir: deps.paths.facts,
+        locksDir: deps.paths.locks,
+        warn: (message, fields) => {
+          warn(message, fields)
+        },
+      })
     } catch (error) {
       warn("facts run retention pruning failed", { error: describeError(error) })
     }
   }
 
   async function reconcile(): Promise<boolean> {
-    await deps.reclaimChildren?.().catch((error: unknown) => { warn("stranded facts children were not reclaimed", { error: describeError(error) }) })
-    await sweepFactsRunTombstones({ factsDir: deps.paths.facts, warn: (message, fields) => { warn(message, fields) } })
+    await deps.reclaimChildren?.().catch((error: unknown) => {
+      warn("stranded facts children were not reclaimed", { error: describeError(error) })
+    })
+    await sweepFactsRunTombstones({
+      factsDir: deps.paths.facts,
+      warn: (message, fields) => {
+        warn(message, fields)
+      },
+    })
     const active = await recoverFactsRuns({
-      factsDir: deps.paths.facts, queue, terminal, warn,
-      isOwnRun: runId => runId === activeRunId,
-      isForeignLive: ledger => ledger.owner !== deps.owner && deps.ownerAlive(ledger),
-      finalize: runDir => finalizeFactsRun(finalizeDeps(), runDir),
+      factsDir: deps.paths.facts,
+      queue,
+      terminal,
+      warn,
+      isOwnRun: (runId) => runId === activeRunId,
+      isForeignLive: (ledger) => ledger.owner !== deps.owner && deps.ownerAlive(ledger),
+      finalize: (runDir) => finalizeFactsRun(finalizeDeps(), runDir),
     })
     await prune()
     return active
   }
 
   async function releaseAll(entries: readonly FactsQueueEntry[], claimId: string): Promise<void> {
-    await queue.releaseClaim(entries, claimId).catch((error: unknown) => { warn("facts claim release failed", { error: describeError(error) }) })
+    await queue.releaseClaim(entries, claimId).catch((error: unknown) => {
+      warn("facts claim release failed", { error: describeError(error) })
+    })
   }
 
   async function launchOnce(request: FactsLaunchRequest): Promise<FactsLaunchResult> {
@@ -129,9 +177,12 @@ export function createFactsRunner(deps: FactsRunnerDeps) {
     try {
       ledgerFile = await failures.readFailures()
     } catch (error) {
-      warn(error instanceof LockContentionError
-        ? "facts failure ledger is busy; launch deferred"
-        : "facts failure ledger is unreadable; refusing to launch", { error: describeError(error) })
+      warn(
+        error instanceof LockContentionError
+          ? "facts failure ledger is busy; launch deferred"
+          : "facts failure ledger is unreadable; refusing to launch",
+        { error: describeError(error) },
+      )
       return { status: "skipped" }
     }
     const selection = selectLaunchable(pending, ledgerFile, deps.now())
@@ -152,16 +203,27 @@ export function createFactsRunner(deps: FactsRunnerDeps) {
     let payload: FactsPayload
     try {
       // A brand-new identity is seeded only under the `memory-write` lock, like reflection and the memory tool.
-      const writerLock = memoryWriterLock(deps, `memory facts (${deps.identity})`, deps.lockWaitTimeoutMs === undefined ? {} : { waitTimeoutMs: deps.lockWaitTimeoutMs })
+      const writerLock = memoryWriterLock(
+        deps,
+        `memory facts (${deps.identity})`,
+        deps.lockWaitTimeoutMs === undefined ? {} : { waitTimeoutMs: deps.lockWaitTimeoutMs },
+      )
       const memoryRepo = await openMemoryRepo(deps, writerLock)
       const people = await readFactsPeoplePayload(memoryRepo.dir)
-      const envelope = { version: 1, identity: deps.identity, today: deps.now().toISOString().slice(0, 10), ...people } as const
+      const envelope = {
+        version: 1,
+        identity: deps.identity,
+        today: deps.now().toISOString().slice(0, 10),
+        ...people,
+      } as const
       const capped = selectCappedFactsBatch({ entries, envelope, now: deps.now() })
       const refused = capped.envelopeOversized ? entries : capped.oversized
       if (refused.length > 0) {
         await failures.recordFailure({
-          targets: queueTargets(refused), failureId: `preflight-${randomUUID()}`,
-          reason: capped.envelopeOversized ? "payload_envelope_oversize" : "payload_entry_oversize", detail: "facts payload exceeds the extractor input cap",
+          targets: queueTargets(refused),
+          failureId: `preflight-${randomUUID()}`,
+          reason: capped.envelopeOversized ? "payload_envelope_oversize" : "payload_entry_oversize",
+          detail: "facts payload exceeds the extractor input cap",
         })
       }
       batch = capped.envelopeOversized ? [] : capped.selected
@@ -170,7 +232,10 @@ export function createFactsRunner(deps: FactsRunnerDeps) {
       await releaseAll(entries, claimId)
       throw error
     }
-    await releaseAll(entries.filter(entry => !batch.includes(entry)), claimId)
+    await releaseAll(
+      entries.filter((entry) => !batch.includes(entry)),
+      claimId,
+    )
     if (batch.length === 0) return { status: "empty" }
     try {
       return await runBatch(request, resolution, batch, payload, claimId)
@@ -179,13 +244,27 @@ export function createFactsRunner(deps: FactsRunnerDeps) {
     }
   }
 
-  async function runBatch(request: FactsLaunchRequest, resolution: Extract<FactsModelResolution, { kind: "resolved" }>, batch: readonly FactsQueueEntry[], payload: FactsPayload, claimId: string): Promise<FactsLaunchResult> {
+  async function runBatch(
+    request: FactsLaunchRequest,
+    resolution: Extract<FactsModelResolution, { kind: "resolved" }>,
+    batch: readonly FactsQueueEntry[],
+    payload: FactsPayload,
+    claimId: string,
+  ): Promise<FactsLaunchResult> {
     const startedAt = deps.now()
     const runDir = await reserveFactsRunDir({
-      factsDir: deps.paths.facts, locksDir: deps.paths.locks, entries: batch,
+      factsDir: deps.paths.facts,
+      locksDir: deps.paths.locks,
+      entries: batch,
       ledger: {
-        startedAt: startedAt.toISOString(), hardDeadlineAt: startedAt.getTime() + deps.deadlineMs * 2, batchId: randomUUID(), claimId,
-        owner: deps.owner, pid: process.pid, processStart: await getProcessStartIdentity(process.pid), model: resolution.model,
+        startedAt: startedAt.toISOString(),
+        hardDeadlineAt: startedAt.getTime() + deps.deadlineMs * 2,
+        batchId: randomUUID(),
+        claimId,
+        owner: deps.owner,
+        pid: process.pid,
+        processStart: await getProcessStartIdentity(process.pid),
+        model: resolution.model,
       },
     })
     if (runDir === undefined) return { status: "active" }
@@ -198,11 +277,23 @@ export function createFactsRunner(deps: FactsRunnerDeps) {
       await writeFile(extractionPath, "", { encoding: "utf8", mode: 0o600 })
       let result: FactsChildResult = { status: "failed", detail: "no facts model candidate launched" }
       for (const model of [resolution.model, ...resolution.fallbacks]) {
-        if (cancelled) { result = { status: "cancelled" }; break }
+        if (cancelled) {
+          result = { status: "cancelled" }
+          break
+        }
         try {
           result = await deps.launchChild({
-            runId: ledger.runId, runDir, parentSessionId: request.parentSessionId, prompt: factsPrompt(payloadText), model, extractionPath,
-            exchanges: payloadExchanges(payload), deadlineMs: deps.deadlineMs, onCancel: stop => { cancel = stop },
+            runId: ledger.runId,
+            runDir,
+            parentSessionId: request.parentSessionId,
+            prompt: factsPrompt(payloadText),
+            model,
+            extractionPath,
+            exchanges: payloadExchanges(payload),
+            deadlineMs: deps.deadlineMs,
+            onCancel: (stop) => {
+              cancel = stop
+            },
           })
           break
         } catch (error) {
@@ -215,7 +306,13 @@ export function createFactsRunner(deps: FactsRunnerDeps) {
         await terminal.abandon(runDir, ledger, "session_shutdown")
         return { status: "cancelled", runId: ledger.runId }
       }
-      const outcome: FactsRunOutcome = { version: 1, runId: ledger.runId, status: result.status, ...(result.detail === undefined ? {} : { detail: result.detail }), finishedAt: deps.now().toISOString() }
+      const outcome: FactsRunOutcome = {
+        version: 1,
+        runId: ledger.runId,
+        status: result.status,
+        ...(result.detail === undefined ? {} : { detail: result.detail }),
+        finishedAt: deps.now().toISOString(),
+      }
       await writeRunJson(outcomePath(runDir), outcome)
       const decided = await finalizeFactsRun(finalizeDeps(), runDir)
       await prune()
@@ -229,7 +326,8 @@ export function createFactsRunner(deps: FactsRunnerDeps) {
   async function drain(request: FactsLaunchRequest): Promise<FactsLaunchResult> {
     const first = await launchOnce(request)
     let latest = first
-    while ((latest.status === "committed" || latest.status === "no_facts") && !cancelled) latest = await launchOnce(request)
+    while ((latest.status === "committed" || latest.status === "no_facts") && !cancelled)
+      latest = await launchOnce(request)
     return first
   }
 

@@ -3,7 +3,13 @@ import { DAG_VERIFICATION_DIRECTIVE } from "@oh-my-opencode/senpi-task"
 import type { DagRunRecordV1 } from "@oh-my-opencode/senpi-task/dag"
 
 /** Task statuses after which a node's child does nothing more; the engine folds each of them. */
-export const TERMINAL_TASK_STATUSES: ReadonlySet<string> = new Set(["completed", "error", "interrupted", "lost", "cancelled"])
+export const TERMINAL_TASK_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "error",
+  "interrupted",
+  "lost",
+  "cancelled",
+])
 const ACTIVE_NODE: ReadonlySet<string> = new Set(["scheduled", "running"])
 const FAILED_NODE: ReadonlySet<string> = new Set(["failed", "cancelled", "skipped"])
 
@@ -36,18 +42,23 @@ export interface DagWakeDecision {
  * terminal wake is keyed by the run generation, which a `retry` or `amend` of a settled run advances
  * (`dag.run.resumed`), so each terminal transition gets its own id instead of colliding with the
  * earlier finish. */
-export function dagWakeInputId(runId: string, slot: { readonly settled: readonly DagWakeSettle[] } | { readonly terminalGeneration: number }): string {
-  const key = "terminalGeneration" in slot ? `dag:${runId}:terminal:${slot.terminalGeneration}`
-    : `dag:${runId}:frontier:${JSON.stringify(canonicalSettles(slot.settled).map(entry => [entry.nodeId, entry.taskId, entry.runEpoch, entry.status]))}`
+export function dagWakeInputId(
+  runId: string,
+  slot: { readonly settled: readonly DagWakeSettle[] } | { readonly terminalGeneration: number },
+): string {
+  const key =
+    "terminalGeneration" in slot
+      ? `dag:${runId}:terminal:${slot.terminalGeneration}`
+      : `dag:${runId}:frontier:${JSON.stringify(canonicalSettles(slot.settled).map((entry) => [entry.nodeId, entry.taskId, entry.runEpoch, entry.status]))}`
   return "msg_omo_dag_" + createHash("sha256").update(key).digest("hex").slice(0, 40)
 }
 
 function canonicalSettles(settled: readonly DagWakeSettle[]): readonly DagWakeSettle[] {
-  return settled.toSorted((left, right) => left.nodeId < right.nodeId ? -1 : left.nodeId > right.nodeId ? 1 : 0)
+  return settled.toSorted((left, right) => (left.nodeId < right.nodeId ? -1 : left.nodeId > right.nodeId ? 1 : 0))
 }
 
 function quoted(ids: readonly string[]): string {
-  return ids.length === 0 ? "none" : ids.map(id => `"${id}"`).join(", ")
+  return ids.length === 0 ? "none" : ids.map((id) => `"${id}"`).join(", ")
 }
 
 /** The model's way back in. Detached runs advance only inside a `workflow` call (parity P-01). */
@@ -59,28 +70,48 @@ function nextCall(runId: string): string {
  * persisted task status. A wake is due only when an admitted node's child settled after the last call
  * folded the record: that settle is news nobody has acted on. `finished` means nothing is running and
  * nothing can start, so the next call only records the run's end. Returns undefined when no wake is due. */
-export function projectDagWake(record: DagRunRecordV1, childState: (taskId: string) => DagWakeChild | undefined): DagWakeDecision | undefined {
-  const projected = new Map<string, string>(record.nodes.map(node => [node.id, node.state]))
-  const found: DagWakeSettle[] = [], running: string[] = []
+export function projectDagWake(
+  record: DagRunRecordV1,
+  childState: (taskId: string) => DagWakeChild | undefined,
+): DagWakeDecision | undefined {
+  const projected = new Map<string, string>(record.nodes.map((node) => [node.id, node.state]))
+  const found: DagWakeSettle[] = [],
+    running: string[] = []
   for (const node of record.nodes) {
     if (!ACTIVE_NODE.has(node.state)) continue
     const child = node.taskId === undefined ? undefined : childState(node.taskId)
-    if (node.taskId === undefined || child === undefined || !TERMINAL_TASK_STATUSES.has(child.status)) { running.push(node.id); continue }
+    if (node.taskId === undefined || child === undefined || !TERMINAL_TASK_STATUSES.has(child.status)) {
+      running.push(node.id)
+      continue
+    }
     projected.set(node.id, child.status === "completed" ? "completed" : "failed")
     found.push({ nodeId: node.id, taskId: node.taskId, runEpoch: child.runEpoch, status: child.status })
   }
   if (found.length === 0) return undefined
   const settled = canonicalSettles(found)
-  const ready = record.nodes.filter(node => (node.state === "pending" || node.state === "blocked") &&
-    node.dependsOn.every(dependency => projected.get(dependency) === "completed")).map(node => node.id)
-  const head = `Workflow "${record.name}" (run ${record.runId}): node(s) ${found.map(entry => `"${entry.nodeId}" (${entry.status})`).join(", ")} finished while no workflow call was in progress.`
+  const ready = record.nodes
+    .filter(
+      (node) =>
+        (node.state === "pending" || node.state === "blocked") &&
+        node.dependsOn.every((dependency) => projected.get(dependency) === "completed"),
+    )
+    .map((node) => node.id)
+  const head = `Workflow "${record.name}" (run ${record.runId}): node(s) ${found.map((entry) => `"${entry.nodeId}" (${entry.status})`).join(", ")} finished while no workflow call was in progress.`
   if (running.length > 0 || ready.length > 0) {
-    return { kind: "frontier", settled, text: `${head} Ready to start: ${quoted(ready)}. Still running: ${quoted(running)}. ${nextCall(record.runId)} (detach=true admits the ready nodes and returns at once; detach=false blocks until the run settles).\n\n${DAG_VERIFICATION_DIRECTIVE}` }
+    return {
+      kind: "frontier",
+      settled,
+      text: `${head} Ready to start: ${quoted(ready)}. Still running: ${quoted(running)}. ${nextCall(record.runId)} (detach=true admits the ready nodes and returns at once; detach=false blocks until the run settles).\n\n${DAG_VERIFICATION_DIRECTIVE}`,
+    }
   }
   const states = [...projected.values()]
-  const completed = states.filter(state => state === "completed").length
-  const failed = states.filter(state => FAILED_NODE.has(state)).length
+  const completed = states.filter((state) => state === "completed").length
+  const failed = states.filter((state) => FAILED_NODE.has(state)).length
   const unstarted = states.length - completed - failed
   const outcome = failed + unstarted > 0 ? "failed" : "completed"
-  return { kind: "finished", settled, text: `${head} No node is running and none can start: the run is ${outcome} (${completed} completed, ${failed} failed, cancelled or skipped, ${unstarted} never started; ${states.length} total). ${nextCall(record.runId)} to record and read its final result.\n\n${DAG_VERIFICATION_DIRECTIVE}` }
+  return {
+    kind: "finished",
+    settled,
+    text: `${head} No node is running and none can start: the run is ${outcome} (${completed} completed, ${failed} failed, cancelled or skipped, ${unstarted} never started; ${states.length} total). ${nextCall(record.runId)} to record and read its final result.\n\n${DAG_VERIFICATION_DIRECTIVE}`,
+  }
 }

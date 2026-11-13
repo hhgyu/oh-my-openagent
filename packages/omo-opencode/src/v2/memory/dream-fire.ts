@@ -9,11 +9,27 @@
 //      is handed to `launch` (the reflection runner, which enforces `targetDoc`).
 // Senpi's drain signal and deadline are not ported: V2 has no shutdown origin (parity P-29).
 
-import { TranscriptJournal, type CapturedConversation, type DreamOrigin, type ReflectionReservationStore, type ReservedRun } from "@oh-my-opencode/memory-core"
+import {
+  TranscriptJournal,
+  type CapturedConversation,
+  type DreamOrigin,
+  type ReflectionReservationStore,
+  type ReservedRun,
+} from "@oh-my-opencode/memory-core"
 import { join } from "node:path"
 import type { BoundMemorySession } from "./binding"
-import { evaluateDreamGates, readLastDreamAtMs, type DreamGateRejection, type DreamTriggerSettings } from "@oh-my-opencode/memory-core/dream-gates"
-import { computeUnreflectedVolumeFast, loadConversations, selectLoadedConversations, type DreamSelectorOptions } from "@oh-my-opencode/memory-core/dream-selection"
+import {
+  evaluateDreamGates,
+  readLastDreamAtMs,
+  type DreamGateRejection,
+  type DreamTriggerSettings,
+} from "@oh-my-opencode/memory-core/dream-gates"
+import {
+  computeUnreflectedVolumeFast,
+  loadConversations,
+  selectLoadedConversations,
+  type DreamSelectorOptions,
+} from "@oh-my-opencode/memory-core/dream-selection"
 
 /** The origins a V2 host can raise: OpenCode 2 has no shutdown event (parity P-29). */
 export type V2DreamOrigin = Exclude<DreamOrigin, "shutdown">
@@ -26,7 +42,10 @@ export interface DreamRequest {
 
 export type DreamFireOutcome =
   | { readonly fired: true; readonly runId: string; readonly status: "active" | "pending" }
-  | { readonly fired: false; readonly rejection: DreamGateRejection | "no_unreflected_content" | "no_session" | "parked" }
+  | {
+      readonly fired: false
+      readonly rejection: DreamGateRejection | "no_unreflected_content" | "no_session" | "parked"
+    }
 
 interface DreamFireInput {
   readonly bound: BoundMemorySession
@@ -43,31 +62,47 @@ export async function fireDream(input: DreamFireInput): Promise<DreamFireOutcome
   const { bound, origin, settings, request, now } = input
   const transcriptsDir = bound.paths.transcripts
   const selector: DreamSelectorOptions = {
-    transcriptsDir, currentConversationId: bound.sessionID, autoSelectMax: settings.autoSelectMax, autoSelectMaxBytes: settings.autoSelectMaxChars,
+    transcriptsDir,
+    currentConversationId: bound.sessionID,
+    autoSelectMax: settings.autoSelectMax,
+    autoSelectMaxBytes: settings.autoSelectMaxChars,
     now: () => new Date(now()),
   }
   const decision = await evaluateDreamGates(origin, settings, {
     nowMs: now(),
     lastDreamAtMs: () => readLastDreamAtMs(bound.paths.runtime),
-    unreflectedBytes: () => origin === "pressure" || request.conversationIds !== undefined ? Promise.resolve(0) : computeUnreflectedVolumeFast(selector),
+    unreflectedBytes: () =>
+      origin === "pressure" || request.conversationIds !== undefined
+        ? Promise.resolve(0)
+        : computeUnreflectedVolumeFast(selector),
   })
   if (!decision.allowed) return { fired: false, rejection: decision.rejection }
-  const selected = origin === "pressure"
-    ? []
-    : request.conversationIds ?? selectLoadedConversations(
-      await loadConversations(transcriptsDir, Math.max(settings.autoSelectMax * 4, 8)), selector, request.focus === undefined ? {} : { focus: request.focus },
-    ).conversationIds
+  const selected =
+    origin === "pressure"
+      ? []
+      : (request.conversationIds ??
+        selectLoadedConversations(
+          await loadConversations(transcriptsDir, Math.max(settings.autoSelectMax * 4, 8)),
+          selector,
+          request.focus === undefined ? {} : { focus: request.focus },
+        ).conversationIds)
   const conversationIds: string[] = []
   const snapshots: CapturedConversation[] = []
   for (const conversationId of selected) {
-    const snapshot = await new TranscriptJournal({ journalDir: join(transcriptsDir, conversationId) }).captureReflectionSnapshot()
+    const snapshot = await new TranscriptJournal({
+      journalDir: join(transcriptsDir, conversationId),
+    }).captureReflectionSnapshot()
     if (snapshot === null) continue
     conversationIds.push(conversationId)
     snapshots.push({ conversationId, snapshot })
   }
-  if (origin !== "pressure" && conversationIds.length === 0) return { fired: false, rejection: "no_unreflected_content" }
+  if (origin !== "pressure" && conversationIds.length === 0)
+    return { fired: false, rejection: "no_unreflected_content" }
   const result = await input.store.tryReserve({
-    trigger: "dream", origin, conversationIds, snapshots,
+    trigger: "dream",
+    origin,
+    conversationIds,
+    snapshots,
     ...(request.focus === undefined ? {} : { focus: request.focus }),
     ...(request.targetDoc === undefined ? {} : { targetDoc: request.targetDoc }),
   })
