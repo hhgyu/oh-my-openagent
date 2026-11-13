@@ -129,6 +129,33 @@ it("preserves runtime fullToolPrompt contributions separately from model-visible
   expect(diet).not.toContain("FULL_SHARED_SNIPPET")
 })
 
+it("renders the Native search-grounding wording when provider-native search is available without web_search", async () => {
+  // given
+  const port = await createPromptPresetPort()
+  const native = await import("@code-yeongyu/senpi/prompt-presets")
+  const withoutSearch: PromptOptions = { ...options, selectedTools: ["read"] }
+  const withNativeSearch: PromptOptions = { ...withoutSearch, nativeSearchAvailable: true }
+  // when
+  const plain = port.buildPreset("claude-haiku-5-5", withoutSearch).prompt
+  const grounded = port.buildPreset("claude-haiku-5-5", withNativeSearch).prompt
+  // then
+  expect(grounded).toBe(native.buildPreset("claude-haiku-5-5", withNativeSearch).prompt)
+  expect(grounded).not.toBe(plain)
+  expect(
+    port.render({ model: { provider: "anthropic", id: "claude-haiku-5.5" }, settings: { promptPreset: "auto" }, options: withNativeSearch })
+      .prompt,
+  ).toBe(grounded)
+})
+
+it("resolves the Fable 5.2 preset Native ships", async () => {
+  // given
+  const port = await createPromptPresetPort()
+  // when
+  const name = port.resolvePresetName({ providerID: "anthropic", modelID: "claude-fable-5.2" })
+  // then
+  expect(name).toBe("claude-fable-5-2")
+})
+
 it("loads only the public preset graph, without warming engine/session/settings runtime", async () => {
   const script = `const Module = await import('node:module');
     let engineRootLoads = 0;
