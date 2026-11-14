@@ -117,6 +117,23 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
             tool: module.createEvalTaskHostTool,
           }))
         : undefined
+    if (context.options?.["omo-ulw-execute-enabled"] !== false) {
+      const { registerUlwExecuteContinuation } = await import("./ulw-execute")
+      cleanups.push(await registerUlwExecuteContinuation(context))
+    }
+    // Native's goal trio (create_goal / update_goal / get_goal) over the senpi engine's goal store.
+    const goal = context.options?.["omo-goal-enabled"] !== false ? await import("./goal") : undefined
+    if (goal) {
+      // A goal engine that cannot load (another installed senpi version) leaves only the goal tools off.
+      const disposeGoal = await goal.registerGoal(context).catch((error: unknown) => {
+        console.warn(
+          "[oh-my-openagent/v2] the Native goal tools are off:",
+          error instanceof Error ? error.message : String(error),
+        )
+        return undefined
+      })
+      if (disposeGoal) cleanups.push(disposeGoal)
+    }
     if (context.options?.["omo-native-eval-enabled"] !== false) {
       // The Native thread tools are eval-only: they exist only as owned host tools of an eval cell.
       const threads = nativeThreadsEnabled(context.options)
@@ -129,11 +146,23 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
       // Native `eval`, on by default like Native. Registers the tool only; senpi-codemode itself
       // is imported on the first call.
       const { registerNativeEval } = await import("./tools/native-eval")
+      const directory = context.location.directory
       const ownedTools = [...(evalTask ? [evalTask.tool(evalTask.port)] : []), ...(threads?.tools ?? [])]
-      cleanups.push(await registerNativeEval(context, ownedTools.length > 0 ? { ownedTools } : {}))
+      cleanups.push(
+        await registerNativeEval(context, {
+          ...(ownedTools.length > 0 && { ownedTools }),
+          ...(goal && {
+            goalStoreFile: (sessionID: string) => goal.goalStoreFile(goal.goalStoreRef(directory, sessionID)),
+          }),
+        }),
+      )
       if (context.options?.["omo-ulw-loop-enabled"] !== false) {
         const { registerUlwLoop } = await import("./ulw-loop")
-        cleanups.push(await registerUlwLoop(context))
+        const { findContinuableWork } = await import("@oh-my-opencode/boulder-state")
+        const { ulwExecuteSessionKey } = await import("./ulw-execute")
+        // Native's loop defers to the ulw-execute continuation while the session has continuable boulder work.
+        const deferTo = (sessionID: string) => findContinuableWork(directory, ulwExecuteSessionKey(sessionID)) !== null
+        cleanups.push(await registerUlwLoop(context, { deferTo }))
       }
     }
     if (owners.nativeTask) {

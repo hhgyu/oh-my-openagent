@@ -7,11 +7,12 @@ import {
 import { registerUlwLoop } from "./component"
 import { activeLoop, fakeUlwLoopHost, NO_LOOP } from "./test-support"
 
-function setup(read: (sessionID: string) => ClassifiedLoopStatus) {
+function setup(read: (sessionID: string) => ClassifiedLoopStatus, deferTo?: (sessionID: string) => boolean) {
   const fake = fakeUlwLoopHost()
   const reads: string[] = []
   const registered = registerUlwLoop(fake.host, {
     skillFile: null,
+    ...(deferTo && { deferTo }),
     readStatus: async (_cwd, sessionID) => {
       reads.push(sessionID)
       return read(sessionID)
@@ -99,6 +100,24 @@ describe("V2 ulw-loop component", () => {
     expect(idleText).toBe("first")
     expect(runningText).toBe(`steer\n\n${ULW_LOOP_STEERING_REMINDER}`)
     expect(settledText).toBe("after")
+    await dispose()
+  })
+
+  test("#given continuable ulw-execute work for the session #when it settles #then the loop defers to the ulw-execute continuation and reads no status", async () => {
+    // given
+    const { idle, synthetic, reads, registered } = setup(
+      () => activeLoop("plan-1"),
+      (sessionID) => sessionID === "ses_a",
+    )
+    const dispose = await registered
+
+    // when
+    await idle("ses_a")
+    await idle("ses_b")
+
+    // then
+    expect(reads).toEqual(["ses_b"])
+    expect(synthetic.map((input) => input["sessionID"])).toEqual(["ses_b"])
     await dispose()
   })
 

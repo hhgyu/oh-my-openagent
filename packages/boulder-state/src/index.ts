@@ -6,8 +6,16 @@ export {
   NOTEPAD_DIR,
   PROMETHEUS_PLANS_DIR,
 } from "./constants"
-export { getPlanChecklist, isStructuredTaskRow, parsePlanChecklist } from "./plan-checklist"
+export { isStructuredTaskRow, parsePlanChecklist } from "./plan-checklist"
 export { readCurrentTopLevelTask } from "./top-level-task"
+export {
+  findContinuableWork,
+  renderUlwExecuteContinuation,
+  ULW_EXECUTE_CONTINUATION_LIMIT,
+  ULW_EXECUTE_STEERING_REMINDER,
+  ulwExecuteContinuationSignature,
+} from "./ulw-execute-continuation"
+export type { ContinuableWork, FindContinuableWorkOptions } from "./ulw-execute-continuation"
 export {
   addBoulderWork,
   appendSessionId,
