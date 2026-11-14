@@ -379,7 +379,8 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
         try {
           if (await lifetime.track(access.restoreAfterReload(id))) restored.push(id)
         } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error)
+          // A plain permission rejection carries no message.
+          const reason = (error instanceof Error ? error.message : String(error)).trim() || "the revival was refused"
           held.push({ taskID: id, runEpoch: record.notification.run_epoch, reason })
           console.warn("[oh-my-openagent/v2] left-behind task child restore held", id, reason)
         }
