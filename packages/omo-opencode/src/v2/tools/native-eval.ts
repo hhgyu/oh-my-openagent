@@ -15,7 +15,8 @@ import type { Info, Result, ToolContext } from "@opencode/plugin/promise/tool"
 import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { AGENT_DEFINITIONS } from "../agents/definitions"
 import type { OwnedEvalHostTool } from "./codemode-host-tools"
 import type { ProcessEvents } from "./codemode-session-registry"
@@ -74,6 +75,8 @@ export interface NativeEvalOptions {
   readonly home?: string
   /** Directory holding the built agent-toolkit `sdk.js`; defaults to the copy staged next to this bundle. */
   readonly agentToolkitSdkRoot?: string
+  /** The session's goal file (the Native goal store), exposed to cells as PI_GOAL_STORE_FILE like Native. */
+  readonly goalStoreFile?: (sessionID: string) => string
   readonly createTimeoutMs?: number
   readonly disposeTimeoutMs?: number
 }
@@ -88,7 +91,7 @@ export function evalStateDir(projectDirectory: string, sessionID: string, home: 
 const AGENT_TOOLKIT_SDK_DIRECTORY = "agent-toolkit-sdk"
 
 /** The build stages the ulw-loop agent-toolkit SDK next to the V2 chunks (script/build-agent-toolkit-sdk.ts). */
-function locateAgentToolkitSdkRoot(directory: string = import.meta.dir): string | undefined {
+function locateAgentToolkitSdkRoot(directory: string = dirname(fileURLToPath(import.meta.url))): string | undefined {
   const root = join(directory, AGENT_TOOLKIT_SDK_DIRECTORY)
   return existsSync(join(root, "sdk.js")) ? root : undefined
 }
@@ -101,11 +104,13 @@ export function evalSessionEnvironment(input: {
   readonly directory: string
   readonly sessionID: string
   readonly agentToolkitSdkRoot?: string | undefined
+  readonly goalStoreFile?: string | undefined
 }): Readonly<Record<string, string>> {
   return {
     PI_SESSION_ID: input.sessionID,
     PI_SESSION_CWD: input.directory,
     ...(input.agentToolkitSdkRoot !== undefined && { OMO_AGENT_TOOLKIT_SDK_ROOT: input.agentToolkitSdkRoot }),
+    ...(input.goalStoreFile !== undefined && { PI_GOAL_STORE_FILE: input.goalStoreFile }),
   }
 }
 
@@ -153,7 +158,13 @@ export async function registerNativeEval(
   const sandbox = host.options?.[NATIVE_EVAL_SANDBOX_OPTION] !== false
   const stateDir = (sessionID: string) => evalStateDir(directory, sessionID, options.home)
   const agentToolkitSdkRoot = options.agentToolkitSdkRoot ?? locateAgentToolkitSdkRoot()
-  const sessionEnv = (sessionID: string) => evalSessionEnvironment({ directory, sessionID, agentToolkitSdkRoot })
+  const sessionEnv = (sessionID: string) =>
+    evalSessionEnvironment({
+      directory,
+      sessionID,
+      agentToolkitSdkRoot,
+      goalStoreFile: options.goalStoreFile?.(sessionID),
+    })
   const stop = new AbortController()
   const roots = new Map<string, Promise<boolean>>()
   const registrations: Registration[] = []
