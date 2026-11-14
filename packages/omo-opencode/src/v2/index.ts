@@ -11,6 +11,8 @@ import { registerCommentChecker } from "./hooks/comment-checker"
 import { registerQuestionGates } from "./hooks/question-gates"
 import { registerTodoFanoutReminder } from "./hooks/todo-fanout-reminder"
 import { registerUltrawork } from "./hooks/ultrawork"
+import { createIdleContinuationChain } from "./hooks/idle-continuation-chain"
+import { createUlwLoopStatusRpc } from "./ulw-loop/status-rpc"
 import { loadRuntimeConfig } from "./config/runtime"
 import { acquireEffectSessionBackendApi } from "./host/effect-session-backend-api"
 // Type-only: the component modules load SQLite-backed journals, so they are imported only when enabled.
@@ -112,21 +114,37 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
             tool: module.createEvalTaskHostTool,
           }))
         : undefined
+    // Goal, ulw-execute and ulw-loop answer one settle through one idle hook, in Native's precedence, and the goal and
+    // the loop share the footer status RPC.
+    const goalEnabled = context.options?.["omo-goal-enabled"] !== false
+    const ulwLoopEnabled =
+      context.options?.["omo-native-eval-enabled"] !== false && context.options?.["omo-ulw-loop-enabled"] !== false
+    const idle = createIdleContinuationChain()
+    const footer = goalEnabled || ulwLoopEnabled ? createUlwLoopStatusRpc() : undefined
+    if (footer) {
+      const registration = await footer.register(context.rpc)
+      cleanups.push(async () => {
+        footer.close()
+        await registration.dispose()
+      })
+    }
     if (context.options?.["omo-ulw-execute-enabled"] !== false) {
       const { registerUlwExecuteContinuation } = await import("./ulw-execute")
-      cleanups.push(await registerUlwExecuteContinuation(context))
+      cleanups.push(await registerUlwExecuteContinuation(context, { idle }))
     }
-    // Native's goal trio (create_goal / update_goal / get_goal) over the senpi engine's goal store.
-    const goal = context.options?.["omo-goal-enabled"] !== false ? await import("./goal") : undefined
+    // Native's goal trio (create_goal / update_goal / get_goal) and its continuation loop over the senpi engine's goal store.
+    const goal = goalEnabled ? await import("./goal") : undefined
     if (goal) {
       // A goal engine that cannot load (another installed senpi version) leaves only the goal tools off.
-      const disposeGoal = await goal.registerGoal(context).catch((error: unknown) => {
-        console.warn(
-          "[oh-my-openagent/v2] the Native goal tools are off:",
-          error instanceof Error ? error.message : String(error),
-        )
-        return undefined
-      })
+      const disposeGoal = await goal
+        .registerGoal(context, { idle, ...(footer && { footer }) })
+        .catch((error: unknown) => {
+          console.warn(
+            "[oh-my-openagent/v2] the Native goal tools are off:",
+            error instanceof Error ? error.message : String(error),
+          )
+          return undefined
+        })
       if (disposeGoal) cleanups.push(disposeGoal)
     }
     if (context.options?.["omo-native-eval-enabled"] !== false) {
@@ -142,15 +160,16 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
           }),
         }),
       )
-      if (context.options?.["omo-ulw-loop-enabled"] !== false) {
+      if (ulwLoopEnabled) {
         const { registerUlwLoop } = await import("./ulw-loop")
         const { findContinuableWork } = await import("@oh-my-opencode/boulder-state")
         const { ulwExecuteSessionKey } = await import("./ulw-execute")
         // Native's loop defers to the ulw-execute continuation while the session has continuable boulder work.
         const deferTo = (sessionID: string) => findContinuableWork(directory, ulwExecuteSessionKey(sessionID)) !== null
-        cleanups.push(await registerUlwLoop(context, { deferTo }))
+        cleanups.push(await registerUlwLoop(context, { deferTo, idle, ...(footer && { footer }) }))
       }
     }
+    cleanups.push((await idle.register(context.session)).dispose)
     if (owners.nativeTask) {
       const { registerNativeTaskComponent } = await import("./orchestration/native-task/component")
       // The lead team tools share the Native task component's registry, kernel and service.
