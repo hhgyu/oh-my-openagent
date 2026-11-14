@@ -49,10 +49,6 @@ function readRecord(value: unknown, key: string): unknown {
   return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined
 }
 
-function isIdleStatus(raw: unknown): boolean {
-  return readRecord(readRecord(readRecord(raw, "data"), "status"), "type") === "idle"
-}
-
 /** The host's global `shell.*` events carry no session field; the shell tool tags `metadata.sessionID`. */
 function shellLifecycle(raw: unknown): ShellLifecycle | undefined {
   const type = readRecord(raw, "type"),
@@ -199,16 +195,18 @@ export async function createOwnedChildObserver(
     } else if (result.status === "completed" || result.status === "error") {
       turnOutcome = result
       settlement.end(result)
-      // Only a succeeded run went through `experimental.idle`; a failed one waits for the session to
-      // go idle with nothing of its own pending, or for the bounded confirmation.
-      if (result.ended === "succeeded" && result.held === undefined) settlement.idle()
+      if (result.ended === "succeeded") {
+        // A succeeded run went through `experimental.idle`: with nothing of its own running, idle.
+        if (result.held === undefined) settlement.idle()
+      } else idleAfterFailure()
     } else if (result.status === "interrupted") settlement.end(result)
   }
-  /** `session.status` idle after a failed run is Native's `agent_idle` for a held error, provided the
-   * child owns no running background work and no input waits for a run. */
-  function observeSessionIdle() {
-    const held = settlement.pending()
-    if (settled || held?.status !== "error" || wakeSources.hasLive()) return
+  /** OpenCode 2.2.6 tells a plugin nothing when a session goes idle after a failed run (no idle hook,
+   * no status event), and no hook can continue a failed run. So the failure itself is Native's
+   * `agent_idle` when the child owns no running background work and no input waits for a run;
+   * otherwise the held error waits for the wake run or the bounded confirmation. */
+  function idleAfterFailure() {
+    if (settled || settlement.pending()?.status !== "error" || wakeSources.hasLive()) return
     if (sessionIsIdle(ownedChildSessionState(bound.snapshot().records))) settlement.idle()
   }
   function outcome(): OwnedChildOutcome {
@@ -358,7 +356,6 @@ export async function createOwnedChildObserver(
           // Full text is carried by text.ended; transient deltas cannot prove a result.
           if (!event.durable && event.type.endsWith(".delta")) continue
           append({ kind: "host", id: event.id, event })
-          if (event.type === "session.status" && isIdleStatus(raw)) observeSessionIdle()
           if (!readySeen && event.durable) {
             readySeen = true
             readyResolve()

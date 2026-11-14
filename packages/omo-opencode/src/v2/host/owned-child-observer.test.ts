@@ -476,7 +476,7 @@ describe("#given a child turn that ends while the child still owns background wo
     await observer.dispose()
   })
 
-  test("#when a run fails with nothing of its own pending #then the session going idle settles the error", async () => {
+  test("#when a run fails with nothing of its own pending #then the error settles at once", async () => {
     const f = fixture(),
       confirmation = manualConfirmation(),
       observer = await createOwnedChildObserver(f.ctx, {
@@ -487,12 +487,9 @@ describe("#given a child turn that ends while the child still owns background wo
     const waiting = observer.waitForOutcome()
     f.emit("session.execution.started")
     f.emit("session.inbox.delivered", { inboxID: "own" })
-    f.emit("session.execution.failed", { error: { type: "provider.error" } })
-    await settleStream()
-    expect(observer.outcome().status).toBe("pending")
 
-    // when: the host reports the child session idle
-    f.emit("session.status", { status: { type: "idle" } })
+    // when: the run fails while the child owns no background work and no input waits
+    f.emit("session.execution.failed", { error: { type: "provider.error" } })
 
     // then: the error settles without waiting for the confirmation
     expect(await waiting).toMatchObject({ status: "error", reason: "provider.error" })
