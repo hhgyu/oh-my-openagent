@@ -5,42 +5,46 @@ import { parseFrontmatter } from "@oh-my-opencode/utils"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-export const ULW_LOOP_SKILL_NAME = "ulw-loop"
+// The Native (omo-senpi) skill texts name Native tool spellings and the Senpi boulder session prefix; OpenCode 2 spells
+// the todo tool `todowrite` and records its boulder sessions as `opencode:<id>`.
+const V2_REWRITES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/`todo`/g, "`todowrite`"],
+  [/senpi:(?=<session_id>|`)/g, "opencode:"],
+]
 
-const V2_TOOL_NAMES: ReadonlyArray<readonly [string, string]> = [["`todo`", "`todowrite`"]]
-
-export function rewriteUlwLoopSkillForV2(text: string): string {
-  return V2_TOOL_NAMES.reduce((current, [from, to]) => current.replaceAll(from, to), text)
+export function rewriteSkillForV2(text: string): string {
+  return V2_REWRITES.reduce((current, [pattern, replacement]) => current.replace(pattern, replacement), text)
 }
 
-/** script/stage-v2-ulw-loop.ts stages the Senpi skill next to the V2 chunks. */
-export function locateUlwLoopSkillFile(directory: string = import.meta.dir): string | undefined {
-  const file = join(directory, "skills", ULW_LOOP_SKILL_NAME, "SKILL.md")
+/** script/stage-v2-ulw-loop.ts stages the skills next to the V2 chunks. */
+export function locateStagedSkillFile(name: string, directory: string = import.meta.dir): string | undefined {
+  const file = join(directory, "skills", name, "SKILL.md")
   return existsSync(file) ? file : undefined
 }
 
-function ulwLoopSkillInfo(file: string): Skill.Info {
+function stagedSkillInfo(name: string, file: string): Skill.Info {
   const { data, body } = parseFrontmatter<{ description?: unknown }>(readFileSync(file, "utf8"))
   return {
-    id: Skill.ID.make(ULW_LOOP_SKILL_NAME),
-    name: Skill.Name.make(ULW_LOOP_SKILL_NAME),
+    id: Skill.ID.make(name),
+    name: Skill.Name.make(name),
     ...(typeof data.description === "string" && { description: data.description }),
     path: Skill.Info.fields.path.make(file),
-    content: rewriteUlwLoopSkillForV2(body),
+    content: rewriteSkillForV2(body),
   }
 }
 
-export async function registerUlwLoopSkill(
+export async function registerStagedSkill(
   skill: Pick<SkillDomain, "transform">,
+  name: string,
   file: string | undefined,
 ): Promise<Registration | undefined> {
   if (file === undefined) {
-    console.warn("[oh-my-openagent/v2] ulw-loop skill not staged next to this bundle; run the build")
+    console.warn(`[oh-my-openagent/v2] ${name} skill not staged next to this bundle; run the build`)
     return undefined
   }
-  const info = ulwLoopSkillInfo(file)
+  const info = stagedSkillInfo(name, file)
   return skill.transform((editor) => {
-    if (editor.list().some((existing) => existing.name === ULW_LOOP_SKILL_NAME)) return
+    if (editor.list().some((existing) => existing.name === name)) return
     editor.add(info)
   })
 }
