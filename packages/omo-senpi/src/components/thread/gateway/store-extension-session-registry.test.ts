@@ -5,7 +5,10 @@ import { pathToFileURL } from "node:url"
 import type { Worker } from "node:worker_threads"
 
 import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
-import type { SessionCallableOp, StoreExtensionRegistration } from "@oh-my-opencode/thread-core/gateway/store-extensions"
+import type {
+  SessionCallableOp,
+  StoreExtensionRegistration,
+} from "@oh-my-opencode/thread-core/gateway/store-extensions"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 
 let harness: GatewayHarness | undefined

@@ -1,7 +1,11 @@
 import { Database } from "bun:sqlite"
 import { afterEach, expect, test } from "bun:test"
 
-import { checkExtensionSchema, ExtensionSchemaViolation, sqliteName } from "@oh-my-opencode/thread-core/gateway/extension-sql"
+import {
+  checkExtensionSchema,
+  ExtensionSchemaViolation,
+  sqliteName,
+} from "@oh-my-opencode/thread-core/gateway/extension-sql"
 import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
 import { Sql, type SqlRow } from "@oh-my-opencode/thread-core/gateway/sql"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"

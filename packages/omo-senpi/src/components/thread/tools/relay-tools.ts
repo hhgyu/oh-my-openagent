@@ -9,7 +9,12 @@ import {
 import type { ThreadErrorCode } from "@oh-my-opencode/thread-core/errors"
 import type { GatewayRelay } from "@oh-my-opencode/thread-core/gateway/relay"
 import { metadata, output, resolveStoredSession, type AnyTool, type ToolOutput } from "./internals"
-import { createRelayToolBodies, RELAY_TOOL_NAMES, type RelayToolCall, type RelayToolName } from "@oh-my-opencode/thread-core/relay-tools"
+import {
+  createRelayToolBodies,
+  RELAY_TOOL_NAMES,
+  type RelayToolCall,
+  type RelayToolName,
+} from "@oh-my-opencode/thread-core/relay-tools"
 import { type ThreadHostView, type ThreadHostViewRequest, type ThreadToolSurfaceOptions } from "./ports"
 
 export type RelayToolsContext = {
@@ -98,5 +103,7 @@ export function createRelayTools(context: RelayToolsContext): AnyTool[] {
       run(name, id, args, ectx, body),
   })
 
-  return RELAY_TOOL_NAMES.map((name) => tool(name, bodies[name] as (call: Call<RelayToolName>) => Promise<ThreadToolResult>))
+  return RELAY_TOOL_NAMES.map((name) =>
+    tool(name, bodies[name] as (call: Call<RelayToolName>) => Promise<ThreadToolResult>),
+  )
 }

@@ -7,7 +7,10 @@ import type {
   SessionAdmissionGate,
   SessionRuntimePort,
 } from "@oh-my-opencode/thread-core/gateway/adapter"
-import { SESSION_CONTROL_DELIVERY_TYPE, SESSION_RELEASED_ENTRY_TYPE } from "@oh-my-opencode/thread-core/gateway/constants"
+import {
+  SESSION_CONTROL_DELIVERY_TYPE,
+  SESSION_RELEASED_ENTRY_TYPE,
+} from "@oh-my-opencode/thread-core/gateway/constants"
 
 type Lane = "start" | "steer" | "followUp"
 

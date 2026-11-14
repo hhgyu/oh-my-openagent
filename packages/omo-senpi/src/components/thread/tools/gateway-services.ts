@@ -1,6 +1,11 @@
 import { toGatewayAddressEntries } from "../address-book"
 import type { GatewayEndpointPort, GatewayEndpointRef } from "@oh-my-opencode/thread-core/gateway/adapter"
-import { createGatewayEngine, resolveFromEntries, type GatewayEngine, type GatewayResolve } from "@oh-my-opencode/thread-core/gateway/engine"
+import {
+  createGatewayEngine,
+  resolveFromEntries,
+  type GatewayEngine,
+  type GatewayResolve,
+} from "@oh-my-opencode/thread-core/gateway/engine"
 import { createLocalTransport } from "@oh-my-opencode/thread-core/gateway/local-transport"
 import { createDeliveryPipeline, type DeliveryPipeline } from "@oh-my-opencode/thread-core/gateway/pipeline"
 import { createGatewayRelay, type GatewayRelay } from "@oh-my-opencode/thread-core/gateway/relay"

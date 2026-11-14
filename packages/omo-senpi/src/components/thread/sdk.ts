@@ -22,7 +22,11 @@ export type {
   StoreExtensionRefusalCode,
 } from "@oh-my-opencode/thread-core/gateway/store-extensions"
 import type { DeliveryTarget } from "@oh-my-opencode/thread-core/gateway/transport"
-import type { ExternalAuthor, GatewayDeliveryMode, GatewayDeliveryResult } from "@oh-my-opencode/thread-core/gateway/types"
+import type {
+  ExternalAuthor,
+  GatewayDeliveryMode,
+  GatewayDeliveryResult,
+} from "@oh-my-opencode/thread-core/gateway/types"
 import { createLiveThreadSurface, parseHostStatusAll } from "./live-surface"
 import { createGatewayResolver, createGatewayServices } from "./tools/gateway-services"
 import {

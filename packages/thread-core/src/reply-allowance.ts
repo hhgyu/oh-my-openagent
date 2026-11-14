@@ -1,4 +1,5 @@
-import { normalizeThreadName } from "./addressing"
+import { normalizeThreadName, type ThreadAddressEntry } from "./addressing"
+import { threadToolFailure, type ThreadToolFailure } from "./errors"
 
 /** What the caller's current run took in: the agent sessions whose deliveries it consumed, and their senders as stated. */
 export type ReplyEvidence = {
@@ -21,5 +22,29 @@ export function isReplyToConsumedSender(evidence: ReplyEvidence, target: string)
     (sender) =>
       sender.session_id === target ||
       (sender.name !== undefined && wanted !== "" && normalizeThreadName(sender.name) === wanted),
+  )
+}
+
+/**
+ * The allowance approved a send as a reply to a consumed delivery's sender (by id or stated name): it is delivered only
+ * when the address resolves to that sender, else refused by name without sending (decision 0027 section 6).
+ */
+export function replyTargetMismatch(
+  evidence: ReplyEvidence,
+  address: string,
+  entry: ThreadAddressEntry,
+): ThreadToolFailure | undefined {
+  if (!isReplyToConsumedSender(evidence, address)) return undefined
+  const senders = evidence.callerReplySenders?.() ?? []
+  if (
+    senders.some((sender) => sender.session_id === entry.thread_id) ||
+    (evidence.callerReplyTargets?.() ?? []).includes(entry.thread_id)
+  )
+    return undefined
+  return threadToolFailure(
+    "reply_target_mismatch",
+    `"${address}" was approved as a reply to a sender of this run's deliveries, but it resolves to ${entry.name} (${entry.thread_id}${entry.device === undefined ? "" : " on " + entry.device}), which is not that sender.`,
+    "Reply with the sender's durable id from the delivery header, or send to the other thread by its id as a normal send.",
+    { resolved_thread_id: entry.thread_id, ...(entry.device === undefined ? {} : { device: entry.device }) },
   )
 }

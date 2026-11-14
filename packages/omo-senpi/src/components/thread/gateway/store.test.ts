@@ -4,7 +4,11 @@ import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "nod
 import { join } from "node:path"
 import type { Worker } from "node:worker_threads"
 
-import { gatewayDatabasePath, gatewayInboxDirectory, gatewayRootDirectory } from "@oh-my-opencode/thread-core/gateway/paths"
+import {
+  gatewayDatabasePath,
+  gatewayInboxDirectory,
+  gatewayRootDirectory,
+} from "@oh-my-opencode/thread-core/gateway/paths"
 import { GATEWAY_MIGRATIONS } from "@oh-my-opencode/thread-core/gateway/schema"
 import type { GatewayStoreEvent } from "@oh-my-opencode/thread-core/gateway/types"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"

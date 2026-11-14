@@ -22,7 +22,11 @@ import {
   type EndpointKind,
   type RegistryEndpoint,
 } from "./endpoint-registry"
-import type { EndpointLiveness, GatewayEndpointPort, GatewayEndpointRef } from "@oh-my-opencode/thread-core/gateway/adapter"
+import type {
+  EndpointLiveness,
+  GatewayEndpointPort,
+  GatewayEndpointRef,
+} from "@oh-my-opencode/thread-core/gateway/adapter"
 import { releaseReply, wakeReply } from "@oh-my-opencode/thread-core/gateway-replies"
 import type { ThreadTranscriptEntry, ThreadHost, ThreadHostSession } from "./tools"
 import type { ThreadHostView, ThreadHostViewRequest, ThreadSessionPort } from "./tools/ports"

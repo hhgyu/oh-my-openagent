@@ -1,10 +1,4 @@
-import type {
-  DrainWakeEvent,
-  ExternalAdmission,
-  GatewayAdmissionKind,
-  SessionRuntimePort,
-  WakeReason,
-} from "./adapter"
+import type { DrainWakeEvent, ExternalAdmission, GatewayAdmissionKind, SessionRuntimePort, WakeReason } from "./adapter"
 import { decideDelivery } from "./decision"
 import { isLockWaitExceeded } from "./lock-wait"
 import { deliveryProvenanceLine, deliverySender, renderDeliveryText } from "./provenance"

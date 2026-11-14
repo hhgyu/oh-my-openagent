@@ -6,7 +6,10 @@ import { dirname, join } from "node:path"
 import { createGatewayRelay } from "@oh-my-opencode/thread-core/gateway/relay"
 import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
 import type { GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
-import type { SessionCallableOp, StoreExtensionRegistration } from "@oh-my-opencode/thread-core/gateway/store-extensions"
+import type {
+  SessionCallableOp,
+  StoreExtensionRegistration,
+} from "@oh-my-opencode/thread-core/gateway/store-extensions"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 
 let harness: GatewayHarness | undefined

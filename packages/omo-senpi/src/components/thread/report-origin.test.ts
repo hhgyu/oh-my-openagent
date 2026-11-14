@@ -4,7 +4,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { createThreadComponent } from "./component"
-import type { AdmitExternalMessageInput, RegisterControlEndpointOptions } from "@oh-my-opencode/thread-core/gateway/adapter"
+import type {
+  AdmitExternalMessageInput,
+  RegisterControlEndpointOptions,
+} from "@oh-my-opencode/thread-core/gateway/adapter"
 import { GATEWAY_LOCK_WAIT_MAX_MS, SESSION_CONTROL_DELIVERY_TYPE } from "@oh-my-opencode/thread-core/gateway/constants"
 import { lockWaitExceeded } from "@oh-my-opencode/thread-core/gateway/lock-wait"
 import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"

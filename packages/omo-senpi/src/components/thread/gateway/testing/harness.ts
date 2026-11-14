@@ -4,8 +4,17 @@ import { join } from "node:path"
 
 import { toSessionControlDrainResult, type GatewayEndpointPort } from "@oh-my-opencode/thread-core/gateway/adapter"
 import { createInboxDrain, type InboxDrain } from "@oh-my-opencode/thread-core/gateway/drain"
-import { createGatewayEngine, resolveFromEntries, type GatewayAddressEntry, type GatewayEngine } from "@oh-my-opencode/thread-core/gateway/engine"
-import { createGatewayStore, type GatewayStore, type GatewayStoreOptions } from "@oh-my-opencode/thread-core/gateway/store"
+import {
+  createGatewayEngine,
+  resolveFromEntries,
+  type GatewayAddressEntry,
+  type GatewayEngine,
+} from "@oh-my-opencode/thread-core/gateway/engine"
+import {
+  createGatewayStore,
+  type GatewayStore,
+  type GatewayStoreOptions,
+} from "@oh-my-opencode/thread-core/gateway/store"
 import { FakeSessionRuntime } from "./fake-runtime"
 import type { RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 import { stampThisDevice } from "../../remote/this-device"
@@ -14,7 +23,11 @@ import { stampThisDevice } from "../../remote/this-device"
 const storeFactory: typeof createGatewayStore =
   process.env.OMO_GATEWAY_TEST_STORE_MODULE === undefined
     ? createGatewayStore
-    : ((await import(process.env.OMO_GATEWAY_TEST_STORE_MODULE)) as typeof import("@oh-my-opencode/thread-core/gateway/store")).createGatewayStore
+    : (
+        (await import(
+          process.env.OMO_GATEWAY_TEST_STORE_MODULE
+        )) as typeof import("@oh-my-opencode/thread-core/gateway/store")
+      ).createGatewayStore
 
 export type HarnessSession = {
   readonly id: string

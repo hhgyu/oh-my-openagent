@@ -34,7 +34,16 @@ export type RunInput =
     }
 
 export function createRunContext(): RunContext {
-  return { turn: 0, cause: undefined, chainHop: 0, consumed: [], replyTo: [], replySenders: [], local: false, answered: true }
+  return {
+    turn: 0,
+    cause: undefined,
+    chainHop: 0,
+    consumed: [],
+    replyTo: [],
+    replySenders: [],
+    local: false,
+    answered: true,
+  }
 }
 
 /**

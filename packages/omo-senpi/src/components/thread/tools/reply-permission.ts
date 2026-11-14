@@ -1,8 +1,6 @@
 import type { ThreadToolSurfaceOptions } from "./ports"
 import { isReplyToConsumedSender } from "@oh-my-opencode/thread-core/reply-allowance"
 
-export { isReplyToConsumedSender } from "@oh-my-opencode/thread-core/reply-allowance"
-
 type PermissionRequest = { permission: string; patterns: string[]; always: string[]; autoApproveAsk?: true }
 
 /**

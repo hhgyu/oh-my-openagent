@@ -7,7 +7,12 @@ import { senderFacts } from "@oh-my-opencode/thread-core/gateway/envelope"
 import { deliveryProvenanceLine, renderDeliveryText } from "@oh-my-opencode/thread-core/gateway/provenance"
 import { REFUSAL_CODES } from "@oh-my-opencode/thread-core/gateway/result"
 import type { GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
-import type { DeliveryOutcome, DeliveryTransport, OutboundDelivery, RelayDeliverySuccess } from "@oh-my-opencode/thread-core/gateway/transport"
+import type {
+  DeliveryOutcome,
+  DeliveryTransport,
+  OutboundDelivery,
+  RelayDeliverySuccess,
+} from "@oh-my-opencode/thread-core/gateway/transport"
 import type { EffectiveLane, GatewayDeliveryDelivery, Provenance } from "@oh-my-opencode/thread-core/gateway/types"
 import { UNKNOWN_CALLER } from "../tools/ports"
 import type { JsonObject, RemoteSessionRow, RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"

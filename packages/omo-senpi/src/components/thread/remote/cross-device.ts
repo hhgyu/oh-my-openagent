@@ -1,4 +1,8 @@
-import { AMBIGUOUS_CANDIDATE_LIMIT, normalizeThreadName, type ThreadCandidate } from "@oh-my-opencode/thread-core/addressing"
+import {
+  AMBIGUOUS_CANDIDATE_LIMIT,
+  normalizeThreadName,
+  type ThreadCandidate,
+} from "@oh-my-opencode/thread-core/addressing"
 import type { ThreadLocalAliasNote, ThreadStatus, ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
 import { createRelaySessionHost, listedThread } from "../control/relay-session-host"
 import type { HostedThread, SessionHost, SessionOpenRequest } from "../control/session-host"

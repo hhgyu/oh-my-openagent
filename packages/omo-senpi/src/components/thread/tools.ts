@@ -3,7 +3,7 @@ import { threadToolFailure } from "@oh-my-opencode/thread-core/errors"
 import type { ThreadErrorCode, ThreadToolFailure } from "@oh-my-opencode/thread-core/errors"
 import { type Static } from "typebox"
 import { toThreadAddressEntries } from "./address-book"
-import { checkNameConflict, normalizeThreadName, type ThreadAddressEntry } from "@oh-my-opencode/thread-core/addressing"
+import { checkNameConflict, normalizeThreadName } from "@oh-my-opencode/thread-core/addressing"
 import { createLocalSessionHost } from "./control/local-session-host"
 import { checkInitialSkills } from "./initial-skills"
 import {
@@ -34,10 +34,16 @@ import type { DeliveryTarget } from "@oh-my-opencode/thread-core/gateway/transpo
 import { createGatewayServices } from "./tools/gateway-services"
 import { listThreads, readThread } from "./tools/read-ops"
 import { createRelayTools } from "./tools/relay-tools"
-import { isReplyToConsumedSender, threadSendPermission } from "./tools/reply-permission"
+import { threadSendPermission } from "./tools/reply-permission"
+import { replyTargetMismatch } from "@oh-my-opencode/thread-core/reply-allowance"
 import { claimCreatedAlias, listAcross, planCreate, renameAlias, withAlias } from "./remote/lazy-ops"
 import { locateControl } from "./control/locate"
-import { closeThread, interruptThread, setModelOn, setThinkingLevelOn } from "@oh-my-opencode/thread-core/control/operations"
+import {
+  closeThread,
+  interruptThread,
+  setModelOn,
+  setThinkingLevelOn,
+} from "@oh-my-opencode/thread-core/control/operations"
 import { controlIdentity, controlRefusalOf } from "@oh-my-opencode/thread-core/control/port"
 import type { LocalAliasReason, LocalExisting } from "./remote/cross-device"
 import { recordThreadCreator, registerExtensionTools, type ExtensionToolHost } from "./tools/extension-tools"
@@ -793,24 +799,4 @@ export function registerThreadTools(
   if (pi.on !== undefined)
     registerExtensionTools(pi as ExtensionToolHost & Required<Pick<ExtensionToolHost, "on">>, options, log)
   return { dispose: built.dispose }
-}
-
-function replyTargetMismatch(
-  options: ThreadToolSurfaceOptions,
-  address: string,
-  entry: ThreadAddressEntry,
-): ThreadToolFailure | undefined {
-  if (!isReplyToConsumedSender(options, address)) return undefined
-  const senders = options.callerReplySenders?.() ?? []
-  if (
-    senders.some((sender) => sender.session_id === entry.thread_id) ||
-    (options.callerReplyTargets?.() ?? []).includes(entry.thread_id)
-  )
-    return undefined
-  return threadToolFailure(
-    "reply_target_mismatch",
-    `"${address}" was approved as a reply to a sender of this run's deliveries, but it resolves to ${entry.name} (${entry.thread_id}${entry.device === undefined ? "" : " on " + entry.device}), which is not that sender.`,
-    "Reply with the sender's durable id from the delivery header, or send to the other thread by its id as a normal send.",
-    { resolved_thread_id: entry.thread_id, ...(entry.device === undefined ? {} : { device: entry.device }) },
-  )
 }

@@ -247,8 +247,6 @@ export function routingId(session: ThreadHostSession): string {
   return session.sessionId
 }
 
-export { transcriptRole } from "@oh-my-opencode/thread-core/read-result"
-
 export function targetSession(view: ThreadHostView, durableId: string): ThreadHostSession | undefined {
   return view.sessions.find((session) => (session.durableSessionId ?? session.sessionId) === durableId)
 }

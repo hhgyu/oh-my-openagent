@@ -2,7 +2,11 @@ import { Database } from "bun:sqlite"
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { rfc3339 } from "@oh-my-opencode/thread-core/gateway/bindings"
-import { DELIVERY_RETENTION_MS, RETENTION_SWEEP_BATCH, RETENTION_SWEEP_INTERVAL_MS } from "@oh-my-opencode/thread-core/gateway/constants"
+import {
+  DELIVERY_RETENTION_MS,
+  RETENTION_SWEEP_BATCH,
+  RETENTION_SWEEP_INTERVAL_MS,
+} from "@oh-my-opencode/thread-core/gateway/constants"
 import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
 import type { GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
