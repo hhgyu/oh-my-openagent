@@ -34,8 +34,17 @@ function productionSources(): readonly string[] {
     .filter((entry: string) => !entry.endsWith(".test.ts") && !entry.endsWith(".test-support.ts"))
     .filter((entry: string) => !entry.split("/").includes("__fixtures__"))
     .sort()
+  // The thread gateway Senpi runs moved to thread-core; its production sources stay inside this gate.
+  const threadCoreSources = readdirSync(join(import.meta.dir, "../../thread-core/src"), {
+    recursive: true,
+    encoding: "utf8",
+  })
+    .map(toPosix)
+    .filter((entry: string) => entry.endsWith(".ts") && !entry.endsWith(".test.ts"))
+    .map((entry: string) => `../../thread-core/src/${entry}`)
+    .sort()
   // Refactors must keep the same production spawn sites inside this safety gate.
-  return [...adapterSources, "../../lsp-core/src/mutation/formatter.ts"]
+  return [...adapterSources, ...threadCoreSources, "../../lsp-core/src/mutation/formatter.ts"]
 }
 
 function importedEntryPoints(source: string): readonly string[] {
@@ -122,7 +131,8 @@ describe("omo-senpi win32 console suppression", () => {
           "components/memory/worker/spawn-supervisor.ts",
           "components/memory/worker/memory-run-supervisor.ts",
           "components/memory/worker/supervisor-process-identity.ts",
-          "components/thread/addressing.ts",
+          "../../thread-core/src/addressing.ts",
+          "../../thread-core/src/gateway/process-identity.ts",
           "../../lsp-core/src/mutation/formatter.ts",
         ]) {
           expect(audited).toContain(required)

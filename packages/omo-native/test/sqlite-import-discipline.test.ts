@@ -4,7 +4,10 @@ import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const TEST_DIR = resolve(fileURLToPath(new URL(".", import.meta.url)))
-const GATEWAY_DIR = resolve(TEST_DIR, "../../omo-senpi/src/components/thread/gateway")
+const GATEWAY_DIRS = [
+  resolve(TEST_DIR, "../../thread-core/src/gateway"),
+  resolve(TEST_DIR, "../../omo-senpi/src/components/thread/gateway"),
+]
 const STATIC_SQLITE_IMPORT = /^\s*import\s[^\n]*from\s+["']node:sqlite["']/m
 const THREAD_CLI = resolve(TEST_DIR, "../bin/lib/thread.js")
 
@@ -35,16 +38,16 @@ describe("node:sqlite import discipline", () => {
   describe("#given the thread gateway store", () => {
     describe("#when every gateway module is scanned", () => {
       test("#then only the store worker reaches node:sqlite, through a lazy import", () => {
-        const modules = readdirSync(GATEWAY_DIR, { recursive: true, encoding: "utf8" }).filter((name) =>
-          name.endsWith(".ts"),
+        const modules = GATEWAY_DIRS.flatMap((dir) =>
+          readdirSync(dir, { recursive: true, encoding: "utf8" })
+            .filter((name) => name.endsWith(".ts"))
+            .map((name) => join(dir, name)),
         )
-        const offenders = modules.filter((name) =>
-          STATIC_SQLITE_IMPORT.test(readFileSync(join(GATEWAY_DIR, name), "utf8")),
-        )
-        const lazy = modules.filter((name) =>
-          readFileSync(join(GATEWAY_DIR, name), "utf8").includes('import("node:sqlite")'),
-        )
-        expect({ offenders, lazy }).toEqual({ offenders: [], lazy: ["store-worker.ts"] })
+        const offenders = modules.filter((path) => STATIC_SQLITE_IMPORT.test(readFileSync(path, "utf8")))
+        const lazy = modules
+          .filter((path) => readFileSync(path, "utf8").includes('import("node:sqlite")'))
+          .map((path) => path.slice(resolve(TEST_DIR, "../..").length + 1).replaceAll("\\", "/"))
+        expect({ offenders, lazy }).toEqual({ offenders: [], lazy: ["thread-core/src/gateway/store-worker.ts"] })
       })
     })
   })
