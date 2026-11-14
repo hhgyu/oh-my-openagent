@@ -4,6 +4,21 @@ export type ThreadV2Host = Pick<Plugin.Context, "session" | "permission" | "even
 
 export type V2SessionInfo = Awaited<ReturnType<ThreadV2Host["session"]["get"]>>
 
+type Session = ThreadV2Host["session"]
+
+/** The session and catalog calls a thread's control makes, on this server or through a peer server. */
+export type ControlHost = {
+  readonly session: {
+    readonly get: (input: { sessionID: string }) => Promise<V2SessionInfo>
+    readonly interrupt: (input: { sessionID: string; resume?: boolean }) => Promise<{ readonly interrupted: boolean }>
+    readonly update: (input: Parameters<Session["update"]>[0]) => Promise<void>
+    readonly switchModel: (input: Parameters<Session["switchModel"]>[0]) => Promise<void>
+    readonly context: (input: { sessionID: string }) => Promise<Awaited<ReturnType<Session["context"]>>>
+  }
+  readonly model: { readonly list: () => ReturnType<ThreadV2Host["model"]["list"]> }
+  readonly provider: { readonly list: () => ReturnType<ThreadV2Host["provider"]["list"]> }
+}
+
 export type V2SessionPhase = "idle" | "mid_turn" | "waiting_question" | "compacting"
 
 export type V2SessionSnapshot = {
@@ -34,7 +49,7 @@ export function isClosed(info: V2SessionInfo): boolean {
 
 /** Writes one metadata key (null removes it); the host replaces `metadata` as sent, so the other keys are resent. */
 export async function writeSessionMetadata(
-  session: Pick<ThreadV2Host["session"], "get" | "update">,
+  session: Pick<ControlHost["session"], "get" | "update">,
   sessionID: string,
   key: string,
   value: string | null,
