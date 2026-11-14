@@ -6,6 +6,7 @@ import type { ToolContext } from "@opencode/plugin/promise/tool"
 import type { ListedTool } from "../../host/tool-registry"
 import type { ToolCallAuthority } from "../../host/tool-kernel"
 import { hasJoinedPermissionCancellation, type JoinedPermissionApi } from "../../host/effect-permission-api"
+import { hostActionReason } from "../../host/host-action"
 
 type NativeTool = { readonly name: string; readonly exposure?: "direct" | "search" }
 type CatalogTool = Pick<ListedTool, "id" | "name" | "options">
@@ -258,6 +259,8 @@ export function createHostBuildAuthorizer(options: {
         messageID: caller.messageID,
         id: caller.id,
       })
+      // A host-originated action (restart recovery, D-037) has no tool call to name as the source.
+      const hostAction = hostActionReason(caller)
       // No raw ToolContext retained; these signals narrow an already-owned call.
       function current() {
         callerSignal.throwIfAborted()
@@ -273,6 +276,7 @@ export function createHostBuildAuthorizer(options: {
         fingerprint: (selection: PreparedHostTaskGrant) => string,
         unchanged: () => boolean,
         operationSignal: AbortSignal,
+        taskID?: string,
       ) {
         const before = select(),
           footprint = fingerprint(before)
@@ -293,7 +297,9 @@ export function createHostBuildAuthorizer(options: {
             agent: source.agent,
             action: "subagent",
             resources: [buildAgentID],
-            source: { type: "tool", messageID: source.messageID, id: source.id },
+            ...(hostAction === undefined
+              ? { source: { type: "tool" as const, messageID: source.messageID, id: source.id } }
+              : { metadata: { omoHostAction: hostAction, ...(taskID === undefined ? {} : { omoTaskId: taskID }) } }),
           },
           { signal },
         )
@@ -369,6 +375,7 @@ export function createHostBuildAuthorizer(options: {
               }),
             () => input.spec === originalSpec,
             operationSignal,
+            input.spec.taskId,
           )
         },
       })

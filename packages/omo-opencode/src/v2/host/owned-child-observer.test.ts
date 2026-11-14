@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { withJoinedSessionCancellation } from "./session-cancellation"
 import { createOwnedChildObserver } from "./owned-child-observer"
 import type {
@@ -22,6 +22,28 @@ type ObserverHost = Pick<Context, "session" | "event">
 function defined<T>(value: T): NonNullable<T> {
   if (value === undefined || value === null) throw new Error("Expected value to be defined")
   return value
+}
+async function settleStream() {
+  for (let turn = 0; turn < 10; turn++) await new Promise((resolve) => setTimeout(resolve, 0))
+}
+function manualConfirmation() {
+  const armed: (() => void)[] = []
+  return {
+    schedule(run: () => void) {
+      armed.push(run)
+      return {
+        cancel: () => {
+          const at = armed.indexOf(run)
+          if (at >= 0) armed.splice(at, 1)
+        },
+      }
+    },
+    async fire() {
+      for (const run of armed.splice(0)) run()
+      await settleStream()
+    },
+    armed: () => armed.length,
+  }
 }
 function fixture(emitBarrier = true) {
   const lifetime = new AbortController()
@@ -155,11 +177,42 @@ function fixture(emitBarrier = true) {
     })
     emit("session.execution.succeeded")
   }
+  let rawSequence = 0
+  function emitRaw(value: Record<string, unknown>) {
+    const event = { id: `raw_${rawSequence}`, created: rawSequence++, ...value }
+    if (wake) {
+      const yes = wake
+      wake = undefined
+      yes({ done: false, value: event })
+    } else queue.push(event)
+  }
+  async function idle(background: readonly Record<string, unknown>[] = []) {
+    await hooks.get("experimental.idle")?.({ sessionID: "child", background })
+  }
+  async function run(input: { message: string; text: string; inbox?: string; background?: Record<string, unknown>[] }) {
+    emit("session.execution.started")
+    if (input.inbox) emit("session.inbox.delivered", { inboxID: input.inbox })
+    emit("session.step.started", {
+      assistantMessageID: input.message,
+      agent: "build",
+      model: { providerID: "actual", id: "observed" },
+    })
+    emit("session.text.started", { assistantMessageID: input.message, ordinal: 0 })
+    emit("session.text.ended", { assistantMessageID: input.message, ordinal: 0, text: input.text })
+    emit("session.step.ended", { assistantMessageID: input.message, finish: "stop", tokens: { input: 1 }, cost: 0 })
+    await settleStream()
+    await idle(input.background)
+    emit("session.execution.succeeded")
+    await settleStream()
+  }
   return {
     ctx,
     session,
     options,
     emit,
+    emitRaw,
+    idle,
+    run,
     finish,
     records,
     uncertainty,
@@ -188,7 +241,7 @@ test("actual observed owned title event establishes readiness; wait follows rece
     consumption: "unconfirmed",
   })
   await observer.dispose()
-  expect(f.metrics().hookDisposed).toBe(1)
+  expect(f.metrics().hookDisposed).toBe(2)
   expect(f.metrics().ended).toBe(true)
   expect(observer.outcome().status).toBe("uncertain")
   expect(() => observer.expectInput("late")).toThrow()
@@ -197,7 +250,7 @@ test("actual observed owned title event establishes readiness; wait follows rece
 test("missing readiness event fails closed and disposes registration and stream", async () => {
   const f = fixture(false)
   await expect(createOwnedChildObserver(f.ctx, { ...f.options, timeoutMs: 10 })).rejects.toThrow("readiness-timeout")
-  expect(f.metrics().hookDisposed).toBe(1)
+  expect(f.metrics().hookDisposed).toBe(2)
   expect(f.metrics().ended).toBe(true)
   expect(f.records).toEqual([])
 })
@@ -260,7 +313,7 @@ test("readiness timeout also aborts a pending public title request", async () =>
     })
   await expect(createOwnedChildObserver(f.ctx, { ...f.options, timeoutMs: 10 })).rejects.toThrow("readiness-timeout")
   expect(aborted).toBe(true)
-  expect(f.metrics().hookDisposed).toBe(1)
+  expect(f.metrics().hookDisposed).toBe(2)
   expect(f.metrics().ended).toBe(true)
 })
 
@@ -334,6 +387,148 @@ test("default observer cannot be switched to turn policy after creation", async 
   await f.finish("")
   expect(await waiting).toMatchObject({ status: "error", reason: "empty-assistant-output" })
   await observer.dispose()
+})
+
+describe("#given a child turn that ends while the child still owns background work (omo#9069)", () => {
+  const shell = (shellID: string) => ({ kind: "shell", sessionID: "child", shellID, command: `run ${shellID}` })
+
+  test("#when the job's notice wakes the child #then only the wake run's outcome settles the turn, once", async () => {
+    const f = fixture(),
+      observer = await createOwnedChildObserver(f.ctx, f.options)
+    observer.expectInput("own")
+    const settled: unknown[] = []
+    const waiting = observer.waitForOutcome().then((result) => {
+      settled.push(result)
+      return result
+    })
+
+    // when: the turn ends while its own background shell runs
+    await f.run({ message: "first", text: "waiting on my test run", inbox: "own", background: [shell("sh_1")] })
+
+    // then: nothing is reported yet
+    expect(settled).toEqual([])
+    expect(observer.outcome().status).toBe("pending")
+
+    // when: the shell exits, its notice wakes the child and the wake run ends with nothing pending
+    f.emitRaw({ type: "shell.exited", data: { id: "sh_1", status: "exited", exit: 0 } })
+    await f.run({ message: "second", text: "tests passed", inbox: "notice", background: [] })
+
+    // then: the wake run's outcome is the turn's, delivered exactly once
+    expect(await waiting).toMatchObject({ status: "completed", text: "tests passed" })
+    expect(settled).toHaveLength(1)
+    expect(observer.outcome()).toMatchObject({ status: "completed", text: "tests passed" })
+    await observer.dispose()
+  })
+
+  test("#when only a descendant owns the job #then the turn settles at once", async () => {
+    const f = fixture(),
+      observer = await createOwnedChildObserver(f.ctx, f.options)
+    observer.expectInput("own")
+    const waiting = observer.waitForOutcome()
+    await f.run({
+      message: "first",
+      text: "done",
+      inbox: "own",
+      background: [{ kind: "shell", sessionID: "grandchild", shellID: "sh_9", command: "run" }],
+    })
+    expect(await waiting).toMatchObject({ status: "completed", text: "done" })
+    await observer.dispose()
+  })
+
+  test("#when the wake run fails #then the error waits for a confirmation while an own shell still runs", async () => {
+    const f = fixture(),
+      confirmation = manualConfirmation(),
+      observer = await createOwnedChildObserver(f.ctx, {
+        ...f.options,
+        settlement: { confirmMs: 1, schedule: confirmation.schedule },
+      })
+    observer.expectInput("own")
+    const settled: unknown[] = []
+    const waiting = observer.waitForOutcome().then((result) => {
+      settled.push(result)
+      return result
+    })
+    await f.run({ message: "first", text: "waiting", inbox: "own", background: [shell("sh_1"), shell("sh_2")] })
+    f.emitRaw({ type: "shell.exited", data: { id: "sh_1", status: "exited" } })
+    f.emit("session.execution.started")
+    f.emit("session.inbox.delivered", { inboxID: "notice" })
+    f.emit("session.step.started", { assistantMessageID: "second", model: { providerID: "actual", id: "observed" } })
+    f.emit("session.step.failed", { assistantMessageID: "second", error: { type: "provider.error" } })
+    f.emit("session.execution.failed", { error: { type: "provider.error" } })
+    await settleStream()
+
+    // when: the confirmation runs while sh_2 still belongs to the child
+    await confirmation.fire()
+
+    // then: the error is still held
+    expect(settled).toEqual([])
+    expect(observer.outcome().status).toBe("pending")
+
+    // when: the last own shell ends and the confirmation runs again
+    f.emitRaw({ type: "shell.exited", data: { id: "sh_2", status: "exited" } })
+    await settleStream()
+    expect(confirmation.armed()).toBe(1)
+    await confirmation.fire()
+
+    // then: the held error settles once
+    expect(await waiting).toMatchObject({ status: "error", reason: "provider.error" })
+    expect(settled).toHaveLength(1)
+    await observer.dispose()
+  })
+
+  test("#when a run fails with nothing of its own pending #then the error settles at once", async () => {
+    const f = fixture(),
+      confirmation = manualConfirmation(),
+      observer = await createOwnedChildObserver(f.ctx, {
+        ...f.options,
+        settlement: { confirmMs: 1, schedule: confirmation.schedule },
+      })
+    observer.expectInput("own")
+    const waiting = observer.waitForOutcome()
+    f.emit("session.execution.started")
+    f.emit("session.inbox.delivered", { inboxID: "own" })
+
+    // when: the run fails while the child owns no background work and no input waits
+    f.emit("session.execution.failed", { error: { type: "provider.error" } })
+
+    // then: the error settles without waiting for the confirmation
+    expect(await waiting).toMatchObject({ status: "error", reason: "provider.error" })
+    expect(confirmation.armed()).toBe(0)
+    await observer.dispose()
+  })
+
+  test("#when the child starts a run on its own after its turn settled #then it is announced once and a reopened turn settles with that run", async () => {
+    const f = fixture(),
+      observer = await createOwnedChildObserver(f.ctx, f.options)
+    observer.expectInput("own")
+    const announced: string[] = []
+    observer.onRunAfterSettle(() => {
+      announced.push("run")
+      observer.reopenTurn()
+    })
+    await f.run({ message: "first", text: "first answer", inbox: "own", background: [] })
+    expect(await observer.waitForOutcome()).toMatchObject({ status: "completed", text: "first answer" })
+
+    // when: a late notice wakes the settled child and it answers again
+    await f.run({ message: "second", text: "late answer", inbox: "late-notice", background: [] })
+
+    // then
+    expect(announced).toEqual(["run"])
+    expect(await observer.waitForOutcome()).toMatchObject({ status: "completed", text: "late answer" })
+    await observer.dispose()
+  })
+
+  test("#when the parent stops the held child #then the turn settles at once as cancelled", async () => {
+    const f = fixture(),
+      observer = await createOwnedChildObserver(f.ctx, f.options)
+    observer.expectInput("own")
+    const waiting = observer.waitForOutcome()
+    await f.run({ message: "first", text: "waiting", inbox: "own", background: [shell("sh_1")] })
+    observer.markStopping()
+    expect(await waiting).toMatchObject({ status: "cancelled" })
+    expect(observer.outcome().status).toBe("cancelled")
+    await observer.dispose()
+  })
 })
 
 async function sourceFixture(options = {}) {

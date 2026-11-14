@@ -204,7 +204,14 @@ export async function createOwnedTaskHandle(input: {
   const preparation = new Set<AbortController>(),
     preparing = new Set<Promise<unknown>>(),
     ticketWork = new Set<Promise<unknown>>()
-  const observers = new Set<OwnedChildObserver>([observer])
+  const observers = new Set<OwnedChildObserver>()
+  const selfResumedListeners = new Set<() => void>()
+  /** Every observer this handle owns reports a run its child starts on its own after a settled turn. */
+  function own(next: OwnedChildObserver) {
+    observers.add(next)
+    next.onRunAfterSettle(() => selfResumed(next))
+  }
+  own(observer)
   let cleanupOnly = false
   function inputPort() {
     return createOwnedManagedInput({
@@ -269,6 +276,7 @@ export async function createOwnedTaskHandle(input: {
     const model = result.model ? { model: `${result.model.providerID}/${result.model.id}` } : {}
     if (result.status === "completed") return { status: "completed", finalResponse: result.text ?? "", ...model }
     if (result.status === "interrupted") return { status: "interrupted", finalResponse: lastText, ...model }
+    if (result.status === "cancelled") return { status: "cancelled" }
     if (result.status === "error")
       return {
         status: "error",
@@ -385,7 +393,7 @@ export async function createOwnedTaskHandle(input: {
       try {
         if (!input.openObserver) throw Error("Owned continuation observer port missing")
         fresh = await input.openObserver(key, lifetime.signal)
-        observers.add(fresh)
+        own(fresh)
         assertOwned()
       } catch {
         if (fresh) {
@@ -452,6 +460,70 @@ export async function createOwnedTaskHandle(input: {
     current = work.then(outcome)
     void current.catch(() => {})
   }
+  /** Native `onSelfResumed` (omo#9069): the child's own run after its turn settled re-opens the task.
+   * Only the current observer counts, never while this handle prepares or dispatches its own input
+   * (a follow-up publishes a fresh observer first), never after Stop, end, detach or a fault. The turn
+   * re-opens at once so the run's end is captured even if it finishes before the manager reopens the
+   * record; the manager then publishes the next run (`bindSelfResumedRun`) and tracks `current`. */
+  function selfResumed(source: OwnedChildObserver) {
+    if (source !== observer || disposed || ended || stopMarked || cleanupOnly || pumpFault || busy) return
+    if (preparation.size || preparing.size || ticketWork.size || selfResumedListeners.size === 0) return
+    source.reopenTurn()
+    current = outcome()
+    void current.catch(() => {})
+    for (const listener of [...selfResumedListeners]) listener()
+  }
+  /** Adopts the run the manager published for a self-resumed turn: the next run_epoch, with the same
+   * observation, journal custody and residency claim. Runs synchronously after the publication so no
+   * custody check sees the moved epoch first. */
+  function bindSelfResumedRun(before: TaskRecord, actual: TaskRecord): void {
+    if (disposed || busy || ended || cleanupOnly) throw new Error("Owned self-resume bookkeeping is unavailable")
+    guard()
+    if (!journalRow) throw new Error("Owned self-resume journal snapshot missing")
+    journal.assertCurrent(journalRow)
+    const next = Math.max(epoch, before.burnt_epoch ?? 0) + 1
+    if (
+      before.task_id !== spec.taskId ||
+      actual.task_id !== spec.taskId ||
+      before.notification.run_epoch !== epoch ||
+      actual.notification.run_epoch !== next ||
+      actual.resumed_run_epoch !== next ||
+      actual.status !== "running" ||
+      actual.killed ||
+      actual.residency_claim !== reference.residencyClaim ||
+      actual.child_session_id !== child.locator.sessionID ||
+      actual.owned_session?.journalKey !== journalKey ||
+      actual.owned_session.journalOwner !== journal.owner ||
+      actual.owned_session.runEpoch !== next ||
+      actual.owned_session.journalRevision !== reference.journalRevision ||
+      JSON.stringify(store.load(spec.taskId)) !== JSON.stringify(actual)
+    )
+      throw new Error("Self-resumed run receipt differs from current custody")
+    busy = true
+    try {
+      const row = backend.checkpointTurn(child, {
+        nativeEpoch: next,
+        observationKey: journalRow.turn?.observationKey ?? journalKey,
+        ...(journalRow.turn?.firstInputID ? { firstInputID: journalRow.turn.firstInputID } : {}),
+      })
+      epoch = next
+      journalRow = row
+      reference = Object.freeze({ ...reference, runEpoch: next, journalRevision: row.revision })
+      store.mutate(spec.taskId, (fresh) => {
+        if (JSON.stringify(fresh) !== JSON.stringify(actual))
+          throw new Error("Self-resumed record moved during checkpoint")
+        return { ...fresh, owned_session: reference }
+      })
+    } catch (error) {
+      epoch = next
+      cleanupOnly = true
+      pumpFault = new ChildObservationUncertain("self-resume-bookkeeping-unconfirmed")
+      outcomeWait.abort(pumpFault)
+      throw error
+    } finally {
+      busy = false
+    }
+  }
   function markStopping() {
     if (stopMarked || disposed || ended) return
     try {
@@ -477,12 +549,12 @@ export async function createOwnedTaskHandle(input: {
     const result = observer.outcome()
     if (result.status === "uncertain")
       throw new ChildObservationUncertain(result.reason ?? "observation-invalidated", result.startEventID)
-    if (result.status === "error" || result.status === "interrupted" || result.status === "completed") return true
+    if (settledStatus(result.status)) return true
     // A local Stop suppresses completed. Its actual terminal reference still proves the
     // observed turn settled; returning from abort does NOT relabel that as host interruption.
     return (
       result.reason === "stop-pending" &&
-      result.delivered.length > 0 &&
+      (result.delivered.length > 0 || result.continuation === true) &&
       !!result.terminalEventID &&
       observer
         .observation()
@@ -641,8 +713,7 @@ export async function createOwnedTaskHandle(input: {
       await managedInput.settled()
       await current
       if (!input.openObserver) throw new Error("Owned prior turn is not positively settled")
-      const needsRecoveredBarrier =
-        !!pumpFault || !["completed", "error", "interrupted"].includes(observer.outcome().status)
+      const needsRecoveredBarrier = !!pumpFault || !settledStatus(observer.outcome().status)
       const matchesRecoveredTerminal = (record: TaskRecord | null) =>
         !!recoveredTerminal &&
         !!record &&
@@ -713,7 +784,7 @@ export async function createOwnedTaskHandle(input: {
       let fresh: OwnedChildObserver | undefined
       try {
         fresh = await input.openObserver(key, observerLifetime.signal)
-        observers.add(fresh)
+        own(fresh)
         signal.throwIfAborted()
         assertPreparedOwned()
         const nextObserver = fresh
@@ -899,6 +970,13 @@ export async function createOwnedTaskHandle(input: {
     },
     assertOwned,
     bindReattachedRun,
+    bindSelfResumedRun,
+    onSelfResumed(listener) {
+      selfResumedListeners.add(listener)
+      return () => {
+        selfResumedListeners.delete(listener)
+      }
+    },
     effectiveModel: () => actualModel,
     subscribe(listener) {
       listeners.add(listener)
@@ -969,11 +1047,7 @@ export async function createOwnedTaskHandle(input: {
     const observed = observer.outcome()
     if (observed.status === "uncertain")
       throw new ChildObservationUncertain(observed.reason ?? "input-observation-unavailable", observed.startEventID)
-    if (
-      record?.status !== "running" ||
-      record.notification.run_epoch !== epoch ||
-      ["completed", "error", "interrupted"].includes(observed.status)
-    ) {
+    if (record?.status !== "running" || record.notification.run_epoch !== epoch || settledStatus(observed.status)) {
       throw new Error("Owned managed idle turn is not bound; no input dispatched")
     }
     busy = true
@@ -1067,4 +1141,9 @@ export async function createOwnedTaskHandle(input: {
       return { turnId: id, outcome: current }
     },
   }
+}
+
+/** An observed turn the observer settled; `cancelled` is a local Stop of a held turn (omo#9069). */
+function settledStatus(status: string): boolean {
+  return status === "completed" || status === "error" || status === "interrupted" || status === "cancelled"
 }

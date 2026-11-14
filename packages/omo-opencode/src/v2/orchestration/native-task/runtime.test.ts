@@ -1310,6 +1310,39 @@ test("initiating caller abort after first input does not kill already admitted b
   })
 })
 
+test("a settled background child that runs again on its own re-opens its task and reports that run (Native onSelfResumed)", async () => {
+  await fixture(async (runtime, state) => {
+    // given: a background child whose turn completed
+    const started = await runtime.start({ category: "qa", prompt: "self resume fixture", run_in_background: true })
+    if (started.kind !== "started") throw Error("No controlled background task")
+    await runtime.wait(started.task_id)
+    const settled = defined(runtime.store.load(started.task_id))
+    expect(settled.status).toBe("completed")
+    const child = defined(settled.child_session_id)
+
+    // when: a notice the task handle never sent wakes the child and it answers
+    state.emit("session.execution.started", child)
+    state.emit("session.inbox.delivered", child, { inboxID: "msg_foreign_notice" })
+    state.emit("session.step.started", child, { assistantMessageID: "woken", model: { providerID: "qa", id: "model" } })
+    state.emit("session.text.started", child, { assistantMessageID: "woken", ordinal: 0 })
+    state.emit("session.text.ended", child, { assistantMessageID: "woken", ordinal: 0, text: "answer of my own run" })
+    state.emit("session.step.ended", child, { assistantMessageID: "woken", finish: "stop" })
+    state.emit("session.execution.succeeded", child)
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const record = runtime.store.load(started.task_id)
+      if (record?.notification.run_epoch === 1 && record.status === "completed") break
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+
+    // then: the record re-opened under run epoch 1 and settled with that run's answer
+    const resumed = defined(runtime.store.load(started.task_id))
+    expect(resumed).toMatchObject({ status: "completed", resumed_run_epoch: 1, final_response: "answer of my own run" })
+    expect(resumed.notification.run_epoch).toBe(1)
+    expect(resumed.owned_session?.runEpoch).toBe(1)
+    await runtime.end(started.task_id)
+  })
+})
+
 test("torn display log promptly rejects outcome without host terminal then retains lane for end", async () => {
   await fixture(async (runtime, state) => {
     const started = await runtime.start({ category: "qa", prompt: "block-until-interrupt" })

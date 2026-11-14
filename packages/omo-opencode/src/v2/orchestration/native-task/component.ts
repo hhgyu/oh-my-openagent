@@ -17,7 +17,8 @@ import {
 import { listActiveTeams } from "@oh-my-opencode/team-core/team-state-store"
 import { OmoTaskSettingsSchema, type OmoConfig } from "@oh-my-opencode/omo-config-core"
 import { Effect, type Scope } from "effect"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
+import type { ToolContext } from "@opencode/plugin/promise/tool"
 import { existsSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
@@ -58,6 +59,10 @@ import type { NativeDagTargets } from "../../tools/native-dag"
 import type { NativeDagComponent, NativeDagHost } from "../native-dag/component"
 import type { NativeTaskTargetPermissionAssociation } from "./service"
 import { registerSkillInvocations } from "./skill-invocations"
+import { nativeTaskStateDir } from "./state-dir"
+import { discoverLeftBehindParents, type LeftBehindParent } from "./left-behind-discovery"
+
+export { nativeTaskStateDir }
 
 type MetadataSource = Parameters<typeof createNativeTaskService>[1]["metadataSource"]
 type JoinedSession = Effect.Success<ReturnType<typeof acquireEffectSessionBackendApi>>
@@ -165,16 +170,6 @@ export function seedTaskIdFloor(projectDirectory: string): void {
     }
   }
   if (max) syncTaskIdFloor(parseTaskId(max))
-}
-
-export function nativeTaskStateDir(projectDirectory: string, parentSessionID: string): string {
-  return join(
-    projectDirectory,
-    ".omo",
-    "tasks",
-    "opencode-v2",
-    createHash("sha256").update(parentSessionID).digest("hex"),
-  )
 }
 
 /** Unnamespaced actual catalog entries a Native child may be granted. Namespaced CodeMode tools,
@@ -539,6 +534,48 @@ export async function registerNativeTaskComponent(
         }),
       )
     }
+    // Native `session_start` revival (D-037): this component starts when the restarted host serves the
+    // project again, so every session with children a previous host left behind gets them back now,
+    // without waiting for a parent task call. Each revival asks its own `subagent` approval; a refused
+    // one stays parked and its parent is told once.
+    const recoveryStop = new AbortController()
+    const recoverParent = async (parent: LeftBehindParent) => {
+      if (recoveryStop.signal.aborted) return
+      try {
+        const actual = await host.session.get({ sessionID: parent.sessionID }, { signal: recoveryStop.signal })
+        if (actual.location.directory !== directory) return
+        console.info("[oh-my-openagent/v2] reviving left-behind task children", actual.id, parent.tasks.join(","))
+        const report = await bridge.recoverLeftBehind(
+          hostRecoveryCaller(actual.id, actual.agent ?? "build", recoveryStop.signal),
+        )
+        console.info(
+          "[oh-my-openagent/v2] left-behind task children revived",
+          actual.id,
+          `restored=${report.restored.join(",")}`,
+          `held=${report.held.map((item) => item.taskID).join(",")}`,
+        )
+        for (const held of report.held) await noticeHeldRevival(host.session, actual.id, held, recoveryStop.signal)
+      } catch (error) {
+        if (recoveryStop.signal.aborted) return
+        console.warn(
+          "[oh-my-openagent/v2] left-behind task recovery held",
+          parent.sessionID,
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+    }
+    // Sessions recover independently, so one approval still waiting cannot hold up another session;
+    // a nested parent waits for the level above it (its own parent child is restored there).
+    const startupRecovery = (async () => {
+      const parents = discoverLeftBehindParents(directory)
+      for (const depth of [...new Set(parents.map((parent) => parent.depth))]) {
+        await Promise.all(parents.filter((parent) => parent.depth === depth).map(recoverParent))
+      }
+    })()
+    closers.push(async () => {
+      recoveryStop.abort(Error("Native task component closed"))
+      await startupRecovery
+    })
   } catch (error) {
     try {
       await close()
@@ -563,4 +600,40 @@ export async function registerNativeTaskComponent(
     locationReleased.abort(Error("OpenCode closed the plugin location"))
     return closeOnce()
   }
+}
+
+/** The caller of a host-originated recovery of `sessionID`'s children: no model tool call exists, so the
+ * message and call identities are this recovery's own and never name a host message. */
+function hostRecoveryCaller(sessionID: string, agent: string, signal: AbortSignal): ToolContext {
+  return Object.freeze({
+    sessionID: sessionID as ToolContext["sessionID"],
+    agent: agent as ToolContext["agent"],
+    messageID: `msg_omo_recovery_${randomUUID().replaceAll("-", "")}` as ToolContext["messageID"],
+    id: `omo-recovery-${randomUUID()}` as ToolContext["id"],
+    signal,
+    progress: async () => {},
+  })
+}
+
+/** One notice per refused revival of one run in this host process (the host deduplicates the id). */
+async function noticeHeldRevival(
+  session: Pick<PromisePlugin.Context["session"], "synthetic">,
+  parentSessionID: string,
+  held: { readonly taskID: string; readonly runEpoch: number; readonly reason: string },
+  signal: AbortSignal,
+): Promise<void> {
+  const digest = createHash("sha256")
+    .update(`task-revival-held:${parentSessionID}:${held.taskID}:${held.runEpoch}:${process.pid}`)
+    .digest("hex")
+  await session.synthetic(
+    {
+      sessionID: parentSessionID as ToolContext["sessionID"],
+      id: `msg_omo_revive_${digest.slice(0, 40)}`,
+      text: `Task ${held.taskID} was left behind by an OpenCode restart and was not revived: ${held.reason}. It stays parked; your next task, task_send or task_cancel call retries the revival.`,
+      delivery: "steer",
+      resume: true,
+      metadata: { omoTaskRevivalHeld: held.taskID },
+    },
+    { signal },
+  )
 }

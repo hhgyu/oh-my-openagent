@@ -8,6 +8,8 @@
 // live for the whole session, so only the engine's own state records (a zero-count snapshot, a
 // monitor-ended notice) clear them - a monitor armed in an earlier turn still protects a later one.
 
+import { createWakeSourceLedger } from "../turn-settlement-core"
+
 export type TurnWakeSources = {
   readonly observe: (record: unknown) => void
   readonly hasLiveWakeSources: () => boolean
@@ -41,34 +43,29 @@ function monitorActiveCount(data: unknown): number | undefined {
 }
 
 export function createTurnWakeSources(): TurnWakeSources {
-  // One entry per ARMED goal continuation timer kind (`monitor`, `userGrace`, senpi#3319's
-  // `providerRetry`, ...). An armed timer of ANY kind is a live wake; an `armed: false` clears
-  // only its own kind so a stale disarm never cancels a timer another kind still holds.
-  const armedGoalTimers = new Set<string>()
-  const monitorWatches = new Map<string, true>()
+  // Goal continuation timers are turn-scoped, one entry per ARMED kind (`monitor`, `userGrace`,
+  // senpi#3319's `providerRetry`, ...): an armed timer of ANY kind is a live wake, and an
+  // `armed: false` clears only its own kind so a stale disarm never cancels a timer another kind
+  // still holds. Terminal monitor watches are session-scoped.
+  const ledger = createWakeSourceLedger()
 
   const trackMonitorSnapshot = (data: unknown): void => {
     const count = monitorActiveCount(data)
     if (count === undefined) return
     if (count === 0) {
-      monitorWatches.clear()
+      ledger.replaceSession([])
       return
     }
     const items =
       typeof data === "object" && data !== null ? (data as { readonly monitors?: unknown }).monitors : undefined
     if (!Array.isArray(items)) return
-    const seen = new Set<string>()
+    const seen: string[] = []
     for (const item of items) {
       if (typeof item !== "object" || item === null) continue
       const id = (item as { readonly id?: unknown }).id
-      if (typeof id === "string" && id.length > 0) {
-        monitorWatches.set(id, true)
-        seen.add(id)
-      }
+      if (typeof id === "string" && id.length > 0) seen.push(id)
     }
-    for (const id of [...monitorWatches.keys()]) {
-      if (!seen.has(id)) monitorWatches.delete(id)
-    }
+    ledger.replaceSession(seen)
   }
 
   return {
@@ -78,8 +75,8 @@ export function createTurnWakeSources(): TurnWakeSources {
       if (isExtensionEventNamed(event, "goal_continuation_timer_state")) {
         const timer = goalTimerKind(event.data)
         if (timer !== undefined) {
-          if (timer.armed) armedGoalTimers.add(timer.kind)
-          else armedGoalTimers.delete(timer.kind)
+          if (timer.armed) ledger.armTurn(timer.kind)
+          else ledger.disarmTurn(timer.kind)
         }
         return
       }
@@ -92,15 +89,10 @@ export function createTurnWakeSources(): TurnWakeSources {
           typeof event.data === "object" && event.data !== null
             ? (event.data as { readonly id?: unknown }).id
             : undefined
-        if (typeof id === "string") monitorWatches.delete(id)
+        if (typeof id === "string") ledger.endSession(id)
       }
     },
-    hasLiveWakeSources() {
-      if (armedGoalTimers.size > 0) return true
-      return monitorWatches.size > 0
-    },
-    resetTurn() {
-      armedGoalTimers.clear()
-    },
+    hasLiveWakeSources: ledger.hasLive,
+    resetTurn: ledger.resetTurn,
   }
 }
