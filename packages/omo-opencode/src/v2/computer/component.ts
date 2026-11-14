@@ -1,5 +1,5 @@
 // V2 port of Native computer use (omo-senpi `components/computer-use`): the `computer` tool (and `computer_actions`
-// behind `computer.cua_adapter`) with Native's read/exec permission tiers, the eval `computer` global, `/computer`,
+// behind `computer.cua_adapter`) with Native's read/exec permission tiers, the eval `computer` global, `/omo:computer`,
 // and the computer-use skill. Everything below the registration shell is the shared senpi-desktop packages.
 //
 // Exposure: Native registers the tool search-exposed (hidden until tool_search activates it). OpenCode 2.2.6 has no
@@ -25,6 +25,7 @@ import { resolve } from "node:path"
 import { z } from "zod"
 import type { OwnedEvalHostTool } from "../tools/codemode-host-tools"
 import type { EvalKernelPreludes } from "../tools/codemode-worker-protocol"
+import { rewriteCommandMentions } from "../commands/namespace"
 import { adaptEvalResult, toToolError } from "../tools/native-eval-result"
 import { EVAL_DENIED_AGENTS } from "../tools/native-eval"
 import {
@@ -104,8 +105,15 @@ export function createComputerComponent(host: ComputerHost, options: ComputerCom
 
   const output = (sessionID: string, level: "info" | "warning" | "error", text: string) =>
     events
-      ?.emit(COMPUTER_COMMAND_OUTPUT_EVENT, { sessionID, command: COMPUTER_COMMAND_NAME, level, text })
-      .catch((error: unknown) => console.warn("[oh-my-openagent/v2] /computer output was not delivered", error))
+      ?.emit(COMPUTER_COMMAND_OUTPUT_EVENT, {
+        sessionID,
+        command: COMPUTER_COMMAND_NAME,
+        level,
+        text: rewriteCommandMentions(text),
+      })
+      .catch((error: unknown) =>
+        console.warn(`[oh-my-openagent/v2] /${COMPUTER_COMMAND_NAME} output was not delivered`, error),
+      )
   const registerRpc = async () => {
     const registration = await host.rpc.register(computerRpc, {})
     registrations.push(registration)
@@ -179,7 +187,25 @@ export function createComputerComponent(host: ComputerHost, options: ComputerCom
     return known
   }
 
+  // The shared tool's results and errors name the Native `/computer`; the model and the user see `/omo:computer`.
   async function run(name: ToolName, input: unknown, caller: ToolContext, signal: AbortSignal) {
+    try {
+      const result = await runNative(name, input, caller, signal)
+      return {
+        ...result,
+        content: result.content.map((part) =>
+          part.type === "text" && typeof part.text === "string"
+            ? { ...part, text: rewriteCommandMentions(part.text) }
+            : part,
+        ),
+      }
+    } catch (error) {
+      if (error instanceof Error) error.message = rewriteCommandMentions(error.message)
+      throw error
+    }
+  }
+
+  async function runNative(name: ToolName, input: unknown, caller: ToolContext, signal: AbortSignal) {
     if (closed) throw Error("computer use is shutting down")
     if (EVAL_DENIED_AGENTS.has(caller.agent))
       throw Error(`${name} is not available to the ${caller.agent} agent: read-only roles cannot drive the desktop.`)
@@ -240,7 +266,7 @@ export function createComputerComponent(host: ComputerHost, options: ComputerCom
   const contribution = {
     javascript: computerPreludeAssets.javascript,
     python: computerPreludeAssets.python,
-    documentation: computerPreludeAssets.documentation,
+    documentation: rewriteCommandMentions(computerPreludeAssets.documentation),
     exports: [...computerPreludeAssets.exports],
   }
   const preludeActive = (sessionID: string) => !closed && runtimes.enabled(sessionID)

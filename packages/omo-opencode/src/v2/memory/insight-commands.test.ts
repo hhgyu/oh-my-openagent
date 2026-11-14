@@ -239,7 +239,7 @@ describe("/people (S7d)", () => {
 
     // then
     expect(result).toEqual({
-      text: expect.stringContaining("/people --ask is not available on OpenCode yet"),
+      text: expect.stringContaining("/omo:people --ask is not available on OpenCode yet"),
       level: "error",
     })
   })
@@ -300,7 +300,7 @@ describe("/palace (S7d)", () => {
 
     // then
     expect(result).toEqual({
-      text: "memory is not bound in this session, so /palace has nothing to render",
+      text: "memory is not bound in this session, so /omo:palace has nothing to render",
       level: "warning",
     })
   })
@@ -315,17 +315,19 @@ describe("read-side command registration", () => {
     })
     f.addSession("root")
     const cleanup = await registerMemoryComponent(f.host, f.options())
-    const registered = ["doctor", "sleeptime", "people", "palace"].filter((name) => f.commands.has(name))
+    const registered = ["omo:doctor", "omo:sleeptime", "omo:people", "omo:palace"].filter((name) =>
+      f.commands.has(name),
+    )
 
     // when
-    await f.runCommand("sleeptime", "root")
+    await f.runCommand("omo:sleeptime", "root")
     await cleanup()
 
     // then
-    expect(registered).toEqual(["doctor", "sleeptime", "people", "palace"])
+    expect(registered).toEqual(["omo:doctor", "omo:sleeptime", "omo:people", "omo:palace"])
     expect(f.events.map((event) => event.name)).toEqual([MEMORY_COMMAND_OUTPUT_EVENT])
     expect(f.synthetics).toHaveLength(1)
-    expect(f.synthetics[0]?.description).toBe("/sleeptime")
+    expect(f.synthetics[0]?.description).toBe("/omo:sleeptime")
     expect(f.synthetics[0]?.resume).toBe(false)
   })
 })

@@ -17,7 +17,7 @@ function stagedSkill(): string {
   const file = join(root, "SKILL.md")
   writeFileSync(
     file,
-    "---\nname: ulw-loop\ndescription: loop description\n---\n\nbody `todo` body, record `senpi:<session_id>`\n",
+    "---\nname: ulw-loop\ndescription: loop description\n---\n\nbody `todo` body, record `senpi:<session_id>`, end with `/goal clear`\n",
   )
   return file
 }
@@ -36,7 +36,7 @@ function fakeSkillDomain(existing: { name: string }[] = []) {
 }
 
 describe("V2 staged skills", () => {
-  test("#given the staged skill #when it registers #then OpenCode gets its frontmatter fields, its file path and the body with V2 tool names and session prefix", async () => {
+  test("#given the staged skill #when it registers #then OpenCode gets its frontmatter fields, its file path and the body with V2 tool names, session prefix and command names", async () => {
     // given
     const file = stagedSkill()
     const { catalog, domain } = fakeSkillDomain()
@@ -51,7 +51,7 @@ describe("V2 staged skills", () => {
         name: ULW_LOOP_SKILL_NAME,
         description: "loop description",
         path: file,
-        content: "\nbody `todowrite` body, record `opencode:<session_id>`\n",
+        content: "\nbody `todowrite` body, record `opencode:<session_id>`, end with `/omo:goal clear`\n",
       },
     ])
   })

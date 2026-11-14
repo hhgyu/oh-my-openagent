@@ -5,11 +5,12 @@
 // not share a display with the user, so the path is always reported instead (parity P-16).
 
 import { generatePalaceHtml } from "@oh-my-opencode/memory-core/palace"
+import { v2Slash } from "../commands/namespace"
 import type { BoundMemorySession } from "./binding"
 import { INSIGHT_COMMAND_NAMES } from "./insight-commands"
 import type { ExtraMemoryCommand } from "./reflect-command"
 
-const UNBOUND_NOTICE = "memory is not bound in this session, so /palace has nothing to render"
+const UNBOUND_NOTICE = `memory is not bound in this session, so ${v2Slash("palace")} has nothing to render`
 
 export function createPalaceCommand(deps: { readonly now?: () => Date } = {}): ExtraMemoryCommand {
   return {

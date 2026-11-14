@@ -40,7 +40,7 @@ describe("/dream", () => {
     // when
     const result = await command.run(bound, "--conversation ses_a,ses_b,ses_a --to reference/build.md build notes")
     // then
-    expect(command.name).toBe("dream")
+    expect(command.name).toBe("omo:dream")
     expect(requests).toEqual([
       { focus: "build notes", conversationIds: ["ses_a", "ses_b"], targetDoc: "reference/build.md" },
     ])
@@ -105,7 +105,7 @@ describe("/dream", () => {
   test("#given a refused request #when /dream runs #then the rejection is reported as an error", async () => {
     for (const [rejection, text] of [
       ["no_unreflected_content", "dream found no unreflected content to process"],
-      ["parked", "automatic memory reflection is paused after repeated failures; run /reflect to retry now"],
+      ["parked", "automatic memory reflection is paused after repeated failures; run /omo:reflect to retry now"],
     ] as const) {
       // given
       const { bound, command } = setup({ fired: false, rejection })

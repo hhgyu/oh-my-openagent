@@ -3,19 +3,22 @@
 // - goalStoreRef: the calling OpenCode session (the tool context's sessionID), never a model-supplied id;
 // - the todo gate: update_goal(complete) is refused, with the engine's message, while the last todowrite has open tasks;
 // - goal accounting (accounting.ts) and the continuation loop (continuation.ts), first in the shared idle chain;
-// - Native's goal status line -> the footer RPC, with the engine's goal status text.
+// - Native's goal status line -> the footer RPC, with the engine's goal status text;
+// - Native's `/goal` -> `/omo:goal` (command.ts); the engine's texts naming `/goal` are rewritten to `/omo:goal`.
 import type * as Plugin from "@opencode/plugin/promise/plugin"
 import type { Registration } from "@opencode/plugin/promise/registration"
 import { Error as ToolError, type Info, type Result, type ToolContext } from "@opencode/plugin/promise/tool"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { GOAL_CONTINUATION_METADATA_KEY, isOwnContinuation } from "../hooks/continuation-metadata"
 import {
   attachIdleContinuation,
   IDLE_CONTINUATION_RANK,
   type IdleContinuationChain,
 } from "../hooks/idle-continuation-chain"
+import { rewriteCommandMentions } from "../commands/namespace"
 import type { UlwLoopStatusRpc } from "../ulw-loop/status-rpc"
 import { createGoalAccounting } from "./accounting"
+import { registerGoalCommand } from "./command"
 import { createGoalContinuation, type GoalTimers } from "./continuation"
 import { pumpGoalEvents } from "./events"
 import { loadGoalEngine, type EngineGoal, type EngineGoalTool, type EngineToolContext, type GoalEngine } from "./engine"
@@ -24,7 +27,8 @@ import { goalStoreRef } from "./store-ref"
 import { createTodoState } from "./todo-state"
 
 export type { GoalTimers } from "./continuation"
-export type GoalHost = Pick<Plugin.Context, "tool" | "session" | "event" | "location">
+export type GoalHost = Pick<Plugin.Context, "tool" | "session" | "event" | "location"> &
+  Partial<Pick<Plugin.Context, "command" | "rpc">>
 
 export interface GoalOptions {
   readonly engine?: () => Promise<GoalEngine>
@@ -54,7 +58,8 @@ export async function registerGoal(host: GoalHost, options: GoalOptions = {}): P
     ref: ref(sessionID),
     sessionManager: { getBranch: () => [] },
   })
-  const statusText = (goal: EngineGoal | null) => (goal === null ? undefined : engine.ui.goalStatusText(goal))
+  const statusText = (goal: EngineGoal | null) =>
+    goal === null ? undefined : rewriteCommandMentions(engine.ui.goalStatusText(goal))
   const publish = (sessionID: string, goal: EngineGoal | null) =>
     options.footer?.publishGoal(sessionID, statusText(goal))
   options.footer?.readGoalsFrom(async (sessionID) => statusText(await engine.store.readGoal(ref(sessionID))))
@@ -73,8 +78,10 @@ export async function registerGoal(host: GoalHost, options: GoalOptions = {}): P
       const info = await host.session.get({ sessionID }).catch(() => undefined)
       return info?.model ? `${info.model.providerID}/${info.model.id}` : undefined
     },
-    deliver: async (sessionID, text, count, signature) => {
-      const digest = createHash("sha256").update(`${sessionID}\0${count}\0${signature}`).digest("hex")
+    deliver: async (sessionID, text, count, signature, queued) => {
+      // A status change resets the count, so a resumed goal can repeat an earlier count and signature.
+      const nonce = queued ? `\0${randomUUID()}` : ""
+      const digest = createHash("sha256").update(`${sessionID}\0${count}\0${signature}${nonce}`).digest("hex")
       await host.session.synthetic({
         sessionID,
         id: `msg_omo_goal_${digest.slice(0, 24)}`,
@@ -115,7 +122,7 @@ export async function registerGoal(host: GoalHost, options: GoalOptions = {}): P
         publish(toolContext.sessionID, await engine.store.readGoal(ctx.ref))
         return {
           content: result.content.flatMap((part) =>
-            part.type === "text" ? [{ type: "text", text: part.text ?? "" }] : [],
+            part.type === "text" ? [{ type: "text", text: rewriteCommandMentions(part.text ?? "") }] : [],
           ),
           metadata: { goal: JSON.parse(JSON.stringify(result.details ?? null)) },
         } as Result
@@ -164,6 +171,13 @@ export async function registerGoal(host: GoalHost, options: GoalOptions = {}): P
           if (!isOwnContinuation(input.metadata)) await continuation.userPrompt(input.sessionID)
         }),
       )
+      if (host.command !== undefined)
+        registrations.push(
+          ...(await registerGoalCommand(
+            { command: host.command, ...(host.rpc && { rpc: host.rpc }) },
+            { engine, accounting, continuation, ref, publish, warn },
+          )),
+        )
     }
   } catch (error) {
     for (const registration of registrations.reverse()) await registration.dispose().catch(() => {})

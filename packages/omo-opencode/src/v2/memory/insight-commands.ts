@@ -10,14 +10,15 @@ import type {
   MemoryCommandIdentity,
   NotifyLevel,
 } from "@oh-my-opencode/memory-core/commands"
+import { v2CommandName } from "../commands/namespace"
 import type { BoundMemorySession } from "./binding"
 
 /** Registered names of the read-side memory commands. */
 export const INSIGHT_COMMAND_NAMES: Readonly<Record<"doctor" | "sleeptime" | "people" | "palace", string>> = {
-  doctor: "doctor",
-  sleeptime: "sleeptime",
-  people: "people",
-  palace: "palace",
+  doctor: v2CommandName("doctor"),
+  sleeptime: v2CommandName("sleeptime"),
+  people: v2CommandName("people"),
+  palace: v2CommandName("palace"),
 }
 
 export const UNBOUND_MEMORY_SESSION =

@@ -1,3 +1,4 @@
+import type { CommandDefinition, CommandInvocation } from "@opencode/plugin/promise/command"
 import type { Info, Result, ToolContext } from "@opencode/plugin/promise/tool"
 import type { GoalHost, GoalTimers } from "./component"
 
@@ -13,10 +14,13 @@ export interface FakeTimer {
 export interface FakeGoalHost {
   readonly host: GoalHost
   readonly tools: readonly { readonly name: string; readonly input: unknown }[]
+  readonly commands: readonly CommandDefinition[]
+  readonly outputs: { readonly rpcID: string; readonly name: string; readonly data: unknown }[]
   readonly synthetic: Record<string, unknown>[]
   readonly timers: GoalTimers
   readonly armed: FakeTimer[]
   call(name: string, input: unknown, sessionID: string): Promise<Result>
+  command(name: string, sessionID: string, text?: string): Promise<void>
   todowrite(sessionID: string, todos: readonly { content: string; status: string }[]): Promise<unknown>
   step(sessionID: string, tokens: { input: number; output: number; reasoning: number }): Promise<void>
   event(type: string, data: Record<string, unknown>): Promise<void>
@@ -34,6 +38,8 @@ export interface ToolRun {
 
 export function fakeGoalHost(directory: string): FakeGoalHost {
   const tools: Info[] = []
+  const commands: CommandDefinition[] = []
+  const outputs: { rpcID: string; name: string; data: unknown }[] = []
   const hooks = new Map<string, Callback>()
   const subscribers = new Set<{ types: readonly string[]; pending: Event[]; wake: (() => void) | undefined }>()
   const synthetic: Record<string, unknown>[] = []
@@ -50,6 +56,28 @@ export function fakeGoalHost(directory: string): FakeGoalHost {
         hooks.set(`tool.${name}`, callback)
         return { dispose: async () => void hooks.delete(`tool.${name}`) }
       },
+    },
+    command: {
+      transform: async (callback: (editor: unknown) => void) => {
+        const added: CommandDefinition[] = []
+        callback({ add: (definition: CommandDefinition) => added.push(definition) })
+        commands.push(...added)
+        return {
+          dispose: async () => {
+            for (const definition of added) commands.splice(commands.indexOf(definition), 1)
+          },
+        }
+      },
+    },
+    rpc: {
+      register: async (definition: { id: string }) => ({
+        dispose: async () => {},
+        events: {
+          emit: async (name: string, data: unknown) => {
+            outputs.push({ rpcID: definition.id, name, data: structuredClone(data) })
+          },
+        },
+      }),
     },
     session: {
       hook: async (name: string, callback: Callback) => {
@@ -120,13 +148,22 @@ export function fakeGoalHost(directory: string): FakeGoalHost {
       ;(handle as FakeTimer).cleared = true
     },
   }
+  const command = async (name: string, sessionID: string, text = "") => {
+    const definition = commands.find((entry) => entry.name === name)
+    if (!definition) throw Error(`command ${name} is not registered`)
+    await definition.execute({ sessionID, prompt: { text }, delivery: "steer" } as unknown as CommandInvocation)
+    await settle()
+  }
   return {
     host,
     tools,
+    commands,
+    outputs,
     synthetic,
     timers,
     armed,
     call,
+    command,
     todowrite: async (sessionID, todos) =>
       hook("tool.execute.after")({ tool: "todowrite", sessionID, input: { todos }, status: "completed", result: {} }),
     step: async (sessionID, tokens) =>

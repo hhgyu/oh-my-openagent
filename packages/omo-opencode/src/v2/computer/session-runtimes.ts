@@ -1,5 +1,5 @@
 // One computer-use runtime per OpenCode session, as Native has one per agent session: created on the session's first
-// `/computer`, tool call or eval call, closed (engine session ended) at session deletion and plugin dispose.
+// `/omo:computer`, tool call or eval call, closed (engine session ended) at session deletion and plugin dispose.
 
 import type * as Plugin from "@opencode/plugin/promise/plugin"
 import { Error as ToolError, type ToolContext } from "@opencode/plugin/promise/tool"

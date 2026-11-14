@@ -9,11 +9,12 @@
 import type { ReflectionEvent, ReservationResult } from "@oh-my-opencode/memory-core"
 import { parseCommandArgs } from "@oh-my-opencode/memory-core/commands/args"
 import type { NotifyLevel } from "@oh-my-opencode/memory-core/commands"
+import { v2CommandName, v2Slash } from "../commands/namespace"
 import type { BoundMemorySession } from "./binding"
 import { reflectionSettings } from "./reflection-run-store"
 
 /** Registered name of the reflection command, kept apart from the core `MEMORY_COMMAND_NAMES` record. */
-const REFLECT_COMMAND_NAMES: Readonly<Record<"reflect", string>> = { reflect: "reflect" }
+const REFLECT_COMMAND_NAMES: Readonly<Record<"reflect", string>> = { reflect: v2CommandName("reflect") }
 
 /** A memory command outside the memory-core suite; its result is posted like every memory command output. */
 export interface ExtraMemoryCommand {
@@ -56,7 +57,10 @@ export function createReflectCommand(evaluate: ReflectEvaluate): ExtraMemoryComm
       if (recentRaw !== undefined) {
         const value = recentRaw === true ? Number.NaN : Number.parseInt(recentRaw, 10)
         if (!Number.isInteger(value) || value <= 0) {
-          return { text: "--recent expects a positive integer, for example /reflect --recent 5", level: "error" }
+          return {
+            text: `--recent expects a positive integer, for example ${v2Slash("reflect")} --recent 5`,
+            level: "error",
+          }
         }
         recentN = value
       }

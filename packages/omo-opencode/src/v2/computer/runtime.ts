@@ -1,5 +1,5 @@
 // One session's computer-use implementation: the desktop service over its engine child, the session handle and the
-// shared tools' `execute`. The component imports this module on the first `/computer`, tool call or eval cell call
+// shared tools' `execute`. The component imports this module on the first `/omo:computer`, tool call or eval cell call
 // only, so a session that never drives the desktop loads none of it (Native #9113). Creating it starts nothing.
 
 import type { PermissionDeniedData } from "@oh-my-opencode/senpi-desktop-protocol"

@@ -12,6 +12,7 @@ import {
 import type { CommandDefinition, CommandInvocation } from "@opencode/plugin/promise/command"
 import type * as Plugin from "@opencode/plugin/promise/plugin"
 import { randomUUID } from "node:crypto"
+import { rewriteCommandMentions, v2CommandName } from "../commands/namespace"
 import { describeError, type MemoryBinder } from "./binding"
 import type { MemoryCommandOutputEvent } from "./command-output-event"
 import { MEMORY_COMMAND_OUTPUT_ID_PREFIX } from "./command-output"
@@ -21,21 +22,10 @@ import type { ExtraMemoryCommand } from "./reflect-command"
 /** Synthetic-message metadata key naming the memory command whose output the message carries. */
 export const MEMORY_COMMAND_OUTPUT_KEY = "omo.memory.command"
 
-/**
- * Registered names. OpenCode 2.2.6 ships its own `init` command (guided AGENTS.md setup) through the
- * same `command.transform` surface, so the memory initializer registers as `memory-init` instead.
- */
-export const MEMORY_COMMAND_NAMES: Readonly<Record<CoreMemoryCommandName, string>> = {
-  memory: "memory",
-  memfs: "memfs",
-  remember: "remember",
-  init: "memory-init",
-  recompile: "recompile",
-  "memory-repository": "memory-repository",
-  search: "search",
-  facts: "facts",
-  agreements: "agreements",
-}
+/** Registered names: `omo:<name>` (../commands/namespace), so `init` is `omo:init` beside OpenCode's own `/init`. */
+export const MEMORY_COMMAND_NAMES: Readonly<Record<CoreMemoryCommandName, string>> = Object.fromEntries(
+  (Object.keys(CORE_MEMORY_COMMANDS) as CoreMemoryCommandName[]).map((name) => [name, v2CommandName(name)]),
+) as Record<CoreMemoryCommandName, string>
 
 type SyntheticPort = Pick<Plugin.Context["session"], "synthetic">
 
@@ -79,7 +69,7 @@ interface Output {
  * - recorded: a `session.synthetic` with `resume: false` (no model turn; the host queues it and delivers
  *   it with the next turn) under a `msg_omo_memory_output_` ID, which the memory component's `context`
  *   and `compaction` hooks strip from every model request, so the dump never reaches the model.
- * `/remember` and `/memory-init` start their model turn with `resume: true`; that message is meant for
+ * `/omo:remember` and `/omo:init` start their model turn with `resume: true`; that message is meant for
  * the model and keeps a host-assigned ID. Posts for one session are serialized; a failed display or
  * post is logged and never thrown into the host.
  */
@@ -118,7 +108,10 @@ export function createMemoryCommands(deps: MemoryCommandsDeps): MemoryCommands {
 
   async function postOutput(output: Output): Promise<void> {
     if (deps.isClosed()) return
-    const text = output.level === "error" ? `/${output.command} failed: ${output.text}` : output.text
+    // Shared memory-core texts name the Native commands; the user sees the V2 names.
+    const text = rewriteCommandMentions(
+      output.level === "error" ? `/${output.command} failed: ${output.text}` : output.text,
+    )
     await display(output, text)
     // The ID is chosen before the call so the record is strippable from the first request that could see it.
     const id = newOutputID()

@@ -70,13 +70,18 @@ describe("the V2 memory status sync field (#12284)", () => {
     expect(loads).toEqual([])
   })
 
-  test("#given a stranded git lock #when the field is read #then its paths survive and no held-file fields appear", async () => {
+  test("#given a stranded git lock #when the field is read #then its paths survive, its action names the V2 unlock command and no held-file fields appear", async () => {
     // given
     const status: RunnerStatus = {
       kind: "failing",
       since: SINCE,
       attempts: 1,
-      failure: { kind: "stranded_lock", paths: [".git/index.lock"], reason: "r", action: "a" },
+      failure: {
+        kind: "stranded_lock",
+        paths: [".git/index.lock"],
+        reason: "r",
+        action: "run /memory unlock .git/index.lock",
+      },
     }
 
     // when
@@ -88,7 +93,7 @@ describe("the V2 memory status sync field (#12284)", () => {
       failure: {
         kind: "stranded_lock",
         reason: "r",
-        action: "a",
+        action: "run /omo:memory unlock .git/index.lock",
         sinceISO: "2026-11-13T10:00:00.000Z",
         attempts: 1,
         paths: [".git/index.lock"],

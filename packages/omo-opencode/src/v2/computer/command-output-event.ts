@@ -1,5 +1,5 @@
 // Wire contract of the computer-use events, shared by the server component that emits them and the TUI plugin that
-// shows them. Dependency-free so the TUI entry does not load the component. `/computer` output has the memory
+// shows them. Dependency-free so the TUI entry does not load the component. `/omo:computer` output has the memory
 // command output shape (`readMemoryCommandOutputEvent` reads it).
 
 export const COMPUTER_RPC_ID = "omo-computer"
