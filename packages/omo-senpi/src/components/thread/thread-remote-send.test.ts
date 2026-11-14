@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { GATEWAY_PEER_REPLY_SENTENCE, GATEWAY_PROVENANCE_SENTENCE } from "./gateway/constants"
-import { deliveryProvenanceLine, renderDeliveryText } from "./gateway/provenance"
+import { GATEWAY_PEER_REPLY_SENTENCE, GATEWAY_PROVENANCE_SENTENCE } from "@oh-my-opencode/thread-core/gateway/constants"
+import { deliveryProvenanceLine, renderDeliveryText } from "@oh-my-opencode/thread-core/gateway/provenance"
 import { UNKNOWN_CALLER } from "./tools"
 import { ENGINE, comparable, createRemoteThreadFixture } from "./thread-remote-fixture"
 

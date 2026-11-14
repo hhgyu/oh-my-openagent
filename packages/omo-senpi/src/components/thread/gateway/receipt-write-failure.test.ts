@@ -2,12 +2,16 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { Database } from "bun:sqlite"
 
 import { createRemoteThreadFixture } from "../thread-remote-fixture"
-import { createGatewayEngine, resolveFromEntries, type GatewayDeliverRequest } from "./engine"
-import { gatewayDatabasePath } from "./paths"
-import type { GatewayStore } from "./store"
+import {
+  createGatewayEngine,
+  resolveFromEntries,
+  type GatewayDeliverRequest,
+} from "@oh-my-opencode/thread-core/gateway/engine"
+import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
+import type { GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 import { settled } from "./testing/settled"
-import type { GatewayDeliveryResult } from "./types"
+import type { GatewayDeliveryResult } from "@oh-my-opencode/thread-core/gateway/types"
 
 let harness: GatewayHarness | undefined
 

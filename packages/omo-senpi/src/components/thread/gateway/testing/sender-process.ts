@@ -1,8 +1,8 @@
 import { createInterface } from "node:readline"
 
-import { createGatewayEngine } from "../engine"
-import { createGatewayStore } from "../store"
-import type { GatewayStoreTestHooks } from "../types"
+import { createGatewayEngine } from "@oh-my-opencode/thread-core/gateway/engine"
+import { createGatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
+import type { GatewayStoreTestHooks } from "@oh-my-opencode/thread-core/gateway/types"
 
 type SenderConfig = {
   readonly agentDir: string

@@ -1,5 +1,5 @@
-import { normalizeThreadName } from "../addressing"
-import type { AliasError, AliasHolder, AliasRegistry, AliasResult } from "./ports"
+import { normalizeThreadName } from "@oh-my-opencode/thread-core/addressing"
+import type { AliasError, AliasHolder, AliasRegistry, AliasResult } from "@oh-my-opencode/thread-core/remote/ports"
 
 /** The signed-in device's way into the account service: its origin and a bearer token that refreshes. */
 export type ServiceAccess = {

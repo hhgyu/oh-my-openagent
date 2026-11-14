@@ -4,10 +4,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { createThreadComponent } from "./component"
-import type { AdmitExternalMessageInput, RegisterControlEndpointOptions } from "./gateway/adapter"
-import { GATEWAY_LOCK_WAIT_MAX_MS, SESSION_CONTROL_DELIVERY_TYPE } from "./gateway/constants"
-import { lockWaitExceeded } from "./gateway/lock-wait"
-import { createGatewayStore, type GatewayStore } from "./gateway/store"
+import type {
+  AdmitExternalMessageInput,
+  RegisterControlEndpointOptions,
+} from "@oh-my-opencode/thread-core/gateway/adapter"
+import { GATEWAY_LOCK_WAIT_MAX_MS, SESSION_CONTROL_DELIVERY_TYPE } from "@oh-my-opencode/thread-core/gateway/constants"
+import { lockWaitExceeded } from "@oh-my-opencode/thread-core/gateway/lock-wait"
+import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { createThreadSdk } from "./sdk"
 import type { ThreadHost, ThreadHostSession } from "./tools"
 import { remainingTestTime } from "../../../../../test-support/test-deadline"

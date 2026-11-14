@@ -1,6 +1,6 @@
 import type { ThreadSetReasoningInput, ThreadToolResult } from "../contracts"
-import { failure } from "../tools/internals"
-import { exactModel, matchModel, modelPatternFailure } from "../tools/model-match"
+import { failure } from "../tool-result"
+import { exactModel, matchModel, modelPatternFailure } from "./model-match"
 import { controlIdentity, controlRefusalOf, type SessionControl } from "./port"
 
 /** Runs one control body and answers its typed refusal as data; every other throw stays the leg's transport failure. */

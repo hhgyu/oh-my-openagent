@@ -22,8 +22,12 @@ import {
   type EndpointKind,
   type RegistryEndpoint,
 } from "./endpoint-registry"
-import type { EndpointLiveness, GatewayEndpointPort, GatewayEndpointRef } from "./gateway/adapter"
-import { releaseReply, wakeReply } from "./gateway-replies"
+import type {
+  EndpointLiveness,
+  GatewayEndpointPort,
+  GatewayEndpointRef,
+} from "@oh-my-opencode/thread-core/gateway/adapter"
+import { releaseReply, wakeReply } from "@oh-my-opencode/thread-core/gateway-replies"
 import type { ThreadTranscriptEntry, ThreadHost, ThreadHostSession } from "./tools"
 import type { ThreadHostView, ThreadHostViewRequest, ThreadSessionPort } from "./tools/ports"
 import { acceptedControls, LEGACY_TUI_COMMANDS, tuiCommandsFrom } from "./endpoint-controls"
@@ -33,7 +37,7 @@ import { closeLadder, SESSION_GONE } from "./control/close-ladder"
 import { createServiceAliasRegistry, type ServiceAccess } from "./remote/alias-registry"
 import { createDeviceServiceSessions } from "./remote/device-service"
 import { createLazyRemoteSurface } from "./remote/lazy-remote"
-import type { RemoteThreadSurface } from "./remote/ports"
+import type { RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 
 type RpcFrame = {
   readonly success?: boolean

@@ -1,5 +1,5 @@
 const { createGatewayStore } = await import(
-  process.env.OMO_GATEWAY_TEST_STORE_MODULE ?? new URL("../store.ts", import.meta.url).href
+  process.env.OMO_GATEWAY_TEST_STORE_MODULE ?? import.meta.resolve("@oh-my-opencode/thread-core/gateway/store")
 )
 const { existsSync, readdirSync } = await import("node:fs")
 const { join } = await import("node:path")

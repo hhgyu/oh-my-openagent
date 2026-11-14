@@ -2,8 +2,8 @@ import { afterEach, expect, test } from "bun:test"
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { gatewayInboxDirectory, gatewayRootDirectory } from "./paths"
-import { createGatewayRelay } from "./relay"
+import { gatewayInboxDirectory, gatewayRootDirectory } from "@oh-my-opencode/thread-core/gateway/paths"
+import { createGatewayRelay } from "@oh-my-opencode/thread-core/gateway/relay"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 
 let harness: GatewayHarness | undefined

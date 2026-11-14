@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite"
 import { afterEach, describe, expect, test } from "bun:test"
 import { COMMAND_UNCERTAIN_REASONS } from "../../../../device-service-core/src/local-api/vocabulary"
-import type { ThreadToolResult } from "./contracts"
-import { gatewayDatabasePath } from "./gateway/paths"
+import type { ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
+import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
 import { type ThreadHostSession } from "./tools"
 import { B_ROW, comparable, createRemoteThreadFixture } from "./thread-remote-fixture"
 

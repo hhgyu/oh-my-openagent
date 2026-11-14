@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import type { RemoteSessionRow } from "./remote/ports"
+import type { RemoteSessionRow } from "@oh-my-opencode/thread-core/remote/ports"
 import type { ThreadHostSession } from "./tools"
 import { B_ROW, createRemoteThreadFixture } from "./thread-remote-fixture"
 

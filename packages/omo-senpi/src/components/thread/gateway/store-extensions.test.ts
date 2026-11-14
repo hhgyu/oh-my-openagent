@@ -3,9 +3,9 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 
-import { gatewayDatabasePath, gatewayInboxDirectory } from "./paths"
-import { GATEWAY_MIGRATIONS } from "./schema"
-import type { StoreExtensionRegistration } from "./store-extensions"
+import { gatewayDatabasePath, gatewayInboxDirectory } from "@oh-my-opencode/thread-core/gateway/paths"
+import { GATEWAY_MIGRATIONS } from "@oh-my-opencode/thread-core/gateway/schema"
+import type { StoreExtensionRegistration } from "@oh-my-opencode/thread-core/gateway/store-extensions"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 
 let harness: GatewayHarness | undefined

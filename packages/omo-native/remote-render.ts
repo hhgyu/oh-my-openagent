@@ -5,7 +5,7 @@ import type {
   Status,
   StatusState,
 } from "../device-service-core/src/index.ts"
-import type { ThreadToolResult } from "../omo-senpi/src/components/thread/contracts"
+import type { ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
 
 // The human forms of `omo remote`; every command also has a --json form that prints the SDK's typed value as is.
 const STATE_LABELS: Readonly<Record<StatusState, string>> = {

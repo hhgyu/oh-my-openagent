@@ -5,7 +5,7 @@ import { spawn } from "node:child_process"
 import { join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
-import { createGatewayStore, gatewayStoreWorkerUrl } from "../../src/components/thread/gateway/store.ts"
+import { createGatewayStore, gatewayStoreWorkerUrl } from "@oh-my-opencode/thread-core/gateway/store"
 
 import { checkExtensionCurrent } from "./build-extension.mjs"
 import { createBuildFixture } from "./build-extension.test-support.mjs"

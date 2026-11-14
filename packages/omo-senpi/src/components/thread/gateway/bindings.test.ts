@@ -1,17 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync, readdirSync } from "node:fs"
 
-import { parseThreadParams, threadToolParamSchemas } from "../contracts"
+import { parseThreadParams, threadToolParamSchemas } from "@oh-my-opencode/thread-core/contracts"
 import {
   BINDING_DEFAULT_TTL_SECONDS,
   type BindInput,
   normalizeBindInput,
   OUTBOX_RETENTION_MS,
   WHOLE_CHAT_THREAD_ID,
-} from "./bindings"
-import { gatewayInboxDirectory } from "./paths"
-import { createGatewayRelay, type GatewayRelay } from "./relay"
-import type { GatewayStore } from "./store"
+} from "@oh-my-opencode/thread-core/gateway/bindings"
+import { gatewayInboxDirectory } from "@oh-my-opencode/thread-core/gateway/paths"
+import { createGatewayRelay, type GatewayRelay } from "@oh-my-opencode/thread-core/gateway/relay"
+import type { GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 
 let harness: GatewayHarness | undefined

@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite"
 import { afterEach, describe, expect, test } from "bun:test"
-import type { ThreadToolResult } from "../contracts"
-import { gatewayDatabasePath } from "../gateway/paths"
+import type { ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
+import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
 import { B_ROW, comparable, createRemoteThreadFixture } from "../thread-remote-fixture"
 import type { ThreadHostSession } from "../tools"
 

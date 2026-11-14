@@ -3,7 +3,7 @@ import { afterEach, expect, test } from "bun:test"
 import { fork } from "node:child_process"
 import { fileURLToPath } from "node:url"
 
-import { gatewayDatabasePath } from "./paths"
+import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 import { remainingTestTime, useTestTimeout } from "../../../../../../test-support/test-deadline"
 

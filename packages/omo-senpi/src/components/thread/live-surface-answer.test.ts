@@ -5,8 +5,8 @@ import { createServer, type Socket } from "node:net"
 import { join } from "node:path"
 import { fakeHostTransport } from "../../../../senpi-task/src/runners/rpc-host/__fixtures__/fake-host-transport"
 
-import type { GatewayEndpointKind, GatewayEndpointRef } from "./gateway/adapter"
-import { createGatewayRelay } from "./gateway/relay"
+import type { GatewayEndpointKind, GatewayEndpointRef } from "@oh-my-opencode/thread-core/gateway/adapter"
+import { createGatewayRelay } from "@oh-my-opencode/thread-core/gateway/relay"
 import { createGatewayHarness, type GatewayHarness } from "./gateway/testing/harness"
 import { createLiveThreadSurface } from "./live-surface"
 

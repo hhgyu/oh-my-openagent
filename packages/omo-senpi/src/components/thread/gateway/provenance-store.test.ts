@@ -2,9 +2,9 @@ import { Database } from "bun:sqlite"
 import { afterEach, expect, test } from "bun:test"
 import { mkdirSync } from "node:fs"
 
-import { gatewayDatabasePath, gatewayRootDirectory } from "./paths"
-import { renderDeliveryText } from "./provenance"
-import { GATEWAY_MIGRATIONS } from "./schema"
+import { gatewayDatabasePath, gatewayRootDirectory } from "@oh-my-opencode/thread-core/gateway/paths"
+import { renderDeliveryText } from "@oh-my-opencode/thread-core/gateway/provenance"
+import { GATEWAY_MIGRATIONS } from "@oh-my-opencode/thread-core/gateway/schema"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 
 let harness: GatewayHarness | undefined

@@ -1,7 +1,6 @@
 import { threadToolFailure, type ThreadErrorCode, type ThreadToolFailure } from "../errors"
 import type { ThreadTranscriptEntry } from "../reader"
-import type { ModelChoice } from "../tools/model-match"
-import type { ThreadCloseOutcome } from "../tools/ports"
+import type { ModelChoice } from "./model-match"
 import type { ThreadSummary } from "../contracts"
 
 /**
@@ -10,6 +9,9 @@ import type { ThreadSummary } from "../contracts"
  * and nothing past it reads the device again. A method refuses with a `ControlRefusal` carrying the tool failure the
  * body answers as data; anything else it throws is the leg's own transport failure, mapped where it always was.
  */
+/** How a close ended: the session ended, no live session held it any more, or another client still holds it. */
+export type ThreadCloseOutcome = "closed" | "not_live" | "held_elsewhere"
+
 export type SessionControl = {
   readonly thread_id: string
   /** The account device holding the thread, when it is not this one. */

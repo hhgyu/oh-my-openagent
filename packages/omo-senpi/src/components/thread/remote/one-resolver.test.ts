@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 
-import { resolveTarget, type ThreadAddressEntry } from "../addressing"
+import { resolveTarget, type ThreadAddressEntry } from "@oh-my-opencode/thread-core/addressing"
 import { relayAddressEntry } from "./address-book"
-import type { RemoteSessionRow } from "./ports"
+import type { RemoteSessionRow } from "@oh-my-opencode/thread-core/remote/ports"
 
 // Decision 0027: ONE resolver over local + relay entries. Local book has "worker" here; the relay book has "planner" on b
 // (durable id published) and "planner" on c (older daemon, listing key only).

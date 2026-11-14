@@ -15,7 +15,7 @@ import { argumentFailure } from "./session-args-schema"
 import type { StoreExtensions } from "./store-extension-ops"
 import { transaction, type StoreContext } from "./store-ops"
 import type { StoreExtensionRefusal, StoreExtensionResult } from "./store-extensions"
-import { UNKNOWN_CALLER } from "../tools/ports"
+import { UNKNOWN_CALLER } from "../caller"
 
 export type SessionCallRequest = {
   readonly name: string

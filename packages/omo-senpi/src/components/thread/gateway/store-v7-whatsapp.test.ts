@@ -3,8 +3,8 @@ import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
-import { gatewayDatabasePath } from "./paths"
-import { GATEWAY_MIGRATIONS } from "./schema"
+import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
+import { GATEWAY_MIGRATIONS } from "@oh-my-opencode/thread-core/gateway/schema"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 import { remainingTestTime } from "../../../../../../test-support/test-deadline"
 

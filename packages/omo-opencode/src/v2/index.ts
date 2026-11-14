@@ -80,6 +80,11 @@ export function nativeTeamEnabled(options: Plugin.Context["options"] | undefined
   return options?.["omo-native-team-enabled"] !== false
 }
 
+/** The eighteen `thread_*` eval host tools, on by default like Native. */
+function nativeThreadsEnabled(options: Plugin.Context["options"] | undefined): boolean {
+  return options?.["omo-native-threads-enabled"] !== false
+}
+
 /** The blocking `workflow` tool rides on the Native task component and defaults the same way. */
 function nativeDagEnabled(options: Plugin.Context["options"] | undefined): boolean {
   return options?.["omo-native-dag-enabled"] !== false
@@ -148,13 +153,22 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
       if (disposeGoal) cleanups.push(disposeGoal)
     }
     if (context.options?.["omo-native-eval-enabled"] !== false) {
+      // The Native thread tools are eval-only: they exist only as owned host tools of an eval cell.
+      const threads = nativeThreadsEnabled(context.options)
+        ? (await import("./threads/component")).createThreadComponent(context)
+        : undefined
+      if (threads) {
+        await threads.start()
+        cleanups.push(threads.close)
+      }
       // Native `eval`, on by default like Native. Registers the tool only; senpi-codemode itself
       // is imported on the first call.
       const { registerNativeEval } = await import("./tools/native-eval")
       const directory = context.location.directory
+      const ownedTools = [...(evalTask ? [evalTask.tool(evalTask.port)] : []), ...(threads?.tools ?? [])]
       cleanups.push(
         await registerNativeEval(context, {
-          ...(evalTask && { ownedTools: [evalTask.tool(evalTask.port)] }),
+          ...(ownedTools.length > 0 && { ownedTools }),
           ...(goal && {
             goalStoreFile: (sessionID: string) => goal.goalStoreFile(goal.goalStoreRef(directory, sessionID)),
           }),

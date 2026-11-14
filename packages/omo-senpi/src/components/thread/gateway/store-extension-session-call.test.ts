@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import type { Worker } from "node:worker_threads"
 
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
-import type { StoreExtensionRegistration } from "./store-extensions"
+import type { StoreExtensionRegistration } from "@oh-my-opencode/thread-core/gateway/store-extensions"
 import { UNKNOWN_CALLER } from "../tools/ports"
 import { remainingTestTime } from "../../../../../../test-support/test-deadline"
 

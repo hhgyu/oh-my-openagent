@@ -1,15 +1,19 @@
-import { AMBIGUOUS_CANDIDATE_LIMIT, normalizeThreadName, type ThreadCandidate } from "../addressing"
-import type { ThreadLocalAliasNote, ThreadStatus, ThreadToolResult } from "../contracts"
+import {
+  AMBIGUOUS_CANDIDATE_LIMIT,
+  normalizeThreadName,
+  type ThreadCandidate,
+} from "@oh-my-opencode/thread-core/addressing"
+import type { ThreadLocalAliasNote, ThreadStatus, ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
 import { createRelaySessionHost, listedThread } from "../control/relay-session-host"
 import type { HostedThread, SessionHost, SessionOpenRequest } from "../control/session-host"
-import { threadToolFailure } from "../errors"
+import { threadToolFailure } from "@oh-my-opencode/thread-core/errors"
 import {
   rowThreadId,
   type AliasError,
   type AliasRegistry,
   type RemoteSessionRow,
   type RemoteThreadSurface,
-} from "./ports"
+} from "@oh-my-opencode/thread-core/remote/ports"
 import { aliasFailure, deviceOnline, remoteAvailable } from "./remote-ops"
 
 type LocalEntry = {

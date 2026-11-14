@@ -1,6 +1,6 @@
 import type { CommandResult } from "@oh-my-opencode/device-service-core"
-import { threadToolFailure, type ThreadToolFailure } from "../errors"
-import type { RemoteCommandOutcome } from "./ports"
+import { threadToolFailure, type ThreadToolFailure } from "@oh-my-opencode/thread-core/errors"
+import type { RemoteCommandOutcome } from "@oh-my-opencode/thread-core/remote/ports"
 
 /**
  * The one mapping between what the device service answers for a command on another device and what every caller
