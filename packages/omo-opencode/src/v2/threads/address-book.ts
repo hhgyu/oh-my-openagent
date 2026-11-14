@@ -6,7 +6,7 @@ import { isClosed, type ThreadV2Host, type V2SessionInfo } from "./host"
 const LIST_PAGE = 200
 const LIST_MAX = 2_000
 
-export type V2AddressEntry = GatewayAddressEntry & { readonly info: V2SessionInfo }
+export type V2AddressEntry = GatewayAddressEntry & { readonly info: V2SessionInfo; readonly owner: string }
 
 export function endpointRef(socket: string, sessionID: string): GatewayEndpointRef {
   return { kind: "rpc_host", socket, routing_id: sessionID, durable_session_id: sessionID }
@@ -22,6 +22,7 @@ export function addressEntry(info: V2SessionInfo, socket: string): V2AddressEntr
   const archived = isClosed(info)
   return {
     info,
+    owner: socket,
     thread_id: info.id,
     name: info.title?.trim() ?? "",
     status: archived ? "resumable" : "live",
@@ -53,6 +54,14 @@ export async function listAddressEntries(
 }
 
 export function summaryOf(entry: V2AddressEntry) {
-  const { info, liveness: _liveness, preview: _preview, transport: _transport, aliases: _aliases, ...summary } = entry
+  const {
+    info,
+    owner: _owner,
+    liveness: _liveness,
+    preview: _preview,
+    transport: _transport,
+    aliases: _aliases,
+    ...summary
+  } = entry
   return { ...summary, link: threadLink(entry.thread_id, sessionTitle(info)) }
 }

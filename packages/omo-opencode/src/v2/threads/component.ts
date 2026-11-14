@@ -15,9 +15,11 @@ import { resolveProvenance } from "@oh-my-opencode/thread-core/gateway/provenanc
 import { createGatewayRelay } from "@oh-my-opencode/thread-core/gateway/relay"
 import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import type { OwnedEvalHostTool } from "../tools/codemode-host-tools"
-import { addressEntry, endpointRef, listAddressEntries } from "./address-book"
+import { addressEntry, endpointRef, listAddressEntries, type V2AddressEntry } from "./address-book"
 import { createThreadDrains } from "./drains"
-import { THREAD_CLOSED_METADATA_KEY, isClosed, writeSessionMetadata, type ThreadV2Host } from "./host"
+import { THREAD_CLOSED_METADATA_KEY, isClosed, writeSessionMetadata, type ControlHost, type ThreadV2Host } from "./host"
+import { createPeerClient, startPeerServer, type PeerClient } from "./peer"
+import { ENDPOINT_REGISTRY_VERSION, createEndpointRegistry, newEndpointSecret } from "./registry"
 import { createSessionStateTracker } from "./session-state"
 import type { ThreadSurface } from "./surface"
 import { createThreadHostTools, type ThreadCallFactory } from "./tools"
@@ -58,7 +60,50 @@ export function createThreadComponent(host: ThreadV2Host, options: ThreadCompone
   const store = options.store ?? createGatewayStore({ agentDir, ...(workerUrl === undefined ? {} : { workerUrl }) })
   const senderProvenance = () => resolveProvenance({ cwd: host.location.directory, env })
   const tracker = createSessionStateTracker(host)
-  const drains = createThreadDrains({ store, host, snapshot: tracker.snapshot, socket, log })
+  const instanceId = randomUUID()
+  const registry = createEndpointRegistry(agentDir)
+  const secret = newEndpointSecret()
+  const peers = new Map<string, PeerClient>()
+  const drains = createThreadDrains({
+    store,
+    host,
+    snapshot: tracker.snapshot,
+    socket,
+    log,
+    peerOf: (peerSocket) => peers.get(peerSocket),
+  })
+  /** This server's sessions, then every live peer server's; a peer that does not answer is left out of this view. */
+  async function entries(): Promise<V2AddressEntry[]> {
+    const local = await listAddressEntries(host.session, socket)
+    const { endpoints, removed } = await registry.live(instanceId)
+    for (const id of removed) log(`removed the registry entry of dead OpenCode 2 server ${id}`)
+    for (const [peerSocket, peer] of peers)
+      if (!endpoints.some((endpoint) => endpoint.socket === peerSocket && endpoint.secret === peer.endpoint.secret))
+        peers.delete(peerSocket)
+    const remote = await Promise.all(
+      endpoints.map(async (endpoint) => {
+        const peer = peers.get(endpoint.socket) ?? createPeerClient(endpoint)
+        try {
+          const sessions = await peer.list()
+          peers.set(endpoint.socket, peer)
+          return sessions.map((info) => addressEntry(info, endpoint.socket))
+        } catch (error) {
+          log(
+            `OpenCode 2 server ${endpoint.instance_id} did not answer: ${error instanceof Error ? error.message : String(error)}`,
+          )
+          return []
+        }
+      }),
+    )
+    const seen = new Set(local.map((entry) => entry.thread_id))
+    return [...local, ...remote.flat().filter((entry) => !seen.has(entry.thread_id))]
+  }
+  const controlHost = (entry: V2AddressEntry): ControlHost => {
+    if (entry.owner === socket) return host
+    const peer = peers.get(entry.owner)
+    if (peer === undefined) throw Error(`host_unavailable:${entry.owner}`)
+    return peer.controlHost()
+  }
   const completions = createCompletionTracker(
     (durableId, outcome, throughArmSeq) =>
       store.emitCompletions({
@@ -78,7 +123,8 @@ export function createThreadComponent(host: ThreadV2Host, options: ThreadCompone
   const armsPickedUp = new Set<string>()
   const surface: ThreadSurface = {
     host,
-    entries: () => listAddressEntries(host.session, socket),
+    entries,
+    controlHost,
     async createSession(input) {
       const caller = await host.session.get({ sessionID: input.callerId })
       const info = await host.session.create({
@@ -91,7 +137,8 @@ export function createThreadComponent(host: ThreadV2Host, options: ThreadCompone
   }
   const locate = async (durableId: string) => {
     const info = await host.session.get({ sessionID: durableId }).catch(() => undefined)
-    return info === undefined || isClosed(info) ? null : endpointRef(socket, durableId)
+    if (info !== undefined) return isClosed(info) ? null : endpointRef(socket, durableId)
+    return (await entries()).find((entry) => entry.thread_id === durableId)?.endpoint ?? null
   }
   const defaultEngine = createGatewayEngine({
     store,
@@ -137,6 +184,7 @@ export function createThreadComponent(host: ThreadV2Host, options: ThreadCompone
   }
 
   let registration: { readonly dispose: () => Promise<void> } | undefined
+  let peerServer: { readonly url: string; readonly close: () => Promise<void> } | undefined
   return {
     tools: createThreadHostTools(calls),
     socket,
@@ -148,6 +196,25 @@ export function createThreadComponent(host: ThreadV2Host, options: ThreadCompone
           evaluation.effect === "ask"
         )
           evaluation.effect = "allow"
+      })
+      peerServer = await startPeerServer({
+        secret,
+        log,
+        handlers: {
+          host,
+          wake: (sessionID, deliveryIds) => drains.wake(sessionID, deliveryIds, "inbox"),
+          respondUi: (sessionID, answer) => drains.respondLocal(sessionID, answer),
+        },
+      })
+      registry.publish({
+        version: ENDPOINT_REGISTRY_VERSION,
+        instance_id: instanceId,
+        pid: process.pid,
+        socket,
+        url: peerServer.url,
+        secret,
+        directory: host.location.directory,
+        created_at: Date.now(),
       })
       tracker.start({
         onSettled: (sessionID, outcome) => {
@@ -165,6 +232,9 @@ export function createThreadComponent(host: ThreadV2Host, options: ThreadCompone
       })
     },
     async close() {
+      registry.withdraw(instanceId)
+      await peerServer?.close()
+      peers.clear()
       completions.dispose()
       relay.dispose()
       drains.close()

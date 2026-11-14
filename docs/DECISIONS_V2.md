@@ -491,6 +491,13 @@ Decision: the harness-neutral half moved to a new Core package `@oh-my-opencode/
 Rejected: a V2 copy of the gateway (forks the delivery logic); `session.remove` for `thread_close` (destroys the transcript a Native close keeps); plugin `session.update({ archived: true })` (2.2.6 accepts it without archiving).
 Limits: see P-57, P-58 and P-61.
 
+### D-035: cross-process V2 threads through an omo-owned endpoint registry (2026-11-14)
+Status: accepted (user decision: same-machine cross-process threads in scope).
+Context: OpenCode 2.2.6 gives a plugin no way to enumerate or address sessions of another `opencode` process, and no access to its own server URL or password.
+Decision: each server's thread component starts a loopback-only HTTP listener with a per-start random secret and publishes `{pid, url, secret, socket}` as a 0600 file under `<agent dir>/gateway/opencode-v2-endpoints/`; it withdraws the file at close, and every reader deletes entries whose pid is dead. Peers list, wake, answer and control sessions only through a fixed call whitelist; delivery state stays in the shared gateway store, so the exactly-once and reply rules are the same as on one server.
+Rejected: `control.rpc.register` on the OpenCode server (a peer would need the server URL and password, neither of which the plugin receives); a V2 shim of senpi's engine RPC sockets (couples V2 to senpi's endpoint protocol).
+Limits: P-62.
+
 ### D-036: an owned child's turn settles when its session is really idle (2026-11-14)
 Status: accepted.
 Context: Native holds a run's outcome until senpi's `agent_idle`, drops it when the child starts another run on its own (a background job, monitor or goal wake) and confirms a held error against the session state and its wake sources (omo#9069, senpi#3262). The V2 owned observer settled on the first `session.execution.succeeded`, so a child that ended its turn waiting on its own background shell was reported completed with its interim text, and the run its job's notice started was lost. A host restart kills such a job and its notice registration; a hard-killed host also left children `resident` under a dead pid that no task verb could reach.
