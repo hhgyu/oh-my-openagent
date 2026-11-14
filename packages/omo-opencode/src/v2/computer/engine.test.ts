@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { createHash, randomUUID } from "node:crypto"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { desktopEngineReleaseAssetName, getDesktopEngineHost } from "@oh-my-opencode/senpi-desktop-engine"
@@ -61,6 +61,7 @@ describe("V2 desktop engine resolution", () => {
     const generation = join(userHome, ".omo", "cache", "senpi-desktop-engine", "2.0.0", host, `${sha}-${randomUUID()}`)
     mkdirSync(generation, { recursive: true })
     writeFileSync(join(generation, asset), bytes)
+    chmodSync(join(generation, asset), 0o755)
 
     // when
     const source = resolveInstalledEngine(undefined, { env: {}, home: userHome, platform, arch })

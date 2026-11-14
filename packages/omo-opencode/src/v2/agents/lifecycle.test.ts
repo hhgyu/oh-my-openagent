@@ -13,6 +13,7 @@ it("cleans agents after RPC registration failure", async () => {
       "omo-senpi-comment-checker-disabled": true,
       "omo-memory-enabled": false,
       "omo-native-eval-enabled": false,
+      "omo-computer-use-enabled": false,
     },
     location: { directory: process.cwd() },
     agent: {
@@ -50,6 +51,7 @@ it("disposes RPC then agents exactly once", async () => {
       "omo-senpi-comment-checker-disabled": true,
       "omo-memory-enabled": false,
       "omo-native-eval-enabled": false,
+      "omo-computer-use-enabled": false,
     },
     location: { directory: process.cwd() },
     agent: {

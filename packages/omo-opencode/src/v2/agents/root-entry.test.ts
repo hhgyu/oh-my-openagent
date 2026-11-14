@@ -15,6 +15,7 @@ it("normal root v2 setup registers a native agent transform and status RPC", asy
       "omo-senpi-comment-checker-disabled": true,
       "omo-memory-enabled": false,
       "omo-native-eval-enabled": false,
+      "omo-computer-use-enabled": false,
     },
     location: { directory: process.cwd() as Plugin.Context["location"]["directory"] },
     agent: {

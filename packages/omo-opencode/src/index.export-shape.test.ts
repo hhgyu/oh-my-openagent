@@ -31,6 +31,7 @@ describe("oh-my-openagent plugin export shape", () => {
         "omo-senpi-comment-checker-disabled": true,
         "omo-memory-enabled": false,
         "omo-native-eval-enabled": false,
+        "omo-computer-use-enabled": false,
       },
       location: { directory: process.cwd() as Plugin.Context["location"]["directory"] },
       agent: {

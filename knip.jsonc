@@ -1095,7 +1095,6 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) COMPUTER_USE_COMPONENT_NAME
       "packages/omo-senpi/src/components/computer-use/index.ts": ["COMPUTER_USE_COMPONENT_NAME"],
       // pre-existing at origin dev 4686e425b5: unused export(s) toComputerSettingsInput
-      "packages/omo-senpi/src/components/computer-use/settings.ts": ["toComputerSettingsInput"],
       // pre-existing at origin dev 4686e425b5: unused export(s) OPENCODE_ROUTING_NOTICE_MIGRATION_ID
       "packages/omo-senpi/src/components/config-startup/opencode-routing-notice.ts": ["OPENCODE_ROUTING_NOTICE_MIGRATION_ID"],
       // pre-existing at origin dev 4686e425b5: unused export(s) PLAN9_FILE_SYSTEM_TYPE, OMO_CONFIG_FILE_FILTER_GLOBS, OMO_CONFIG_DIRECTORY_FILTER_GLOBS
