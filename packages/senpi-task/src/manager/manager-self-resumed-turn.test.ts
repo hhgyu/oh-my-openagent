@@ -63,6 +63,32 @@ describe("a child that resumes on its own after its turn settled (omo#9069)", ()
     expect(buildCompletionDetails(settled).resumed_turn).toBeUndefined()
   })
 
+  test("#given a handle that keeps its own run bookkeeping #when it resumes on its own #then it is handed the settled and the reopened record before its outcome is tracked", async () => {
+    // given
+    const { store, fake, taskId } = await startedChild()
+    const bound: { before: number; actual: number; status: string }[] = []
+    fake.handle.bindSelfResumedRun = (before, actual) => {
+      bound.push({
+        before: before.notification.run_epoch,
+        actual: actual.notification.run_epoch,
+        status: actual.status,
+      })
+      expect(store.load(taskId)?.notification.run_epoch).toBe(actual.notification.run_epoch)
+    }
+    fake.settle({ status: "completed", finalResponse: "waiting" })
+    await flush()
+
+    // when
+    fake.selfResume()
+    await flush()
+    fake.settle({ status: "completed", finalResponse: "resumed answer" })
+    await flush()
+
+    // then
+    expect(bound).toEqual([{ before: 0, actual: 1, status: "running" }])
+    expect(store.load(taskId)?.final_response).toBe("resumed answer")
+  })
+
   test("#given a cancelled child #when a late self-resume fires #then the record stays cancelled", async () => {
     // given
     const { manager, store, fake, taskId } = await startedChild()

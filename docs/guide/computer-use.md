@@ -187,7 +187,7 @@ The OpenCode 2 host runs the same `computer` tool, `/computer` command and compu
 - Permission rules use the `computer` action with `read`, `exec` or `control` as the resource, for example `{ "action": "computer", "resource": "exec", "effect": "ask" }`. The foreground-control question is a `computer` permission request on `control`.
 - Only root sessions of the project get it, and never the read-only agents.
 
-The full list is row P-55 of [the OpenCode 2 parity register](../reference/opencode-v2-parity.md).
+The full list is row P-63 of [the OpenCode 2 parity register](../reference/opencode-v2-parity.md).
 
 ## Known limitations
 

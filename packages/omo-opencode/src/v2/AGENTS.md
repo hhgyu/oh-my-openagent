@@ -27,7 +27,7 @@ orchestration/  background agents, todos, goal, boulder, team, monitor
 tui/            OpenCode 2 TUI entry
 compat/         event, message, and schema adapters
 rpc/            diagnostic RPCs
-computer/       local computer use over the shared senpi-desktop packages (D-034, P-55)
+computer/       local computer use over the shared senpi-desktop packages (D-038, P-63)
 ```
 
 ## Verification

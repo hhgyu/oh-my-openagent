@@ -7,6 +7,7 @@ import type { SessionLease, SessionScopes } from "./session-state"
 import type { ToolRegistry } from "./tool-registry"
 import type { ToolValueDecoder } from "./tool-value-codec"
 import { hasJoinedPermissionCancellation } from "./effect-permission-api"
+import { markHostAction } from "./host-action"
 
 async function decode(schema: Info["input"], input: unknown): Promise<unknown> {
   if (Schema.isSchema(schema)) {
@@ -183,6 +184,44 @@ export function createToolKernel(options: {
   if (!Number.isInteger(maxDepth) || maxDepth < 1) throw new Error("Invalid tool depth limit")
   return {
     callAuthority,
+    /** Trusted component authority only: runs `run` under an authorized frame for a host-originated
+     * action on `lease` that no model tool call carries (the restart recovery of left-behind task
+     * children, D-037). The frame grants no tool permission; whatever the action does asserts its own
+     * approval, and the issued caller is marked so that approval names the action, not a tool call. */
+    async hostAction<T>(
+      context: ToolContext,
+      lease: SessionLease,
+      reason: string,
+      run: (caller: ToolContext) => Promise<T>,
+    ): Promise<T> {
+      options.scopes.assert(lease, context.sessionID)
+      const generation = options.registry.generation
+      const retirement = options.registry.retirementSignal(generation)
+      const rawSignal = context.signal
+      const signal = AbortSignal.any([rawSignal, lease.signal, retirement])
+      const check = () => {
+        signal.throwIfAborted()
+        options.scopes.assert(lease, context.sessionID)
+        options.registry.assert(generation)
+      }
+      const caller: ToolContext = Object.freeze({
+        ...context,
+        signal,
+        progress: async () => {
+          check()
+        },
+      })
+      markHostAction(caller, reason)
+      const frame: AuthorizedFrame = { caller, lease, generation, rawSignal, retirement, check, open: true }
+      try {
+        check()
+        return await authorized.run(frame, () => run(caller))
+      } finally {
+        frame.open = false
+        frame.caller = undefined
+        frame.check = undefined
+      }
+    },
     /** Call only inside a genuine host tool callback. Expose just invoke to evaluated code,
      * never this binder, context, scope authority, registry or permission port. */
     bind(context: ToolContext, lease: SessionLease) {

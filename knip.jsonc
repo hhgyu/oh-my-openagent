@@ -90,7 +90,8 @@
       "packages/ast-grep-mcp/src/mcp.ts": ["AST_GREP_SERVER_NAME", "AST_GREP_SERVER_VERSION", "coerceToolArguments"],
       // pre-existing at origin dev 4686e425b5: unused export(s) BOULDER_DIR, BOULDER_FILE, BOULDER_STATE_PATH, NOTEPAD_DIR, NOTEPAD_BASE_PATH, PROMETHEUS_PLANS_DIR, readCurrentTopLevelTask, getPlanChecklist, parsePlanChecklist, isStructuredTaskRow and 33 more
       // added on dev after the last merge (origin dev 2b5831715e): unused export(s) getPlanReviewsDir, hashPlanContent, isContainedPlanPath, formatMomusReviewArtifact, writeMomusReviewArtifact
-      "packages/boulder-state/index.d.ts": ["BOULDER_DIR", "BOULDER_FILE", "BOULDER_STATE_PATH", "NOTEPAD_DIR", "NOTEPAD_BASE_PATH", "PROMETHEUS_PLANS_DIR", "readCurrentTopLevelTask", "getPlanChecklist", "parsePlanChecklist", "isStructuredTaskRow", "addBoulderWork", "appendSessionId", "appendSessionIdForWork", "clearBoulderState", "completeBoulder", "createBoulderState", "endTaskTimer", "findPrometheusPlans", "generateWorkId", "getActiveWorks", "getBoulderFilePath", "getBoulderWorks", "getPlanName", "getPlanProgress", "getTaskSessionState", "getWorkById", "getWorkByPlanName", "getWorkForSession", "getWorkResumeOptions", "normalizeSessionId", "readBoulderState", "DEFAULT_STALE_WORK_THRESHOLD_MS", "STALE_WORK_THRESHOLD_ENV_KEY", "isWorkStale", "reconcileStaleWorks", "resolveStaleWorkThresholdMs", "resolveBoulderPlanPath", "resolveBoulderPlanPathForWork", "selectActiveWork", "startTaskTimer", "upsertTaskSessionState", "upsertTaskSessionStateForWork", "writeBoulderState", "getPlanReviewsDir", "hashPlanContent", "isContainedPlanPath", "formatMomusReviewArtifact", "writeMomusReviewArtifact"],
+      // the hand-written declarations of the ulw-execute continuation exports (consumers resolve src/index.ts)
+      "packages/boulder-state/index.d.ts": ["BOULDER_DIR", "BOULDER_FILE", "BOULDER_STATE_PATH", "NOTEPAD_DIR", "NOTEPAD_BASE_PATH", "PROMETHEUS_PLANS_DIR", "readCurrentTopLevelTask", "parsePlanChecklist", "isStructuredTaskRow", "addBoulderWork", "appendSessionId", "appendSessionIdForWork", "clearBoulderState", "completeBoulder", "createBoulderState", "endTaskTimer", "findPrometheusPlans", "generateWorkId", "getActiveWorks", "getBoulderFilePath", "getBoulderWorks", "getPlanName", "getPlanProgress", "getTaskSessionState", "getWorkById", "getWorkByPlanName", "getWorkForSession", "getWorkResumeOptions", "normalizeSessionId", "readBoulderState", "DEFAULT_STALE_WORK_THRESHOLD_MS", "STALE_WORK_THRESHOLD_ENV_KEY", "isWorkStale", "reconcileStaleWorks", "resolveStaleWorkThresholdMs", "resolveBoulderPlanPath", "resolveBoulderPlanPathForWork", "selectActiveWork", "startTaskTimer", "upsertTaskSessionState", "upsertTaskSessionStateForWork", "writeBoulderState", "getPlanReviewsDir", "hashPlanContent", "isContainedPlanPath", "formatMomusReviewArtifact", "writeMomusReviewArtifact", "ULW_EXECUTE_CONTINUATION_LIMIT", "ULW_EXECUTE_STEERING_REMINDER", "findContinuableWork", "ulwExecuteContinuationSignature", "renderUlwExecuteContinuation"],
       // pre-existing at origin dev 4686e425b5: unused export(s) BOULDER_STATE_PATH, NOTEPAD_DIR, NOTEPAD_BASE_PATH
       "packages/boulder-state/src/constants.ts": ["BOULDER_STATE_PATH", "NOTEPAD_DIR", "NOTEPAD_BASE_PATH"],
       // pre-existing at origin dev 4686e425b5: unused export(s) BOULDER_DIR, BOULDER_FILE, BOULDER_STATE_PATH, NOTEPAD_BASE_PATH, NOTEPAD_DIR, PROMETHEUS_PLANS_DIR, parsePlanChecklist, generateWorkId
@@ -1344,8 +1345,6 @@
       "packages/omo-senpi/src/components/thread/tools/extension-tools.ts": ["resolveCallerDurableId"],
       // pre-existing at origin dev 4686e425b5: unused export(s) canContinueAfterAgentEnd
       "packages/omo-senpi/src/components/ulw-execute-continuation/agent-end-eligibility.ts": ["canContinueAfterAgentEnd"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) __testInternals
-      "packages/omo-senpi/src/components/ulw-execute-continuation/index.ts": ["__testInternals"],
       // pre-existing at origin dev 4686e425b5: unused export(s) goalPathsFromContext
       "packages/omo-senpi/src/components/ulw-loop/footer-status.ts": ["goalPathsFromContext"],
       // pre-existing at origin dev 4686e425b5: unused export(s) withEnv, withEnvAsync
@@ -3724,6 +3723,7 @@
         "src/v2/memory/kibitzer/test-support.ts",
         "src/v2/orchestration/native-dag/test-support.ts",
         "src/v2/tools/test-support.ts",
+        "src/v2/goal/test-support.ts",
         "src/v2/ulw-loop/test-support.ts",
         // The Native eval Worker entry: started by file name (`new Worker(...)` in codemode-worker-client.ts), never imported.
         "src/v2/tools/codemode-worker.ts",

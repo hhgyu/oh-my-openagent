@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { registerUlwLoopSkill, ULW_LOOP_SKILL_NAME } from "./skill"
+import { registerStagedSkill } from "./staged-skill"
+
+const ULW_LOOP_SKILL_NAME = "ulw-loop"
 
 const roots: string[] = []
 afterEach(() => {
@@ -13,7 +15,10 @@ function stagedSkill(): string {
   const root = mkdtempSync(join(tmpdir(), "v2-ulw-skill-"))
   roots.push(root)
   const file = join(root, "SKILL.md")
-  writeFileSync(file, "---\nname: ulw-loop\ndescription: loop description\n---\n\nbody `todo` body\n")
+  writeFileSync(
+    file,
+    "---\nname: ulw-loop\ndescription: loop description\n---\n\nbody `todo` body, record `senpi:<session_id>`\n",
+  )
   return file
 }
 
@@ -30,14 +35,14 @@ function fakeSkillDomain(existing: { name: string }[] = []) {
   }
 }
 
-describe("V2 ulw-loop skill", () => {
-  test("#given the staged skill #when it registers #then OpenCode gets its frontmatter fields, its file path and the body with V2 tool names", async () => {
+describe("V2 staged skills", () => {
+  test("#given the staged skill #when it registers #then OpenCode gets its frontmatter fields, its file path and the body with V2 tool names and session prefix", async () => {
     // given
     const file = stagedSkill()
     const { catalog, domain } = fakeSkillDomain()
 
     // when
-    await registerUlwLoopSkill(domain, file)
+    await registerStagedSkill(domain, ULW_LOOP_SKILL_NAME, file)
 
     // then
     expect(catalog).toEqual([
@@ -46,7 +51,7 @@ describe("V2 ulw-loop skill", () => {
         name: ULW_LOOP_SKILL_NAME,
         description: "loop description",
         path: file,
-        content: "\nbody `todowrite` body\n",
+        content: "\nbody `todowrite` body, record `opencode:<session_id>`\n",
       },
     ])
   })
@@ -56,7 +61,7 @@ describe("V2 ulw-loop skill", () => {
     const { catalog, domain } = fakeSkillDomain([{ name: ULW_LOOP_SKILL_NAME }])
 
     // when
-    await registerUlwLoopSkill(domain, stagedSkill())
+    await registerStagedSkill(domain, ULW_LOOP_SKILL_NAME, stagedSkill())
 
     // then
     expect(catalog).toEqual([{ name: ULW_LOOP_SKILL_NAME }])

@@ -77,6 +77,8 @@ export const observationRecordSchema = z.discriminatedUnion("kind", [
     .refine((value) => value.id === value.event.id, "Host event identity mismatch"),
   z.object({ kind: z.literal("input"), id: text, inboxID: text }).strict(),
   z.object({ kind: z.literal("stop"), id: text }).strict(),
+  /** One host `experimental.idle` call: how much background work the child itself and its descendants still ran. */
+  z.object({ kind: z.literal("idle"), id: text, owned: integer, descendant: integer }).strict(),
   z.object({ kind: z.literal("primary"), id: text, model: observedModelSchema }).strict(),
   z
     .object({ kind: z.literal("auxiliary"), id: text, requestKind: z.enum(["title", "generate", "compaction"]) })
@@ -111,7 +113,8 @@ export interface OwnedChildObservationStore {
   close(): void
 }
 export interface OwnedChildOutcome {
-  readonly status: "pending" | "control-only" | "uncertain" | "completed" | "error" | "interrupted"
+  /** `cancelled`: a local Stop ended a turn held for the child's own background work (omo#9069). */
+  readonly status: "pending" | "control-only" | "uncertain" | "completed" | "error" | "interrupted" | "cancelled"
   /** Our frame references a real host start event. It is NOT a host executionID. */
   readonly startEventID?: string
   readonly terminalEventID?: string
@@ -119,6 +122,12 @@ export interface OwnedChildOutcome {
   readonly text?: string
   readonly model?: ObservedModel
   readonly reason?: string
+  /** How the host ended the run; only a `succeeded` run went through `experimental.idle`. */
+  readonly ended?: "succeeded" | "failed" | "interrupted"
+  /** The run succeeded but the child still owns running background work whose notice will wake it. */
+  readonly held?: "background"
+  /** The run is one the child's session started on its own after an owned run of this turn. */
+  readonly continuation?: true
   readonly delivered: readonly string[]
   readonly consumption: "unconfirmed"
   readonly observedSteps?: number
