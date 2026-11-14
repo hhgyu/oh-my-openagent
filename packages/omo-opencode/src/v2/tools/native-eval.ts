@@ -158,7 +158,12 @@ export async function registerNativeEval(
   const stateDir = (sessionID: string) => evalStateDir(directory, sessionID, options.home)
   const agentToolkitSdkRoot = options.agentToolkitSdkRoot ?? locateAgentToolkitSdkRoot()
   const sessionEnv = (sessionID: string) =>
-    evalSessionEnvironment({ directory, sessionID, agentToolkitSdkRoot, goalStoreFile: options.goalStoreFile?.(sessionID) })
+    evalSessionEnvironment({
+      directory,
+      sessionID,
+      agentToolkitSdkRoot,
+      goalStoreFile: options.goalStoreFile?.(sessionID),
+    })
   const stop = new AbortController()
   const roots = new Map<string, Promise<boolean>>()
   const registrations: Registration[] = []

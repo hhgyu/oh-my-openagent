@@ -105,7 +105,9 @@ export async function registerGoal(host: GoalHost, options: GoalOptions = {}): P
         }
         const result = await definition.execute(String(context.id), input, context.signal, undefined, ctx)
         return {
-          content: result.content.flatMap((part) => (part.type === "text" ? [{ type: "text", text: part.text ?? "" }] : [])),
+          content: result.content.flatMap((part) =>
+            part.type === "text" ? [{ type: "text", text: part.text ?? "" }] : [],
+          ),
           metadata: { goal: JSON.parse(JSON.stringify(result.details ?? null)) },
         } as Result
       } catch (error) {
@@ -115,7 +117,12 @@ export async function registerGoal(host: GoalHost, options: GoalOptions = {}): P
   })
 
   try {
-    if (definitions.map((tool) => tool.name).sort().join() !== [...GOAL_TOOL_NAMES].sort().join())
+    if (
+      definitions
+        .map((tool) => tool.name)
+        .sort()
+        .join() !== [...GOAL_TOOL_NAMES].sort().join()
+    )
       throw Error(`the senpi goal extension registered ${definitions.map((tool) => tool.name).join(", ")}`)
     let collided: string | undefined
     registrations.push(

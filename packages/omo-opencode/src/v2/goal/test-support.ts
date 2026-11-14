@@ -1,10 +1,18 @@
-import type { Info, ToolContext } from "@opencode/plugin/promise/tool"
+import type { Info, Result, ToolContext } from "@opencode/plugin/promise/tool"
 import type { GoalHost } from "./component"
 
 type Callback = (input: never) => unknown
 type Event = { readonly type: string; readonly data: Record<string, unknown> }
 
-export function fakeGoalHost(directory: string) {
+export interface FakeGoalHost {
+  readonly host: GoalHost
+  readonly tools: readonly { readonly name: string; readonly input: unknown }[]
+  call(name: string, input: unknown, sessionID: string): Promise<Result>
+  todowrite(sessionID: string, todos: readonly { content: string; status: string }[]): Promise<unknown>
+  step(sessionID: string, tokens: { input: number; output: number; reasoning: number }): Promise<void>
+}
+
+export function fakeGoalHost(directory: string): FakeGoalHost {
   const tools: Info[] = []
   const hooks = new Map<string, Callback>()
   const pending: Event[] = []
@@ -65,7 +73,10 @@ export function fakeGoalHost(directory: string) {
         status: "completed",
       }),
     step: async (sessionID: string, tokens: { input: number; output: number; reasoning: number }) => {
-      pending.push({ type: "session.step.ended", data: { sessionID, tokens: { ...tokens, cache: { read: 0, write: 0 } } } })
+      pending.push({
+        type: "session.step.ended",
+        data: { sessionID, tokens: { ...tokens, cache: { read: 0, write: 0 } } },
+      })
       wake?.()
       await new Promise((resolve) => setTimeout(resolve, 0))
     },

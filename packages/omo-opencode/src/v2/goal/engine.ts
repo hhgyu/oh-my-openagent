@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url"
 import { packageDirectory, readInstalledVersion } from "../tools/codemode-loader"
 
 const SENPI_PACKAGE = "@code-yeongyu/senpi"
-export const GOAL_ENGINE_VERSION = "2026.11.12"
+const GOAL_ENGINE_VERSION = "2026.11.12"
 const GOAL_EXTENSION_DIR = join("dist", "core", "extensions", "builtin", "goal")
 
 export interface GoalStoreRef {
