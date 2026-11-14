@@ -9,10 +9,12 @@ import {
 import { createInboxDrain, type InboxDrain } from "@oh-my-opencode/thread-core/gateway/drain"
 import type { GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import type { ThreadV2Host, V2SessionSnapshot } from "./host"
+import type { PeerClient } from "./peer"
 import { createV2SessionRuntime, type V2SessionRuntime } from "./runtime-port"
 
 export type ThreadDrains = {
   readonly endpoints: GatewayEndpointPort
+  readonly respondLocal: (sessionID: string, answer: UiAnswer) => Promise<UiAnswerReply>
   readonly wake: (sessionID: string, deliveryIds: readonly string[], reason: WakeReason) => Promise<GatewayWakeReply>
   readonly release: (sessionID: string) => void
   readonly close: () => void
@@ -51,6 +53,8 @@ export function createThreadDrains(input: {
   readonly snapshot: (sessionID: string) => Promise<V2SessionSnapshot>
   readonly socket: string
   readonly log: (line: string) => void
+  /** Another OpenCode 2 server of the agent dir that publishes this socket (the endpoint registry), if any. */
+  readonly peerOf?: (socket: string) => PeerClient | undefined
 }): ThreadDrains {
   const entries = new Map<string, Entry>()
   let closed = false
@@ -111,12 +115,23 @@ export function createThreadDrains(input: {
   return {
     endpoints: {
       wake: (endpoint, deliveryIds) => {
-        if (endpoint.socket !== input.socket) return Promise.reject(Error(`host_unavailable:${endpoint.socket}`))
-        return wake(endpoint.durable_session_id, deliveryIds, "inbox")
+        if (endpoint.socket === input.socket) return wake(endpoint.durable_session_id, deliveryIds, "inbox")
+        const peer = input.peerOf?.(endpoint.socket)
+        if (peer === undefined) return Promise.reject(Error(`host_unavailable:${endpoint.socket}`))
+        return peer.wake(endpoint.durable_session_id, deliveryIds)
       },
-      classifyLiveness: async (endpoint) => (endpoint.socket === input.socket && !closed ? "routable" : "dead"),
-      respondUi,
+      classifyLiveness: async (endpoint) =>
+        !closed && (endpoint.socket === input.socket || input.peerOf?.(endpoint.socket) !== undefined)
+          ? "routable"
+          : "dead",
+      respondUi: (endpoint, answer) => {
+        if (endpoint.socket === input.socket) return respondUi(endpoint, answer)
+        const peer = input.peerOf?.(endpoint.socket)
+        if (peer === undefined) return Promise.reject(Error(`host_unavailable:${endpoint.socket}`))
+        return peer.respondUi(endpoint.durable_session_id, answer)
+      },
     },
+    respondLocal: (sessionID: string, answer: UiAnswer) => respondUi({ durable_session_id: sessionID }, answer),
     wake,
     release(sessionID) {
       if (closed || !entries.has(sessionID)) return

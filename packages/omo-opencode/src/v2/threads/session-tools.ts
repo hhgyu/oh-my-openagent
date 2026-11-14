@@ -70,7 +70,7 @@ async function locate(
 
 function control(surface: ThreadSurface, call: ThreadCall, entry: V2AddressEntry) {
   return createV2SessionControl({
-    host: surface.host,
+    host: surface.controlHost(entry),
     info: entry.info,
     visible: async () => workspaceEntries(await surface.entries(), await call.workspaceRoot()),
   })

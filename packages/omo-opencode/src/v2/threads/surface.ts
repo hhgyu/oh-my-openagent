@@ -1,7 +1,7 @@
 import type { GatewayDeliveryMode, GatewayDeliveryResult } from "@oh-my-opencode/thread-core/gateway/types"
 import type { ReplyEvidence } from "@oh-my-opencode/thread-core/reply-allowance"
 import type { V2AddressEntry } from "./address-book"
-import type { ThreadV2Host } from "./host"
+import type { ControlHost, ThreadV2Host } from "./host"
 
 export type ThreadSendRequest = {
   readonly thread_id: string
@@ -16,6 +16,7 @@ export type ThreadSendRequest = {
 export type ThreadSurface = {
   readonly host: ThreadV2Host
   readonly entries: () => Promise<V2AddressEntry[]>
+  readonly controlHost: (entry: V2AddressEntry) => ControlHost
   readonly createSession: (input: {
     readonly directory: string
     readonly title?: string

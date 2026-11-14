@@ -8,9 +8,11 @@ import {
   isClosed,
   isExecuting,
   writeSessionMetadata,
-  type ThreadV2Host,
+  type ControlHost,
   type V2SessionInfo,
 } from "./host"
+
+export type { ControlHost } from "./host"
 import { sessionTitle } from "./address-book"
 
 /** Native reasoning levels; a session runs one only where its model advertises a host variant of that name. */
@@ -35,7 +37,7 @@ function transcriptEntry(message: Record<string, unknown>): ThreadTranscriptEntr
 }
 
 export function createV2SessionControl(input: {
-  readonly host: Pick<ThreadV2Host, "session" | "model" | "provider">
+  readonly host: ControlHost
   readonly info: V2SessionInfo
   readonly visible: () => Promise<readonly ThreadSummary[]>
 }): SessionControl {
