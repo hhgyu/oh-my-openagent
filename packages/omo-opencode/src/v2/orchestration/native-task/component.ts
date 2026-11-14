@@ -545,8 +545,15 @@ export async function registerNativeTaskComponent(
         try {
           const actual = await host.session.get({ sessionID: parent.sessionID }, { signal: recoveryStop.signal })
           if (actual.location.directory !== directory) continue
+          console.info("[oh-my-openagent/v2] reviving left-behind task children", actual.id, parent.tasks.join(","))
           const report = await bridge.recoverLeftBehind(
             hostRecoveryCaller(actual.id, actual.agent ?? "build", recoveryStop.signal),
+          )
+          console.info(
+            "[oh-my-openagent/v2] left-behind task children revived",
+            actual.id,
+            `restored=${report.restored.join(",")}`,
+            `held=${report.held.map((item) => item.taskID).join(",")}`,
           )
           for (const held of report.held) await noticeHeldRevival(host.session, actual.id, held, recoveryStop.signal)
         } catch (error) {

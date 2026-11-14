@@ -23,7 +23,8 @@ function record(directory: string, root: string, id: string, extra: Record<strin
     join(tasks, `${id}.json`),
     JSON.stringify({
       task_id: id,
-      runner_kind: "owned-session",
+      // The store's on-disk shape of an owned child (storable-record.ts).
+      runner_kind: "host-session",
       owned_session: { sessionID: `child-${id}` },
       status: "running",
       residency_state: "resident",
@@ -46,6 +47,7 @@ describe("#given the task state a previous OpenCode process left in a project", 
     record(directory, "ses_root", "st_done", { status: "completed" })
     record(directory, "ses_root", "st_mine", { host_pid: 4242 })
     record(directory, "ses_root", "st_killed", { killed: true })
+    record(directory, "ses_root", "st_daemon", { owned_session: undefined, host_session: { socket: "s" } })
     record(directory, "ses_other", "st_misplaced", {}, "ses_root")
 
     // when

@@ -17,6 +17,18 @@ function field(value: unknown, key: string): unknown {
   return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined
 }
 
+/** The task store writes an owned child as R0's `host-session` kind plus its `owned_session` reference
+ * (`storable-record.ts`); the parser restores `owned-session` only for that exact pair. */
+function ownedOnDisk(record: unknown): boolean {
+  const kind = field(record, "runner_kind")
+  return (
+    (kind === "host-session" || kind === "owned-session") &&
+    typeof field(record, "owned_session") === "object" &&
+    field(record, "host_session") === undefined &&
+    field(record, "pid") === undefined
+  )
+}
+
 /** Native revives a session's suspended children at `session_start` (`revival-selection.ts`). This finds
  * the sessions that need it after an OpenCode restart: an owned child still running, pending or paused
  * that a previous host either parked (persisted only) or left resident under another process. Every
@@ -48,8 +60,7 @@ export function discoverLeftBehindParents(projectDirectory: string, hostPid = pr
         residency = field(record, "residency_state")
       if (
         field(record, "task_id") !== id ||
-        field(record, "runner_kind") !== "owned-session" ||
-        field(record, "owned_session") === undefined ||
+        !ownedOnDisk(record) ||
         field(record, "killed") === true ||
         !LEFT_BEHIND_STATUSES.has(String(field(record, "status"))) ||
         typeof parent !== "string" ||
