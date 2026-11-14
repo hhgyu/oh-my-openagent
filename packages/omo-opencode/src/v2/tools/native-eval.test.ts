@@ -224,4 +224,20 @@ describe("native eval tool", () => {
     })
     expect(withoutSdk).toEqual({ PI_SESSION_ID: "ses_other", PI_SESSION_CWD: "/home/user/project" })
   })
+
+  test("#given the goal store is on #when an eval session's environment is built #then PI_GOAL_STORE_FILE names that session's goal file", () => {
+    // given / when
+    const env = evalSessionEnvironment({
+      directory: "/home/user/project",
+      sessionID: "ses_root",
+      goalStoreFile: "/home/user/project/.omo/goal/ses_root.json",
+    })
+
+    // then
+    expect(env).toEqual({
+      PI_SESSION_ID: "ses_root",
+      PI_SESSION_CWD: "/home/user/project",
+      PI_GOAL_STORE_FILE: "/home/user/project/.omo/goal/ses_root.json",
+    })
+  })
 })

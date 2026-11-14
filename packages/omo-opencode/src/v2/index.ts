@@ -112,11 +112,20 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
             tool: module.createEvalTaskHostTool,
           }))
         : undefined
+    // Native's goal trio (create_goal / update_goal / get_goal) over the senpi engine's goal store.
+    const goal = context.options?.["omo-goal-enabled"] !== false ? await import("./goal") : undefined
+    if (goal) cleanups.push(await goal.registerGoal(context))
     if (context.options?.["omo-native-eval-enabled"] !== false) {
       // Native `eval`, on by default like Native. Registers the tool only; senpi-codemode itself
       // is imported on the first call.
       const { registerNativeEval } = await import("./tools/native-eval")
-      cleanups.push(await registerNativeEval(context, evalTask ? { ownedTools: [evalTask.tool(evalTask.port)] } : {}))
+      const directory = context.location.directory
+      cleanups.push(
+        await registerNativeEval(context, {
+          ...(evalTask && { ownedTools: [evalTask.tool(evalTask.port)] }),
+          ...(goal && { goalStoreFile: (sessionID: string) => goal.goalStoreFile(goal.goalStoreRef(directory, sessionID)) }),
+        }),
+      )
       if (context.options?.["omo-ulw-loop-enabled"] !== false) {
         const { registerUlwLoop } = await import("./ulw-loop")
         cleanups.push(await registerUlwLoop(context))
