@@ -828,6 +828,17 @@ describe("#given the records a previous observer retained for a turn", () => {
   test("#when no input or execution was observed #then nothing was cut off", () => {
     expect(retainedTurnCutOff([])).toBe(false)
   })
+  test("#when the last run succeeded while the child still owned background work #then it was cut off", () => {
+    const records = fixture().records
+    const at = records.findIndex(terminal)
+    const withIdle = (owned: number): ObservationRecord[] => [
+      ...records.slice(0, at),
+      { kind: "idle", id: "idle-1", owned, descendant: 0 },
+      ...records.slice(at),
+    ]
+    expect(retainedTurnCutOff(withIdle(1))).toBe(true)
+    expect(retainedTurnCutOff(withIdle(0))).toBe(false)
+  })
 })
 
 // Safe envelopes copied from the actual isolated 2.2.6 observations.json capture (2026-11-08).

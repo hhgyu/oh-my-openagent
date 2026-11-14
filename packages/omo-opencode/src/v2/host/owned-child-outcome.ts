@@ -94,18 +94,26 @@ export function ownedChildSessionState(records: readonly ObservationRecord[]): {
 /** Whether the turn a previous observer retained was cut off before the host settled it, read from
  * the retained records only (a rebound binding is uncertain by design, so its outcome is never
  * trusted). Cut off: the last observed execution has no terminal, the host interrupted it (a park's
- * interrupt), or an expected input was never delivered. A local stop, a turn the host
- * finished or failed, and an observer that saw no input at all are not cut off. This is the
+ * interrupt), an expected input was never delivered, or the last run succeeded while the child still
+ * owned background work (omo#9069): a host background job dies with the host and its notice never
+ * comes, so the held turn would wait forever. A local stop, a turn the host finished or failed with
+ * nothing of its own pending, and an observer that saw no input at all are not cut off. This is the
  * transcript-tail decision of Native `continueInterruptedTurn` (`sessionTailNeedsContinuation`:
  * an aborted, unanswered or unfinished tail continues) over the owned observation. */
 export function retainedTurnCutOff(records: readonly ObservationRecord[]): boolean {
   let open = false,
-    interrupted = false
+    interrupted = false,
+    heldForBackground = false
+  let pendingIdle: number | undefined
   const undelivered = new Set<string>()
   for (const record of records) {
     if (record.kind === "stop") return false
     if (record.kind === "input") {
       undelivered.add(record.inboxID)
+      continue
+    }
+    if (record.kind === "idle") {
+      pendingIdle = record.owned
       continue
     }
     if (record.kind !== "host") continue
@@ -114,12 +122,15 @@ export function retainedTurnCutOff(records: readonly ObservationRecord[]): boole
     else if (type === "session.execution.started") {
       open = true
       interrupted = false
+      heldForBackground = false
     } else if (open && terminals.has(type)) {
       open = false
       interrupted = type === "session.execution.interrupted"
+      heldForBackground = type === "session.execution.succeeded" && pendingIdle !== undefined && pendingIdle > 0
+      pendingIdle = undefined
     }
   }
-  return open || interrupted || undelivered.size > 0
+  return open || interrupted || heldForBackground || undelivered.size > 0
 }
 
 /** Own observations, not host wait/info.outcome or a fabricated execution identifier. */

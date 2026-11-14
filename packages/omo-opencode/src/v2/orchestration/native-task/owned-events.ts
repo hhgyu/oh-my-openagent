@@ -52,7 +52,8 @@ export function createOwnedEventProjection(
         delivery = turnOpened
         steps.clear()
       }
-      if (event.type === "session.inbox.delivered" && data.inboxID && own.has(data.inboxID)) delivery = turnOpened = true
+      if (event.type === "session.inbox.delivered" && data.inboxID && own.has(data.inboxID))
+        delivery = turnOpened = true
       if (event.type === "session.step.started" && id && data.model) {
         steps.set(id, { owned: delivery, model: data.model, parts: new Map() })
         if (delivery)

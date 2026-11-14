@@ -969,11 +969,7 @@ export async function createOwnedTaskHandle(input: {
     const observed = observer.outcome()
     if (observed.status === "uncertain")
       throw new ChildObservationUncertain(observed.reason ?? "input-observation-unavailable", observed.startEventID)
-    if (
-      record?.status !== "running" ||
-      record.notification.run_epoch !== epoch ||
-      settledStatus(observed.status)
-    ) {
+    if (record?.status !== "running" || record.notification.run_epoch !== epoch || settledStatus(observed.status)) {
       throw new Error("Owned managed idle turn is not bound; no input dispatched")
     }
     busy = true
