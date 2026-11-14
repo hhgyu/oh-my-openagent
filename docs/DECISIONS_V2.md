@@ -23,12 +23,13 @@ In scope:
 - The OpenCode plugin entry, tools, tool hooks, prompt and context hooks, agents, commands, MCP servers, skills, configuration, background orchestration, team mode, monitor, OpenClaw, and the TUI.
 - V1 coexistence. The V1 entry stays unchanged and continues to load on OpenCode 1.
 - A real-host parity matrix and an isolated QA harness.
+- Local computer use (the `computer` tool, its eval prelude and the desktop service over the desktop engine) and threads between sessions, by user decision (D-034).
 
 Out of scope:
 
-- The `omo` CLI and the OmO Native binary.
+- The `omo` CLI and the OmO Native binary. Local computer use reuses the desktop engine an OmO Native install provisioned; the V2 host never ships, downloads or installs one (D-034).
 - The Codex and Senpi adapters.
-- Desktop application code.
+- Desktop application code, the device service, `omo remote`, and the computer v3 relay carriers and fleet (blocked on a device-service adapter for OpenCode sessions, D-034).
 - Publishing a new npm package or changing the release workflow.
 
 ## Architecture
@@ -482,3 +483,10 @@ Context: Native task children follow their parent's approval mode on every chang
 Decision: the owned runner keeps one watch per parent session (`session.permissions` events plus a fresh `session.get`) and links every staged or restored child to it with Native's `ChildParentLink` (`@oh-my-opencode/senpi-task/parent-link`); a push is `session.update` of the child's own rules behind its observation guard. The link stops, and joins a push in flight, before detach (park), end or dispose. A fresh child whose copy differs from the parent's current rules (a change raced its creation) is aligned at once; a recovered child counts as on its parent's mode, so rules written on the child itself, which parking restores exactly, are only replaced by the parent's next change. A failed push is appended to the task log (`task_parent_mode_follow_failed`) and logged, and the next change retries it.
 Rejected: aligning a revived child to the parent at once, which would overwrite user rules on the child that parking promises to restore; reporting a failed follow as a parent session message, which would add an internal prompt route outside the prompt gate.
 Limits: a parent change made while a child is parked reaches it at the parent's next change. The write has no compare-and-set (P-06). Memory workers never follow (P-53). See P-51.
+
+### D-034: local computer use and threads are in V2 scope (2026-11-14)
+Status: accepted (user decision, 2026-11-14).
+Context: the scope note listed the `omo` CLI, the OmO Native binary and desktop application code as out of scope, which left Native computer use and Native threads unported. The port assessment (local evidence `20261114-v2-thread-computer/assessment.md`) found that local computer use and same-device threads need no surface OpenCode 2.2.6 lacks, while relay delivery, `omo remote`, cross-device threads and the computer v3 relay carriers and fleet need the device service to address OpenCode sessions, which it cannot (it registers senpi agent directories and speaks senpi engine RPC).
+Decision: the user moved local computer use and threads into scope. Computer v3, relay carriers, fleet, relay threads and `omo remote` stay out until a device-service adapter for OpenCode sessions exists. Local computer use reuses the shared senpi-desktop packages unchanged: the `computer` tool (and `computer_actions` behind `computer.cua_adapter`) with Native's read/exec tiers as the `computer` permission action with the tier as resource (an "always" answer saves that tier only), the `computer` kernel prelude passed to codemode `kernelPreludes` and reaching the main thread through the owned host-tool bridge, one desktop service per session over the engine child (started on first use, closed at session deletion and plugin dispose, foreground-control grant revoked when a run settles), the intervention policy and the machine-wide interaction lock of the engine, `/computer` and the computer-use skill. The engine is the one an OmO Native install provisioned (`~/.omo/binary-runtime/<version>/` sidecar or the verified release cache) or `computer.engine_path`; without one, the tool refuses with the install action and nothing is downloaded.
+Exposure: Native's `computer` is search-exposed. OpenCode 2.2.6 has no tool_search, so the tool is a Code Mode tool (`codemode: true`), absent from the direct tool list and called through `execute`, and eval cells have the `computer` global. See P-55.
+Rejected: listing `computer` as a direct tool (every session would carry its schema and safety text, which Native avoids by search exposure); downloading the engine from the omo release (a new distribution path for a V2-only install).

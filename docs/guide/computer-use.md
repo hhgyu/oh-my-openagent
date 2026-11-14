@@ -4,7 +4,7 @@
 
 OmO Native can capture your desktop, inspect windows and accessibility trees, and send mouse and keyboard input to native applications. The `computer` tool is backed by the `senpi-desktop-engine` binary. The OmO Senpi component registers the tool when a session loads, but starts the engine only when the tool is first used. Computer use is available on macOS, Linux and Windows. It does not drive web pages through a browser API; for pages, use the `browser` skill.
 
-The tool's parameters and permission classification are in [the computer tool reference](../reference/computer.md). Scroll amounts are pixels on every OS, and one mouse-wheel notch is about 40 px, so the same scroll moves a similar distance on macOS, Linux and Windows. This feature belongs to OmO Native; the same `computer` block does not enable it in the OpenCode or Codex editions.
+The tool's parameters and permission classification are in [the computer tool reference](../reference/computer.md). Scroll amounts are pixels on every OS, and one mouse-wheel notch is about 40 px, so the same scroll moves a similar distance on macOS, Linux and Windows. This feature belongs to OmO Native. The OpenCode 2 host runs the same tool from the same `computer` block (see [On OpenCode 2](#on-opencode-2)); the Codex edition does not.
 
 ## Turn it on
 
@@ -92,7 +92,7 @@ Background delivery depends on the target toolkit and the requested action. Chro
 
 ## Configure it
 
-Put the `computer` block in `~/.omo/omo.jsonc` (or `~/.omo/omo.json`) for your account, or `.omo/omo.jsonc` in a project. The closest project layer wins. You may place it under `"[native]"` or at the shared top level; either way it is effective only in OmO Native. All keys are optional. Most use **snake_case**; the virtual-cursor setting is `showCursor`:
+Put the `computer` block in `~/.omo/omo.jsonc` (or `~/.omo/omo.json`) for your account, or `.omo/omo.jsonc` in a project. The closest project layer wins. Under `"[native]"` it applies to OmO Native only; at the shared top level it applies to OmO Native and the OpenCode 2 host. All keys are optional. Most use **snake_case**; the virtual-cursor setting is `showCursor`:
 
 ```jsonc
 {
@@ -177,6 +177,17 @@ Plain Esc is not a stop key: the app you are working in needs it for its own dia
 | `Suspended` | You pressed the stop chord or ran `/computer stop` | Run `/computer resume` when you want input back |
 | `ControlRequired` | A foreground action, `win.raise()`, or input on the desktop or a display ran without your foreground-control approval, or after it ended | Approve the "Allow foreground computer control?" question when the agent asks, or have the agent target a window; background delivery to one window needs no approval |
 | `InputBusy` | Another session holds foreground control | Finish or interrupt that session's task, then retry |
+
+## On OpenCode 2
+
+The OpenCode 2 host runs the same `computer` tool, `/computer` command and computer-use skill, with these differences:
+
+- It needs the desktop engine an OmO Native install already provisioned, or `computer.engine_path`. It never downloads an engine; without one, `/computer status` and the tool say what to install.
+- OpenCode 2 has no `tool_search`. The `computer` tool is a Code Mode tool, called through `execute`, and `eval` cells have the `computer` global whenever computer use is on for the session.
+- Permission rules use the `computer` action with `read`, `exec` or `control` as the resource, for example `{ "action": "computer", "resource": "exec", "effect": "ask" }`. The foreground-control question is a `computer` permission request on `control`.
+- Only root sessions of the project get it, and never the read-only agents.
+
+The full list is row P-55 of [the OpenCode 2 parity register](../reference/opencode-v2-parity.md).
 
 ## Known limitations
 
