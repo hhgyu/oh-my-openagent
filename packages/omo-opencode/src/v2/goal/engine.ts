@@ -3,7 +3,7 @@
 // INSTALLED engine, imported by computed file URL (the package exports no subpath for them) and pinned to the version
 // these structural types were checked against, as codemode-loader.ts does for codemode.
 import { join } from "node:path"
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { packageDirectory, readInstalledVersion } from "../tools/codemode-loader"
 
 const SENPI_PACKAGE = "@code-yeongyu/senpi"
@@ -73,8 +73,8 @@ export interface GoalEngine {
   openTodoCompletionError(openTasks: readonly string[]): string
 }
 
-function resolveEngineRoot(from: string = import.meta.dir): string {
-  return packageDirectory(Bun.resolveSync(SENPI_PACKAGE, from), SENPI_PACKAGE)
+function resolveEngineRoot(): string {
+  return packageDirectory(fileURLToPath(import.meta.resolve(SENPI_PACKAGE)), SENPI_PACKAGE)
 }
 
 function member<T>(module: Record<string, unknown>, name: string): T {

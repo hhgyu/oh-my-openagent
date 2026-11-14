@@ -15,7 +15,8 @@ import type { Info, Result, ToolContext } from "@opencode/plugin/promise/tool"
 import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { AGENT_DEFINITIONS } from "../agents/definitions"
 import type { OwnedEvalHostTool } from "./codemode-host-tools"
 import type { ProcessEvents } from "./codemode-session-registry"
@@ -90,7 +91,7 @@ export function evalStateDir(projectDirectory: string, sessionID: string, home: 
 const AGENT_TOOLKIT_SDK_DIRECTORY = "agent-toolkit-sdk"
 
 /** The build stages the ulw-loop agent-toolkit SDK next to the V2 chunks (script/build-agent-toolkit-sdk.ts). */
-function locateAgentToolkitSdkRoot(directory: string = import.meta.dir): string | undefined {
+function locateAgentToolkitSdkRoot(directory: string = dirname(fileURLToPath(import.meta.url))): string | undefined {
   const root = join(directory, AGENT_TOOLKIT_SDK_DIRECTORY)
   return existsSync(join(root, "sdk.js")) ? root : undefined
 }

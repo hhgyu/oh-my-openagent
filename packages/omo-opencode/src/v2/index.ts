@@ -118,7 +118,14 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
     }
     // Native's goal trio (create_goal / update_goal / get_goal) over the senpi engine's goal store.
     const goal = context.options?.["omo-goal-enabled"] !== false ? await import("./goal") : undefined
-    if (goal) cleanups.push(await goal.registerGoal(context))
+    if (goal) {
+      // A goal engine that cannot load (another installed senpi version) leaves only the goal tools off.
+      const disposeGoal = await goal.registerGoal(context).catch((error: unknown) => {
+        console.warn("[oh-my-openagent/v2] the Native goal tools are off:", error instanceof Error ? error.message : String(error))
+        return undefined
+      })
+      if (disposeGoal) cleanups.push(disposeGoal)
+    }
     if (context.options?.["omo-native-eval-enabled"] !== false) {
       // Native `eval`, on by default like Native. Registers the tool only; senpi-codemode itself
       // is imported on the first call.

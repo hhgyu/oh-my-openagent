@@ -3,7 +3,8 @@ import type { Registration } from "@opencode/plugin/promise/registration"
 import type { SkillDomain } from "@opencode/plugin/promise/skill"
 import { parseFrontmatter } from "@oh-my-opencode/utils"
 import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 
 // The Native (omo-senpi) skill texts name Native tool spellings and the Senpi boulder session prefix; OpenCode 2 spells
 // the todo tool `todowrite` and records its boulder sessions as `opencode:<id>`.
@@ -17,7 +18,7 @@ export function rewriteSkillForV2(text: string): string {
 }
 
 /** script/stage-v2-ulw-loop.ts stages the skills next to the V2 chunks. */
-export function locateStagedSkillFile(name: string, directory: string = import.meta.dir): string | undefined {
+export function locateStagedSkillFile(name: string, directory: string = dirname(fileURLToPath(import.meta.url))): string | undefined {
   const file = join(directory, "skills", name, "SKILL.md")
   return existsSync(file) ? file : undefined
 }
