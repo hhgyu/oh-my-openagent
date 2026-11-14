@@ -494,7 +494,8 @@ export async function createOwnedTaskHandle(input: {
       actual.child_session_id !== child.locator.sessionID ||
       actual.owned_session?.journalKey !== journalKey ||
       actual.owned_session.journalOwner !== journal.owner ||
-      actual.owned_session.runEpoch !== epoch ||
+      actual.owned_session.runEpoch !== next ||
+      actual.owned_session.journalRevision !== reference.journalRevision ||
       JSON.stringify(store.load(spec.taskId)) !== JSON.stringify(actual)
     )
       throw new Error("Self-resumed run receipt differs from current custody")

@@ -60,7 +60,12 @@ export async function reopenSelfResumedTurn(
   ports.store.mutate(taskId, (fresh) => {
     if (!reopenable(fresh, handle, ports) || nextRunEpoch(fresh) !== epoch) return fresh
     reopened = true
-    return { ...buildRevived(fresh, nowIso(ports.now)), resumed_run_epoch: epoch }
+    // An owned session's reference names the run it belongs to; it moves with the run, as on reattach.
+    return {
+      ...buildRevived(fresh, nowIso(ports.now)),
+      resumed_run_epoch: epoch,
+      ...(fresh.owned_session === undefined ? {} : { owned_session: { ...fresh.owned_session, runEpoch: epoch } }),
+    }
   })
   if (!reopened) {
     if (reservation.ok) reservation.release()
