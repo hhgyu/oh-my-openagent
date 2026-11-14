@@ -25,6 +25,7 @@ export {
   isWorkStale,
   reconcileStaleWorks,
   resolveStaleWorkThresholdMs,
+  sessionsAwaitingLivenessProof,
   STALE_WORK_THRESHOLD_ENV_KEY,
 } from "./stale-work"
 export { endTaskTimer, startTaskTimer, upsertTaskSessionState, upsertTaskSessionStateForWork } from "./task"

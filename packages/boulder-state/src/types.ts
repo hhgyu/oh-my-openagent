@@ -85,6 +85,12 @@ export interface ReconcileStaleWorksOptions {
   readonly thresholdMs?: number
   /** Agent sessions root holding `<encoded session cwd>/<timestamp>_<sessionId>.jsonl` transcripts. */
   readonly sessionsDirectory?: string
+  /**
+   * Newest activity the host can prove for a work's platform-prefixed session ids (a live execution, a
+   * sessions API's last update), or `null` without proof. Read beside the transcripts, only for works whose
+   * recorded activity is already stale.
+   */
+  readonly sessionActivityMs?: (sessionIds: readonly string[]) => number | null
   readonly env?: Readonly<Record<string, string | undefined>>
 }
 
