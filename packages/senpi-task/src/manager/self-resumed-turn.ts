@@ -67,6 +67,15 @@ export async function reopenSelfResumedTurn(
     return
   }
   ports.store.appendEvent(taskId, { type: "task_self_resumed", payload: { run_epoch: epoch } })
+  // A handle that fences its own custody on the run epoch adopts the published run before tracking.
+  const reopenedRecord = ports.tryLoad(taskId)
+  if (handle.bindSelfResumedRun !== undefined && reopenedRecord !== null) {
+    try {
+      await handle.bindSelfResumedRun(settled, reopenedRecord)
+    } catch (error) {
+      log("senpi-task self-resumed run bookkeeping failed", { taskId, error: String(error) })
+    }
+  }
   // The run may have started before its finished turn was recorded and marked on the host (#11092).
   publishHostTaskStatus(handle, taskId, "running")
   // A resumed run is already doing its work: a full lane may deny it a slot, but never its result.
