@@ -36,3 +36,10 @@ export type { OwnedSessionLifecyclePort, ResidencyRegistry, DestroyCause } from 
 export type { TaskLifecycle } from "../lifecycle/types"
 export { buildRespawnManagedSpec } from "./manager-helpers"
 export { NO_HOST_ENDPOINT } from "../lifecycle/host-session"
+export { createHeldTurnSettlement, createWakeSourceLedger, sessionIsIdle } from "../runners/turn-settlement-core"
+export type {
+  HeldTurnSettlement,
+  TurnSettlementProbe,
+  TurnSettlementScheduler,
+  WakeSourceLedger,
+} from "../runners/turn-settlement-core"

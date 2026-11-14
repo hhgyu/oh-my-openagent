@@ -2206,6 +2206,7 @@
     "packages/senpi-task/src/runners/rpc/turn-wake-sources.ts",
     "packages/senpi-task/src/runners/rpc/ui-auto-answer.ts",
     "packages/senpi-task/src/runners/task-parent-control.ts",
+    "packages/senpi-task/src/runners/turn-settlement-core.ts",
     "packages/senpi-task/src/senpi/explicit-pin.ts",
     "packages/senpi-task/src/senpi/thinking-level.ts",
     "packages/senpi-task/src/state/host-liveness.ts",

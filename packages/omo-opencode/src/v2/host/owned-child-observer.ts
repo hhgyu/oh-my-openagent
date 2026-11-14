@@ -1,6 +1,12 @@
 import type { Context } from "@opencode/plugin/promise/plugin"
 import type { ChildCompletionPolicy } from "@oh-my-opencode/orchestration-core/contracts/child-outcome"
 import { randomUUID } from "node:crypto"
+import {
+  createHeldTurnSettlement,
+  createWakeSourceLedger,
+  sessionIsIdle,
+  type TurnSettlementScheduler,
+} from "@oh-my-opencode/senpi-task/manager-kernel"
 import type { ChildHandle } from "./session-backend"
 import {
   normalizeOwnedChildEvent,
@@ -14,7 +20,7 @@ import {
 } from "./owned-child-observation-types"
 import { openOwnedToolMetadataSubscription, type OwnedToolMetadataSource } from "./effect-tool-metadata-source"
 import { hasJoinedSessionCancellation } from "./session-cancellation"
-import { projectOwnedChildOutcome } from "./owned-child-outcome"
+import { ownedChildSessionState, projectOwnedChildOutcome } from "./owned-child-outcome"
 
 type Host = Pick<Context, "session" | "event">
 export interface OwnedChildObserverOptions {
@@ -31,6 +37,33 @@ export interface OwnedChildObserverOptions {
   readonly signal?: AbortSignal
   /** Acquired in the genuine public Effect root scope before this observer. */
   readonly toolMetadataSource?: OwnedToolMetadataSource
+  /** Held-error confirmation (Native `settleConfirmMs`, default the Native heartbeat interval). */
+  readonly settlement?: { readonly confirmMs?: number; readonly schedule?: TurnSettlementScheduler }
+}
+
+const DEFAULT_SETTLE_CONFIRM_MS = 10_000
+
+type ShellLifecycle = { readonly type: "created" | "ended"; readonly key: string; readonly sessionID?: unknown }
+
+function readRecord(value: unknown, key: string): unknown {
+  return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined
+}
+
+/** The host's global `shell.*` events carry no session field; the shell tool tags `metadata.sessionID`. */
+function shellLifecycle(raw: unknown): ShellLifecycle | undefined {
+  const type = readRecord(raw, "type"),
+    data = readRecord(raw, "data")
+  if (type === "shell.created") {
+    const info = readRecord(data, "info"),
+      id = readRecord(info, "id")
+    if (typeof id !== "string") return undefined
+    return { type: "created", key: `shell:${id}`, sessionID: readRecord(readRecord(info, "metadata"), "sessionID") }
+  }
+  if (type === "shell.exited" || type === "shell.deleted") {
+    const id = readRecord(data, "id")
+    return typeof id === "string" ? { type: "ended", key: `shell:${id}` } : undefined
+  }
+  return undefined
 }
 export interface OwnedChildObserver {
   expectInput(inboxID: string): void
@@ -53,6 +86,9 @@ export async function createOwnedChildObserver(
   if (!hasJoinedSessionCancellation(ctx.session))
     throw new Error("Child observation requires joined session cancellation")
   if (!options.title.trim() || options.title.length > 4096) throw new Error("Observation requires a bounded task title")
+  const confirmMs = options.settlement?.confirmMs ?? DEFAULT_SETTLE_CONFIRM_MS
+  if (!Number.isSafeInteger(confirmMs) || confirmMs < 1) throw new Error("Invalid settlement confirmation delay")
+  const schedule = options.settlement?.schedule
   const timeout = options.timeoutMs ?? 5000
   if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 60_000)
     throw new Error("Invalid observation readiness timeout")
@@ -123,24 +159,89 @@ export async function createOwnedChildObserver(
     delivered: [],
     consumption: "unconfirmed",
   })
+  // Native held settlement (omo#9069, senpi#3262): a run's end is held until the session is really
+  // done. `experimental.idle` with no background work the child itself owns is that edge; a run the
+  // session starts on its own (a background job's notice) drops the held outcome and its own end is
+  // held next. A held error is confirmed against the session's state and its own running shells.
+  const wakeSources = createWakeSourceLedger()
+  let settled: OwnedChildOutcome | undefined
+  let runStart: string | undefined, runTerminal: string | undefined
+  let turnOutcome: OwnedChildOutcome | undefined
+  const settlement = createHeldTurnSettlement<OwnedChildOutcome>({
+    settle(result) {
+      if (settled) return
+      settled = Object.freeze(result)
+      for (const resolveWaiter of [...waiters]) resolveWaiter(result)
+    },
+    probe: async () => ownedChildSessionState(bound.snapshot().records),
+    settleConfirmMs: confirmMs,
+    wakeSourcesLive: wakeSources.hasLive,
+    disposed: () => disposed || !!fault,
+    ...(schedule ? { scheduleConfirmation: schedule } : {}),
+  })
+  function advance(result: OwnedChildOutcome) {
+    if (settled || result.status === "uncertain") return
+    if (result.startEventID !== undefined && result.startEventID !== runStart) {
+      runStart = result.startEventID
+      runTerminal = undefined
+      wakeSources.resetTurn()
+      settlement.begin()
+    }
+    if (result.terminalEventID === undefined || result.terminalEventID === runTerminal) return
+    runTerminal = result.terminalEventID
+    if (result.status === "control-only") {
+      // A run that did no model work for the turn leaves the turn's last outcome where it was.
+      if (turnOutcome) settlement.end(turnOutcome)
+    } else if (result.status === "completed" || result.status === "error") {
+      turnOutcome = result
+      settlement.end(result)
+      if (result.ended === "succeeded") {
+        // A succeeded run went through `experimental.idle`: with nothing of its own running, idle.
+        if (result.held === undefined) settlement.idle()
+      } else idleAfterFailure()
+    } else if (result.status === "interrupted") settlement.end(result)
+  }
+  /** OpenCode 2.2.6 tells a plugin nothing when a session goes idle after a failed run (no idle hook,
+   * no status event), and no hook can continue a failed run. So the failure itself is Native's
+   * `agent_idle` when the child owns no running background work and no input waits for a run;
+   * otherwise the held error waits for the wake run or the bounded confirmation. */
+  function idleAfterFailure() {
+    if (settled || settlement.pending()?.status !== "error" || wakeSources.hasLive()) return
+    if (sessionIsIdle(ownedChildSessionState(bound.snapshot().records))) settlement.idle()
+  }
   function outcome(): OwnedChildOutcome {
     if (fault || disposed) return uncertain()
+    let result: OwnedChildOutcome
     try {
       drainMetadata()
-      return projectOwnedChildOutcome(bound.snapshot(), completion)
+      result = projectOwnedChildOutcome(bound.snapshot(), completion)
     } catch {
       fail("observation-store-unavailable")
       return uncertain()
     }
+    if (result.status === "uncertain") return result
+    advance(result)
+    if (settled) return settled
+    if (settlement.pending()) return { ...result, status: "pending", reason: "settlement-held" }
+    return result
   }
   function notify() {
     const result = outcome()
-    if (result.status === "pending" || result.status === "control-only") return
+    if (result.status !== "uncertain") return
     for (const settle of [...waiters]) settle(result)
+  }
+  function observeShell(shell: ShellLifecycle) {
+    if (shell.type === "created") {
+      if (shell.sessionID === options.child.locator.sessionID) wakeSources.armSession(shell.key)
+      return
+    }
+    wakeSources.endSession(shell.key)
+    settlement.reconfirmHeld()
   }
   function fail(reason: string) {
     if (!fault) {
       fault = reason
+      settlement.cancelConfirmation()
       try {
         bound.invalidate(reason)
       } catch {
@@ -219,10 +320,37 @@ export async function createOwnedChildObserver(
       }),
     )
     if (disposed || fault) throw new Error("Observation setup stopped")
+    await register(
+      ctx.session.hook("experimental.idle", (idle) => {
+        if (disposed || fault || idle.sessionID !== options.child.locator.sessionID) return
+        try {
+          const owned = idle.background.filter((job) => job.sessionID === options.child.locator.sessionID)
+          wakeSources.replaceSession(owned.flatMap((job) => (job.kind === "shell" ? [`shell:${job.shellID}`] : [])))
+          wakeSources.resetTurn()
+          for (const job of owned)
+            if (job.kind === "subagent") wakeSources.armTurn(`subagent:${job.childSessionID}`)
+            else if (job.kind === "image") wakeSources.armTurn(`image:${job.path}`)
+          append({
+            kind: "idle",
+            id: randomUUID(),
+            owned: owned.length,
+            descendant: idle.background.length - owned.length,
+          })
+        } catch {
+          fail("idle-observation-unavailable")
+        }
+      }),
+    )
+    if (disposed || fault) throw new Error("Observation setup stopped")
     pump = (async () => {
       try {
         for await (const raw of ctx.event.subscribe({ signal: controller.signal })) {
           if (disposed || fault) break
+          const shell = shellLifecycle(raw)
+          if (shell) {
+            observeShell(shell)
+            continue
+          }
           const event = normalizeOwnedChildEvent(raw, options.child.locator.sessionID)
           if (!event) continue
           // Full text is carried by text.ended; transient deltas cannot prove a result.
@@ -258,6 +386,13 @@ export async function createOwnedChildObserver(
       },
       markStopping() {
         append({ kind: "stop", id: randomUUID() })
+        // A local Stop ends a turn held for the child's own background work at once (Native: a user
+        // abort settles as cancelled).
+        const held = settlement.pending()
+        if (held && !settled) {
+          const { held: _background, text: _text, ...facts } = held
+          settlement.end({ ...facts, status: "cancelled", reason: "stopped-while-held" })
+        }
       },
       outcome,
       observation() {
@@ -275,7 +410,7 @@ export async function createOwnedChildObserver(
         if (!expectedInput) return Promise.reject(new Error("Record the expected owned input before waiting"))
         if (signal?.aborted) return Promise.reject(signal.reason)
         const current = outcome()
-        if (current.status !== "pending" && current.status !== "control-only") return Promise.resolve(current)
+        if (current.status === "uncertain" || settled) return Promise.resolve(current)
         return new Promise<OwnedChildOutcome>((resolve, reject) => {
           const settle = (result: OwnedChildOutcome) => {
             waiters.delete(settle)

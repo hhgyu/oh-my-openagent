@@ -15,6 +15,8 @@ import type { TeamServiceDeps } from "@oh-my-opencode/senpi-task/team-operations
 import type { DagTaskOwner, DagTaskOwnerKey, OwnedStartResult } from "@oh-my-opencode/senpi-task/dag"
 import type { NativeOperationLifetime } from "./accepted-operation"
 
+const LEFT_BEHIND_STATUSES = new Set(["running", "pending", "paused"])
+
 export interface AcceptedTaskProof {
   readonly taskID: string
   readonly epoch: number
@@ -354,6 +356,28 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
     restoreAfterReload(id: string): Promise<boolean> {
       current()
       return lifetime.track(access.restoreAfterReload(id))
+    },
+    /** Native revives a session's suspended children when the session starts again after a reload
+     * (`revival-selection.ts`). On OpenCode 2 the parent's next acting task call is that point (a child
+     * is revived only inside a genuine current parent action): every child of the original parent a
+     * reload parked or a dead host stranded is restored first, so a turn the restart cut off continues.
+     * A refused restore stays held for the next call; the call itself goes on. */
+    async restoreLeftBehind(): Promise<void> {
+      current()
+      for (const { record } of manager.list({ scope: "parent-session", session_id: access.parentSessionID })) {
+        const id = record.task_id
+        if (!LEFT_BEHIND_STATUSES.has(record.status) || record.runner_kind !== "owned-session") continue
+        if (receipts.has(id) || access.owned(id)) continue
+        try {
+          await lifetime.track(access.restoreAfterReload(id))
+        } catch (error) {
+          console.warn(
+            "[oh-my-openagent/v2] left-behind task child restore held",
+            id,
+            error instanceof Error ? error.message : String(error),
+          )
+        }
+      }
     },
     /** A child's live handle when THIS host holds it, only in the original parent (Native DAG recovery's orphan check). */
     residentHandle(id: string) {
