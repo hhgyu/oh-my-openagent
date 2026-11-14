@@ -63,4 +63,24 @@ describe("V2 ulw-loop footer", () => {
     expect(view.frame()).toBeUndefined()
     view.close()
   })
+
+  test("#given an active goal and no loop #when the session is shown #then the footer shows the goal status alone, and beside the frames once a loop runs", async () => {
+    // given
+    const { view, push } = harness({})
+
+    // when
+    view.select("ses_a")
+    await Promise.resolve()
+    push({ sessionID: "ses_a", active: false, goal: "Pursuing goal (5m)" })
+    const goalOnly = view.frame()
+    push({ sessionID: "ses_a", active: true, goal: "Pursuing goal (6m)" })
+    const both = view.frame()
+    push({ sessionID: "ses_a", active: false })
+
+    // then
+    expect(goalOnly).toBe("Pursuing goal (5m)")
+    expect(both).toBe(`${ULW_LOOP_FOOTER_FRAMES[0]}  Pursuing goal (6m)`)
+    expect(view.frame()).toBeUndefined()
+    view.close()
+  })
 })

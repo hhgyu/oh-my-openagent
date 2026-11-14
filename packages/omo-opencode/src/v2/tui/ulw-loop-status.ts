@@ -23,6 +23,7 @@ export function createUlwLoopFooterView(deps: {
   const timers = deps.timers ?? realTimers
   let sessionID: string | undefined
   let active = false
+  let goal: string | undefined
   let frameIndex = 0
   let ticker: unknown
   let request: AbortController | undefined
@@ -42,10 +43,16 @@ export function createUlwLoopFooterView(deps: {
     }
     deps.changed()
   }
+  const setGoal = (next: string | undefined) => {
+    if (next === goal) return
+    goal = next
+    deps.changed()
+  }
   const accept = (data: unknown): boolean => {
     const result = ulwLoopStatusSchema.safeParse(data)
     if (closed || !result.success || result.data.sessionID !== sessionID) return false
     setActive(result.data.active)
+    setGoal(result.data.goal)
     return true
   }
   const unsubscribe = deps.subscribe((data) => {
@@ -57,6 +64,7 @@ export function createUlwLoopFooterView(deps: {
       request?.abort()
       sessionID = id
       setActive(false)
+      setGoal(undefined)
       const controller = new AbortController()
       request = controller
       void deps
@@ -67,7 +75,10 @@ export function createUlwLoopFooterView(deps: {
         .catch(() => {})
     },
     frame(): string | undefined {
-      return active ? ULW_LOOP_FOOTER_FRAMES[frameIndex] : undefined
+      const parts = [active ? ULW_LOOP_FOOTER_FRAMES[frameIndex] : undefined, goal].filter(
+        (part): part is string => part !== undefined,
+      )
+      return parts.length === 0 ? undefined : parts.join("  ")
     },
     close(): void {
       closed = true

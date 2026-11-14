@@ -20,8 +20,13 @@ import {
 } from "@oh-my-opencode/omo-codex/ulw-loop-session-sdk/loop-continuation"
 import { createHash } from "node:crypto"
 import { isOwnContinuation, ULW_LOOP_CONTINUATION_METADATA_KEY } from "../hooks/continuation-metadata"
+import {
+  attachIdleContinuation,
+  IDLE_CONTINUATION_RANK,
+  type IdleContinuationChain,
+} from "../hooks/idle-continuation-chain"
 import { locateStagedSkillFile, registerStagedSkill } from "../skills/staged-skill"
-import { createUlwLoopStatusRpc } from "./status-rpc"
+import { createUlwLoopStatusRpc, type UlwLoopStatusRpc } from "./status-rpc"
 
 export type UlwLoopHost = Pick<Plugin.Context, "session" | "tool" | "rpc" | "skill" | "location" | "event">
 
@@ -31,6 +36,9 @@ export interface UlwLoopOptions {
   readonly skillFile?: string | null
   /** Native defers to the ulw-execute continuation while the session has continuable boulder work. */
   readonly deferTo?: (sessionID: string) => boolean
+  readonly idle?: IdleContinuationChain
+  /** A footer status RPC another owner registered and closes (shared with the goal component). */
+  readonly footer?: UlwLoopStatusRpc
 }
 
 const EXECUTION_EVENTS = [
@@ -46,7 +54,8 @@ export async function registerUlwLoop(host: UlwLoopHost, options: UlwLoopOptions
   const cwd = host.location.directory
   const readStatus = options.readStatus ?? readHostLoopStatus
   const sessions = new Map<string, { continuation: LoopContinuationState; running: boolean }>()
-  const footer = createUlwLoopStatusRpc()
+  const ownsFooter = options.footer === undefined
+  const footer = options.footer ?? createUlwLoopStatusRpc()
   const registrations: Registration[] = []
   const stop = new AbortController()
   const stateOf = (sessionID: string) => {
@@ -68,15 +77,15 @@ export async function registerUlwLoop(host: UlwLoopHost, options: UlwLoopOptions
     }
   }
 
-  async function onIdle(input: SessionIdle): Promise<void> {
+  async function onIdle(input: SessionIdle): Promise<boolean> {
     const state = stateOf(input.sessionID)
     state.running = false
-    if (state.continuation.capReached()) return
-    if (options.deferTo?.(input.sessionID) === true) return
+    if (state.continuation.capReached()) return false
+    if (options.deferTo?.(input.sessionID) === true) return false
     const status = await read(input.sessionID)
-    if (status === undefined) return
+    if (status === undefined) return false
     const decision = state.continuation.decide(status)
-    if (!decision.continue) return
+    if (!decision.continue) return false
     const digest = createHash("sha256").update(`${input.sessionID}\0${decision.count}\0${status.raw}`).digest("hex")
     await host.session.synthetic({
       sessionID: input.sessionID,
@@ -86,6 +95,7 @@ export async function registerUlwLoop(host: UlwLoopHost, options: UlwLoopOptions
       resume: true,
       metadata: { [ULW_LOOP_CONTINUATION_METADATA_KEY]: String(decision.count) },
     })
+    return true
   }
 
   async function onPrompt(input: SessionPrompt): Promise<void> {
@@ -110,8 +120,8 @@ export async function registerUlwLoop(host: UlwLoopHost, options: UlwLoopOptions
     const skillFile = options.skillFile === undefined ? locateStagedSkillFile("ulw-loop") : options.skillFile
     const skill = skillFile === null ? undefined : await registerStagedSkill(host.skill, "ulw-loop", skillFile)
     if (skill) registrations.push(skill)
-    registrations.push(await footer.register(host.rpc))
-    registrations.push(await host.session.hook("experimental.idle", onIdle))
+    if (ownsFooter) registrations.push(await footer.register(host.rpc))
+    registrations.push(await attachIdleContinuation(host.session, options.idle, IDLE_CONTINUATION_RANK.ulwLoop, onIdle))
     registrations.push(await host.session.hook("prompt", onPrompt))
     registrations.push(
       await host.tool.hook("execute.after", async (input) => {
@@ -129,7 +139,7 @@ export async function registerUlwLoop(host: UlwLoopHost, options: UlwLoopOptions
   return async () => {
     stop.abort()
     await pump
-    footer.close()
+    if (ownsFooter) footer.close()
     sessions.clear()
     for (const registration of registrations.reverse()) await registration.dispose()
   }
