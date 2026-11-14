@@ -6,7 +6,11 @@ import { describe, expect, test } from "bun:test"
 import { ToolSearchService } from "../../../node_modules/@code-yeongyu/senpi/dist/core/extensions/builtin/tool-search/service.js"
 import type { ToolInfo } from "../../../node_modules/@code-yeongyu/senpi/dist/core/extensions/types.js"
 
-import { THREAD_FAMILY_PROMPT_GUIDELINES, THREAD_TOOL_EXPOSURE, THREAD_TOOL_METADATA } from "./metadata"
+import {
+  THREAD_FAMILY_PROMPT_GUIDELINES,
+  THREAD_TOOL_EXPOSURE,
+  THREAD_TOOL_METADATA,
+} from "@oh-my-opencode/thread-core/metadata"
 
 const THREAD_TOOL_NAMES = [
   "thread_create",

@@ -12,9 +12,9 @@ import {
   SettingsManager,
   createAgentSession,
 } from "../../senpi-test-runtime"
-import type { ThreadToolResult } from "./contracts"
-import { createGatewayStore, type GatewayStore } from "./gateway/store"
-import { THREAD_FAMILY_PROMPT_GUIDELINES, THREAD_TOOL_METADATA } from "./metadata"
+import type { ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
+import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
+import { THREAD_FAMILY_PROMPT_GUIDELINES, THREAD_TOOL_METADATA } from "@oh-my-opencode/thread-core/metadata"
 import { createThreadTools, registerThreadTools, type ThreadHost, type ThreadHostSession } from "./tools"
 
 // The eval-only contract (oh-my-openagent#12903) is senpi's policy over omo's declarations, so it is

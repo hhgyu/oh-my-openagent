@@ -5,14 +5,14 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 import { join } from "node:path"
 import { fakeHostTransport } from "../../../../senpi-task/src/runners/rpc-host/__fixtures__/fake-host-transport"
 
-import type { ThreadToolName, ThreadToolResult } from "./contracts"
+import type { ThreadToolName, ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
 import {
   createLiveThreadSurface,
   parseHostStatusAll,
   TUI_ENDPOINT_COMMANDS,
   type HostEndpointReport,
 } from "./live-surface"
-import { createGatewayStore } from "./gateway/store"
+import { createGatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { createThreadTools } from "./tools"
 import { testBudgetSignal } from "../../../../../test-support/test-deadline"
 

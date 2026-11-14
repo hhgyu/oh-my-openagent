@@ -4,8 +4,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { gatewayInboxDirectory, gatewayRootDirectory } from "./paths"
-import type { GatewayStore } from "./store"
+import { gatewayInboxDirectory, gatewayRootDirectory } from "@oh-my-opencode/thread-core/gateway/paths"
+import type { GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 import { remainingTestTime, useTestTimeout } from "../../../../../../test-support/test-deadline"
 

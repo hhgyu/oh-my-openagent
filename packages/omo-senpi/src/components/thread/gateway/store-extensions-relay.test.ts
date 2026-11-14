@@ -3,11 +3,11 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { createThreadSdk } from "../sdk"
-import { PAIR_BUCKET_BURST } from "./constants"
-import { gatewayInboxDirectory, gatewayOutboxMarkerPath } from "./paths"
-import type { BindingRecord } from "./bindings"
-import type { GatewayStore, OutboxPage } from "./store"
-import type { RelayResult } from "./relay"
+import { PAIR_BUCKET_BURST } from "@oh-my-opencode/thread-core/gateway/constants"
+import { gatewayInboxDirectory, gatewayOutboxMarkerPath } from "@oh-my-opencode/thread-core/gateway/paths"
+import type { BindingRecord } from "@oh-my-opencode/thread-core/gateway/bindings"
+import type { GatewayStore, OutboxPage } from "@oh-my-opencode/thread-core/gateway/store"
+import type { RelayResult } from "@oh-my-opencode/thread-core/gateway/relay"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 
 let harness: GatewayHarness | undefined

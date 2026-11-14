@@ -1,7 +1,7 @@
-import type { ThreadAddressEntry } from "../addressing"
-import type { ThreadStatus } from "../contracts/results"
-import type { ThreadToolFailure } from "../errors"
-import { rowThreadId, type RemoteSessionRow, type RemoteThreadSurface } from "./ports"
+import type { ThreadAddressEntry } from "@oh-my-opencode/thread-core/addressing"
+import type { ThreadStatus } from "@oh-my-opencode/thread-core/contracts/results"
+import type { ThreadToolFailure } from "@oh-my-opencode/thread-core/errors"
+import { rowThreadId, type RemoteSessionRow, type RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 import { holderTarget, remoteAvailable } from "./remote-ops"
 
 // Decision 0027 section 1: the relay transport's address book. The account listing becomes entries of the SAME shape the

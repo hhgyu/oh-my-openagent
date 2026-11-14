@@ -11,7 +11,7 @@ import {
   type SessionFilter,
   type SessionRowState,
 } from "../device-service-core/src/index.ts"
-import type { RemoteThreadSurface } from "../omo-senpi/src/components/thread/remote/ports"
+import type { RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 import { serveRemoteAttach } from "./remote-attach"
 import { type BootstrapSetup, runBootstrapVerb } from "./remote-bootstrap"
 import { REMOTE_EXIT, UsageError } from "./remote-exit"

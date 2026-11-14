@@ -1,4 +1,4 @@
-import type { DrainWakeEvent, GatewayAdmissionKind, SessionRuntimePort, WakeReason } from "./adapter"
+import type { DrainWakeEvent, ExternalAdmission, GatewayAdmissionKind, SessionRuntimePort, WakeReason } from "./adapter"
 import { decideDelivery } from "./decision"
 import { isLockWaitExceeded } from "./lock-wait"
 import { deliveryProvenanceLine, deliverySender, renderDeliveryText } from "./provenance"
@@ -111,9 +111,9 @@ export function createInboxDrain(options: InboxDrainOptions): InboxDrain {
       })
       if (claimed.kind !== "claimed") continue
       options._test?.afterClaim?.(claimed.row)
-      let result: ReturnType<SessionRuntimePort["admitExternalMessage"]>
+      let result: ExternalAdmission
       try {
-        result = runtime.admitExternalMessage({
+        result = await runtime.admitExternalMessage({
           delivery_id: row.delivery_id,
           text: renderDeliveryText(claimed.row),
           sender: deliverySender(claimed.row),

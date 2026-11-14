@@ -1,11 +1,11 @@
-import type { ThreadToolResult } from "../contracts"
-import { workspaceEntries } from "../addressing"
-import { rowThreadId } from "../remote/ports"
+import type { ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
+import { workspaceEntries } from "@oh-my-opencode/thread-core/addressing"
+import { rowThreadId } from "@oh-my-opencode/thread-core/remote/ports"
 import { createRelayControl, deviceOnline } from "../remote/lazy-ops"
 import { resolution, resolveEntries, targetSession, resolveAcross } from "../tools/internals"
 import type { ThreadHostView, ThreadToolSurfaceOptions } from "../tools/ports"
 import { createLocalControl } from "./local-control"
-import type { SessionControl } from "./port"
+import type { SessionControl } from "@oh-my-opencode/thread-core/control/port"
 
 export type LocatedControl =
   | { readonly kind: "control"; readonly control: SessionControl }

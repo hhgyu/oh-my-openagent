@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import type { GatewayEndpointPort } from "./adapter"
-import { createInboxDrain } from "./drain"
-import { createGatewayEngine, resolveFromEntries } from "./engine"
+import type { GatewayEndpointPort } from "@oh-my-opencode/thread-core/gateway/adapter"
+import { createInboxDrain } from "@oh-my-opencode/thread-core/gateway/drain"
+import { createGatewayEngine, resolveFromEntries } from "@oh-my-opencode/thread-core/gateway/engine"
 import { FakeSessionRuntime } from "./testing/fake-runtime"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 

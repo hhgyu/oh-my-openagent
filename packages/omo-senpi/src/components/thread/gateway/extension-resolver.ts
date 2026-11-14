@@ -4,7 +4,7 @@ import { createLazyLiveThreadSurface } from "../lazy-live-surface"
 import { createGatewayResolver } from "../tools/gateway-services"
 import { hostView } from "../tools/internals"
 import { UNKNOWN_CALLER, type ThreadToolSurfaceOptions } from "../tools/ports"
-import type { GatewayResolve } from "./engine"
+import type { GatewayResolve } from "@oh-my-opencode/thread-core/gateway/engine"
 
 const NOTHING_LIVE = async () => ({ sessions: [], hosts: [], disk: [] })
 

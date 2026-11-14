@@ -1,6 +1,6 @@
-import type { JsonObject } from "../remote/ports"
+import type { JsonObject } from "@oh-my-opencode/thread-core/remote/ports"
 import type { ThreadCloseOutcome } from "../tools/ports"
-import { refuse } from "./port"
+import { refuse } from "@oh-my-opencode/thread-core/control/port"
 
 /**
  * How a leg answers one engine record for the ladder: the engine's reply data, or `gone` when the engine no longer

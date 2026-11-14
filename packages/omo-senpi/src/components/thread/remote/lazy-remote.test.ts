@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import type { AliasRegistry } from "./ports"
+import type { AliasRegistry } from "@oh-my-opencode/thread-core/remote/ports"
 import { createLazyRemoteSurface } from "./lazy-remote"
 import { createRemoteThreadFixture } from "../thread-remote-fixture"
 

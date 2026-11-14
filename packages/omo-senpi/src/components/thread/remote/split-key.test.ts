@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createRemoteThreadFixture } from "../thread-remote-fixture"
-import type { RemoteSessionRow } from "./ports"
+import type { RemoteSessionRow } from "@oh-my-opencode/thread-core/remote/ports"
 
 // Audit class C8 (#13017): a relay listing key that DIFFERS from the durable id. The id a caller sees in thread_list is the
 // durable id, and that id addresses the row in every tool, while the transport still dispatches by the listing key.

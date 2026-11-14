@@ -16,6 +16,7 @@ export const corePackagePaths = [
   "packages/hashline-core",
   "packages/tmux-core",
   "packages/team-core",
+  "packages/thread-core",
   "packages/openclaw-core",
   "packages/boulder-state",
   "packages/isolation-core",

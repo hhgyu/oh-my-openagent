@@ -1,12 +1,12 @@
-import type { ThreadTranscriptEntry } from "../reader"
+import type { ThreadTranscriptEntry } from "@oh-my-opencode/thread-core/reader"
 import { relayAddressEntry } from "../remote/address-book"
-import { rowThreadId } from "../remote/ports"
-import type { JsonObject, RemoteSessionRow, RemoteThreadSurface } from "../remote/ports"
+import { rowThreadId } from "@oh-my-opencode/thread-core/remote/ports"
+import type { JsonObject, RemoteSessionRow, RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 import { outcomeFailure } from "../remote/outcome"
 import { replyData } from "../remote/remote-ops"
-import type { ModelChoice } from "../tools/model-match"
+import type { ModelChoice } from "@oh-my-opencode/thread-core/control/model-match"
 import { closeLadder, SESSION_GONE, type RecordAnswer } from "./close-ladder"
-import { ControlRefusal, refuse, type SessionControl } from "./port"
+import { ControlRefusal, refuse, type SessionControl } from "@oh-my-opencode/thread-core/control/port"
 
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value)

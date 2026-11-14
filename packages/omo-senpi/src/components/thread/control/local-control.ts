@@ -1,7 +1,7 @@
 import { routingId, sessionPort } from "../tools/internals"
 import type { ThreadHostSession, ThreadToolSurfaceOptions } from "../tools/ports"
-import type { ThreadSummary } from "../contracts"
-import { refuse, type SessionControl } from "./port"
+import type { ThreadSummary } from "@oh-my-opencode/thread-core/contracts"
+import { refuse, type SessionControl } from "@oh-my-opencode/thread-core/control/port"
 
 const THINKING_LEVEL_UNSUPPORTED = "thinking_level_unsupported:"
 

@@ -1,11 +1,14 @@
-import { workspaceEntries } from "../addressing"
-import type { ThreadReadInput, ThreadToolResult } from "../contracts"
+import { workspaceEntries } from "@oh-my-opencode/thread-core/addressing"
+import type { ThreadReadInput, ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
 import { locateControl } from "../control/locate"
-import { controlIdentity } from "../control/port"
-import { readTranscript, type ThreadTranscriptEntry } from "../reader"
-import { threadLink } from "../thread-link"
-import { addressBook, degradedSummary, failure, resolveEntries, summary, transcriptRole } from "./internals"
+import { controlIdentity } from "@oh-my-opencode/thread-core/control/port"
+import { readTranscript } from "@oh-my-opencode/thread-core/reader"
+import { liveReadResult, readWindow, transcriptRole } from "@oh-my-opencode/thread-core/read-result"
+import { threadLink } from "@oh-my-opencode/thread-core/thread-link"
+import { addressBook, degradedSummary, failure, resolveEntries, summary } from "./internals"
 import type { ThreadHostSession, ThreadHostView, ThreadToolSurfaceOptions } from "./ports"
+
+export { liveReadResult } from "@oh-my-opencode/thread-core/read-result"
 
 /**
  * `thread_list` over one host view. Default scope is the caller's workspace, the same test
@@ -42,14 +45,6 @@ export function listThreads(
   return { kind: "ok", threads, scope: allScope === true ? "all" : "workspace" }
 }
 
-/**
- * A first read takes the trailing window; a read that carries a cursor continues forward from it.
- * Tail mode ignores the cursor, so following next_cursor in tail mode returned the same slice again.
- */
-function readWindow(value: ThreadReadInput): { mode: "tail" | "page"; max_bytes?: number; cursor?: string } {
-  return { mode: value.cursor === undefined ? "tail" : "page", max_bytes: value.max_bytes, cursor: value.cursor }
-}
-
 /** `thread_read`: the live transcript through the thread's control, wherever it is held; else its JSONL when its endpoint here is dead. */
 export async function readThread(
   options: ThreadToolSurfaceOptions,
@@ -63,30 +58,6 @@ export async function readThread(
   const { control } = located
   const result = liveReadResult(control.thread_id, control.title, await control.getMessages(), value)
   return result.kind === "ok" ? { ...result, ...controlIdentity(control) } : result
-}
-
-/** A live session's transcript through the bounded reader; the same window rules on this device and on another one. */
-export function liveReadResult(
-  threadId: string,
-  title: string | undefined,
-  messages: readonly ThreadTranscriptEntry[],
-  value: ThreadReadInput,
-): ThreadToolResult {
-  const live = readTranscript({ kind: "live", entries: () => messages }, readWindow(value))
-  if (live.kind === "error") return { kind: "error", error: live.error }
-  return {
-    kind: "ok",
-    thread_id: threadId,
-    link: threadLink(threadId, title),
-    items: live.items.map((item, index) => ({
-      seq: index + 1,
-      role: transcriptRole(item.role),
-      content: JSON.stringify(item.content ?? item),
-    })),
-    truncated: live.truncated,
-    ...(live.next_cursor === null ? {} : { next_cursor: live.next_cursor }),
-    source: live.source,
-  }
 }
 
 /**
