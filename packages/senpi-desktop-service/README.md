@@ -43,7 +43,7 @@ None yet.
 - `@oh-my-opencode/senpi-desktop-engine` may import `-protocol`.
 - `@oh-my-opencode/senpi-desktop-service` may import `-protocol`, `-engine`, and `-prelude`.
 - `@oh-my-opencode/senpi-desktop-tool` may import `-protocol`, `-engine`, `-prelude`, and `-service`.
-- Only omo-senpi's computer-use component imports these packages, and only `-tool` and `-service`. senpi itself imports none of them.
+- Only omo-senpi's computer-use component (`-tool` and `-service` only) and the OpenCode 2 host (`packages/omo-opencode/src/v2/computer/`) import these packages. senpi itself imports none of them.
 - No desktop package imports `pi-agent-core`, `pi-ai`, or `pi-tui`. There is no shared utils package: the five desktop packages are the whole set.
 
 The Rust side runs the other way: `senpi-desktop-core` <- `-safety` <- `-session` <- backends <- `senpi-desktop-engine` (the binary). The TS packages reach it only through the engine's stdio JSON-RPC.

@@ -18,7 +18,7 @@ function jsonDetails(details: unknown): unknown {
 
 /** senpi `AgentToolResult` of a cell to the SDK result: text stays text, images become data-URI files,
  * `isError` becomes a tool error the model reads. */
-export function adaptEvalResult(value: unknown): Result {
+export function adaptEvalResult(value: unknown, metadataKey = "nativeEval"): Result {
   if (!value || typeof value !== "object" || !Array.isArray((value as { content?: unknown }).content))
     throw Error("eval returned no content")
   const result = value as { content: unknown[]; details?: unknown; isError?: unknown }
@@ -35,7 +35,7 @@ export function adaptEvalResult(value: unknown): Result {
     return []
   })
   const details = jsonDetails(result.details)
-  const metadata = details === undefined ? {} : { nativeEval: details }
+  const metadata = details === undefined ? {} : { [metadataKey]: details }
   if (result.isError === true) {
     throw new ToolError({
       message: content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n") || "eval cell failed",

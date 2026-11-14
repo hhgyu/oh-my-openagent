@@ -118,6 +118,7 @@ function fixture(options: { version?: string; failRpc?: boolean; mutation?: bool
       "omo-native-eval-enabled": false,
       "omo-goal-enabled": false,
       "omo-ulw-execute-enabled": false,
+      "omo-computer-use-enabled": false,
     },
     agent: { get: unused, list: unused, reload: unused, transform: () => registration("agents") },
     session: new Proxy(unused, { get: (_target, key) => (key === "get" ? get : unused) }),

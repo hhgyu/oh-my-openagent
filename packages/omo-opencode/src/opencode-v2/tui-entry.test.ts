@@ -2,8 +2,9 @@ import { describe, expect, it } from "bun:test"
 
 import { NATIVE_EDITION_GUIDE_URL, NATIVE_EDITION_INSTALL_COMMAND } from "../cli/native-edition-hint"
 import tuiModule from "../tui"
+import { COMPUTER_COMMAND_OUTPUT_EVENT_TYPE, COMPUTER_PERMISSION_EVENT_TYPE } from "../v2/computer/command-output-event"
 import { MEMORY_COMMAND_OUTPUT_EVENT_TYPE } from "../v2/memory/command-output-event"
-import { showMemoryCommandOutput, showOpenCodeV2Notice, type MemoryOutputTui } from "./tui-entry"
+import { showComputerEvents, showMemoryCommandOutput, showOpenCodeV2Notice, type MemoryOutputTui } from "./tui-entry"
 
 type ShownToast = { readonly title: string; readonly message: string; readonly variant: string }
 
@@ -98,6 +99,25 @@ describe("OpenCode 2 TUI memory command output", () => {
     expect(t.toasts).toEqual([
       { title: "/search", message: "/search failed: boom", variant: "error", sessionID: "ses_1" },
     ])
+  })
+
+  it("#given a subscribed TUI #when computer use emits /computer output and a missing OS permission #then the output opens a dialog and the permission a warning toast", async () => {
+    // given
+    const t = outputContext()
+    const unsubscribe = showComputerEvents(t.context)
+    const output = t.handlers.get(COMPUTER_COMMAND_OUTPUT_EVENT_TYPE)
+    const permission = t.handlers.get(COMPUTER_PERMISSION_EVENT_TYPE)
+    if (output === undefined || permission === undefined) throw new Error("not subscribed")
+    // when
+    output({ data: { sessionID: "ses_1", command: "computer", level: "info", text: "Computer use: enabled=true" } })
+    permission({ data: { sessionID: "ses_1", permission: "accessibility", app: "Terminal" } })
+    permission({ data: { sessionID: "ses_1", permission: "camera", app: "Terminal" } })
+    await Promise.resolve()
+    unsubscribe()
+    // then
+    expect(t.dialogs).toEqual([{ title: "/computer", message: "Computer use: enabled=true" }])
+    expect(t.toasts.map((toast) => [toast.variant, toast.sessionID])).toEqual([["warning", "ses_1"]])
+    expect(t.handlers.size).toBe(0)
   })
 
   it("#given a subscription #when it is disposed #then the handler is removed", () => {
