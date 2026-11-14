@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import type { ThreadToolResult } from "./contracts"
-import { createGatewayStore, type GatewayStore } from "./gateway/store"
+import type { ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
+import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { INITIAL_SKILLS_CONTEXT_KEY, INITIAL_SKILLS_ENTRY, registerInitialSkills } from "./initial-skills"
 import { createThreadTools, type ThreadHost, type ThreadHostSession } from "./tools"
 

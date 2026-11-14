@@ -27,6 +27,7 @@ describe("V2 command namespace", () => {
       people: "omo:people",
       palace: "omo:palace",
       goal: "omo:goal",
+      computer: "omo:computer",
     })
     expect(v2Slash("goal")).toBe("/omo:goal")
   })

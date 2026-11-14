@@ -23,8 +23,10 @@ const V2_BUILD_ARGS = [
 // The Native eval Worker entry is emitted as its own file next to each bundle's chunks (dist/ and
 // dist/v2/, because the root bundle also carries the V2 graph lazily). The client locates it by this
 // name relative to its chunk, so `[name].[ext]` keeps it flat: dist/codemode-worker.js, dist/v2/codemode-worker.js.
+// The thread gateway store's Worker entry is emitted the same way: dist/store-worker.js, dist/v2/store-worker.js.
 const CODEMODE_WORKER_ENTRY = [
   "packages/omo-opencode/src/v2/tools/codemode-worker.ts",
+  "packages/thread-core/src/gateway/store-worker.ts",
   "--entry-naming",
   "[name].[ext]",
 ]
@@ -107,6 +109,12 @@ export const BUILD_NODES: BuildNode[] = [
   { id: "shared-skills-assets", command: "bun", args: ["run", "build:shared-skills-assets"], deps: ["index"] },
   { id: "node-require-shim", command: "bun", args: ["run", "build:node-require-shim"], deps: ["index", "v2-index"] },
   { id: "v2-personas", command: "bun", args: ["script/stage-v2-personas.ts"], deps: ["index", "v2-index"] },
+  {
+    id: "v2-computer-assets",
+    command: "bun",
+    args: ["script/stage-v2-computer-assets.ts"],
+    deps: ["index", "v2-index"],
+  },
   { id: "v2-ulw-loop", command: "bun", args: ["script/stage-v2-ulw-loop.ts"], deps: ["index", "v2-index"] },
   { id: "declarations", command: "tsc", args: ["--emitDeclarationOnly"], deps: [] },
   {

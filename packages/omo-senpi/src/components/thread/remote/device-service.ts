@@ -6,7 +6,7 @@ import {
   type DeviceService,
   type RemoteAttach,
 } from "@oh-my-opencode/device-service-core"
-import type { JsonObject, RemoteCommandOutcome, RemoteSessionsPort } from "./ports"
+import type { JsonObject, RemoteCommandOutcome, RemoteSessionsPort } from "@oh-my-opencode/thread-core/remote/ports"
 
 export type DeviceServiceSessionsOptions = {
   readonly version: string

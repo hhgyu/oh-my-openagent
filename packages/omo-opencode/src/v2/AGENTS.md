@@ -27,6 +27,8 @@ orchestration/  background agents, todos, goal, boulder, team, monitor
 tui/            OpenCode 2 TUI entry
 compat/         event, message, and schema adapters
 rpc/            diagnostic RPCs
+threads/        Native thread tools as eval host tools over @oh-my-opencode/thread-core
+computer/       local computer use over the shared senpi-desktop packages (D-038, P-63)
 ```
 
 ## Verification

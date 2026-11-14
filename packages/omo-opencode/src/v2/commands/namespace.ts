@@ -22,6 +22,7 @@ export const NATIVE_COMMAND_NAMES = [
   "people",
   "palace",
   "goal",
+  "computer",
 ] as const
 
 export type NativeCommandName = (typeof NATIVE_COMMAND_NAMES)[number]

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { join } from "node:path"
 import { existsSync, rmSync } from "node:fs"
-import { readTranscript } from "../../../src/components/thread/reader.ts"
+import { readTranscript } from "@oh-my-opencode/thread-core/reader"
 import { assert, processSnapshot, cleanupReceipt } from "./common.mjs"
 import {
   HostClient,

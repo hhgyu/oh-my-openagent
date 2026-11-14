@@ -3,9 +3,9 @@ import { basename } from "node:path"
 
 import { createThreadSdk } from "../sdk"
 import { createThreadTools, type ThreadHost } from "../tools"
-import { toSessionControlDrainResult } from "./adapter"
-import { createGatewayEngine, resolveFromEntries } from "./engine"
-import { renderDeliveryText } from "./provenance"
+import { toSessionControlDrainResult } from "@oh-my-opencode/thread-core/gateway/adapter"
+import { createGatewayEngine, resolveFromEntries } from "@oh-my-opencode/thread-core/gateway/engine"
+import { renderDeliveryText } from "@oh-my-opencode/thread-core/gateway/provenance"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 
 let harness: GatewayHarness | undefined

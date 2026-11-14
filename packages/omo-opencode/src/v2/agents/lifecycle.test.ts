@@ -15,6 +15,7 @@ it("cleans agents after RPC registration failure", async () => {
       "omo-native-eval-enabled": false,
       "omo-goal-enabled": false,
       "omo-ulw-execute-enabled": false,
+      "omo-computer-use-enabled": false,
     },
     location: { directory: process.cwd() },
     agent: {
@@ -54,6 +55,7 @@ it("disposes RPC then agents exactly once", async () => {
       "omo-native-eval-enabled": false,
       "omo-goal-enabled": false,
       "omo-ulw-execute-enabled": false,
+      "omo-computer-use-enabled": false,
     },
     location: { directory: process.cwd() },
     agent: {

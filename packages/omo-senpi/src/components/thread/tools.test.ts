@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, mock, test } from "bun:test"
-import { deliverySender } from "./gateway/provenance"
+import { deliverySender } from "@oh-my-opencode/thread-core/gateway/provenance"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { ThreadToolName, ThreadToolResult } from "./contracts"
-import type { GatewayEndpointRef } from "./gateway/adapter"
-import { GATEWAY_RECEIPT_RETENTION_MS } from "./gateway/constants"
-import { createGatewayStore, type GatewayStore } from "./gateway/store"
-import { parseThreadLinkUrl } from "./thread-link"
+import type { ThreadToolName, ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
+import type { GatewayEndpointRef } from "@oh-my-opencode/thread-core/gateway/adapter"
+import { GATEWAY_RECEIPT_RETENTION_MS } from "@oh-my-opencode/thread-core/gateway/constants"
+import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
+import { parseThreadLinkUrl } from "@oh-my-opencode/thread-core/thread-link"
 import {
   createThreadTools,
   RECEIPT_RECOVERY_MAX_KEYS,

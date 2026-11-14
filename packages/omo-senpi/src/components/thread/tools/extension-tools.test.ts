@@ -4,10 +4,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { gatewayDatabasePath } from "../gateway/paths"
-import { GATEWAY_MIGRATIONS } from "../gateway/schema"
-import { createGatewayStore, type GatewayStore } from "../gateway/store"
-import type { SessionCallableOp, StoreExtensionRegistration } from "../gateway/store-extensions"
+import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
+import { GATEWAY_MIGRATIONS } from "@oh-my-opencode/thread-core/gateway/schema"
+import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
+import type {
+  SessionCallableOp,
+  StoreExtensionRegistration,
+} from "@oh-my-opencode/thread-core/gateway/store-extensions"
 import { createThreadTools, type ThreadHost, type ThreadHostSession } from "../tools"
 import { buildExtensionTools, registerExtensionTools } from "./extension-tools"
 import type { AnyTool } from "./internals"

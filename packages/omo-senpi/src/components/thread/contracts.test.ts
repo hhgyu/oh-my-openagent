@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import type { ThreadErrorCode } from "./errors"
+import type { ThreadErrorCode } from "@oh-my-opencode/thread-core/errors"
 import { THREAD_ERROR_CODES, isThreadErrorCode, threadToolFailure } from "./index"
 import {
   ThreadCreateParams,

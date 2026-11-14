@@ -9,7 +9,13 @@ import type { ProcessEvents } from "./codemode-session-registry"
 import type { OwnedEvalHostTool } from "./codemode-host-tools"
 import { createCodemodeWorkerBackend, type CodemodeWorkerPort } from "./codemode-worker-client"
 import { attachCodemodeWorker } from "./codemode-worker-runtime"
-import type { EvalBackend, EvalDefinition, EvalSessionHandle } from "./codemode-worker-protocol"
+import type {
+  EvalBackend,
+  EvalDefinition,
+  EvalKernelPreludes,
+  EvalSessionHandle,
+  KernelPreludeContribution,
+} from "./codemode-worker-protocol"
 import type { NativeEvalHost } from "./native-eval"
 
 type Listener = (event: { readonly data?: unknown; readonly message?: string }) => void
@@ -39,11 +45,13 @@ export interface FakeWorkerSetup {
   readonly kernels?: () => readonly unknown[]
   readonly execute?: (input: EvalRuntimeInput, ...args: Parameters<EvalToolDefinition["execute"]>) => Promise<unknown>
   readonly ownedTools?: readonly OwnedEvalHostTool[]
+  readonly kernelPreludes?: EvalKernelPreludes
   readonly sessionEnv?: (sessionID: string) => Readonly<Record<string, string>>
 }
 
 export function connectFakeWorker(setup: FakeWorkerSetup = {}) {
   const state = {
+    definitionPreludes: [] as (readonly KernelPreludeContribution[])[],
     spawned: 0,
     terminated: 0,
     created: [] as string[],
@@ -91,7 +99,10 @@ export function connectFakeWorker(setup: FakeWorkerSetup = {}) {
           state.sessionEnvs.push(input.sessionEnv)
           return runtime(input)
         },
-        buildDefinition: async () => ({ description: "codemode description", parameters: { type: "object" } }),
+        buildDefinition: async (_modules, _sandbox, preludes) => {
+          state.definitionPreludes.push(preludes)
+          return { description: "codemode description", parameters: { type: "object" } }
+        },
       },
     )
     return {
@@ -121,6 +132,7 @@ export function connectFakeWorker(setup: FakeWorkerSetup = {}) {
     killKernels: (pids) => {
       state.killed.push(pids)
     },
+    ...(setup.kernelPreludes && { kernelPreludes: setup.kernelPreludes }),
   })
   const close = () => {
     for (const channel of state.channels) {

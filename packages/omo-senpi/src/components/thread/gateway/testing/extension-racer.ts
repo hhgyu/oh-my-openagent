@@ -1,8 +1,8 @@
 export {}
 
 const { createGatewayStore } = (await import(
-  process.env.OMO_GATEWAY_TEST_STORE_MODULE ?? "../store"
-)) as typeof import("../store")
+  process.env.OMO_GATEWAY_TEST_STORE_MODULE ?? "@oh-my-opencode/thread-core/gateway/store"
+)) as typeof import("@oh-my-opencode/thread-core/gateway/store")
 
 const [agentDir, moduleUrl] = process.argv.slice(2)
 const store = createGatewayStore({ agentDir })

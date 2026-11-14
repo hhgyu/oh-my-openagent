@@ -4,11 +4,11 @@ import { connect, createServer } from "node:net"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { createInboxDrain } from "./drain"
-import { gatewayInboxDirectory } from "./paths"
+import { createInboxDrain } from "@oh-my-opencode/thread-core/gateway/drain"
+import { gatewayInboxDirectory } from "@oh-my-opencode/thread-core/gateway/paths"
 import { createGatewayHarness, type GatewayHarness, type HarnessSession } from "./testing/harness"
 import { resumeProcess, suspendProcess } from "./testing/job-control"
-import type { GatewayStoreEvent, GatewayStoreTestHooks } from "./types"
+import type { GatewayStoreEvent, GatewayStoreTestHooks } from "@oh-my-opencode/thread-core/gateway/types"
 import { remainingTestTime, useTestTimeout } from "../../../../../../test-support/test-deadline"
 
 const SENDER = fileURLToPath(new URL("./testing/sender-process.ts", import.meta.url))

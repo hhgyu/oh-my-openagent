@@ -10,7 +10,7 @@ import {
   type JsonValue,
   type ThreadReadSourceRef,
   type ThreadTranscriptReadResult,
-} from "./reader"
+} from "@oh-my-opencode/thread-core/reader"
 import { THREAD_READ_DEFAULT_BYTES, THREAD_READ_MAX_BYTES } from "./index"
 
 // ---------------------------------------------------------------------------

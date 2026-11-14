@@ -1,11 +1,11 @@
 import type * as CrossDevice from "./cross-device"
-import { rowThreadId } from "./ports"
+import { rowThreadId } from "@oh-my-opencode/thread-core/remote/ports"
 import type * as RemoteOps from "./remote-ops"
 import type * as RelayTransport from "./relay-transport"
 import type * as RelayControl from "../control/relay-control"
-import type { SessionControl } from "../control/port"
-import type { DeliveryTransport } from "../gateway/transport"
-import type { RemoteSessionRow, RemoteThreadSurface } from "./ports"
+import type { SessionControl } from "@oh-my-opencode/thread-core/control/port"
+import type { DeliveryTransport } from "@oh-my-opencode/thread-core/gateway/transport"
+import type { RemoteSessionRow, RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
 
 type Runtime = Pick<
   typeof CrossDevice,

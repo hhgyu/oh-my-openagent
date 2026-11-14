@@ -5,9 +5,17 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { COMPLETION_SETTLE_WAIT_MS, createThreadComponent } from "./component"
-import { createGatewayEngine, resolveFromEntries, type GatewayAddressEntry } from "./gateway/engine"
-import { gatewayDatabasePath, gatewayInboxDirectory, gatewayRootDirectory } from "./gateway/paths"
-import { createGatewayStore, type GatewayStore } from "./gateway/store"
+import {
+  createGatewayEngine,
+  resolveFromEntries,
+  type GatewayAddressEntry,
+} from "@oh-my-opencode/thread-core/gateway/engine"
+import {
+  gatewayDatabasePath,
+  gatewayInboxDirectory,
+  gatewayRootDirectory,
+} from "@oh-my-opencode/thread-core/gateway/paths"
+import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { resumeProcess, suspendProcess } from "./gateway/testing/job-control"
 import { createRemoteThreadFixture } from "./thread-remote-fixture"
 import type { ThreadHost } from "./tools"

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { withContractHost, type ContractHost } from "../../../../senpi-task/src/runners/rpc-host/testing/contract-host"
-import { controlRefusalOf } from "./control/port"
+import { controlRefusalOf } from "@oh-my-opencode/thread-core/control/port"
 import { createLiveThreadSurface, type LiveThreadSurface } from "./live-surface"
 
 // The contract host enforces the engine's own close rules (senpi 2026.11.5-1): a close from a connection that holds no

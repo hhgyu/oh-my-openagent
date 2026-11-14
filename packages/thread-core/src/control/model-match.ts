@@ -1,5 +1,5 @@
 import type { ThreadToolResult } from "../contracts"
-import { failure } from "./internals"
+import { failure } from "../tool-result"
 
 export type ModelChoice = { readonly provider: string; readonly id: string; readonly name?: string }
 type Matched = { readonly kind: "match"; readonly model: ModelChoice }

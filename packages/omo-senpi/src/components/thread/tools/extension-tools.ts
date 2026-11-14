@@ -7,8 +7,8 @@
  */
 import type { AgentToolResult } from "@code-yeongyu/senpi"
 
-import type { ThreadToolResult } from "../contracts"
-import type { DeclaredSessionOp, StoreExtensionResult } from "../gateway/store"
+import type { ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
+import type { DeclaredSessionOp, StoreExtensionResult } from "@oh-my-opencode/thread-core/gateway/store"
 import { addressBook, hostView, type AnyTool } from "./internals"
 import { UNKNOWN_CALLER, type ThreadHostView, type ThreadToolSurfaceOptions } from "./ports"
 

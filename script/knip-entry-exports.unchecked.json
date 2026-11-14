@@ -81,6 +81,7 @@
     "packages/skills-loader-core/src/shared/project-discovery-dirs.ts",
     "packages/skills-loader-core/src/shared/skill-path-resolver.ts",
     "packages/telemetry-core/src/posthog-immediate-send.ts",
+    "packages/thread-core/src/gateway/process-identity.ts",
     "packages/utils/src/logger.ts",
     "script/omo-native-trust-mutations.ts"
   ]

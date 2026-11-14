@@ -1,13 +1,18 @@
 import { toGatewayAddressEntries } from "../address-book"
-import type { GatewayEndpointPort, GatewayEndpointRef } from "../gateway/adapter"
-import { createGatewayEngine, resolveFromEntries, type GatewayEngine, type GatewayResolve } from "../gateway/engine"
-import { createLocalTransport } from "../gateway/local-transport"
-import { createDeliveryPipeline, type DeliveryPipeline } from "../gateway/pipeline"
-import { createGatewayRelay, type GatewayRelay } from "../gateway/relay"
+import type { GatewayEndpointPort, GatewayEndpointRef } from "@oh-my-opencode/thread-core/gateway/adapter"
+import {
+  createGatewayEngine,
+  resolveFromEntries,
+  type GatewayEngine,
+  type GatewayResolve,
+} from "@oh-my-opencode/thread-core/gateway/engine"
+import { createLocalTransport } from "@oh-my-opencode/thread-core/gateway/local-transport"
+import { createDeliveryPipeline, type DeliveryPipeline } from "@oh-my-opencode/thread-core/gateway/pipeline"
+import { createGatewayRelay, type GatewayRelay } from "@oh-my-opencode/thread-core/gateway/relay"
 import { createRelayTransport } from "../remote/lazy-ops"
-import type { GatewayStore } from "../gateway/store"
-import type { Provenance } from "../gateway/types"
-import { resolveProvenance } from "../gateway/provenance-resolver"
+import type { GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
+import type { Provenance } from "@oh-my-opencode/thread-core/gateway/types"
+import { resolveProvenance } from "@oh-my-opencode/thread-core/gateway/provenance-resolver"
 import { addressBook, sendAddressBook } from "./internals"
 import type { ThreadHostView, ThreadToolSurfaceOptions } from "./ports"
 import { sendView } from "./send-view"

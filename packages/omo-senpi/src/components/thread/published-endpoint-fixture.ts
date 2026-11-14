@@ -6,7 +6,7 @@ import { fakeHostTransport } from "../../../../senpi-task/src/runners/rpc-host/_
 import { controlSocketSecretPath } from "./endpoint-registry"
 import { createLiveThreadSurface } from "./live-surface"
 import { createControlEndpointRegistrant, type SenpiWakeEvent } from "./gateway/registration"
-import { createGatewayStore } from "./gateway/store"
+import { createGatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { FakeSessionRuntime } from "./gateway/testing/fake-runtime"
 import { createThreadTools } from "./tools"
 import { createThreadSdk } from "./sdk"

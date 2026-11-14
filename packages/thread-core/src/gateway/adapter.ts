@@ -128,16 +128,16 @@ export type AdmitExternalMessageInput = {
 
 /**
  * Receiver side: the target session's own runtime, called from its drain. All four calls are
- * synchronous and microsecond-scale in senpi (`pi.session.*`); `admitExternalMessage` may throw
- * once a `release_session` closed admission, which the drain treats as "not admitted here".
+ * synchronous and microsecond-scale in senpi (`pi.session.*`); a host whose admission is a request
+ * (OpenCode's `session.synthetic`) answers `admitExternalMessage` with a promise. It may throw (or
+ * reject) once a `release_session` closed admission, which the drain treats as "not admitted here".
  */
+export type ExternalAdmission = { readonly kind: ExternalAdmissionKind; readonly turn_epoch: number }
+
 export type SessionRuntimePort = {
   readonly phase: () => RuntimePhase
   readonly admissionGate: () => SessionAdmissionGate
-  readonly admitExternalMessage: (input: AdmitExternalMessageInput) => {
-    readonly kind: ExternalAdmissionKind
-    readonly turn_epoch: number
-  }
+  readonly admitExternalMessage: (input: AdmitExternalMessageInput) => ExternalAdmission | Promise<ExternalAdmission>
   readonly listAdmittedDeliveries: () => { readonly pending: readonly string[]; readonly emitted: readonly string[] }
 }
 

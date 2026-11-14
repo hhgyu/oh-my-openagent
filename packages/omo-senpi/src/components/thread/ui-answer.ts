@@ -1,4 +1,4 @@
-import type { GatewayEndpointRef, UiAnswer, UiAnswerReply } from "./gateway/adapter"
+import type { GatewayEndpointRef, UiAnswer, UiAnswerReply } from "@oh-my-opencode/thread-core/gateway/adapter"
 
 type FrameCall = (
   socket: string,

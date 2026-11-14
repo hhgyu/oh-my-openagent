@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite"
 import { afterEach, expect, test } from "bun:test"
 
-import { gatewayDatabasePath } from "./paths"
+import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 
 let harness: GatewayHarness | undefined

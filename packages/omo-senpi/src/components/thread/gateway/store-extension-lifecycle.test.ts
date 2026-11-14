@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Worker } from "node:worker_threads"
 
-import type { GatewayResolution } from "./engine"
+import type { GatewayResolution } from "@oh-my-opencode/thread-core/gateway/engine"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 import { remainingTestTime, useTestTimeout } from "../../../../../../test-support/test-deadline"
 

@@ -14,7 +14,7 @@ export const OmoComputerSettingsLayerSchema = z
     enabled: z
       .boolean()
       .describe(
-        "Experimental: register the computer tool in OmO Native sessions (default: on where the host is supported; false leaves it unregistered)",
+        "Experimental: register the computer tool in OmO Native and OpenCode 2 sessions (default: on where the host is supported; false leaves it unregistered)",
       ),
     display: z.string().min(1),
     showCursor: z.boolean().describe("Show the display-only macOS cursor overlay (default: true; false hides it)"),
@@ -45,7 +45,7 @@ export const OmoComputerSettingsLayerSchema = z
   .partial()
   .strict()
   .describe(
-    "Experimental computer use in OmO Native: screenshots, windows, accessibility trees and native mouse and keyboard input. Every key is optional; defaults depend on the host.",
+    "Experimental computer use in OmO Native and OpenCode 2: screenshots, windows, accessibility trees and native mouse and keyboard input. Every key is optional; defaults depend on the host.",
   )
 
 export const OmoComputerSettingsSchema = OmoComputerSettingsLayerSchema
@@ -56,21 +56,21 @@ type ComputerSettingKey = keyof OmoComputerSettings
 type ComputerSettingPath = `computer.${ComputerSettingKey}`
 
 export const COMPUTER_HARNESS_SUPPORT: Record<ComputerSettingPath, readonly OmoHarnessId[]> = {
-  "computer.enabled": ["native"],
-  "computer.display": ["native"],
-  "computer.showCursor": ["native"],
-  "computer.max_width": ["native"],
-  "computer.max_height": ["native"],
-  "computer.screenshot_max_bytes": ["native"],
-  "computer.stop_hotkey": ["native"],
-  "computer.allow_host_relay_only_stop": ["native"],
-  "computer.macos_canary": ["native"],
-  "computer.audit_log": ["native"],
-  "computer.screenshot_gc": ["native"],
-  "computer.engine_path": ["native"],
-  "computer.cua_adapter": ["native"],
-  "computer.run_sandbox": ["native"],
-  "computer.intervention": ["native"],
-  "computer.macos_key_priming": ["native"],
-  "computer.trace": ["native"],
+  "computer.enabled": ["native", "opencode"],
+  "computer.display": ["native", "opencode"],
+  "computer.showCursor": ["native", "opencode"],
+  "computer.max_width": ["native", "opencode"],
+  "computer.max_height": ["native", "opencode"],
+  "computer.screenshot_max_bytes": ["native", "opencode"],
+  "computer.stop_hotkey": ["native", "opencode"],
+  "computer.allow_host_relay_only_stop": ["native", "opencode"],
+  "computer.macos_canary": ["native", "opencode"],
+  "computer.audit_log": ["native", "opencode"],
+  "computer.screenshot_gc": ["native", "opencode"],
+  "computer.engine_path": ["native", "opencode"],
+  "computer.cua_adapter": ["native", "opencode"],
+  "computer.run_sandbox": ["native", "opencode"],
+  "computer.intervention": ["native", "opencode"],
+  "computer.macos_key_priming": ["native", "opencode"],
+  "computer.trace": ["native", "opencode"],
 } as const
