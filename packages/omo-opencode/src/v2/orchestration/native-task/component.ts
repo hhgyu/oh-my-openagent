@@ -60,7 +60,7 @@ import type { NativeDagComponent, NativeDagHost } from "../native-dag/component"
 import type { NativeTaskTargetPermissionAssociation } from "./service"
 import { registerSkillInvocations } from "./skill-invocations"
 import { nativeTaskStateDir } from "./state-dir"
-import { discoverLeftBehindParents } from "./left-behind-discovery"
+import { discoverLeftBehindParents, type LeftBehindParent } from "./left-behind-discovery"
 
 export { nativeTaskStateDir }
 
@@ -539,31 +539,37 @@ export async function registerNativeTaskComponent(
     // without waiting for a parent task call. Each revival asks its own `subagent` approval; a refused
     // one stays parked and its parent is told once.
     const recoveryStop = new AbortController()
-    const startupRecovery = (async () => {
-      for (const parent of discoverLeftBehindParents(directory)) {
+    const recoverParent = async (parent: LeftBehindParent) => {
+      if (recoveryStop.signal.aborted) return
+      try {
+        const actual = await host.session.get({ sessionID: parent.sessionID }, { signal: recoveryStop.signal })
+        if (actual.location.directory !== directory) return
+        console.info("[oh-my-openagent/v2] reviving left-behind task children", actual.id, parent.tasks.join(","))
+        const report = await bridge.recoverLeftBehind(
+          hostRecoveryCaller(actual.id, actual.agent ?? "build", recoveryStop.signal),
+        )
+        console.info(
+          "[oh-my-openagent/v2] left-behind task children revived",
+          actual.id,
+          `restored=${report.restored.join(",")}`,
+          `held=${report.held.map((item) => item.taskID).join(",")}`,
+        )
+        for (const held of report.held) await noticeHeldRevival(host.session, actual.id, held, recoveryStop.signal)
+      } catch (error) {
         if (recoveryStop.signal.aborted) return
-        try {
-          const actual = await host.session.get({ sessionID: parent.sessionID }, { signal: recoveryStop.signal })
-          if (actual.location.directory !== directory) continue
-          console.info("[oh-my-openagent/v2] reviving left-behind task children", actual.id, parent.tasks.join(","))
-          const report = await bridge.recoverLeftBehind(
-            hostRecoveryCaller(actual.id, actual.agent ?? "build", recoveryStop.signal),
-          )
-          console.info(
-            "[oh-my-openagent/v2] left-behind task children revived",
-            actual.id,
-            `restored=${report.restored.join(",")}`,
-            `held=${report.held.map((item) => item.taskID).join(",")}`,
-          )
-          for (const held of report.held) await noticeHeldRevival(host.session, actual.id, held, recoveryStop.signal)
-        } catch (error) {
-          if (recoveryStop.signal.aborted) return
-          console.warn(
-            "[oh-my-openagent/v2] left-behind task recovery held",
-            parent.sessionID,
-            error instanceof Error ? error.message : String(error),
-          )
-        }
+        console.warn(
+          "[oh-my-openagent/v2] left-behind task recovery held",
+          parent.sessionID,
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+    }
+    // Sessions recover independently, so one approval still waiting cannot hold up another session;
+    // a nested parent waits for the level above it (its own parent child is restored there).
+    const startupRecovery = (async () => {
+      const parents = discoverLeftBehindParents(directory)
+      for (const depth of [...new Set(parents.map((parent) => parent.depth))]) {
+        await Promise.all(parents.filter((parent) => parent.depth === depth).map(recoverParent))
       }
     })()
     closers.push(async () => {
