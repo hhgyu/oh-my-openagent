@@ -169,7 +169,8 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
         cleanups.push(await registerUlwLoop(context, { deferTo, idle, ...(footer && { footer }) }))
       }
     }
-    cleanups.push((await idle.register(context.session)).dispose)
+    if (goalEnabled || ulwLoopEnabled || context.options?.["omo-ulw-execute-enabled"] !== false)
+      cleanups.push((await idle.register(context.session)).dispose)
     if (owners.nativeTask) {
       const { registerNativeTaskComponent } = await import("./orchestration/native-task/component")
       // The lead team tools share the Native task component's registry, kernel and service.
