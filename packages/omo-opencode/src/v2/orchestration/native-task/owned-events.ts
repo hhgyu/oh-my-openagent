@@ -38,7 +38,10 @@ export function createOwnedEventProjection(
       string,
       { owned: boolean; model: { providerID: string; id: string }; parts: Map<number, string> }
     >()
-    let delivery = false
+    // A run the session starts on its own after an owned one (a background job's notice) continues
+    // that turn, so its output is shown too (omo#9069).
+    let delivery = false,
+      turnOpened = false
     const result: ManagedChildEvent[] = []
     for (const row of view.records) {
       if (row.kind !== "host") continue
@@ -46,10 +49,10 @@ export function createOwnedEventProjection(
         data = event.data,
         id = data.assistantMessageID
       if (event.type === "session.execution.started") {
-        delivery = false
+        delivery = turnOpened
         steps.clear()
       }
-      if (event.type === "session.inbox.delivered" && data.inboxID && own.has(data.inboxID)) delivery = true
+      if (event.type === "session.inbox.delivered" && data.inboxID && own.has(data.inboxID)) delivery = turnOpened = true
       if (event.type === "session.step.started" && id && data.model) {
         steps.set(id, { owned: delivery, model: data.model, parts: new Map() })
         if (delivery)

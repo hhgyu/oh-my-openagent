@@ -269,6 +269,7 @@ export async function createOwnedTaskHandle(input: {
     const model = result.model ? { model: `${result.model.providerID}/${result.model.id}` } : {}
     if (result.status === "completed") return { status: "completed", finalResponse: result.text ?? "", ...model }
     if (result.status === "interrupted") return { status: "interrupted", finalResponse: lastText, ...model }
+    if (result.status === "cancelled") return { status: "cancelled" }
     if (result.status === "error")
       return {
         status: "error",
@@ -477,12 +478,12 @@ export async function createOwnedTaskHandle(input: {
     const result = observer.outcome()
     if (result.status === "uncertain")
       throw new ChildObservationUncertain(result.reason ?? "observation-invalidated", result.startEventID)
-    if (result.status === "error" || result.status === "interrupted" || result.status === "completed") return true
+    if (settledStatus(result.status)) return true
     // A local Stop suppresses completed. Its actual terminal reference still proves the
     // observed turn settled; returning from abort does NOT relabel that as host interruption.
     return (
       result.reason === "stop-pending" &&
-      result.delivered.length > 0 &&
+      (result.delivered.length > 0 || result.continuation === true) &&
       !!result.terminalEventID &&
       observer
         .observation()
@@ -641,8 +642,7 @@ export async function createOwnedTaskHandle(input: {
       await managedInput.settled()
       await current
       if (!input.openObserver) throw new Error("Owned prior turn is not positively settled")
-      const needsRecoveredBarrier =
-        !!pumpFault || !["completed", "error", "interrupted"].includes(observer.outcome().status)
+      const needsRecoveredBarrier = !!pumpFault || !settledStatus(observer.outcome().status)
       const matchesRecoveredTerminal = (record: TaskRecord | null) =>
         !!recoveredTerminal &&
         !!record &&
@@ -972,7 +972,7 @@ export async function createOwnedTaskHandle(input: {
     if (
       record?.status !== "running" ||
       record.notification.run_epoch !== epoch ||
-      ["completed", "error", "interrupted"].includes(observed.status)
+      settledStatus(observed.status)
     ) {
       throw new Error("Owned managed idle turn is not bound; no input dispatched")
     }
@@ -1067,4 +1067,9 @@ export async function createOwnedTaskHandle(input: {
       return { turnId: id, outcome: current }
     },
   }
+}
+
+/** An observed turn the observer settled; `cancelled` is a local Stop of a held turn (omo#9069). */
+function settledStatus(status: string): boolean {
+  return status === "completed" || status === "error" || status === "interrupted" || status === "cancelled"
 }
