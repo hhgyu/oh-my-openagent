@@ -3722,6 +3722,7 @@
         "src/v2/memory/kibitzer/test-support.ts",
         "src/v2/orchestration/native-dag/test-support.ts",
         "src/v2/tools/test-support.ts",
+        "src/v2/goal/test-support.ts",
         "src/v2/ulw-loop/test-support.ts",
         // The Native eval Worker entry: started by file name (`new Worker(...)` in codemode-worker-client.ts), never imported.
         "src/v2/tools/codemode-worker.ts",
