@@ -81,6 +81,7 @@ export function reconcileStaleWorks(
         nowMs,
         thresholdMs,
         ...(options.sessionsDirectory !== undefined ? { sessionsDirectory: options.sessionsDirectory } : {}),
+        ...(options.sessionActivityMs !== undefined ? { sessionActivityMs: options.sessionActivityMs } : {}),
       })
       if (!isWorkStale({ lastActivityMs, nowMs, thresholdMs })) {
         continue
@@ -120,32 +121,63 @@ export function reconcileStaleWorks(
   }
 }
 
+/**
+ * Session ids of every `active` work whose recorded activity is already stale: the works a reconcile with the
+ * same options would demote unless a transcript or `sessionActivityMs` proves one of these sessions alive.
+ */
+export function sessionsAwaitingLivenessProof(
+  directory: string,
+  options: Pick<ReconcileStaleWorksOptions, "now" | "thresholdMs" | "env"> = {},
+): string[] {
+  try {
+    const state = readBoulderState(directory)
+    if (!state) {
+      return []
+    }
+
+    const nowMs = options.now ?? Date.now()
+    const thresholdMs = options.thresholdMs ?? resolveStaleWorkThresholdMs(options.env)
+    const sessionIds = getBoulderWorks(state)
+      .filter(
+        (work) =>
+          work.status === "active" && isWorkStale({ lastActivityMs: recordedActivityMs(work), nowMs, thresholdMs }),
+      )
+      .flatMap((work) => work.session_ids)
+    return [...new Set(sessionIds)]
+  } catch {
+    return []
+  }
+}
+
+function recordedActivityMs(work: BoulderWorkState): number | null {
+  return newestMs([parseIsoToMs(work.updated_at), parseIsoToMs(work.started_at)])
+}
+
 function resolveLastActivityMs(input: {
   work: BoulderWorkState
   directory: string
   nowMs: number
   thresholdMs: number
   sessionsDirectory?: string
+  sessionActivityMs?: (sessionIds: readonly string[]) => number | null
 }): number | null {
-  const recordedMs = newestMs([parseIsoToMs(input.work.updated_at), parseIsoToMs(input.work.started_at)])
+  const recordedMs = recordedActivityMs(input.work)
   // Recorded activity inside the window already proves the work is not stale, so the transcript
   // scan only runs for works that would otherwise be demoted.
   if (recordedMs !== null && input.nowMs - recordedMs < input.thresholdMs) {
     return recordedMs
   }
 
-  if (input.sessionsDirectory === undefined) {
-    return recordedMs
-  }
-
-  return newestMs([
-    recordedMs,
-    findNewestSessionTranscriptMs({
-      sessionsDirectory: input.sessionsDirectory,
-      sessionIds: input.work.session_ids,
-      sessionCwds: [input.directory, input.work.worktree_path],
-    }),
-  ])
+  const transcriptMs =
+    input.sessionsDirectory === undefined
+      ? null
+      : findNewestSessionTranscriptMs({
+          sessionsDirectory: input.sessionsDirectory,
+          sessionIds: input.work.session_ids,
+          sessionCwds: [input.directory, input.work.worktree_path],
+        })
+  const hostMs = input.sessionActivityMs?.(input.work.session_ids) ?? null
+  return newestMs([recordedMs, transcriptMs, hostMs])
 }
 
 /**

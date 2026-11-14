@@ -15,7 +15,11 @@ export {
   ULW_EXECUTE_STEERING_REMINDER,
   ulwExecuteContinuationSignature,
 } from "./ulw-execute-continuation"
-export type { ContinuableWork, FindContinuableWorkOptions } from "./ulw-execute-continuation"
+export type {
+  ContinuableWork,
+  FindContinuableWorkOptions,
+  UlwExecuteContinuationRenderOptions,
+} from "./ulw-execute-continuation"
 export {
   addBoulderWork,
   appendSessionId,
@@ -49,6 +53,7 @@ export {
   resolveBoulderPlanPathForWork,
   resolveStaleWorkThresholdMs,
   selectActiveWork,
+  sessionsAwaitingLivenessProof,
   STALE_WORK_THRESHOLD_ENV_KEY,
   startTaskTimer,
   upsertTaskSessionState,

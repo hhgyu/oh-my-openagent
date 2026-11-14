@@ -15,6 +15,7 @@ import {
   reconcileStaleWorks,
   resolveStaleWorkThresholdMs,
   selectActiveWork,
+  sessionsAwaitingLivenessProof,
   STALE_WORK_THRESHOLD_ENV_KEY,
 } from "./index"
 
@@ -329,6 +330,74 @@ describe("reconcileStaleWorks", () => {
     // then
     expect(result).toEqual({ demoted: [], written: false })
     expect(readRawState(directory)).toBe("{not-json")
+  })
+})
+
+describe("host session liveness", () => {
+  const OPENCODE_SESSION_ID = "opencode:ses_e282ff549ffeFJQEhOxBPuD55p"
+
+  test("#given a stale recorded work whose session the host proves active an hour ago #when reconciling #then nothing is written", () => {
+    // given
+    const nowMs = Date.parse("2026-09-17T06:00:00.000Z")
+    const directory = createProject(
+      { [STALE_WORK_ID]: createStaleWorkRecord({ session_ids: [OPENCODE_SESSION_ID] }) },
+      STALE_WORK_ID,
+    )
+    const rawStateBefore = readRawState(directory)
+    const asked: string[][] = []
+
+    // when
+    const result = reconcileStaleWorks(directory, {
+      now: nowMs,
+      sessionActivityMs: (sessionIds) => {
+        asked.push([...sessionIds])
+        return nowMs - HOUR_MS
+      },
+    })
+
+    // then
+    expect(result).toEqual({ demoted: [], written: false })
+    expect(readRawState(directory)).toBe(rawStateBefore)
+    expect(asked).toEqual([[OPENCODE_SESSION_ID]])
+  })
+
+  test("#given a stale recorded work the host has no proof for #when reconciling #then it is demoted", () => {
+    // given
+    const nowMs = Date.parse("2026-09-17T06:00:00.000Z")
+    const directory = createProject(
+      { [STALE_WORK_ID]: createStaleWorkRecord({ session_ids: [OPENCODE_SESSION_ID] }) },
+      STALE_WORK_ID,
+    )
+
+    // when
+    const result = reconcileStaleWorks(directory, { now: nowMs, sessionActivityMs: () => null })
+
+    // then
+    expect(result.demoted.map((demotion) => demotion.work_id)).toEqual([STALE_WORK_ID])
+    expect(readBoulderState(directory)?.works?.[STALE_WORK_ID]?.status).toBe("paused")
+  })
+
+  test("#given active, fresh and finished works #when listing the sessions awaiting a liveness proof #then only the stale active work's sessions are listed", () => {
+    // given
+    const nowMs = Date.parse("2026-09-17T06:00:00.000Z")
+    const directory = createProject(
+      {
+        [STALE_WORK_ID]: createStaleWorkRecord({ session_ids: [OPENCODE_SESSION_ID, STALE_SESSION_ID] }),
+        fresh: createStaleWorkRecord({
+          work_id: "fresh",
+          session_ids: ["opencode:ses_fresh"],
+          updated_at: new Date(nowMs - HOUR_MS).toISOString(),
+        }),
+        done: createStaleWorkRecord({ work_id: "done", session_ids: ["opencode:ses_done"], status: "completed" }),
+      },
+      STALE_WORK_ID,
+    )
+
+    // when
+    const sessionIds = sessionsAwaitingLivenessProof(directory, { now: nowMs })
+
+    // then
+    expect(sessionIds).toEqual([OPENCODE_SESSION_ID, STALE_SESSION_ID])
   })
 })
 

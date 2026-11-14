@@ -97,6 +97,7 @@ export interface ReconcileStaleWorksOptions {
   readonly now?: number
   readonly thresholdMs?: number
   readonly sessionsDirectory?: string
+  readonly sessionActivityMs?: (sessionIds: readonly string[]) => number | null
   readonly env?: Readonly<Record<string, string | undefined>>
 }
 
@@ -191,6 +192,10 @@ export declare function reconcileStaleWorks(
   options?: ReconcileStaleWorksOptions,
 ): StaleWorkReconcileResult
 export declare function resolveStaleWorkThresholdMs(env?: Readonly<Record<string, string | undefined>>): number
+export declare function sessionsAwaitingLivenessProof(
+  directory: string,
+  options?: Pick<ReconcileStaleWorksOptions, "now" | "thresholdMs" | "env">,
+): string[]
 export declare function resolveBoulderPlanPath(
   directory: string,
   state: Pick<BoulderState, "active_plan" | "worktree_path">,
@@ -251,8 +256,12 @@ export declare function findContinuableWork(
   options?: FindContinuableWorkOptions,
 ): ContinuableWork | null
 export declare function ulwExecuteContinuationSignature(continuable: ContinuableWork): string
+export interface UlwExecuteContinuationRenderOptions {
+  readonly taskTool?: string
+}
 export declare function renderUlwExecuteContinuation(
   directory: string,
   continuable: ContinuableWork,
   sessionKey: string,
+  options?: UlwExecuteContinuationRenderOptions,
 ): string

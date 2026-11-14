@@ -1,90 +1,101 @@
-// OpenCode 2 port of Native's model-callable goal trio. The engine's own registerGoalTools builds create_goal,
+// OpenCode 2 port of Native's goal extension on the engine's own code. registerGoalTools builds create_goal,
 // update_goal and get_goal; this component only supplies what the engine reads from its session:
 // - goalStoreRef: the calling OpenCode session (the tool context's sessionID), never a model-supplied id;
 // - the todo gate: update_goal(complete) is refused, with the engine's message, while the last todowrite has open tasks;
-// - goal accounting: Senpi's per-session window (opened by create_goal, read by get_goal/update_goal, also closed out
-//   on settle), fed by `session.step.ended` tokens (input as input, output plus reasoning as output).
+// - goal accounting (accounting.ts) and the continuation loop (continuation.ts), first in the shared idle chain;
+// - Native's goal status line -> the footer RPC, with the engine's goal status text.
 import type * as Plugin from "@opencode/plugin/promise/plugin"
 import type { Registration } from "@opencode/plugin/promise/registration"
 import { Error as ToolError, type Info, type Result, type ToolContext } from "@opencode/plugin/promise/tool"
+import { createHash } from "node:crypto"
+import { GOAL_CONTINUATION_METADATA_KEY, isOwnContinuation } from "../hooks/continuation-metadata"
 import {
-  loadGoalEngine,
-  type EngineGoal,
-  type EngineGoalTool,
-  type EngineToolContext,
-  type GoalAccountingMode,
-  type GoalEngine,
-  type GoalUsage,
-} from "./engine"
+  attachIdleContinuation,
+  IDLE_CONTINUATION_RANK,
+  type IdleContinuationChain,
+} from "../hooks/idle-continuation-chain"
+import type { UlwLoopStatusRpc } from "../ulw-loop/status-rpc"
+import { createGoalAccounting } from "./accounting"
+import { createGoalContinuation, type GoalTimers } from "./continuation"
+import { pumpGoalEvents } from "./events"
+import { loadGoalEngine, type EngineGoal, type EngineGoalTool, type EngineToolContext, type GoalEngine } from "./engine"
+import { createRunRecords } from "./run-record"
 import { goalStoreRef } from "./store-ref"
 import { createTodoState } from "./todo-state"
 
+export type { GoalTimers } from "./continuation"
 export type GoalHost = Pick<Plugin.Context, "tool" | "session" | "event" | "location">
 
 export interface GoalOptions {
   readonly engine?: () => Promise<GoalEngine>
   readonly home?: string
+  readonly timers?: GoalTimers
+  readonly idle?: IdleContinuationChain
+  readonly footer?: UlwLoopStatusRpc
 }
 
 const GOAL_TOOL_NAMES = ["create_goal", "update_goal", "get_goal"] as const
-const emptyUsage = (): GoalUsage => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 })
-
-interface Accounting {
-  window?: { readonly goalId: string; measuredFrom: number }
-  pending: GoalUsage
+const realTimers: GoalTimers = {
+  set: (callback, ms) => setTimeout(() => void callback().catch(warn("goal continuation skipped")), ms),
+  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 }
+const warn = (what: string) => (error: unknown) => console.warn(`[oh-my-openagent/v2] ${what}`, String(error))
 
 export async function registerGoal(host: GoalHost, options: GoalOptions = {}): Promise<() => Promise<void>> {
   const directory = host.location.directory
   const engine = await (options.engine ?? loadGoalEngine)()
   const todos = createTodoState()
-  const sessions = new Map<string, Accounting>()
+  const runs = createRunRecords()
+  const accounting = createGoalAccounting(engine.store)
   const registrations: Registration[] = []
   const stop = new AbortController()
-  const accountingOf = (sessionID: string) => {
-    let state = sessions.get(sessionID)
-    if (!state) sessions.set(sessionID, (state = { pending: emptyUsage() }))
-    return state
-  }
-  const beginWindow = (goal: EngineGoal) => {
-    if (goal.status !== "active" || goal.continuationStoppedAt !== undefined) return
-    const state = accountingOf(goal.threadId)
-    if (state.window?.goalId === goal.id) return
-    state.pending = emptyUsage()
-    state.window = { goalId: goal.id, measuredFrom: Date.now() }
-  }
+  const ref = (sessionID: string) => goalStoreRef(directory, sessionID, options.home)
+  const context = (sessionID: string): EngineToolContext => ({
+    ref: ref(sessionID),
+    sessionManager: { getBranch: () => [] },
+  })
+  const statusText = (goal: EngineGoal | null) => (goal === null ? undefined : engine.ui.goalStatusText(goal))
+  const publish = (sessionID: string, goal: EngineGoal | null) =>
+    options.footer?.publishGoal(sessionID, statusText(goal))
+  options.footer?.readGoalsFrom(async (sessionID) => statusText(await engine.store.readGoal(ref(sessionID))))
 
-  async function accountTurn(ctx: EngineToolContext, mode: GoalAccountingMode): Promise<EngineGoal | null> {
-    const state = accountingOf(ctx.ref.threadId)
-    const window = state.window
-    if (window === undefined) {
-      // A reload drops the in-memory window; Native reopens it at session start for an active goal.
-      const goal = await engine.store.readGoal(ctx.ref)
-      if (goal) beginWindow(goal)
-      return goal
-    }
-    const usage = state.pending
-    state.pending = emptyUsage()
-    const now = Date.now()
-    const elapsedSeconds = Math.max(0, Math.round((now - window.measuredFrom) / 1000))
-    const goal = await engine.store.accountGoalUsage(ctx.ref, usage, elapsedSeconds, mode, window.goalId)
-    if (goal?.id === window.goalId) state.window = { goalId: window.goalId, measuredFrom: now }
-    else delete state.window
-    return goal
-  }
+  const continuation = createGoalContinuation({
+    engine,
+    timers: options.timers ?? realTimers,
+    ref,
+    todoCounts: (sessionID) => todos.counts(sessionID),
+    account: (sessionID) => accounting.account(ref(sessionID), "active"),
+    changed: (sessionID, goal) => {
+      if (goal) accounting.begin(goal)
+      publish(sessionID, goal)
+    },
+    modelId: async (sessionID) => {
+      const info = await host.session.get({ sessionID }).catch(() => undefined)
+      return info?.model ? `${info.model.providerID}/${info.model.id}` : undefined
+    },
+    deliver: async (sessionID, text, count, signature) => {
+      const digest = createHash("sha256").update(`${sessionID}\0${count}\0${signature}`).digest("hex")
+      await host.session.synthetic({
+        sessionID,
+        id: `msg_omo_goal_${digest.slice(0, 24)}`,
+        text,
+        delivery: "steer",
+        resume: true,
+        metadata: { [GOAL_CONTINUATION_METADATA_KEY]: String(count) },
+      })
+    },
+  })
 
   const definitions: EngineGoalTool[] = []
   engine.registerGoalTools(
     { registerTool: (tool) => definitions.push(tool) },
     {
       goalStoreRef: (ctx) => ctx.ref,
-      beginAgentGoalAccounting: beginWindow,
-      refreshGoalUi: () => {},
-      accountCurrentAgentTurn: accountTurn,
+      beginAgentGoalAccounting: accounting.begin,
+      refreshGoalUi: (ctx, goal) => publish(ctx.ref.threadId, goal),
+      accountCurrentAgentTurn: (ctx, mode) => accounting.account(ctx.ref, mode),
       markGoalBlockedThisTurn: () => {},
-      markGoalCompletedThisTurn: (goal) => {
-        accountingOf(goal.threadId).window = { goalId: goal.id, measuredFrom: Date.now() }
-      },
+      markGoalCompletedThisTurn: accounting.completed,
     },
   )
 
@@ -93,17 +104,15 @@ export async function registerGoal(host: GoalHost, options: GoalOptions = {}): P
     description: definition.description,
     input: definition.parameters as Info["input"],
     options: { codemode: false },
-    async execute(input: unknown, context: ToolContext): Promise<Result> {
-      const ctx: EngineToolContext = {
-        ref: goalStoreRef(directory, context.sessionID, options.home),
-        sessionManager: { getBranch: () => [] },
-      }
+    async execute(input: unknown, toolContext: ToolContext): Promise<Result> {
+      const ctx = context(toolContext.sessionID)
       try {
         if (definition.name === "update_goal" && (input as { status?: unknown } | null)?.status === "complete") {
-          const open = todos.openTasks(context.sessionID)
+          const open = todos.openTasks(toolContext.sessionID)
           if (open.length > 0) throw Error(engine.openTodoCompletionError(open))
         }
-        const result = await definition.execute(String(context.id), input, context.signal, undefined, ctx)
+        const result = await definition.execute(String(toolContext.id), input, toolContext.signal, undefined, ctx)
+        publish(toolContext.sessionID, await engine.store.readGoal(ctx.ref))
         return {
           content: result.content.flatMap((part) =>
             part.type === "text" ? [{ type: "text", text: part.text ?? "" }] : [],
@@ -117,13 +126,9 @@ export async function registerGoal(host: GoalHost, options: GoalOptions = {}): P
   })
 
   try {
-    if (
-      definitions
-        .map((tool) => tool.name)
-        .sort()
-        .join() !== [...GOAL_TOOL_NAMES].sort().join()
-    )
-      throw Error(`the senpi goal extension registered ${definitions.map((tool) => tool.name).join(", ")}`)
+    const names = definitions.map((tool) => tool.name).sort()
+    if (names.join() !== [...GOAL_TOOL_NAMES].sort().join())
+      throw Error(`the senpi goal extension registered ${names.join(", ")}`)
     let collided: string | undefined
     registrations.push(
       await host.tool.transform((editor) => {
@@ -138,15 +143,25 @@ export async function registerGoal(host: GoalHost, options: GoalOptions = {}): P
       registrations.push(
         await host.tool.hook("execute.after", (input) => {
           if (input.status === "completed") todos.observe(input.sessionID, input.tool, input.input)
+          runs.tool(input.sessionID, {
+            messageID: input.messageID,
+            tool: input.tool,
+            input: input.input,
+            ...(input.status === "completed" ? { output: input.result.content } : { error: input.error.message }),
+          })
         }),
       )
       registrations.push(
-        await host.session.hook("experimental.idle", async (input) => {
-          if (sessions.get(input.sessionID)?.window === undefined) return
-          await accountTurn(
-            { ref: goalStoreRef(directory, input.sessionID, options.home), sessionManager: { getBranch: () => [] } },
-            "active",
-          ).catch((error: unknown) => console.warn("[oh-my-openagent/v2] goal accounting skipped", String(error)))
+        await attachIdleContinuation(host.session, options.idle, IDLE_CONTINUATION_RANK.goal, async (input) => {
+          const run = runs.take(input.sessionID)
+          const goal = await accounting.account(ref(input.sessionID), "active")
+          publish(input.sessionID, goal)
+          return continuation.afterIdle(input.sessionID, goal, run, input.background)
+        }),
+      )
+      registrations.push(
+        await host.session.hook("prompt", async (input) => {
+          if (!isOwnContinuation(input.metadata)) await continuation.userPrompt(input.sessionID)
         }),
       )
     }
@@ -155,31 +170,32 @@ export async function registerGoal(host: GoalHost, options: GoalOptions = {}): P
     throw error
   }
 
-  const pump = (async () => {
-    for await (const event of host.event.subscribe({
-      types: ["session.step.ended", "session.deleted"],
-      signal: stop.signal,
-    })) {
-      const sessionID = event.data.sessionID
-      if (event.type === "session.deleted") {
-        sessions.delete(sessionID)
-        todos.forget(sessionID)
-        continue
-      }
-      const state = sessions.get(sessionID)
-      const tokens = (event.data as { tokens?: { input?: number; output?: number; reasoning?: number } }).tokens
-      if (!state?.window || !tokens) continue
-      state.pending.input += Math.max(0, tokens.input ?? 0)
-      state.pending.output += Math.max(0, (tokens.output ?? 0) + (tokens.reasoning ?? 0))
-    }
-  })().catch((error: unknown) => {
-    if (!stop.signal.aborted) console.warn("[oh-my-openagent/v2] goal event stream stopped", String(error))
+  const pump = pumpGoalEvents(host.event, stop.signal, {
+    stepStarted: (sessionID) => continuation.stepStarted(sessionID),
+    stepEnded: (sessionID, messageID, finish, tokens) => {
+      runs.stepEnded(sessionID, messageID, finish)
+      accounting.tokens(sessionID, tokens)
+    },
+    text: (sessionID, messageID, text) => runs.text(sessionID, messageID, text),
+    executionStarted: (sessionID) => continuation.executionStarted(sessionID),
+    executionEnded: (sessionID) => continuation.executionEnded(sessionID),
+    interrupted: (sessionID, reason) =>
+      continuation.interrupted(sessionID, reason).catch(warn("goal interrupt skipped")),
+    deleted: (sessionID) => {
+      accounting.forget(sessionID)
+      todos.forget(sessionID)
+      runs.forget(sessionID)
+      continuation.forget(sessionID)
+    },
+  }).catch((error: unknown) => {
+    if (!stop.signal.aborted) warn("goal event stream stopped")(error)
   })
 
   return async () => {
     stop.abort()
     await pump
-    sessions.clear()
+    continuation.dispose()
+    accounting.clear()
     for (const registration of registrations.reverse()) await registration.dispose()
   }
 }
