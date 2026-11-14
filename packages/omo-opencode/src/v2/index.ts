@@ -111,6 +111,11 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
       })
       cleanups.push(await runtime.register(context))
     }
+    // Native computer use; created before eval so cells get its `computer` global and owned host tools.
+    const computer =
+      context.options?.["omo-computer-use-enabled"] !== false
+        ? await import("./computer").then((module) => module.createComputerComponent(context))
+        : undefined
     // An eval cell's `tools.task` reaches the Native task component through this port (S9d).
     const evalTask =
       owners.nativeTask && context.options?.["omo-native-eval-enabled"] !== false
@@ -165,10 +170,15 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
       // is imported on the first call.
       const { registerNativeEval } = await import("./tools/native-eval")
       const directory = context.location.directory
-      const ownedTools = [...(evalTask ? [evalTask.tool(evalTask.port)] : []), ...(threads?.tools ?? [])]
+      const ownedTools = [
+        ...(evalTask ? [evalTask.tool(evalTask.port)] : []),
+        ...(threads?.tools ?? []),
+        ...(computer?.ownedTools ?? []),
+      ]
       cleanups.push(
         await registerNativeEval(context, {
           ...(ownedTools.length > 0 && { ownedTools }),
+          ...(computer?.kernelPreludes && { kernelPreludes: computer.kernelPreludes }),
           ...(goal && {
             goalStoreFile: (sessionID: string) => goal.goalStoreFile(goal.goalStoreRef(directory, sessionID)),
           }),
@@ -183,6 +193,7 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
         cleanups.push(await registerUlwLoop(context, { deferTo, idle, ...(footer && { footer }) }))
       }
     }
+    if (computer) cleanups.push(await computer.register())
     if (goalEnabled || ulwLoopEnabled || context.options?.["omo-ulw-execute-enabled"] !== false)
       cleanups.push((await idle.register(context.session)).dispose)
     if (owners.nativeTask) {

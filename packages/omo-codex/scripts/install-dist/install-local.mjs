@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:edf310e08b04ac9961dd6fdfecc0fda43c8cacbb4edf38388138693dd5ce52d8:dc687839f80929c2a37a9bbf255c6499f65abae1a676cb299c0475a0032d40dd
+// omo-codex-install:56f32784993ff4cbf206538b97baf5ada4f96d53bacd0e8608375fb88d618f19:d18e2f3859125f5dd23be08e360dfd080e43fb0de2260a70d4ea1fb9a1bdea2c
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -19754,7 +19754,7 @@ var OmoCategoriesConfigSchema = record(string2(), OmoCategoryConfigSchema);
 var positiveInteger = number2().int().positive();
 var nonNegativeInteger = number2().int().nonnegative();
 var OmoComputerSettingsLayerSchema = object({
-  enabled: boolean2().describe("Experimental: register the computer tool in OmO Native sessions (default: on where the host is supported; false leaves it unregistered)"),
+  enabled: boolean2().describe("Experimental: register the computer tool in OmO Native and OpenCode 2 sessions (default: on where the host is supported; false leaves it unregistered)"),
   display: string2().min(1),
   showCursor: boolean2().describe("Show the display-only macOS cursor overlay (default: true; false hides it)"),
   max_width: positiveInteger,
@@ -19771,7 +19771,7 @@ var OmoComputerSettingsLayerSchema = object({
   intervention: _enum(["continue", "pause"]).describe("What a background action does while the user uses the target app (default: continue)"),
   macos_key_priming: _enum(["on", "off"]).describe("macOS background keys first make the target window key (default: off)"),
   trace: boolean2().describe("Per-request timing traces (default: false)")
-}).partial().strict().describe("Experimental computer use in OmO Native: screenshots, windows, accessibility trees and native mouse and keyboard input. Every key is optional; defaults depend on the host.");
+}).partial().strict().describe("Experimental computer use in OmO Native and OpenCode 2: screenshots, windows, accessibility trees and native mouse and keyboard input. Every key is optional; defaults depend on the host.");
 var OmoComputerSettingsSchema = OmoComputerSettingsLayerSchema;
 
 // packages/omo-config-core/src/schema/git-master.ts

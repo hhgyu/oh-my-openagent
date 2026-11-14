@@ -20,6 +20,7 @@ import {
   CODEMODE_RPC,
   type EvalBackend,
   type EvalDefinition,
+  type EvalKernelPreludes,
   type HostToolParams,
   type KernelsNotice,
   type LoadReply,
@@ -89,6 +90,7 @@ export interface CodemodeWorkerBackendOptions {
   readonly killKernels?: (pids: readonly number[]) => void
   readonly createTimeoutMs?: number
   readonly disposeTimeoutMs?: number
+  readonly kernelPreludes?: EvalKernelPreludes
 }
 
 export function createCodemodeWorkerBackend(options: CodemodeWorkerBackendOptions): EvalBackend {
@@ -187,6 +189,7 @@ export function createCodemodeWorkerBackend(options: CodemodeWorkerBackendOption
         description: tool.description,
         parameters: tool.parameters,
       })),
+      ...(options.kernelPreludes?.catalog.length && { preludes: options.kernelPreludes.catalog }),
       ...(options.createTimeoutMs !== undefined && { createTimeoutMs: options.createTimeoutMs }),
       ...(options.disposeTimeoutMs !== undefined && { disposeTimeoutMs: options.disposeTimeoutMs }),
     })
@@ -211,7 +214,12 @@ export function createCodemodeWorkerBackend(options: CodemodeWorkerBackendOption
         run: (toolCallId, params, runSignal, onUpdate) =>
           connect().call(
             CODEMODE_RPC.execute,
-            { ...session, toolCallId, params },
+            {
+              ...session,
+              toolCallId,
+              params,
+              ...(options.kernelPreludes && { preludes: [...options.kernelPreludes.active(sessionID)] }),
+            },
             {
               signal: runSignal,
               onUpdate,

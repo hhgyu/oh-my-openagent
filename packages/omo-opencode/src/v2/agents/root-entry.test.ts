@@ -17,6 +17,7 @@ it("normal root v2 setup registers a native agent transform and status RPC", asy
       "omo-native-eval-enabled": false,
       "omo-goal-enabled": false,
       "omo-ulw-execute-enabled": false,
+      "omo-computer-use-enabled": false,
     },
     location: { directory: process.cwd() as Plugin.Context["location"]["directory"] },
     agent: {
