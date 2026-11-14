@@ -58,6 +58,41 @@ test("real own-log frames survive lost acknowledgement without duplicating and e
     rmSync(dir, { recursive: true, force: true })
   }
 })
+test("a run the session starts on its own after the owned run is shown as part of the turn", () => {
+  // given: the owned run, then a wake run started by a background job's notice (no own input)
+  const base = view()
+  const wake = (type: string, seq: number, data: object = {}): ObservationRecord => ({
+    kind: "host",
+    id: `wake:${seq}`,
+    event: {
+      id: `wake:${seq}`,
+      type,
+      created: 100 + seq,
+      sessionID: "child",
+      durable: { aggregateID: "child", seq: 100 + seq, version: 1 },
+      data,
+    },
+  })
+  const records = [
+    ...base.records,
+    wake("session.execution.started", 0),
+    wake("session.inbox.delivered", 1, { inboxID: "notice" }),
+    wake("session.step.started", 2, { assistantMessageID: "woken", model: { providerID: "p", id: "actual" } }),
+    wake("session.text.ended", 3, { assistantMessageID: "woken", ordinal: 0, text: "after wake" }),
+    wake("session.step.ended", 4, { assistantMessageID: "woken", finish: "stop" }),
+    wake("session.execution.succeeded", 5),
+  ]
+
+  // when
+  const texts = createOwnedEventProjection("st_000000f0", 0, tmpdir(), () => {})
+    .events({ ...base, records })
+    .map((event) => (event.message as { content?: { text: string }[] } | undefined)?.content?.[0]?.text)
+    .filter((text) => text !== undefined)
+
+  // then
+  expect(texts).toEqual(["owned", "after wake"])
+})
+
 test("torn own frame and explicit log bound refuse before further append", () => {
   const dir = mkdtempSync(join(tmpdir(), "omo-owned-torn-"))
   mkdirSync(join(dir, "tasks"))

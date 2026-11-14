@@ -58,6 +58,9 @@ export type ManagedChildHandle = {
   /** Optional host bookkeeping handoff after canonical reattach publication, before outcome arming.
    * This is not a newly observed child turn or permission to replay its input. */
   bindReattachedRun?(before: TaskRecord, actual: TaskRecord): Promise<void> | void
+  /** Optional host bookkeeping handoff after a self-resumed run is published (the record reopened
+   * under the next run_epoch), before its outcome is tracked. Like bindReattachedRun, never input. */
+  bindSelfResumedRun?(before: TaskRecord, actual: TaskRecord): Promise<void> | void
   readonly observationCoverage?: "partial" | "complete"
   subscribeTranscript?(store: import("./transcript-log").TranscriptLogStore, taskId: string): () => void
   readonly sessionId: string | undefined
