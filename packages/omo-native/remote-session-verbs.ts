@@ -1,12 +1,7 @@
 import type { DeviceService } from "../device-service-core/src/index.ts"
 import type { ThreadToolResult } from "@oh-my-opencode/thread-core/contracts"
 import { createRelaySessionHost } from "../omo-senpi/src/components/thread/control/relay-session-host"
-import {
-  answered,
-  closeThread,
-  interruptThread,
-  setModelOn,
-} from "@oh-my-opencode/thread-core/control/operations"
+import { answered, closeThread, interruptThread, setModelOn } from "@oh-my-opencode/thread-core/control/operations"
 import { createRelayControl } from "../omo-senpi/src/components/thread/control/relay-control"
 import { createDeviceServiceSessions } from "../omo-senpi/src/components/thread/remote/device-service"
 import { randomUUID } from "node:crypto"

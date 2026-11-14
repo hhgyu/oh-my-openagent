@@ -40,7 +40,10 @@ const TRACKED_EVENTS = [
 
 /** A person's prompt, one of our deliveries (named by its metadata), or any other host message such as team mail. */
 function inboxRunInput(item: unknown): RunInput | undefined {
-  const { type, payload } = (item ?? {}) as { readonly type?: unknown; readonly payload?: { readonly metadata?: unknown } }
+  const { type, payload } = (item ?? {}) as {
+    readonly type?: unknown
+    readonly payload?: { readonly metadata?: unknown }
+  }
   if (type === "user") return { kind: "user" }
   if (type !== "synthetic") return undefined
   const metadata = payload?.metadata as Record<string, unknown> | undefined
