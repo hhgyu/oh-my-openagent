@@ -26,30 +26,94 @@ type Frame = {
   steps: Step[]
   delivered: string[]
   calls: Set<string>
+  /** Started after an owned run of this turn; with no own delivery it is a run the session started on
+   * its own (a background job's notice, omo#9069), so it continues that turn. */
+  afterTurn: boolean
+  /** Background work the child itself still owned when the host last ran `experimental.idle`. */
+  ownedBackground?: number
 }
 
 const terminals = new Set(["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"])
 const finishes = new Set(["stop", "length", "tool-calls"])
+const endings: Record<string, NonNullable<OwnedChildOutcome["ended"]>> = {
+  "session.execution.succeeded": "succeeded",
+  "session.execution.failed": "failed",
+  "session.execution.interrupted": "interrupted",
+}
 
 function isDefinedNumber(value: number | undefined): value is number {
   return value !== undefined
 }
 
+function stepText(step: Step): string {
+  return [...step.parts]
+    .sort(([a], [b]) => a - b)
+    .map(([, part]) => part)
+    .join("")
+}
+
+function continuesTurn(frame: Frame): boolean {
+  return frame.afterTurn && frame.delivered.length === 0
+}
+
+function lastOwnedText(frame: Frame): string {
+  return (
+    [...frame.steps]
+      .reverse()
+      .filter((step) => step.afterOwnDelivery)
+      .map(stepText)
+      .find((value) => value.length > 0) ?? ""
+  )
+}
+
+/** The child's session read from the retained records, as the held-error confirmation probe needs it:
+ * an execution still open, or input enqueued after the last execution ended (the host will start a
+ * run for it), means the session is not idle. */
+export function ownedChildSessionState(records: readonly ObservationRecord[]): {
+  readonly isStreaming: boolean
+  readonly pendingMessageCount: number
+} {
+  let open = false
+  const pending = new Set<string>()
+  for (const record of records) {
+    if (record.kind !== "host") continue
+    const { type, data } = record.event
+    if (type === "session.execution.started") {
+      open = true
+      pending.clear()
+    } else if (terminals.has(type)) {
+      open = false
+      pending.clear()
+    } else if (type === "session.inbox.enqueued" && data.inboxID !== undefined) pending.add(data.inboxID)
+    else if ((type === "session.inbox.delivered" || type === "session.inbox.cancelled") && data.inboxID !== undefined)
+      pending.delete(data.inboxID)
+  }
+  return { isStreaming: open, pendingMessageCount: pending.size }
+}
+
 /** Whether the turn a previous observer retained was cut off before the host settled it, read from
  * the retained records only (a rebound binding is uncertain by design, so its outcome is never
  * trusted). Cut off: the last observed execution has no terminal, the host interrupted it (a park's
- * interrupt), or an expected input was never delivered. A local stop, a turn the host
- * finished or failed, and an observer that saw no input at all are not cut off. This is the
+ * interrupt), an expected input was never delivered, or the last run succeeded while the child still
+ * owned background work (omo#9069): a host background job dies with the host and its notice never
+ * comes, so the held turn would wait forever. A local stop, a turn the host finished or failed with
+ * nothing of its own pending, and an observer that saw no input at all are not cut off. This is the
  * transcript-tail decision of Native `continueInterruptedTurn` (`sessionTailNeedsContinuation`:
  * an aborted, unanswered or unfinished tail continues) over the owned observation. */
 export function retainedTurnCutOff(records: readonly ObservationRecord[]): boolean {
   let open = false,
-    interrupted = false
+    interrupted = false,
+    heldForBackground = false
+  let pendingIdle: number | undefined
   const undelivered = new Set<string>()
   for (const record of records) {
     if (record.kind === "stop") return false
     if (record.kind === "input") {
       undelivered.add(record.inboxID)
+      continue
+    }
+    if (record.kind === "idle") {
+      pendingIdle = record.owned
       continue
     }
     if (record.kind !== "host") continue
@@ -58,12 +122,15 @@ export function retainedTurnCutOff(records: readonly ObservationRecord[]): boole
     else if (type === "session.execution.started") {
       open = true
       interrupted = false
+      heldForBackground = false
     } else if (open && terminals.has(type)) {
       open = false
       interrupted = type === "session.execution.interrupted"
+      heldForBackground = type === "session.execution.succeeded" && pendingIdle !== undefined && pendingIdle > 0
+      pendingIdle = undefined
     }
   }
-  return open || interrupted || undelivered.size > 0
+  return open || interrupted || heldForBackground || undelivered.size > 0
 }
 
 /** Own observations, not host wait/info.outcome or a fabricated execution identifier. */
@@ -95,6 +162,10 @@ export function projectOwnedChildOutcome(
   const delivered = new Set<string>()
   const steps = new Map<string, Step>()
   let frame: Frame | undefined
+  // An own input was delivered: later runs of the session belong to this turn (omo#9069).
+  let turnOpened = false
+  let turnText = ""
+  let pendingIdle: number | undefined
   let cursor: number | undefined
   let stopped = false
   let issue: string | undefined
@@ -116,6 +187,12 @@ export function projectOwnedChildOutcome(
     if (record.kind === "uncertain") return uncertain("observation-invalidated")
     if (record.kind === "stop") {
       stopped = true
+      continue
+    }
+    if (record.kind === "idle") {
+      // The hook call and the event stream are separate channels: the idle record can land before
+      // its execution's earlier events, but always before that execution's terminal.
+      pendingIdle = record.owned
       continue
     }
     if (record.kind === "input") {
@@ -147,7 +224,8 @@ export function projectOwnedChildOutcome(
 
     if (event.type === "session.execution.started") {
       if (frame && !frame.terminal) fail("overlapping-execution")
-      frame = { start: event.id, steps: [], delivered: [], calls: new Set() }
+      if (frame && (frame.delivered.length > 0 || continuesTurn(frame))) turnText = lastOwnedText(frame) || turnText
+      frame = { start: event.id, steps: [], delivered: [], calls: new Set(), afterTurn: turnOpened }
       continue
     }
     if (event.type === "session.inbox.delivered") {
@@ -161,6 +239,9 @@ export function projectOwnedChildOutcome(
         else {
           delivered.add(inboxID)
           frame.delivered.push(inboxID)
+          // Own input opens a new turn: nothing is carried over from the runs of an earlier one.
+          turnOpened = true
+          turnText = ""
         }
       }
       continue
@@ -196,7 +277,7 @@ export function projectOwnedChildOutcome(
       } else {
         const step: Step = {
           id: assistantMessageID,
-          afterOwnDelivery: frame.delivered.length > 0,
+          afterOwnDelivery: frame.delivered.length > 0 || frame.afterTurn,
           model,
           parts: new Map(),
           textStarts: new Set(),
@@ -301,6 +382,8 @@ export function projectOwnedChildOutcome(
       if (frame.steps.some((step) => !step.ended && !step.failed)) fail("unfinished-step")
       if (event.type === "session.execution.failed" && !event.data.errorType) fail("missing-execution-error")
       frame.terminal = event
+      frame.ownedBackground = pendingIdle
+      pendingIdle = undefined
     } else if (event.type.startsWith("session.execution.")) {
       fail("unknown-execution-event")
     } else if (event.type.startsWith("session.retry.")) {
@@ -318,6 +401,14 @@ export function projectOwnedChildOutcome(
       ? { assistantMessageID: last.id, model: { ...last.model }, observedSteps: frame.steps.length }
       : {}),
     ...(frame && frame.calls.size > 0 ? { observedToolCalls: frame.calls.size } : {}),
+    ...(frame && continuesTurn(frame) ? { continuation: true as const } : {}),
+    ...(frame?.terminal ? { ended: endings[frame.terminal.type] } : {}),
+    // The run succeeded but the child still owns running background work whose notice will wake it.
+    ...(frame?.terminal?.type === "session.execution.succeeded" &&
+    frame.ownedBackground !== undefined &&
+    frame.ownedBackground > 0
+      ? { held: "background" as const }
+      : {}),
   }
   const terminal = frame?.terminal
   if (stopped && terminal?.type !== "session.execution.interrupted" && terminal?.type !== "session.execution.failed") {
@@ -325,12 +416,14 @@ export function projectOwnedChildOutcome(
     return { ...facts, status: "pending", reason: "stop-pending" }
   }
   if (!terminal || !frame) return { ...facts, status: "pending" }
-  if (!frame.delivered.length) return { ...facts, status: "control-only" }
+  const continuation = continuesTurn(frame)
+  if (!frame.delivered.length && !continuation) return { ...facts, status: "control-only" }
   if (terminal.type === "session.execution.interrupted")
     return { ...facts, status: "interrupted", reason: "host-interrupted" }
   if (terminal.type === "session.execution.failed")
     return { ...facts, status: "error", reason: terminal.data.errorType }
-  if (!last) return uncertain("missing-assistant-step")
+  // A run of the turn that did no model work (a compaction) leaves the turn where it was.
+  if (!last) return continuation ? { ...facts, status: "control-only" } : uncertain("missing-assistant-step")
   if ([...expected].some((id) => !delivered.has(id)))
     return { ...facts, status: "pending", reason: "input-not-delivered" }
   const failed = frame.steps.find((step) => step.failed)
@@ -338,20 +431,17 @@ export function projectOwnedChildOutcome(
   const ownedSteps = frame.steps.filter((step) => step.afterOwnDelivery)
   if (completion !== undefined && ownedSteps.length === 0) return uncertain("missing-owned-assistant-step")
   if (last.ended?.data.finish === "tool-calls") return uncertain("unfinished-assistant-turn")
-  const stepText = (step: Step) =>
-    [...step.parts]
-      .sort(([a], [b]) => a - b)
-      .map(([, part]) => part)
-      .join("")
-  // Native keeps the last nonempty assistant message WITHIN the current turn.
+  // Native keeps the last nonempty assistant message WITHIN the current turn, which spans the runs
+  // the session started on its own after the owned one (omo#9069).
   // Both explicit Native policies retain it; omitted policy preserves legacy P0 behavior.
-  const text =
+  const runText =
     completion !== undefined
       ? ([...ownedSteps]
           .reverse()
           .map(stepText)
           .find((value) => value.length > 0) ?? "")
       : stepText(last)
+  const text = runText || (continuation ? turnText : "")
   if (text.length > 1_048_576) return uncertain("output-too-large")
   if (text.length === 0 && completion !== "turn") return { ...facts, status: "error", reason: "empty-assistant-output" }
   const ended = frame.steps.map((step) => {

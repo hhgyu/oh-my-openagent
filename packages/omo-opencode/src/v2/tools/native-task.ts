@@ -223,6 +223,8 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
         const call = await resources.service.forCall(caller)
         return call.operation(
           async (manager, resolveAncestry, signal, operation) => {
+            // task_output is read-only and never revives a child.
+            if (name !== "task_output") await operation.recovery.restoreLeftBehind()
             if (name === "task_output") {
               const result = await runTaskOutput(
                 { ...resources.outputDependencies(caller), manager: operation.output },

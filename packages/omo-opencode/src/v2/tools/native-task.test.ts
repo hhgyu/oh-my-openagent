@@ -205,6 +205,7 @@ function unitFixture(initial: ListedTool[] = [], sessionID = "unit-parent") {
                   },
                 },
                 output: { list: () => [], get: () => undefined },
+                recovery: { restoreLeftBehind: async () => {} },
                 reportProgress: (update: Record<string, unknown>) => {
                   void reporting.progress(update)
                 },
