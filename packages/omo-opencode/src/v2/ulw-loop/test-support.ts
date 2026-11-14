@@ -2,7 +2,11 @@ import type { ClassifiedLoopStatus } from "@oh-my-opencode/omo-codex/ulw-loop-se
 import type { UlwLoopHost } from "./component"
 
 type Callback = (input: never) => unknown
-type Event = { readonly type: string; readonly data: { readonly sessionID: string } }
+type Event = {
+  readonly type: string
+  readonly data: Readonly<Record<string, unknown>> & { readonly sessionID: string }
+}
+export type FakeSessionInfo = { readonly time: { updated: number; busy?: number; idle?: number } }
 
 export function activeLoop(raw: string): ClassifiedLoopStatus {
   return { status: { raw, active: true } }
@@ -16,6 +20,8 @@ export function fakeUlwLoopHost() {
   const emitted: unknown[] = []
   const skills: { name: string }[] = []
   const pending: Event[] = []
+  const sessions = new Map<string, FakeSessionInfo>()
+  const sessionReads: string[] = []
   let wake: (() => void) | undefined
   const host = {
     location: { directory: "/project" },
@@ -23,6 +29,13 @@ export function fakeUlwLoopHost() {
       hook: async (name: string, callback: Callback) => {
         hooks.set(name, callback)
         return { dispose: async () => void hooks.delete(name) }
+      },
+      get: async ({ sessionID }: { sessionID: string }) => {
+        sessionReads.push(sessionID)
+        const info = sessions.get(sessionID)
+        if (!info)
+          throw Object.assign(Error(`Session not found: ${sessionID}`), { _tag: "SessionNotFoundError", sessionID })
+        return { id: sessionID, ...info }
       },
       synthetic: async (input: Record<string, unknown>) => {
         synthetic.push(input)
@@ -66,7 +79,10 @@ export function fakeUlwLoopHost() {
     synthetic,
     emitted,
     skills,
-    idle: (sessionID: string) => call("experimental.idle", { sessionID, background: [] }),
+    sessions,
+    sessionReads,
+    idle: (sessionID: string, background: readonly unknown[] = []) =>
+      call("experimental.idle", { sessionID, background }),
     prompt: async (sessionID: string, text: string, metadata?: Record<string, unknown>) => {
       const input = {
         sessionID,
@@ -78,8 +94,8 @@ export function fakeUlwLoopHost() {
       await call("prompt", input)
       return input.prompt.text
     },
-    event: async (type: string, sessionID: string) => {
-      pending.push({ type, data: { sessionID } })
+    event: async (type: string, sessionID: string, data: Readonly<Record<string, unknown>> = {}) => {
+      pending.push({ type, data: { ...data, sessionID } })
       wake?.()
       await new Promise((resolve) => setTimeout(resolve, 0))
     },
