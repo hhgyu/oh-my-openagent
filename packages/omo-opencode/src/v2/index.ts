@@ -131,6 +131,10 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
       const { registerNativeEval } = await import("./tools/native-eval")
       const ownedTools = [...(evalTask ? [evalTask.tool(evalTask.port)] : []), ...(threads?.tools ?? [])]
       cleanups.push(await registerNativeEval(context, ownedTools.length > 0 ? { ownedTools } : {}))
+      if (context.options?.["omo-ulw-loop-enabled"] !== false) {
+        const { registerUlwLoop } = await import("./ulw-loop")
+        cleanups.push(await registerUlwLoop(context))
+      }
     }
     if (owners.nativeTask) {
       const { registerNativeTaskComponent } = await import("./orchestration/native-task/component")

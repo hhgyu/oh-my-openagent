@@ -109,6 +109,7 @@ export const BUILD_NODES: BuildNode[] = [
   { id: "shared-skills-assets", command: "bun", args: ["run", "build:shared-skills-assets"], deps: ["index"] },
   { id: "node-require-shim", command: "bun", args: ["run", "build:node-require-shim"], deps: ["index", "v2-index"] },
   { id: "v2-personas", command: "bun", args: ["script/stage-v2-personas.ts"], deps: ["index", "v2-index"] },
+  { id: "v2-ulw-loop", command: "bun", args: ["script/stage-v2-ulw-loop.ts"], deps: ["index", "v2-index"] },
   { id: "declarations", command: "tsc", args: ["--emitDeclarationOnly"], deps: [] },
   {
     id: "cli",

@@ -39,6 +39,7 @@ export interface FakeWorkerSetup {
   readonly kernels?: () => readonly unknown[]
   readonly execute?: (input: EvalRuntimeInput, ...args: Parameters<EvalToolDefinition["execute"]>) => Promise<unknown>
   readonly ownedTools?: readonly OwnedEvalHostTool[]
+  readonly sessionEnv?: (sessionID: string) => Readonly<Record<string, string>>
 }
 
 export function connectFakeWorker(setup: FakeWorkerSetup = {}) {
@@ -46,6 +47,7 @@ export function connectFakeWorker(setup: FakeWorkerSetup = {}) {
     spawned: 0,
     terminated: 0,
     created: [] as string[],
+    sessionEnvs: [] as (Readonly<Record<string, string>> | undefined)[],
     disposed: [] as string[],
     killed: [] as (readonly number[])[],
     channels: [] as MessageChannel[],
@@ -86,6 +88,7 @@ export function connectFakeWorker(setup: FakeWorkerSetup = {}) {
         loader: { load: async () => modules, loaded: () => modules },
         createRuntime: async (_modules, input) => {
           state.created.push(input.sessionID)
+          state.sessionEnvs.push(input.sessionEnv)
           return runtime(input)
         },
         buildDefinition: async () => ({ description: "codemode description", parameters: { type: "object" } }),
@@ -112,6 +115,7 @@ export function connectFakeWorker(setup: FakeWorkerSetup = {}) {
     sandbox: true,
     ownedTools: setup.ownedTools ?? [],
     stateDir: (id) => `/state/${id}`,
+    ...(setup.sessionEnv && { sessionEnv: setup.sessionEnv }),
     processEvents: proc.events,
     spawn,
     killKernels: (pids) => {
