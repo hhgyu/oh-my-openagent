@@ -1316,23 +1316,19 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) queuedNotice
       "packages/thread-core/src/gateway/drain.ts": ["queuedNotice"],
       // pre-existing at origin dev 4686e425b5: unused export(s) AWAIT_TIMEOUT_MAX_MS, REGISTERED_TOOL_NAME_MAX, registeredToolName, listSessionOps
-      "packages/thread-core/src/gateway/extension-registrations.ts": ["AWAIT_TIMEOUT_MAX_MS", "REGISTERED_TOOL_NAME_MAX", "registeredToolName", "listSessionOps"],
+      "packages/thread-core/src/gateway/extension-registrations.ts": ["AWAIT_TIMEOUT_MAX_MS", "REGISTERED_TOOL_NAME_MAX", "registeredToolName"],
       // pre-existing at origin dev 4686e425b5: unused export(s) WAKE_FILE_RECHECK_MS
       "packages/thread-core/src/gateway/extension-session-await.ts": ["WAKE_FILE_RECHECK_MS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) ExtensionTransactionEndedError, ExtensionTransactionBusyError
-      "packages/thread-core/src/gateway/extension-transaction.ts": ["ExtensionTransactionEndedError", "ExtensionTransactionBusyError"],
+      "packages/thread-core/src/gateway/extension-transaction.ts": ["ExtensionTransactionBusyError"],
       // pre-existing at origin dev 4686e425b5: unused export(s) LOCK_WAIT_EXCEEDED_CODE
       "packages/thread-core/src/gateway/lock-wait.ts": ["LOCK_WAIT_EXCEEDED_CODE"],
       // pre-existing at origin dev 4686e425b5: unused export(s) GATEWAY_TABLES
       "packages/thread-core/src/gateway/schema.ts": ["GATEWAY_TABLES"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) recordThreadCreation, sessionCall
-      "packages/thread-core/src/gateway/store-extension-session-ops.ts": ["recordThreadCreation", "sessionCall"],
       // pre-existing at origin dev 4686e425b5: unused export(s) GatewayMigrationError, migrate, reconcile, claim, recordOutcome, refuseQueued, listDeliveries, isReferenced, journalMode, stats and 1 more
-      "packages/thread-core/src/gateway/store-ops.ts": ["GatewayMigrationError", "migrate", "reconcile", "claim", "recordOutcome", "refuseQueued", "listDeliveries", "isReferenced", "journalMode", "stats", "migrateLegacyMailboxes"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) registerIncarnation, clearEndpoint, sessionOwner
-      "packages/thread-core/src/gateway/store-ownership.ts": ["registerIncarnation", "clearEndpoint", "sessionOwner"],
+      "packages/thread-core/src/gateway/store-ops.ts": ["GatewayMigrationError"],
       // pre-existing at origin dev 4686e425b5: unused export(s) toolReceiptBegin, toolReceiptSettle, registerIncarnation, pendingCompletionArms, latestCompletionArm, closeQuestion
-      "packages/thread-core/src/gateway/store-relay-ops.ts": ["toolReceiptBegin", "toolReceiptSettle", "toolReceiptRevise", "registerIncarnation", "pendingCompletionArms", "latestCompletionArm", "closeQuestion"],
+      "packages/thread-core/src/gateway/store-relay-ops.ts": ["registerIncarnation"],
       // pre-existing at origin dev 4686e425b5: unused export(s) sweepRetention
       "packages/thread-core/src/gateway/store-retention.ts": ["sweepRetention"],
       // pre-existing at origin dev 4686e425b5: unused export(s) matcherAwaits
@@ -3734,6 +3730,7 @@
         "src/v2/memory/test-support.ts",
         "src/v2/memory/kibitzer/test-support.ts",
         "src/v2/orchestration/native-dag/test-support.ts",
+        "src/v2/threads/test-support.ts",
         "src/v2/tools/test-support.ts",
         "src/v2/ulw-loop/test-support.ts",
         // The Native eval Worker entry: started by file name (`new Worker(...)` in codemode-worker-client.ts), never imported.
