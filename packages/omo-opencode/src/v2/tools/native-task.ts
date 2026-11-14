@@ -33,6 +33,7 @@ import type {
 import { issueNativeTaskCodecs, nativeTaskInputSchemas } from "./native-task-codecs"
 import { requestedTaskSkillNames, type PreparedNativeTaskRuntime } from "./native-task-preparation"
 import { adaptNativeTaskResult } from "./native-task-result"
+import type { LeftBehindRestore } from "../orchestration/native-task/operation-ports"
 
 const canonicalTargets = new WeakMap<
   ListedTool,
@@ -397,6 +398,31 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
      * same normalization the `execute.before` hook gives a direct call. */
     invokeTask(input: unknown, caller: ToolContext): Promise<Result> {
       return publicCall("task", normalizeTaskToolArguments(input), caller)
+    },
+    /** Native `session_start` revival without a model tool call (D-037): restores every child of the
+     * caller's session that a restart left behind, as a host-originated action of that session. Each
+     * revival still asks its own `subagent` approval; refused ones are reported, not thrown. */
+    async recoverLeftBehind(caller: ToolContext): Promise<LeftBehindRestore> {
+      current()
+      const finish = ticket(callbacks),
+        prepared = ticket(setups)
+      try {
+        const resources = owner
+        if (!resources) throw Error("Native task bridge has no acquired owner")
+        const lease = await resources.service.parent(caller)
+        current()
+        caller.signal.throwIfAborted()
+        prepared()
+        return await resources.kernel.hostAction(caller, lease, "task-restart-recovery", async (bound) => {
+          const call = await resources.service.forCall(bound)
+          return call.operation(async (_manager, _ancestry, _signal, operation) =>
+            operation.recovery.restoreLeftBehind(),
+          )
+        })
+      } finally {
+        prepared()
+        finish()
+      }
     },
     /** Wire to a genuine session lifetime event at assembly; manual forgetting
      * is not evidence that host session retirement is connected. */

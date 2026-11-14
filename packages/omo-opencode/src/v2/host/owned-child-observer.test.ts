@@ -497,6 +497,27 @@ describe("#given a child turn that ends while the child still owns background wo
     await observer.dispose()
   })
 
+  test("#when the child starts a run on its own after its turn settled #then it is announced once and a reopened turn settles with that run", async () => {
+    const f = fixture(),
+      observer = await createOwnedChildObserver(f.ctx, f.options)
+    observer.expectInput("own")
+    const announced: string[] = []
+    observer.onRunAfterSettle(() => {
+      announced.push("run")
+      observer.reopenTurn()
+    })
+    await f.run({ message: "first", text: "first answer", inbox: "own", background: [] })
+    expect(await observer.waitForOutcome()).toMatchObject({ status: "completed", text: "first answer" })
+
+    // when: a late notice wakes the settled child and it answers again
+    await f.run({ message: "second", text: "late answer", inbox: "late-notice", background: [] })
+
+    // then
+    expect(announced).toEqual(["run"])
+    expect(await observer.waitForOutcome()).toMatchObject({ status: "completed", text: "late answer" })
+    await observer.dispose()
+  })
+
   test("#when the parent stops the held child #then the turn settles at once as cancelled", async () => {
     const f = fixture(),
       observer = await createOwnedChildObserver(f.ctx, f.options)

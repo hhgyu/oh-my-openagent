@@ -71,6 +71,11 @@ export interface OwnedChildObserver {
   outcome(): OwnedChildOutcome
   observation(): OwnedChildObservationView
   waitForOutcome(signal?: AbortSignal): Promise<OwnedChildOutcome>
+  /** A run the child's session starts on its own (model work, no own input) after its turn settled
+   * (Native `onSelfResumed`, omo#9069): the listener decides, and may call `reopenTurn`. */
+  onRunAfterSettle(listener: () => void): () => void
+  /** Re-opens the settled turn so the self-started run's end settles it again. */
+  reopenTurn(): void
   dispose(): Promise<void>
 }
 
@@ -167,6 +172,9 @@ export async function createOwnedChildObserver(
   let settled: OwnedChildOutcome | undefined
   let runStart: string | undefined, runTerminal: string | undefined
   let turnOutcome: OwnedChildOutcome | undefined
+  let stopRecorded = false,
+    announcedRun: string | undefined
+  const runAfterSettle = new Set<() => void>()
   const settlement = createHeldTurnSettlement<OwnedChildOutcome>({
     settle(result) {
       if (settled) return
@@ -180,7 +188,24 @@ export async function createOwnedChildObserver(
     ...(schedule ? { scheduleConfirmation: schedule } : {}),
   })
   function advance(result: OwnedChildOutcome) {
-    if (settled || result.status === "uncertain") return
+    if (result.status === "uncertain") return
+    if (settled) {
+      // A run that does model work after the turn settled, with no own input, is the child's own.
+      const start = result.startEventID
+      if (
+        start !== undefined &&
+        start !== settled.startEventID &&
+        start !== announcedRun &&
+        result.continuation === true &&
+        (result.observedSteps ?? 0) > 0 &&
+        settled.status !== "cancelled" &&
+        !stopRecorded
+      ) {
+        announcedRun = start
+        for (const listener of [...runAfterSettle]) listener()
+      }
+      if (settled) return
+    }
     if (result.startEventID !== undefined && result.startEventID !== runStart) {
       runStart = result.startEventID
       runTerminal = undefined
@@ -385,6 +410,7 @@ export async function createOwnedChildObserver(
         expectedInput = true
       },
       markStopping() {
+        stopRecorded = true
         append({ kind: "stop", id: randomUUID() })
         // A local Stop ends a turn held for the child's own background work at once (Native: a user
         // abort settles as cancelled).
@@ -427,6 +453,18 @@ export async function createOwnedChildObserver(
           if (signal?.aborted) abort()
           else notify()
         })
+      },
+      onRunAfterSettle(listener) {
+        runAfterSettle.add(listener)
+        return () => runAfterSettle.delete(listener)
+      },
+      reopenTurn() {
+        if (!settled || disposed || fault) return
+        settled = undefined
+        turnOutcome = undefined
+        runStart = undefined
+        runTerminal = undefined
+        settlement.begin()
       },
       dispose,
     }
