@@ -69,9 +69,10 @@ export function loadGoalEngine(resolveRoot: () => string = resolveEngineRoot): P
       throw Error(`${SENPI_PACKAGE} ${version} is installed; the V2 goal tools need ${GOAL_ENGINE_VERSION}`)
     const load = (file: string) =>
       import(pathToFileURL(join(root, GOAL_EXTENSION_DIR, file)).href) as Promise<Record<string, unknown>>
-    const [store, tools, gate, continuation, prompt, recovery, cacheWarm, ui] = await Promise.all([
+    const [store, tools, command, gate, continuation, prompt, recovery, cacheWarm, ui] = await Promise.all([
       load("store.js"),
       load("tool-registration.js"),
+      load("command-registration.js"),
       load("todo-gate.js"),
       load("continuation.js"),
       load("prompt.js"),
@@ -110,6 +111,7 @@ export function loadGoalEngine(resolveRoot: () => string = resolveEngineRoot): P
       )(undefined),
       ui: { goalStatusText: member<GoalEngine["ui"]["goalStatusText"]>(ui, "goalStatusText") },
       registerGoalTools: member<GoalEngine["registerGoalTools"]>(tools, "registerGoalTools"),
+      registerGoalCommand: member<GoalEngine["registerGoalCommand"]>(command, "registerGoalCommand"),
       openTodoCompletionError: member<GoalEngine["openTodoCompletionError"]>(gate, "openTodoCompletionError"),
     }
   })().catch((error: unknown) => {

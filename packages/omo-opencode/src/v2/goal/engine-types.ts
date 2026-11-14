@@ -33,7 +33,7 @@ export type EngineMessage =
       readonly isError: boolean
       readonly content: readonly { readonly type: "text"; readonly text: string }[]
     }
-export type GoalContinuationPath = "immediate" | "userGrace" | "monitorDelayed"
+export type GoalContinuationPath = "immediate" | "userGrace" | "monitorDelayed" | "sessionStart"
 export interface GoalContinuationInput {
   readonly isIdle: boolean
   readonly hasPendingMessages: boolean
@@ -112,6 +112,25 @@ export interface EngineGoalToolDeps {
   markGoalBlockedThisTurn(goal: EngineGoal): void
   markGoalCompletedThisTurn(goal: EngineGoal): void
 }
+/** The slice of senpi's command context the engine's `/goal` handler reads (`command-registration.js`). */
+export interface EngineCommandContext {
+  readonly ref: GoalStoreRef
+  readonly hasUI: false
+  readonly ui: { notify(message: string, level?: "info" | "warning" | "error"): void }
+}
+export interface EngineGoalCommand {
+  readonly description: string
+  handler(args: string, ctx: EngineCommandContext): Promise<void>
+}
+export interface EngineGoalCommandDeps {
+  goalStoreRef(ctx: EngineCommandContext): GoalStoreRef
+  accountCurrentAgentTurn(ctx: EngineCommandContext, mode: GoalAccountingMode): Promise<EngineGoal | null>
+  beginAgentGoalAccounting(goal: EngineGoal): void
+  stopAgentGoalAccounting(goalId: string): void
+  clearAgentGoalAccounting(): void
+  queueGoalContinuation(pi: unknown, ctx: EngineCommandContext, goal: EngineGoal): void
+  refreshGoalUi(ctx: EngineCommandContext, goal: EngineGoal | null): void
+}
 export interface GoalEngine {
   readonly store: {
     goalFilePath(ref: GoalStoreRef): string
@@ -165,5 +184,9 @@ export interface GoalEngine {
   readonly backstopDelayMs: number
   readonly ui: { goalStatusText(goal: EngineGoal): string }
   registerGoalTools(pi: { registerTool(tool: EngineGoalTool): void }, deps: EngineGoalToolDeps): void
+  registerGoalCommand(
+    pi: { registerCommand(name: string, command: EngineGoalCommand): void },
+    deps: EngineGoalCommandDeps,
+  ): void
   openTodoCompletionError(openTasks: readonly string[]): string
 }

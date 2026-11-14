@@ -31,9 +31,21 @@ describe("memory commands", () => {
     ])
     const registered = [...f.commands.values()].map((definition) => [definition.name, definition.description])
     expect(registered.slice(0, core.length)).toEqual(core)
-    expect(registered.slice(core.length).map(([name]) => name)).toEqual(["doctor", "sleeptime", "people", "palace"])
-    expect(f.commands.has("init")).toBe(false)
-    expect(f.commands.has("memory-init")).toBe(true)
+    expect([...f.commands.keys()]).toEqual([
+      "omo:memory",
+      "omo:memfs",
+      "omo:remember",
+      "omo:init",
+      "omo:recompile",
+      "omo:memory-repository",
+      "omo:search",
+      "omo:facts",
+      "omo:agreements",
+      "omo:doctor",
+      "omo:sleeptime",
+      "omo:people",
+      "omo:palace",
+    ])
     await cleanup()
   })
 
@@ -44,15 +56,15 @@ describe("memory commands", () => {
     f.addSession("other")
     const cleanup = await registerMemoryComponent(f.host, f.options())
     // when
-    await f.runCommand("memfs", "root", "init")
-    await f.runCommand("memory", "root")
+    await f.runCommand("omo:memfs", "root", "init")
+    await f.runCommand("omo:memory", "root")
     // then
     expect(f.events.map((event) => [event.rpcID, event.name])).toEqual([
       ["omo-memory", "command.output"],
       ["omo-memory", "command.output"],
     ])
-    expect(f.events[0]?.data).toMatchObject({ sessionID: "root", command: "memfs", level: "info" })
-    expect(f.events[1]?.data).toMatchObject({ sessionID: "root", command: "memory", level: "info" })
+    expect(f.events[0]?.data).toMatchObject({ sessionID: "root", command: "omo:memfs", level: "info" })
+    expect(f.events[1]?.data).toMatchObject({ sessionID: "root", command: "omo:memory", level: "info" })
     expect(JSON.stringify(f.events[1]?.data)).toContain("# Memory: ")
     await cleanup()
   })
@@ -62,9 +74,9 @@ describe("memory commands", () => {
     const f = fixture()
     f.addSession("root")
     const cleanup = await registerMemoryComponent(f.host, f.options())
-    await f.runCommand("memfs", "root", "init")
+    await f.runCommand("omo:memfs", "root", "init")
     // when
-    await f.runCommand("memory", "root")
+    await f.runCommand("omo:memory", "root")
     // then
     expect(
       f.synthetics.map((post) => [
@@ -74,8 +86,8 @@ describe("memory commands", () => {
         post.metadata?.level,
       ]),
     ).toEqual([
-      ["root", false, "memfs", "info"],
-      ["root", false, "memory", "info"],
+      ["root", false, "omo:memfs", "info"],
+      ["root", false, "omo:memory", "info"],
     ])
     for (const post of f.synthetics) expect(post.id ?? "").toStartWith(MEMORY_COMMAND_OUTPUT_ID_PREFIX)
     expect(new Set(f.synthetics.map((post) => post.id)).size).toBe(2)
@@ -111,15 +123,32 @@ describe("memory commands", () => {
     f.addSession("child", { parentID: "root" })
     const cleanup = await registerMemoryComponent(f.host, f.options())
     // when
-    await f.runCommand("memory", "child")
+    await f.runCommand("omo:memory", "child")
     // then
     expect(f.synthetics).toHaveLength(1)
     expect(f.synthetics[0]).toMatchObject({
       sessionID: "child",
       resume: false,
-      metadata: { [MEMORY_COMMAND_OUTPUT_KEY]: "memory", level: "error" },
+      metadata: { [MEMORY_COMMAND_OUTPUT_KEY]: "omo:memory", level: "error" },
     })
     expect(f.synthetics[0]?.text).toContain("memory is not bound to this session")
+    await cleanup()
+  })
+
+  test("#given a bound session without a memory repository #when /omo:memory runs #then the commands its output names are the V2 commands", async () => {
+    // given
+    const f = fixture()
+    f.addSession("root")
+    const cleanup = await registerMemoryComponent(f.host, f.options())
+    // when
+    await f.runCommand("omo:memory", "root")
+    // then
+    const shown = String(f.events[0]?.data && (f.events[0].data as { text?: unknown }).text)
+    const recorded = f.synthetics[0]?.text ?? ""
+    expect(shown).toBe(recorded)
+    expect(recorded).toContain("/omo:memfs init")
+    expect(recorded).toContain("/omo:init")
+    expect(recorded).not.toMatch(/(^|[\s(`])\/(memfs|init|memory)\b/)
     await cleanup()
   })
 
@@ -129,7 +158,7 @@ describe("memory commands", () => {
     f.addSession("root")
     const cleanup = await registerMemoryComponent(f.host, f.options())
     // when
-    await f.runCommand("remember", "root", "I prefer tabs")
+    await f.runCommand("omo:remember", "root", "I prefer tabs")
     // then
     expect(f.synthetics).toHaveLength(1)
     expect(f.synthetics[0]).toMatchObject({
@@ -150,15 +179,15 @@ describe("memory commands", () => {
     f.syntheticFailure = (input) => (input.resume === true ? new Error("inbox closed") : undefined)
     const cleanup = await registerMemoryComponent(f.host, f.options())
     // when
-    const run = f.runCommand("remember", "root", "I prefer tabs")
+    const run = f.runCommand("omo:remember", "root", "I prefer tabs")
     // then
     await expect(run).resolves.toBeUndefined()
     expect(f.synthetics).toEqual([
-      expect.objectContaining({ sessionID: "root", resume: false, text: "/remember failed: inbox closed" }),
+      expect.objectContaining({ sessionID: "root", resume: false, text: "/omo:remember failed: inbox closed" }),
     ])
     expect(f.synthetics[0]?.metadata?.level).toBe("error")
     expect(f.events.map((event) => event.data)).toEqual([
-      { sessionID: "root", command: "remember", level: "error", text: "/remember failed: inbox closed" },
+      { sessionID: "root", command: "omo:remember", level: "error", text: "/omo:remember failed: inbox closed" },
     ])
     await cleanup()
   })
@@ -180,7 +209,7 @@ describe("memory commands", () => {
       }),
     )
     // when
-    const run = f.runCommand("memory", "root")
+    const run = f.runCommand("omo:memory", "root")
     // then
     await expect(run).resolves.toBeUndefined()
     expect(warnings).toContain("memory command output was not posted")
@@ -196,7 +225,7 @@ describe("memory commands", () => {
     const cleanup = await registerMemoryComponent(f.host, f.options())
     await f.idle("root")
     // when
-    await f.runCommand("search", "root", "flat white")
+    await f.runCommand("omo:search", "root", "flat white")
     // then
     expect(f.synthetics).toHaveLength(1)
     expect(f.synthetics[0]?.metadata?.level).toBe("info")

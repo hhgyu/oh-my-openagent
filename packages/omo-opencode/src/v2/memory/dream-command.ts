@@ -10,6 +10,7 @@
 import { validateMemoryPath } from "@oh-my-opencode/memory-core"
 import { parseCommandArgs } from "@oh-my-opencode/memory-core/commands/args"
 import { isAbsolute, relative, sep } from "node:path"
+import { v2CommandName, v2Slash } from "../commands/namespace"
 import type { BoundMemorySession } from "./binding"
 import type { DreamFireOutcome, DreamRequest } from "./dream-fire"
 import type { DreamTriggerSettings } from "@oh-my-opencode/memory-core/dream-gates"
@@ -17,7 +18,7 @@ import { selectRecentDreamConversations } from "@oh-my-opencode/memory-core/drea
 import type { ExtraMemoryCommand } from "./reflect-command"
 
 /** Registered name of the dream command, kept apart from the core `MEMORY_COMMAND_NAMES` record. */
-const DREAM_COMMAND_NAMES: Readonly<Record<"dream", string>> = { dream: "dream" }
+const DREAM_COMMAND_NAMES: Readonly<Record<"dream", string>> = { dream: v2CommandName("dream") }
 
 const MODE_FLAGS = ["auto", "recent", "conversation", "from"] as const
 const JOURNAL_ID = /^[A-Za-z0-9._-]+$/
@@ -64,7 +65,7 @@ function dreamRejection(rejection: string): string {
   if (rejection === "no_unreflected_content") return "dream found no unreflected content to process"
   if (rejection === "no_session") return "dreaming is not available without a bound memory session"
   if (rejection === "parked")
-    return "automatic memory reflection is paused after repeated failures; run /reflect to retry now"
+    return `automatic memory reflection is paused after repeated failures; run ${v2Slash("reflect")} to retry now`
   return `dream request was not started: ${rejection}`
 }
 

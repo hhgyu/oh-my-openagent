@@ -19,6 +19,7 @@ import {
   type ReflectionParkState,
 } from "@oh-my-opencode/memory-core"
 import { runDoctor, type DoctorCheck } from "@oh-my-opencode/memory-core/doctor"
+import { v2Slash } from "../commands/namespace"
 import type { BoundMemorySession } from "./binding"
 import { coreCommandCall, INSIGHT_COMMAND_NAMES, UNBOUND_MEMORY_SESSION } from "./insight-commands"
 import type { ExtraMemoryCommand } from "./reflect-command"
@@ -53,7 +54,7 @@ async function reflectionParkHealth(reflectionDir: string): Promise<DoctorCheck>
   const paused =
     park.parkedAt === undefined
       ? ""
-      : `; automatic reflection paused since ${park.parkedAt} (next probe ${nextProbeAt(park)}; run /reflect to retry now)`
+      : `; automatic reflection paused since ${park.parkedAt} (next probe ${nextProbeAt(park)}; run ${v2Slash("reflect")} to retry now)`
   return {
     name: "reflection-health",
     level: park.streak >= STREAK_WARN || park.parkedAt !== undefined ? "warn" : "ok",

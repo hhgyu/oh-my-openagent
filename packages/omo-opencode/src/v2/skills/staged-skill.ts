@@ -5,16 +5,20 @@ import { parseFrontmatter } from "@oh-my-opencode/utils"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { rewriteCommandMentions } from "../commands/namespace"
 
-// The Native (omo-senpi) skill texts name Native tool spellings and the Senpi boulder session prefix; OpenCode 2 spells
-// the todo tool `todowrite` and records its boulder sessions as `opencode:<id>`.
+// The Native (omo-senpi) skill texts name Native tool spellings, the Senpi boulder session prefix and Native commands;
+// OpenCode 2 spells the todo tool `todowrite`, records its boulder sessions as `opencode:<id>` and names OmO commands
+// `/omo:<name>`.
 const V2_REWRITES: ReadonlyArray<readonly [RegExp, string]> = [
   [/`todo`/g, "`todowrite`"],
   [/senpi:(?=<session_id>|`)/g, "opencode:"],
 ]
 
 export function rewriteSkillForV2(text: string): string {
-  return V2_REWRITES.reduce((current, [pattern, replacement]) => current.replace(pattern, replacement), text)
+  return rewriteCommandMentions(
+    V2_REWRITES.reduce((current, [pattern, replacement]) => current.replace(pattern, replacement), text),
+  )
 }
 
 /** script/stage-v2-ulw-loop.ts stages the skills next to the V2 chunks. */

@@ -27,7 +27,8 @@ export interface GoalContinuationDeps {
   readonly timers: GoalTimers
   ref(sessionID: string): GoalStoreRef
   todoCounts(sessionID: string): { readonly open: number; readonly total: number }
-  deliver(sessionID: string, text: string, count: number, signature: string): Promise<void>
+  /** `queued`: a user command's continuation, which may repeat an earlier delivery's count and signature. */
+  deliver(sessionID: string, text: string, count: number, signature: string, queued: boolean): Promise<void>
   modelId(sessionID: string): Promise<string | undefined>
   /** Closes the session's accounting window and returns its goal, as Native's agent_end accounting does. */
   account(sessionID: string): Promise<EngineGoal | null>
@@ -35,6 +36,14 @@ export interface GoalContinuationDeps {
 }
 
 const USER_ABORT_REASON = "user interrupted the turn"
+// `session-start-continuation.js queueGoalContinuation`: a queued continuation carries no ended-run guard state.
+const SESSION_START_INPUT = {
+  lastStopReason: undefined,
+  lastTurnWasMalformedToolUse: false,
+  consecutiveLengthRecoveries: 0,
+  recentNormalizedOutputHashes: [],
+  toollessContinuationStreak: 0,
+} satisfies Partial<GoalContinuationInput>
 
 export function createGoalContinuation(deps: GoalContinuationDeps) {
   const { engine } = deps
@@ -81,7 +90,10 @@ export function createGoalContinuation(deps: GoalContinuationDeps) {
 
   async function admit(sessionID: string, goal: EngineGoal, path: GoalContinuationPath, run: EndedRun) {
     const state = stateOf(sessionID)
-    const input = verdictInput(sessionID, goal, path, run)
+    const input =
+      path === "sessionStart"
+        ? { ...verdictInput(sessionID, goal, path, run), ...SESSION_START_INPUT }
+        : verdictInput(sessionID, goal, path, run)
     const verdict = engineContinuation.evaluateGoalContinuation({ goal, ...input })
     if (verdict.kind === "deny") {
       await denied(sessionID, goal, input, verdict.reason)
@@ -102,7 +114,13 @@ export function createGoalContinuation(deps: GoalContinuationDeps) {
     if (verdict.stallNotice)
       text = `${engine.prompt.buildGoalStallNotice(state.toollessStreak, { liveSources: [] })}\n\n${text}`
     state.pending = true
-    await deps.deliver(sessionID, text, recorded.consecutiveContinuations ?? 0, input.currentSignature)
+    await deps.deliver(
+      sessionID,
+      text,
+      recorded.consecutiveContinuations ?? 0,
+      input.currentSignature,
+      path === "sessionStart",
+    )
     changed(sessionID, recorded)
     return true
   }
@@ -161,6 +179,16 @@ export function createGoalContinuation(deps: GoalContinuationDeps) {
       }
       schedule(sessionID, "monitor")
       return false
+    },
+    /** Native `queueGoalContinuation` after `/goal <objective>` or `/goal resume`: continue now when idle. */
+    async queue(sessionID: string, goal: EngineGoal): Promise<boolean> {
+      const state = stateOf(sessionID)
+      if (goal.status !== "active" || state.busy) return false
+      if (goal.id !== state.goalId) {
+        resetContinuationState(state)
+        state.goalId = goal.id
+      }
+      return admit(sessionID, goal, "sessionStart", state.lastRun)
     },
     async userPrompt(sessionID: string): Promise<void> {
       const state = stateOf(sessionID)

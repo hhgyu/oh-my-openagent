@@ -6,6 +6,7 @@
 // unified omo config files instead of a resolved path.
 
 import type { OmoMemorySettings } from "@oh-my-opencode/omo-config-core"
+import { v2Slash } from "../commands/namespace"
 import type { BoundMemorySession } from "./binding"
 import { INSIGHT_COMMAND_NAMES, UNBOUND_MEMORY_SESSION } from "./insight-commands"
 import type { ExtraMemoryCommand } from "./reflect-command"
@@ -57,8 +58,8 @@ function renderSleeptime(settings: OmoMemorySettings, agentId: string): string {
     `Soul: edit notice ${onOff(soul.edit_notice)}${mark(has(agent?.soul, "edit_notice"))}`,
     "",
     `Edit your omo config file (~/.omo/omo.jsonc, or .omo/omo.jsonc in a project) under memory.reflection, or memory.agents.${agentId} for this identity only.`,
-    "Reflect now: /reflect [--recent N | --conversation <ids>] [focus]",
-    "Dream now: /dream [--auto|--recent N|--conversation <ids>] [focus]",
+    `Reflect now: ${v2Slash("reflect")} [--recent N | --conversation <ids>] [focus]`,
+    `Dream now: ${v2Slash("dream")} [--auto|--recent N|--conversation <ids>] [focus]`,
   ].join("\n")
 }
 

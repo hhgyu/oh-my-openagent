@@ -1,5 +1,6 @@
 import * as Plugin from "@opencode/plugin/tui/plugin"
 
+import { GOAL_COMMAND_OUTPUT_EVENT_TYPE } from "../v2/goal/command-output-event"
 import { MEMORY_COMMAND_OUTPUT_EVENT_TYPE, readMemoryCommandOutputEvent } from "../v2/memory/command-output-event"
 import { OPENCODE_V2_NOTICE_DURATION_MS, OPENCODE_V2_NOTICE_MESSAGE, OPENCODE_V2_NOTICE_TITLE } from "./startup-notice"
 
@@ -29,7 +30,7 @@ export function showOpenCodeV2Notice(context: NoticeToast): void {
 export interface MemoryOutputTui {
   readonly data?: {
     readonly on: (
-      type: typeof MEMORY_COMMAND_OUTPUT_EVENT_TYPE,
+      type: typeof MEMORY_COMMAND_OUTPUT_EVENT_TYPE | typeof GOAL_COMMAND_OUTPUT_EVENT_TYPE,
       handler: (event: { readonly data: unknown }) => void,
     ) => () => void
   }
@@ -49,31 +50,39 @@ export interface MemoryOutputTui {
 }
 
 /**
- * Shows memory slash-command output the moment the server emits it (`rpc.omo-memory.command.output`):
- * a dialog for a result, an error toast for a failure. This is the only OpenCode 2.2.6 surface that is
- * visible right away and never part of the model context. Returns the unsubscribe function.
+ * Shows memory and goal slash-command output the moment the server emits it (`rpc.omo-memory.command.output`,
+ * `rpc.omo-goal.command.output`): a dialog for a result, an error toast for a failure. This is the only OpenCode
+ * 2.2.6 surface that is visible right away and never part of the model context. Returns the unsubscribe function.
  */
 export function showMemoryCommandOutput(context: MemoryOutputTui): () => void {
-  if (context.data === undefined) return () => undefined
-  return context.data.on(MEMORY_COMMAND_OUTPUT_EVENT_TYPE, (event) => {
-    const output = readMemoryCommandOutputEvent(event.data)
-    if (output === undefined) return
-    if (output.level === "error") {
-      context.ui.toast.show({
-        title: `/${output.command}`,
-        message: output.text,
-        variant: "error",
-        sessionID: output.sessionID,
-      })
-      return
-    }
-    void context.ui.dialog.alert({ title: `/${output.command}`, message: output.text }).catch((error: unknown) => {
-      context.ui.toast.show({
-        title: `/${output.command}`,
-        message: `${output.text} (dialog failed: ${String(error)})`,
-        variant: "error",
-        sessionID: output.sessionID,
-      })
+  const data = context.data
+  if (data === undefined) return () => undefined
+  const closers = [MEMORY_COMMAND_OUTPUT_EVENT_TYPE, GOAL_COMMAND_OUTPUT_EVENT_TYPE].map((type) =>
+    data.on(type, (event) => showOutput(context, event)),
+  )
+  return () => {
+    for (const close of closers) close()
+  }
+}
+
+function showOutput(context: MemoryOutputTui, event: { readonly data: unknown }): void {
+  const output = readMemoryCommandOutputEvent(event.data)
+  if (output === undefined) return
+  if (output.level === "error") {
+    context.ui.toast.show({
+      title: `/${output.command}`,
+      message: output.text,
+      variant: "error",
+      sessionID: output.sessionID,
+    })
+    return
+  }
+  void context.ui.dialog.alert({ title: `/${output.command}`, message: output.text }).catch((error: unknown) => {
+    context.ui.toast.show({
+      title: `/${output.command}`,
+      message: `${output.text} (dialog failed: ${String(error)})`,
+      variant: "error",
+      sessionID: output.sessionID,
     })
   })
 }

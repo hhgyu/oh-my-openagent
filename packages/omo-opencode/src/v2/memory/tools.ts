@@ -8,6 +8,7 @@ import {
 import { mkdir } from "@oh-my-opencode/memory-core/fs"
 import { Error as ToolError, type Info, type Result, type ToolContext } from "@opencode/plugin/promise/tool"
 import { z } from "zod"
+import { rewriteCommandMentions } from "../commands/namespace"
 import type { BoundMemorySession, MemoryBinder } from "./binding"
 import { memoryWriterLock, openMemoryRepo } from "./memory-repo-open"
 
@@ -76,7 +77,7 @@ export function createMemoryTools(
           result.commit === undefined ? {} : { commit: result.commit.sha, paths: [...result.commit.affectedPaths] },
       }
     } catch (error) {
-      if (error instanceof MemoryToolError) throw new ToolError({ message: error.message })
+      if (error instanceof MemoryToolError) throw new ToolError({ message: rewriteCommandMentions(error.message) })
       throw error
     }
   }

@@ -2,6 +2,7 @@
 // `sync-status-copy.ts`): all three exist only while the engine runs, so this ships in the engine chunk
 // (`./engine-runtime.ts`), never the memory chunk.
 
+import { rewriteCommandMentions } from "../../commands/namespace"
 import type { MemoryRpcSync } from "./ports"
 import type { EngineOnlyStatus } from "./status-field"
 
@@ -40,8 +41,8 @@ export function failureRpcSync(status: EngineOnlyStatus): MemoryRpcSync {
 function rpcFailure({ failure, since, attempts }: Omit<Failing, "kind">): NonNullable<MemoryRpcSync["failure"]> {
   return {
     kind: failure.kind === "oversized_item" ? "unknown" : failure.kind,
-    reason: failure.reason,
-    action: failure.action,
+    reason: rewriteCommandMentions(failure.reason),
+    action: rewriteCommandMentions(failure.action),
     sinceISO: new Date(since).toISOString(),
     attempts,
     ...(failure.kind === "stranded_lock" ? { paths: failure.paths } : {}),
