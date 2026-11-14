@@ -16,6 +16,12 @@ import type { DagTaskOwner, DagTaskOwnerKey, OwnedStartResult } from "@oh-my-ope
 import type { NativeOperationLifetime } from "./accepted-operation"
 
 const LEFT_BEHIND_STATUSES = new Set(["running", "pending", "paused"])
+/** What one restore of a parent's left-behind children did: restored task ids, and the ones it refused
+ * (a denied approval, a conflict) that stay parked for a later revival. */
+export interface LeftBehindRestore {
+  readonly restored: readonly string[]
+  readonly held: readonly { readonly taskID: string; readonly runEpoch: number; readonly reason: string }[]
+}
 
 export interface AcceptedTaskProof {
   readonly taskID: string
@@ -362,22 +368,24 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
      * is revived only inside a genuine current parent action): every child of the original parent a
      * reload parked or a dead host stranded is restored first, so a turn the restart cut off continues.
      * A refused restore stays held for the next call; the call itself goes on. */
-    async restoreLeftBehind(): Promise<void> {
+    async restoreLeftBehind(): Promise<LeftBehindRestore> {
       current()
+      const restored: string[] = [],
+        held: { readonly taskID: string; readonly runEpoch: number; readonly reason: string }[] = []
       for (const { record } of manager.list({ scope: "parent-session", session_id: access.parentSessionID })) {
         const id = record.task_id
         if (!LEFT_BEHIND_STATUSES.has(record.status) || record.runner_kind !== "owned-session") continue
         if (receipts.has(id) || access.owned(id)) continue
         try {
-          await lifetime.track(access.restoreAfterReload(id))
+          if (await lifetime.track(access.restoreAfterReload(id))) restored.push(id)
         } catch (error) {
-          console.warn(
-            "[oh-my-openagent/v2] left-behind task child restore held",
-            id,
-            error instanceof Error ? error.message : String(error),
-          )
+          // A plain permission rejection carries no message.
+          const reason = (error instanceof Error ? error.message : String(error)).trim() || "the revival was refused"
+          held.push({ taskID: id, runEpoch: record.notification.run_epoch, reason })
+          console.warn("[oh-my-openagent/v2] left-behind task child restore held", id, reason)
         }
       }
+      return Object.freeze({ restored, held })
     },
     /** A child's live handle when THIS host holds it, only in the original parent (Native DAG recovery's orphan check). */
     residentHandle(id: string) {

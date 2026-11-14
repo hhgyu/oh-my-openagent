@@ -285,6 +285,7 @@ async function authorization(
     context,
     bound,
     kernel,
+    lease,
     setRun(value: typeof run) {
       run = value
     },
@@ -762,6 +763,28 @@ test("fresh recovery approval issues THIS call's real subagent request and refus
   ])
   expect(result?.buildAgentID).toBe("build")
   expect(result?.selection).toEqual(prepareRecoveryHostGrant(recovery()))
+  await f.close()
+})
+test("a host-originated recovery asks the same subagent approval, naming the action and task instead of a tool call", async () => {
+  // given: the restart recovery of a left-behind child, which no model tool call carries
+  const f = await authorization()
+
+  // when
+  const result = await f.kernel.hostAction(f.context, f.lease, "task-restart-recovery", (caller) =>
+    f.authorizer.forCall(caller).authorizeRecovery(recovery(), caller.signal),
+  )
+
+  // then
+  expect(f.requests).toEqual([
+    {
+      sessionID: "ses_grant_unit",
+      agent: "actual-unit-parent",
+      action: "subagent",
+      resources: ["build"],
+      metadata: { omoHostAction: "task-restart-recovery", omoTaskId: recovery().spec.taskId },
+    },
+  ])
+  expect(result.buildAgentID).toBe("build")
   await f.close()
 })
 function defined<T>(value: T | null | undefined): T {
