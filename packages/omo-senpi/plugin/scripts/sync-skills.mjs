@@ -214,6 +214,13 @@ export async function getSkillOutputManifest() {
   }
 }
 
+// One shared skill with the omo-senpi (Native) adaptation; the OpenCode 2 build stages ulw-execute through this too.
+export async function stageNativeSharedSkill(skillName, destination) {
+  const source = join(sharedSkillsRoot, skillName)
+  await cp(source, destination, { filter: createSkillSourceCopyFilter(source, senpiFilterOptions), recursive: true })
+  await adaptSkillTree(destination, (content) => applySharedTierAdaptation(skillName, content))
+}
+
 export async function syncSkills() {
   await rm(skillsRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   await mkdir(skillsRoot, { recursive: true })
@@ -236,10 +243,8 @@ export async function syncSkills() {
   const { names } = await getSkillOutputManifest()
   for (const skillName of names) {
     if (componentSkillNames.has(skillName) || nativeSkillNames.has(skillName)) continue
-    const source = join(sharedSkillsRoot, skillName)
     const destination = join(skillsRoot, skillName)
-    await cp(source, destination, { filter: createSkillSourceCopyFilter(source, senpiFilterOptions), recursive: true })
-    await adaptSkillTree(destination, (content) => applySharedTierAdaptation(skillName, content))
+    await stageNativeSharedSkill(skillName, destination)
     const texts = await Promise.all(
       (await listFiles(destination)).filter(isTextFile).map((file) => readFile(file, "utf8")),
     )
