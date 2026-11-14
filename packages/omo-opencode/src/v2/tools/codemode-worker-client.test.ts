@@ -71,6 +71,24 @@ describe("codemode worker client", () => {
     fake.close()
   })
 
+  test("#given a host session environment #when a session is acquired #then the worker builds that session's kernels with it", async () => {
+    // given
+    const fake = connectFakeWorker({ sessionEnv: (id) => ({ PI_SESSION_ID: id, PI_SESSION_CWD: "/project" }) })
+
+    // when
+    await fake.backend.acquire("ses_a", new AbortController().signal)
+    await fake.backend.acquire("ses_b", new AbortController().signal)
+
+    // then
+    expect(fake.state.created).toEqual(["ses_a", "ses_b"])
+    expect(fake.state.sessionEnvs).toEqual([
+      { PI_SESSION_ID: "ses_a", PI_SESSION_CWD: "/project" },
+      { PI_SESSION_ID: "ses_b", PI_SESSION_CWD: "/project" },
+    ])
+    await fake.backend.dispose()
+    fake.close()
+  })
+
   test("#given a running cell #when the tool signal aborts #then the abort reaches the worker as a message and the cell's own answer returns", async () => {
     // given
     const seen: string[] = []

@@ -124,6 +124,10 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
           ...(computer.kernelPreludes && { kernelPreludes: computer.kernelPreludes }),
         }),
       )
+      if (context.options?.["omo-ulw-loop-enabled"] !== false) {
+        const { registerUlwLoop } = await import("./ulw-loop")
+        cleanups.push(await registerUlwLoop(context))
+      }
     }
     cleanups.push(await computer.register())
     if (owners.nativeTask) {

@@ -21,6 +21,10 @@
 			"types": "./src/install/*.ts",
 			"import": "./src/install/*.ts"
 		},
+		"./ulw-loop-session-sdk/*": {
+			"types": "./plugin/components/ulw-loop/src/session-sdk/*.ts",
+			"import": "./plugin/components/ulw-loop/src/session-sdk/*.ts"
+		},
 		"./marketplace.json": "./marketplace.json"
 	},
 	"types": "./index.d.ts",

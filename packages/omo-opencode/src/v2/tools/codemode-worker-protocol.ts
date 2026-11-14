@@ -68,6 +68,8 @@ export interface LoadReply {
 export interface SessionParams {
   readonly sessionID: string
   readonly stateDir: string
+  /** The session's kernel environment (codemode `sessionEnv`), built on the main thread from the host session. */
+  readonly sessionEnv?: Readonly<Record<string, string>>
 }
 export interface ExecuteParams extends SessionParams {
   readonly toolCallId: string

@@ -113,6 +113,7 @@ export const BUILD_NODES: BuildNode[] = [
     args: ["script/stage-v2-computer-assets.ts"],
     deps: ["index", "v2-index"],
   },
+  { id: "v2-ulw-loop", command: "bun", args: ["script/stage-v2-ulw-loop.ts"], deps: ["index", "v2-index"] },
   { id: "declarations", command: "tsc", args: ["--emitDeclarationOnly"], deps: [] },
   {
     id: "cli",

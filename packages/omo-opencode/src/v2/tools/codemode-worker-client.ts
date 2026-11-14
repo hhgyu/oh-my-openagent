@@ -84,6 +84,7 @@ export interface CodemodeWorkerBackendOptions {
   readonly sandbox: boolean
   readonly ownedTools: readonly OwnedEvalHostTool[]
   readonly stateDir: (sessionID: string) => string
+  readonly sessionEnv?: (sessionID: string) => Readonly<Record<string, string>>
   readonly processEvents?: ProcessEvents
   readonly spawn?: () => CodemodeWorkerPort
   readonly killKernels?: (pids: readonly number[]) => void
@@ -203,14 +204,18 @@ export function createCodemodeWorkerBackend(options: CodemodeWorkerBackendOption
     },
     definition: () => definition,
     async acquire(sessionID, signal) {
-      await connect().call(CODEMODE_RPC.acquire, { sessionID, stateDir: options.stateDir(sessionID) }, { signal })
+      const session = {
+        sessionID,
+        stateDir: options.stateDir(sessionID),
+        ...(options.sessionEnv && { sessionEnv: options.sessionEnv(sessionID) }),
+      }
+      await connect().call(CODEMODE_RPC.acquire, session, { signal })
       return {
         run: (toolCallId, params, runSignal, onUpdate) =>
           connect().call(
             CODEMODE_RPC.execute,
             {
-              sessionID,
-              stateDir: options.stateDir(sessionID),
+              ...session,
               toolCallId,
               params,
               ...(options.kernelPreludes && { preludes: [...options.kernelPreludes.active(sessionID)] }),
