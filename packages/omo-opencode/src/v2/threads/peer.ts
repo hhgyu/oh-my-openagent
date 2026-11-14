@@ -4,7 +4,7 @@ import type { ControlHost } from "./control"
 import type { ThreadV2Host, V2SessionInfo } from "./host"
 import { secretMatches, type V2Endpoint } from "./registry"
 
-export const PEER_SECRET_HEADER = "x-omo-thread-secret"
+const PEER_SECRET_HEADER = "x-omo-thread-secret"
 const BODY_MAX_BYTES = 2 * 1024 * 1024
 const CALL_TIMEOUT_MS = 15_000
 const LIST_PAGE = 200
