@@ -121,7 +121,10 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
     if (goal) {
       // A goal engine that cannot load (another installed senpi version) leaves only the goal tools off.
       const disposeGoal = await goal.registerGoal(context).catch((error: unknown) => {
-        console.warn("[oh-my-openagent/v2] the Native goal tools are off:", error instanceof Error ? error.message : String(error))
+        console.warn(
+          "[oh-my-openagent/v2] the Native goal tools are off:",
+          error instanceof Error ? error.message : String(error),
+        )
         return undefined
       })
       if (disposeGoal) cleanups.push(disposeGoal)

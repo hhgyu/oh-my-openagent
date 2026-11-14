@@ -18,7 +18,10 @@ export function rewriteSkillForV2(text: string): string {
 }
 
 /** script/stage-v2-ulw-loop.ts stages the skills next to the V2 chunks. */
-export function locateStagedSkillFile(name: string, directory: string = dirname(fileURLToPath(import.meta.url))): string | undefined {
+export function locateStagedSkillFile(
+  name: string,
+  directory: string = dirname(fileURLToPath(import.meta.url)),
+): string | undefined {
   const file = join(directory, "skills", name, "SKILL.md")
   return existsSync(file) ? file : undefined
 }
