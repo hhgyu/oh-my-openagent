@@ -81,7 +81,7 @@ const SOURCES = {
   kernels: "src/extension/kernel-registry.ts",
 } as const
 
-function packageDirectory(entry: string, name: string): string {
+export function packageDirectory(entry: string, name: string): string {
   let directory = dirname(entry)
   for (;;) {
     try {
@@ -111,7 +111,7 @@ function resolveCodemodeRoot(from: string = import.meta.dir): string {
   }
 }
 
-function readInstalledVersion(root: string): string {
+export function readInstalledVersion(root: string): string {
   const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { version?: unknown }
   return typeof manifest.version === "string" ? manifest.version : "unknown"
 }

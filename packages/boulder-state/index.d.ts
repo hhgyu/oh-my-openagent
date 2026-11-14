@@ -133,7 +133,6 @@ export interface TaskTimerInput extends TaskSessionInput {
 }
 
 export declare function readCurrentTopLevelTask(planPath: string): TopLevelTaskRef | null
-export declare function getPlanChecklist(planPath: string): PlanChecklist
 export declare function parsePlanChecklist(markdown: string): PlanChecklist
 export declare function isStructuredTaskRow(line: string, section: "todo" | "final-wave"): boolean
 export declare function addBoulderWork(directory: string, input: BoulderWorkInput): BoulderState | null
@@ -235,3 +234,25 @@ export declare function writeMomusReviewArtifact(
   planPath: string,
   artifact: MomusReviewArtifactInput,
 ): string | null
+
+export declare const ULW_EXECUTE_CONTINUATION_LIMIT: number
+export declare const ULW_EXECUTE_STEERING_REMINDER: string
+export interface ContinuableWork {
+  readonly work: BoulderWorkState
+  readonly planPath: string
+  readonly checklist: PlanChecklist
+}
+export interface FindContinuableWorkOptions {
+  readonly reconcile?: ReconcileStaleWorksOptions
+}
+export declare function findContinuableWork(
+  directory: string,
+  sessionKey: string,
+  options?: FindContinuableWorkOptions,
+): ContinuableWork | null
+export declare function ulwExecuteContinuationSignature(continuable: ContinuableWork): string
+export declare function renderUlwExecuteContinuation(
+  directory: string,
+  continuable: ContinuableWork,
+  sessionKey: string,
+): string

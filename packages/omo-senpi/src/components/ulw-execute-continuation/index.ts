@@ -1,4 +1,9 @@
-import { join } from "node:path"
+import {
+  renderUlwExecuteContinuation,
+  ULW_EXECUTE_CONTINUATION_LIMIT as CONTINUATION_LIMIT,
+  ULW_EXECUTE_STEERING_REMINDER,
+  ulwExecuteContinuationSignature,
+} from "@oh-my-opencode/boulder-state"
 
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { readAgentEndOutcome } from "./agent-end-eligibility"
@@ -8,16 +13,6 @@ import { createRunCompletionTracker } from "./run-completion"
 export interface UlwExecuteContinuationComponentOptions {
   // none yet; retained for future DI seams
 }
-
-const CONTINUATION_LIMIT = 8
-
-const ULW_EXECUTE_STEERING_REMINDER = [
-  "<omo-senpi-ulw-execute>",
-  "An active ulw-execute work plan is present in this working directory.",
-  "Before continuing, read `.omo/boulder.json` and the active plan file to determine what remains; use the ledger and plan as the source of truth.",
-  "Continue the current work with evidence-bound execution; do not start unrelated work until every top-level checkbox is `- [x]`.",
-  "</omo-senpi-ulw-execute>",
-].join("\n")
 
 interface InputEventLike {
   text: string
@@ -124,8 +119,7 @@ export function createUlwExecuteContinuationComponent(
           return
         }
 
-        const { work, planPath, checklist } = continuable
-        const signature = `${work.work_id}:${work.updated_at ?? work.started_at}:${checklist.completed}/${checklist.total}`
+        const signature = ulwExecuteContinuationSignature(continuable)
         if (state.lastSignature === signature) {
           ctx.logger.info("omo-senpi ulw-execute-continuation skipped", { reason: "stale-signature" })
           return
@@ -134,15 +128,7 @@ export function createUlwExecuteContinuationComponent(
         state.lastSignature = signature
         state.consecutiveContinuations += 1
 
-        const content = renderDirective({
-          planName: work.plan_name,
-          planPath,
-          boulderPath: join(cwd, ".omo", "boulder.json"),
-          ledgerPath: join(cwd, ".omo", "ulw-execute", "ledger.jsonl"),
-          checklist,
-          worktreePath: work.worktree_path ?? null,
-          sessionId: `senpi:${sessionId}`,
-        })
+        const content = renderUlwExecuteContinuation(cwd, continuable, `senpi:${sessionId}`)
 
         deliverContinuation(pi, ctx, content)
       })
@@ -180,53 +166,6 @@ function deliverContinuation(pi: SenpiExtensionAPI, ctx: ComponentContext, conte
   )
 }
 
-interface DirectiveState {
-  planName: string
-  planPath: string
-  boulderPath: string
-  ledgerPath: string
-  checklist: { completed: number; remaining: number; total: number; nextTaskLabel: string | null }
-  worktreePath: string | null
-  sessionId: string
-}
-
-function renderDirective(state: DirectiveState): string {
-  const worktreeBlock =
-    state.worktreePath === null
-      ? ""
-      : `\n- Worktree: \`${state.worktreePath}\` (all edits, tests, and commands run inside this directory)`
-  const nextLabel = state.checklist.nextTaskLabel ?? "none (final gate pending)"
-  const finalGateHint =
-    state.checklist.remaining === 0
-      ? "\nAll top-level checkboxes are complete. Run the Final Verification Wave and mark the boulder work completed."
-      : ""
-
-  return [
-    "<omo-senpi-ulw-execute-continuation>",
-    "You are mid-flight on a ulw-execute work plan; this turn is an automatic continuation. Do NOT ask whether to continue: the contract is auto-continue until every top-level checkbox is `- [x]`.",
-    "",
-    "# State",
-    "",
-    `- Plan: \`${state.planName}\``,
-    `- Plan file: \`${state.planPath}\``,
-    `- Boulder state: \`${state.boulderPath}\``,
-    `- Remaining top-level checkboxes: ${state.checklist.remaining} of ${state.checklist.total}`,
-    `- [Status: ${state.checklist.completed}/${state.checklist.total}, next: ${nextLabel}]`,
-    `- Ledger: \`${state.ledgerPath}\``,
-    `- Your session id in boulder.json: ${state.sessionId}`,
-    `${worktreeBlock}`,
-    "",
-    "# What to do this turn",
-    "",
-    "1. Read the plan file AND the ledger first: they are the only sources of truth for what remains and what evidence exists; do not trust your memory of prior turns.",
-    `2. When the remaining count is \`0\`, skip checkbox execution and perform the Final gate now. Otherwise, pick the FIRST unchecked top-level checkbox in \`## TODOs\` or \`## Final Verification Wave\`.${finalGateHint}`,
-    "3. Apply the checkbox's tier and verify with real-surface evidence. Decompose and dispatch sub-tasks in parallel via Senpi's `task` tool when safe.",
-    "4. Honor the delivery mode recorded in the goal/ledger at session start: `--make-pr` finishes through the task-owned worktree and an opened PR, then hands off with the PR URL; `--ship` keeps working until that PR is MERGED, then removes the worktree and syncs `.omo/` state back.",
-    "5. After verification, apply the checkbox, append a durable evidence record to the ledger, and continue.",
-    "</omo-senpi-ulw-execute-continuation>",
-  ].join("\n")
-}
-
 function extractCwd(eventCtx: unknown): string | undefined {
   if (isRecord(eventCtx) && typeof eventCtx["cwd"] === "string") {
     return eventCtx["cwd"]
@@ -259,8 +198,4 @@ function isUserSourcedInput(value: InputEventLike): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-export const __testInternals = {
-  renderDirective,
 }
