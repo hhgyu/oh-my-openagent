@@ -116,7 +116,7 @@ describe("memory reflection wiring", () => {
     // when
     const cleanup = await registerMemoryComponent(f.host, options)
     // then
-    expect(f.commands.get("reflect")?.description).toBe(
+    expect(f.commands.get("omo:reflect")?.description).toBe(
       "Request a memory reflection run now, optionally scoped and focused.",
     )
     await cleanup()

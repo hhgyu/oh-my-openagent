@@ -15,12 +15,12 @@ import {
   selectPersonObservations,
 } from "@oh-my-opencode/memory-core/palace"
 import { GitMemoryRepo, type PeopleLimits } from "@oh-my-opencode/memory-core"
+import { v2Slash } from "../commands/namespace"
 import type { BoundMemorySession } from "./binding"
 import { INSIGHT_COMMAND_NAMES, UNBOUND_MEMORY_SESSION } from "./insight-commands"
 import type { ExtraMemoryCommand } from "./reflect-command"
 
-const ASK_REFUSAL =
-  "/people --ask is not available on OpenCode yet: it needs a dedicated memory child; use /people <name> to read the record"
+const ASK_REFUSAL = `${v2Slash("people")} --ask is not available on OpenCode yet: it needs a dedicated memory child; use ${v2Slash("people")} <name> to read the record`
 
 /** Native reads the root `memory.people` block here (no per-identity override). */
 function peopleLimits(bound: BoundMemorySession): PeopleLimits | undefined {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test"
 import { NATIVE_EDITION_GUIDE_URL, NATIVE_EDITION_INSTALL_COMMAND } from "../cli/native-edition-hint"
 import tuiModule from "../tui"
 import { COMPUTER_COMMAND_OUTPUT_EVENT_TYPE, COMPUTER_PERMISSION_EVENT_TYPE } from "../v2/computer/command-output-event"
+import { GOAL_COMMAND_OUTPUT_EVENT_TYPE } from "../v2/goal/command-output-event"
 import { MEMORY_COMMAND_OUTPUT_EVENT_TYPE } from "../v2/memory/command-output-event"
 import { showComputerEvents, showMemoryCommandOutput, showOpenCodeV2Notice, type MemoryOutputTui } from "./tui-entry"
 
@@ -83,21 +84,26 @@ describe("OpenCode 2 TUI memory command output", () => {
     return { handlers, dialogs, toasts, context }
   }
 
-  it("#given a subscribed TUI #when the server emits a result and a failure #then the result opens a dialog and the failure an error toast", async () => {
+  it("#given a subscribed TUI #when the server emits a result and a failure #then memory and goal results open a dialog and the failure an error toast", async () => {
     // given
     const t = outputContext()
     showMemoryCommandOutput(t.context)
     const emit = t.handlers.get(MEMORY_COMMAND_OUTPUT_EVENT_TYPE)
-    if (emit === undefined) throw new Error("not subscribed")
+    const emitGoal = t.handlers.get(GOAL_COMMAND_OUTPUT_EVENT_TYPE)
+    if (emit === undefined || emitGoal === undefined) throw new Error("not subscribed")
     // when
-    emit({ data: { sessionID: "ses_1", command: "memory", level: "info", text: "# Memory: me" } })
-    emit({ data: { sessionID: "ses_1", command: "search", level: "error", text: "/search failed: boom" } })
+    emit({ data: { sessionID: "ses_1", command: "omo:memory", level: "info", text: "# Memory: me" } })
+    emit({ data: { sessionID: "ses_1", command: "omo:search", level: "error", text: "/omo:search failed: boom" } })
     emit({ data: { unrelated: true } })
+    emitGoal({ data: { sessionID: "ses_1", command: "omo:goal", level: "info", text: "Goal active" } })
     await Promise.resolve()
     // then
-    expect(t.dialogs).toEqual([{ title: "/memory", message: "# Memory: me" }])
+    expect(t.dialogs).toEqual([
+      { title: "/omo:memory", message: "# Memory: me" },
+      { title: "/omo:goal", message: "Goal active" },
+    ])
     expect(t.toasts).toEqual([
-      { title: "/search", message: "/search failed: boom", variant: "error", sessionID: "ses_1" },
+      { title: "/omo:search", message: "/omo:search failed: boom", variant: "error", sessionID: "ses_1" },
     ])
   })
 
@@ -109,13 +115,13 @@ describe("OpenCode 2 TUI memory command output", () => {
     const permission = t.handlers.get(COMPUTER_PERMISSION_EVENT_TYPE)
     if (output === undefined || permission === undefined) throw new Error("not subscribed")
     // when
-    output({ data: { sessionID: "ses_1", command: "computer", level: "info", text: "Computer use: enabled=true" } })
+    output({ data: { sessionID: "ses_1", command: "omo:computer", level: "info", text: "Computer use: enabled=true" } })
     permission({ data: { sessionID: "ses_1", permission: "accessibility", app: "Terminal" } })
     permission({ data: { sessionID: "ses_1", permission: "camera", app: "Terminal" } })
     await Promise.resolve()
     unsubscribe()
     // then
-    expect(t.dialogs).toEqual([{ title: "/computer", message: "Computer use: enabled=true" }])
+    expect(t.dialogs).toEqual([{ title: "/omo:computer", message: "Computer use: enabled=true" }])
     expect(t.toasts.map((toast) => [toast.variant, toast.sessionID])).toEqual([["warning", "ses_1"]])
     expect(t.handlers.size).toBe(0)
   })

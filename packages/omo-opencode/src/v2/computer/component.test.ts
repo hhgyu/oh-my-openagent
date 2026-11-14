@@ -180,7 +180,7 @@ function caller(sessionID = "ses_root", agent = "build"): ToolContext {
 const engine = { env: {}, home: join(root, "no-native-home"), platform: "win32" }
 
 describe("V2 computer use component", () => {
-  test("#given computer use on with the CUA adapter #when registered #then the Code Mode tools, /computer, the skill, the eval host tools and the prelude are all present", async () => {
+  test("#given computer use on with the CUA adapter #when registered #then the Code Mode tools, /omo:computer, the skill, the eval host tools and the prelude are all present, and the skill and prelude name /omo:computer", async () => {
     // given
     const fake = fakeHost(project("register", { cua_adapter: true }))
     const runtime = fakeRuntimeModule()
@@ -199,13 +199,19 @@ describe("V2 computer use component", () => {
       ["computer", { codemode: true, permission: "computer" }],
       ["computer_actions", { codemode: true, permission: "computer" }],
     ])
-    expect(fake.commands.map((command) => command.name)).toEqual(["computer"])
+    expect(fake.commands.map((command) => command.name)).toEqual(["omo:computer"])
     expect(fake.skills.map((skill) => skill.name)).toEqual(["computer-use"])
     expect(component.ownedTools.map((tool) => tool.name)).toEqual(["computer", "computer_actions"])
     expect(component.kernelPreludes?.catalog.map((entry) => [entry.name, entry.contribution.exports])).toEqual([
       ["computer", ["computer"]],
     ])
     expect(component.kernelPreludes?.active("ses_root")).toEqual(["computer"])
+    const skill = fake.skills[0] as { content?: string } | undefined
+    const preludeDocs = component.kernelPreludes?.catalog[0]?.contribution.documentation ?? ""
+    for (const text of [skill?.content ?? "", preludeDocs]) {
+      expect(text).toContain("/omo:computer resume")
+      expect(text).not.toMatch(/(^|[\s(`])\/computer\b/)
+    }
     expect(runtime.created).toEqual([])
     await dispose()
   })
@@ -303,7 +309,7 @@ describe("V2 computer use component", () => {
     await dispose()
   })
 
-  test("#given /computer #when status, off and status run #then the output event reports the engine and the prelude, and off removes the global", async () => {
+  test("#given /omo:computer #when status, off, status and an unknown subcommand run #then the output event reports the engine and the prelude, off removes the global, and the usage names /omo:computer", async () => {
     // given
     const fake = fakeHost(project("command", {}))
     const component = createComputerComponent(fake.host, {
@@ -321,6 +327,7 @@ describe("V2 computer use component", () => {
     await run("status")
     await run("off")
     await run("")
+    await run("bogus")
 
     // then
     const texts = fake.emitted.map((event) => event.payload.text ?? "")
@@ -330,6 +337,9 @@ describe("V2 computer use component", () => {
     expect(texts[0]).toContain("OS permissions: unknown until first use")
     expect(texts[1]).toBe("Computer use off for this session.")
     expect(texts[2]).toContain("prelude: inactive")
+    expect(fake.emitted[3]?.payload).toMatchObject({ level: "warning", command: "omo:computer" })
+    expect(texts[3]).toContain("Usage: /omo:computer on|off|status|stop|resume")
+    for (const text of texts) expect(text).not.toMatch(/(^|[\s(`])\/computer\b/)
     expect(component.kernelPreludes?.active("ses_root")).toEqual([])
     await dispose()
   })
@@ -378,7 +388,7 @@ describe("V2 computer use component", () => {
     expect(fake.tools).toEqual([])
     expect(component.ownedTools).toEqual([])
     expect(component.kernelPreludes).toBeUndefined()
-    expect(fake.emitted[0]?.payload).toMatchObject({ level: "warning", command: "computer" })
+    expect(fake.emitted[0]?.payload).toMatchObject({ level: "warning", command: "omo:computer" })
     expect(fake.emitted[0]?.payload.text).toContain("computer.enabled")
     await dispose()
   })

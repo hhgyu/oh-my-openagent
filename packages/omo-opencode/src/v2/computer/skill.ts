@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { COMPUTER_SKILL_NAME, computerSkillMarkdown } from "@oh-my-opencode/senpi-desktop-tool/registration"
+import { rewriteCommandMentions } from "../commands/namespace"
 
 export const COMPUTER_SKILL_ID = "oh-my-openagent/computer-use"
 
@@ -28,7 +29,9 @@ function frontmatterField(markdown: string, field: string): string | undefined {
 }
 
 export function buildComputerSkill(root: string = tmpdir()): ComputerSkill {
-  const markdown = computerSkillMarkdown().replace(NATIVE_DISCOVERY_SENTENCE, V2_DISCOVERY_SENTENCE)
+  const markdown = rewriteCommandMentions(
+    computerSkillMarkdown().replace(NATIVE_DISCOVERY_SENTENCE, V2_DISCOVERY_SENTENCE),
+  )
   const digest = createHash("sha256").update(markdown).digest("hex").slice(0, 16)
   const dir = join(root, `omo-v2-computer-skill-${digest}`, COMPUTER_SKILL_NAME)
   const path = join(dir, "SKILL.md")

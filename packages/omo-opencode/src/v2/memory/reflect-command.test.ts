@@ -44,7 +44,7 @@ function setup(reflection: Record<string, unknown> = {}) {
     newOutputID: () => `${MEMORY_COMMAND_OUTPUT_ID_PREFIX}${synthetics.length}`,
     extraCommands: [createReflectCommand((target, event) => store.evaluate(target.sessionID, event))],
   })
-  const definition = commands.definitions.find((entry) => entry.name === "reflect")
+  const definition = commands.definitions.find((entry) => entry.name === "omo:reflect")
   const reflect = async (text: string, sessionID = bound.sessionID) => {
     if (definition === undefined) throw new Error("/reflect is not registered")
     await definition.execute({ sessionID, prompt: { text }, delivery: "steer" } as unknown as Parameters<
@@ -65,7 +65,7 @@ describe("/reflect", () => {
     expect(displayed).toEqual([
       {
         sessionID: bound.sessionID,
-        command: "reflect",
+        command: "omo:reflect",
         level: "info",
         text: `reflection run run-1 reserved (recent 3; focus "tabs over spaces"); it runs in the background`,
       },
@@ -76,7 +76,7 @@ describe("/reflect", () => {
         post.resume,
         post.metadata?.[MEMORY_COMMAND_OUTPUT_KEY],
       ]),
-    ).toEqual([[true, false, "reflect"]])
+    ).toEqual([[true, false, "omo:reflect"]])
     const active = await store.readState()
     expect(active.active?.request).toMatchObject({
       trigger: "manual",
@@ -119,10 +119,13 @@ describe("/reflect", () => {
     expect([...disabled.displayed, ...enabled.displayed].map((output) => [output.level, output.text])).toEqual([
       [
         "error",
-        "/reflect failed: reflection is disabled; set reflection.enabled to true in your omo config to enable it",
+        "/omo:reflect failed: reflection is disabled; set reflection.enabled to true in your omo config to enable it",
       ],
-      ["error", "/reflect failed: --recent expects a positive integer, for example /reflect --recent 5"],
-      ["error", "/reflect failed: memory is not bound to this session; start a session with memory enabled and retry"],
+      ["error", "/omo:reflect failed: --recent expects a positive integer, for example /omo:reflect --recent 5"],
+      [
+        "error",
+        "/omo:reflect failed: memory is not bound to this session; start a session with memory enabled and retry",
+      ],
     ])
     expect([(await disabled.store.readState()).active, (await enabled.store.readState()).active]).toEqual([
       undefined,

@@ -32,6 +32,7 @@ import {
 } from "@oh-my-opencode/memory-core"
 import type { Context } from "@opencode/plugin/promise/plugin"
 import { join } from "node:path"
+import { v2Slash } from "../commands/namespace"
 import type { probeJournalOwner } from "../host/child-journal"
 import type { SessionBackendApi } from "../host/session-backend"
 import { hasJoinedSessionCancellation } from "../host/session-cancellation"
@@ -162,7 +163,7 @@ export function createReflectionRecovery(deps: ReflectionRecoveryDeps) {
     if (reported.has(key)) return "reported"
     reported.add(key)
     deps.warn(
-      `memory reflection is held by run ${runId} and ${reason}; new reflection requests only queue. Run /doctor; if no reflection run is active, move ${join(bound.paths.reflection, "active.lock")} aside.`,
+      `memory reflection is held by run ${runId} and ${reason}; new reflection requests only queue. Run ${v2Slash("doctor")}; if no reflection run is active, move ${join(bound.paths.reflection, "active.lock")} aside.`,
       { runId },
     )
     return "reported"

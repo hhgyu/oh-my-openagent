@@ -36,7 +36,7 @@ export interface TrackedDesktopServiceOptions extends DesktopServiceOptions {
   readonly onPermissionRequired?: (permission: Pick<PermissionDeniedData, "permission" | "app">) => void
 }
 
-/** A `DesktopService` that remembers whether its engine started, so `/computer status` never has to start one. */
+/** A `DesktopService` that remembers whether its engine started, so `/omo:computer status` never has to start one. */
 export class TrackedDesktopService extends DesktopService {
   #engineState: EngineState = "not started"
   readonly #onError: TrackedDesktopServiceOptions["onError"]

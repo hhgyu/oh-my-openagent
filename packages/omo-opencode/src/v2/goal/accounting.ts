@@ -43,6 +43,10 @@ export function createGoalAccounting(store: GoalEngine["store"]) {
       else delete state.window
       return goal
     },
+    stop(sessionID: string, goalId: string): void {
+      const state = sessions.get(sessionID)
+      if (state?.window?.goalId === goalId) delete state.window
+    },
     completed(goal: EngineGoal): void {
       accountingOf(goal.threadId).window = { goalId: goal.id, measuredFrom: Date.now() }
     },

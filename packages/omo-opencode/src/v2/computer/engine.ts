@@ -24,7 +24,7 @@ import {
 type Env = Readonly<Record<string, string | undefined>>
 
 export const ENGINE_NOT_INSTALLED_ACTION =
-  "Install or update OmO Native (https://omo.dev), which provisions the desktop engine, or set computer.engine_path in omo.json to a senpi-desktop-engine binary; then run /computer status."
+  "Install or update OmO Native (https://omo.dev), which provisions the desktop engine, or set computer.engine_path in omo.json to a senpi-desktop-engine binary; then run /omo:computer status."
 
 export interface EngineLocatorOptions {
   readonly env?: Env

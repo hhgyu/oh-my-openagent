@@ -1,4 +1,4 @@
-// `/computer status` while no engine runs: a passive `engine.hello` + `capabilities` probe of the installed engine,
+// `/omo:computer status` while no engine runs: a passive `engine.hello` + `capabilities` probe of the installed engine,
 // with no desktop session and no stop listener, as Native's status reports OS permissions.
 
 import { spawn } from "node:child_process"

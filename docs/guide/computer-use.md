@@ -180,9 +180,11 @@ Plain Esc is not a stop key: the app you are working in needs it for its own dia
 
 ## On OpenCode 2
 
-The OpenCode 2 host runs the same `computer` tool, `/computer` command and computer-use skill, with these differences:
+The OpenCode 2 host runs the same `computer` tool, command and computer-use skill, with these differences:
 
-- It needs the desktop engine an OmO Native install already provisioned, or `computer.engine_path`. It never downloads an engine; without one, `/computer status` and the tool say what to install.
+- The command is `/omo:computer` (every OmO command on OpenCode 2 is `/omo:<name>`): `/omo:computer status`, `/omo:computer on`, `/omo:computer off`, `/omo:computer cursor on|off`, `/omo:computer stop` and `/omo:computer resume`. Messages from the tool and the skill name `/omo:computer` there.
+
+- It needs the desktop engine an OmO Native install already provisioned, or `computer.engine_path`. It never downloads an engine; without one, `/omo:computer status` and the tool say what to install.
 - OpenCode 2 has no `tool_search`. The `computer` tool is a Code Mode tool, called through `execute`, and `eval` cells have the `computer` global whenever computer use is on for the session.
 - Permission rules use the `computer` action with `read`, `exec` or `control` as the resource, for example `{ "action": "computer", "resource": "exec", "effect": "ask" }`. The foreground-control question is a `computer` permission request on `control`.
 - Only root sessions of the project get it, and never the read-only agents.

@@ -4,12 +4,13 @@ import {
   type ComputerSettings,
   runComputerCommand,
 } from "@oh-my-opencode/senpi-desktop-tool/registration"
+import { v2CommandName, v2Slash } from "../commands/namespace"
 import type { MemoryCommandOutputLevel } from "../memory/command-output-event"
 import { describeInstalledEngine, type EngineLocatorOptions, resolveInstalledEngine } from "./engine"
 import { describeEnginePermissions } from "./engine-permissions"
 import type { SessionRuntimes } from "./session-runtimes"
 
-export const COMPUTER_COMMAND_NAME = "computer"
+export const COMPUTER_COMMAND_NAME = v2CommandName("computer")
 export const COMPUTER_COMMAND_DESCRIPTION =
   "Computer use (experimental): on, off, status, stop, or resume (stop and resume are user-only)"
 
@@ -61,6 +62,6 @@ export async function runComputerSlashCommand(
     return { text: lines.join("\n"), level: "info" }
   } catch (error) {
     if (!(error instanceof Error)) throw error
-    return { text: `/computer ${args.trim()}: ${failureText(error)}`, level: "error" }
+    return { text: `${v2Slash("computer")} ${args.trim()}: ${failureText(error)}`, level: "error" }
   }
 }

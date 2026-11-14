@@ -610,15 +610,15 @@ describe("facts and agreements commands", () => {
     const f = fixture()
     f.addSession("root")
     await register(f)
-    await f.runCommand("memfs", "root", "init")
+    await f.runCommand("omo:memfs", "root", "init")
     // when
-    await f.runCommand("facts", "root")
-    await f.runCommand("agreements", "root")
+    await f.runCommand("omo:facts", "root")
+    await f.runCommand("omo:agreements", "root")
     // then
     const outputs = f.events.slice(1).map((event) => event.data as { command: string; level: string; text: string })
     expect(outputs.map((output) => [output.command, output.level])).toEqual([
-      ["facts", "info"],
-      ["agreements", "info"],
+      ["omo:facts", "info"],
+      ["omo:agreements", "info"],
     ])
     expect(outputs[0]?.text).toContain("queued: 0 pending")
     expect(outputs[1]?.text).toContain("no agreements yet")
