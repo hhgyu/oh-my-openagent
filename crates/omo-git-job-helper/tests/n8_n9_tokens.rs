@@ -34,12 +34,25 @@ fn cross_level(helper_launcher: Launcher, standard_probe: bool) {
     let medium = sddl::medium_user_sddl();
     let observer = Observer::start(&suffix, (!standard_probe).then_some(medium.as_str()));
     let mut op = Op::start(&[], helper_launcher, Stdio::null()).expect("helper run");
-    op.go(&scratch("n8"), &example("testkit_blocker"), &[&suffix])
+    let spawned = op
+        .go(&scratch("n8"), &example("testkit_blocker"), &[&suffix])
         .expect("go");
     assert!(
-        observer.wait_for(1, Duration::from_secs(30)),
-        "member never connected"
+        spawned.starts_with("spawned "),
+        "the helper did not spawn the member: {spawned:?}"
     );
+    if !observer.wait_for(1, Duration::from_secs(30)) {
+        let member = Op::spawned_pid(&spawned);
+        let state = match process::open(member, process::WATCH) {
+            None => "not openable".to_owned(),
+            Some(handle) if process::signaled_within(handle.raw(), Duration::ZERO) => {
+                format!("exited {:?}", process::exit_code(handle.raw()))
+            }
+            Some(handle) => format!("running as {}", process::image_path(handle.raw())),
+        };
+        let reported = op.frame(Duration::from_secs(5));
+        panic!("member {member} never connected to the observer pipe: {state}; helper reported {reported:?}");
+    }
     let helper_ft = creation_time(op.helper.raw()).expect("helper creation time");
     let (dead, dead_pid) = spawn(
         &example("testkit_touch"),

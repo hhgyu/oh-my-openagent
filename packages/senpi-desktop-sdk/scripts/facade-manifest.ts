@@ -127,6 +127,26 @@ function methodEntry(owner: string, member: string, doc: DocTags): FacadeMethodE
   }
 }
 
+// `bun fmt` drops member semicolons, so a member also ends at a top-level line break unless the type continues on the
+// next line (a leading `|`/`&`) or the line ends mid-type (a trailing `|`, `&`, `:`, `,` or `=>`).
+function memberEnd(rest: string): number {
+  let depth = 0
+  for (let index = 0; index < rest.length; index += 1) {
+    const char = rest[index] ?? ""
+    if (char === ">" && rest[index - 1] === "=") continue
+    if (OPEN.has(char)) depth += 1
+    else if (CLOSE.has(char)) depth -= 1
+    else if (depth === 0 && char === ";") return index
+    else if (depth === 0 && char === "\n") {
+      const before = rest.slice(0, index).trimEnd()
+      const after = rest.slice(index).trimStart()
+      const continues = /^[|&]/.test(after) || /(?:[|&:,]|=>)$/.test(before)
+      if (!continues) return index
+    }
+  }
+  return rest.length
+}
+
 /** The members of one interface body, each with the doc comment right before it. */
 function members(body: string, owner: string): { readonly text: string; readonly doc: DocTags | undefined }[] {
   const found: { text: string; doc: DocTags | undefined }[] = []
@@ -143,10 +163,9 @@ function members(body: string, owner: string): { readonly text: string; readonly
       continue
     }
     if (rest.startsWith("//") || rest.startsWith("/*")) throw new Error(`${owner}: only doc comments are supported`)
-    const [text] = splitTopLevel(rest, ";")
-    if (text === undefined) throw new Error(`${owner}: unterminated member`)
-    const end = rest.indexOf(text) + text.length
-    if (rest[end] !== ";") throw new Error(`${owner}: member ${JSON.stringify(text)} must end with ';'`)
+    const end = memberEnd(rest)
+    const text = rest.slice(0, end).trim()
+    if (text.length === 0) throw new Error(`${owner}: empty member`)
     found.push({ text: text.replace(/\s+/g, " "), doc })
     doc = undefined
     rest = rest.slice(end + 1)
