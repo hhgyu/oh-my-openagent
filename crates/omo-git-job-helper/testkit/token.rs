@@ -24,8 +24,8 @@ use windows_sys::Win32::System::Console::{
 use windows_sys::Win32::System::SystemServices::SE_GROUP_INTEGRITY;
 use windows_sys::Win32::System::Threading::{
     CreateProcessAsUserW, GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenProcessToken,
-    WaitForSingleObject, CREATE_NO_WINDOW, INFINITE, PROCESS_INFORMATION,
-    PROCESS_QUERY_LIMITED_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW,
+    WaitForSingleObject, INFINITE, PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+    STARTF_USESTDHANDLES, STARTUPINFOW,
 };
 
 use super::win::{command_line, wide, Owned};
@@ -185,9 +185,7 @@ pub fn run_as(token: &Owned, exe: &Path, args: &[&str]) -> Result<u32, u32> {
             null(),
             null(),
             1,
-            // A Medium child attached to the launcher's elevated console cannot start a console child of its own
-            // (0xC0000142), so it gets its own windowless console, as the helper's launcher gives it in production.
-            CREATE_NO_WINDOW,
+            0,
             null(),
             null(),
             &startup,
