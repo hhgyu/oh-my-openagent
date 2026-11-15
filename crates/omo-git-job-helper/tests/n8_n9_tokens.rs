@@ -60,7 +60,8 @@ fn cross_level(helper_launcher: Launcher, standard_probe: bool) {
             }
             Some(handle) => format!("running as {}", process::image_path(handle.raw())),
         };
-        panic!("member {member} never connected to the observer pipe: {state}");
+        let reported = op.frame(Duration::from_secs(5));
+        panic!("member {member} never connected to the observer pipe: {state}; helper reported {reported:?}");
     }
     let helper_ft = creation_time(op.helper.raw()).expect("helper creation time");
     let (dead, dead_pid) = spawn(
