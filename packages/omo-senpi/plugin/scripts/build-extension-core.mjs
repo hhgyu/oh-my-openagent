@@ -1,8 +1,10 @@
 import { spawnSync } from "node:child_process"
-import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises"
 import { builtinModules, createRequire } from "node:module"
+import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { replaceFileContents } from "../../../../script/windows-safe-replace.mjs"
 
 import { attachBuildMarker, minifyBundle, normalizeBuiltinImports } from "./build-artifact.mjs"
 import { stageRuntimePersonas } from "./persona-artifacts.mjs"
@@ -476,7 +478,10 @@ export async function buildExtension(options = {}) {
     buildDefines,
     sdkExternalSpecifiers,
   )
-  await copyFile(computerRunWasmSourcePath(), join(dirname(computerUseOutput), COMPUTER_RUN_WASM_NAME))
+  await replaceFileContents(
+    join(dirname(computerUseOutput), COMPUTER_RUN_WASM_NAME),
+    await readFile(computerRunWasmSourcePath()),
+  )
   const gatewayStoreWorkerInputs = await buildEntry(
     gatewayStoreWorkerEntryPath,
     gatewayStoreWorkerOutput,
@@ -488,7 +493,10 @@ export async function buildExtension(options = {}) {
   // so the persona and the computer-use prelude are staged into the directory the loader runs from.
   await Promise.all([
     stageRuntimePersonas(repoRoot, dirname(output)),
-    writeFile(join(dirname(output), COMPUTER_PRELUDE_ASSET_NAME), await readFile(computerPreludeAssetSource, "utf8")),
+    replaceFileContents(
+      join(dirname(output), COMPUTER_PRELUDE_ASSET_NAME),
+      await readFile(computerPreludeAssetSource, "utf8"),
+    ),
   ])
   return {
     mainInputs,
@@ -526,8 +534,27 @@ export async function buildExtension(options = {}) {
 
 // `assets`: the entry imports files (the Loro wasm) through Bun's file loader, which is a second output
 // that --outfile cannot write; --outdir with fixed names puts the entry at `output` and each asset beside it.
+// The bundle is rewritten several times (Bun, builtin normalization, minify, marker), and a running
+// Senpi or OpenCode that loaded this checkout keeps the published file open or memory-mapped, which
+// Windows refuses to truncate. So every pass runs in a private staging directory and only the
+// finished files are swapped into place; the bytes do not depend on where they are built, which
+// check-extension-current.mjs relies on too.
 async function buildEntry(entry, output, buildDefines, externals = externalSpecifiers, { assets = false } = {}) {
-  await mkdir(dirname(output), { recursive: true })
+  const staging = await mkdtemp(join(tmpdir(), "omo-senpi-build-"))
+  try {
+    const staged = join(staging, basename(output))
+    const inputs = await buildStagedEntry(entry, staged, buildDefines, externals, assets)
+    await mkdir(dirname(output), { recursive: true })
+    for (const name of await readdir(staging)) {
+      await replaceFileContents(join(dirname(output), name), await readFile(join(staging, name)))
+    }
+    return inputs
+  } finally {
+    await rm(staging, { recursive: true, force: true })
+  }
+}
+
+async function buildStagedEntry(entry, output, buildDefines, externals, assets) {
   const metafile = `${output}.meta.json`
   const target = assets
     ? ["--outdir", dirname(output), "--entry-naming", basename(output), "--asset-naming", "[name].[ext]"]

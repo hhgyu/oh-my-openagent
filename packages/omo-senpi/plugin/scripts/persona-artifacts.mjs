@@ -1,5 +1,6 @@
-import { readFile, writeFile } from "node:fs/promises"
+import { readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { replaceFileContents } from "../../../../script/windows-safe-replace.mjs"
 
 export function runtimePersonaSources(repoRoot) {
   return [
@@ -19,7 +20,7 @@ export function runtimePersonaSources(repoRoot) {
 export async function stageRuntimePersonas(repoRoot, outputDir) {
   await Promise.all(
     runtimePersonaSources(repoRoot).map(async ([name, source]) =>
-      writeFile(join(outputDir, name), await readFile(source, "utf8")),
+      replaceFileContents(join(outputDir, name), await readFile(source, "utf8")),
     ),
   )
 }

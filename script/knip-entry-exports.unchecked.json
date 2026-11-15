@@ -83,6 +83,7 @@
     "packages/telemetry-core/src/posthog-immediate-send.ts",
     "packages/thread-core/src/gateway/process-identity.ts",
     "packages/utils/src/logger.ts",
-    "script/omo-native-trust-mutations.ts"
+    "script/omo-native-trust-mutations.ts",
+    "script/sync-directory.mjs"
   ]
 }

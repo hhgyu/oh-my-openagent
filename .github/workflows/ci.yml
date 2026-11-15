@@ -1060,6 +1060,14 @@ jobs:
         if: needs.ci-mode.outputs.run_heavy == 'true'
         run: bun install --frozen-lockfile --ignore-scripts
 
+      # The test jobs install with scripts, so `prepare` rebuilds the native
+      # service-auth bundle before script/build-service-auth.test.ts compares it
+      # with its source, and a commit that changes a bundled source without
+      # regenerating it passes every test leg. Here nothing has rebuilt it yet.
+      - name: Verify the committed native service-auth bundle is current
+        if: needs.ci-mode.outputs.run_heavy == 'true'
+        run: bun script/build-service-auth.ts --check
+
       - name: Build
         if: needs.ci-mode.outputs.run_heavy == 'true'
         run: bun run build
@@ -1096,6 +1104,7 @@ jobs:
             - Builds the distributable OpenCode/Codex packages.
             - Confirms `dist/index.js` and `dist/index.d.ts` exist.
             - Fails when the build regenerates `assets/oh-my-opencode.schema.json` or `assets/omo.schema.json` differently from the committed copy.
+            - Fails before building when the committed native service-auth bundle no longer matches its sources (`bun script/build-service-auth.ts --check`).
             - Runs dist bundle regression tests.
           JOB_SUMMARY_NEXT: Fix the first failing build prerequisite before debugging downstream dist checks; a stale schema artifact is fixed by `bun run build:schema && bun run build:omo-schema` plus committing the result.
         run: GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" bash .github/scripts/write-job-summary.sh

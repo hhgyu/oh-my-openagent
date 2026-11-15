@@ -2283,10 +2283,14 @@
         "script/release-version.d.mts",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
         "script/review-claim-gate.mjs",
+        // type declarations for script/sync-directory.mjs, which package.json runs by path and only a test imports
+        "script/sync-directory.d.mts",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
         "script/update-frontend-upstreams.mjs",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
         "script/wait-registry-versions.d.mts",
+        // type declarations for script/windows-safe-replace.mjs, imported by the Senpi build scripts (JS) and its tests
+        "script/windows-safe-replace.d.mts",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
         "test-support/held-test-root.d.mts",
       ],
