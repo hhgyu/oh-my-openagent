@@ -139,7 +139,7 @@
     "bundle-inputs:check": "node packages/omo-senpi/plugin/scripts/bundle-inputs.mjs --check",
     "brand-logo:check": "bun script/build-brand-logo.ts --check",
     "build:materialize-frontend": "node packages/omo-codex/plugin/scripts/materialize-shared-upstreams.mjs --strict",
-    "build:shared-skills-assets": "bun run build:materialize-frontend && rm -rf dist/skills && cp -R packages/shared-skills/skills dist/skills",
+    "build:shared-skills-assets": "bun run build:materialize-frontend && bun script/sync-directory.mjs packages/shared-skills/skills dist/skills",
     "build:lsp-tools-mcp": "npm --prefix packages/lsp-tools-mcp ci && npm --prefix packages/lsp-tools-mcp run build",
     "build:lsp-daemon": "npm --prefix packages/lsp-daemon ci && npm --prefix packages/lsp-daemon run build",
     "build:node-require-shim": "bun run script/patch-node-require-shim.ts",

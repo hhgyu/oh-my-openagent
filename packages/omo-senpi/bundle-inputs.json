@@ -2572,6 +2572,7 @@
     "packages/utils/tsconfig.json",
     "script/build-codex-install.ts",
     "script/tsconfig.json",
+    "script/windows-safe-replace.mjs",
     "tsconfig.json"
   ],
   "directories": [
