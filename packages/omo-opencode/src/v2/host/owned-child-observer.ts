@@ -20,7 +20,7 @@ import {
 } from "./owned-child-observation-types"
 import { openOwnedToolMetadataSubscription, type OwnedToolMetadataSource } from "./effect-tool-metadata-source"
 import { hasJoinedSessionCancellation } from "./session-cancellation"
-import { ownedChildSessionState, projectOwnedChildOutcome } from "./owned-child-outcome"
+import { ownedChildSessionState, projectOwnedChildOutcome, retainedTurnOutcome } from "./owned-child-outcome"
 
 type Host = Pick<Context, "session" | "event">
 export interface OwnedChildObserverOptions {
@@ -76,6 +76,9 @@ export interface OwnedChildObserver {
   onRunAfterSettle(listener: () => void): () => void
   /** Re-opens the settled turn so the self-started run's end settles it again. */
   reopenTurn(): void
+  /** The outcome of the turn retained under this binding when its last run ended with nothing of its
+   * own pending and no event of it is missing (`retainedTurnOutcome`); undefined otherwise. */
+  retainedOutcome(): OwnedChildOutcome | undefined
   dispose(): Promise<void>
 }
 
@@ -183,6 +186,7 @@ export async function createOwnedChildObserver(
     },
     probe: async () => ownedChildSessionState(bound.snapshot().records),
     settleConfirmMs: confirmMs,
+    confirmStatuses: ["error", "completed"],
     wakeSourcesLive: wakeSources.hasLive,
     disposed: () => disposed || !!fault,
     ...(schedule ? { scheduleConfirmation: schedule } : {}),
@@ -465,6 +469,15 @@ export async function createOwnedChildObserver(
         runStart = undefined
         runTerminal = undefined
         settlement.begin()
+      },
+      retainedOutcome() {
+        if (disposed || fault) return undefined
+        try {
+          return retainedTurnOutcome(bound.snapshot(), completion)
+        } catch {
+          fail("observation-store-unavailable")
+          return undefined
+        }
       },
       dispose,
     }
