@@ -408,3 +408,63 @@ describe("#given an owned child a reload parked while its turn was still running
     })
   })
 })
+
+describe("#given owned children started with different label sources", () => {
+  test("#when each child is staged and a running one is restored after a reload #then every title write carries the Native task label with its id", async () => {
+    await withGuard(async (before) => {
+      await withGuard(async (after) => {
+        await withOwnedRuntimeUnit(async (runtime, state) => {
+          // given
+          const titles = new Map<string, string[]>()
+          state.onUpdate((input) => {
+            if (input.title === undefined) return
+            titles.set(input.sessionID, [...(titles.get(input.sessionID) ?? []), input.title])
+          })
+          const summary = await runtime.start({
+            category: "qa",
+            prompt: "block-until-interrupt",
+            task_summary: "Title probe A",
+            description: "ignored description",
+          })
+          const described = await runtime.start({
+            category: "qa",
+            prompt: "described child",
+            description: "Title probe B",
+          })
+          const bare = await runtime.start({ category: "qa", prompt: "bare child" })
+          if (summary.kind !== "started" || described.kind !== "started" || bare.kind !== "started")
+            throw Error(JSON.stringify([summary, described, bare]))
+          await runtime.wait(described.task_id, AbortSignal.timeout(5000))
+          await runtime.wait(bare.task_id, AbortSignal.timeout(5000))
+          await until(() => state.hostActive(), "summary child turn running")
+          const children = new Map(
+            [summary, described, bare].map((task) => [
+              task.task_id,
+              String(runtime.get(task.task_id)?.child_session_id),
+            ]),
+          )
+          const childOf = (id: string) => String(children.get(id))
+
+          // when
+          const reloaded = await state.reopen({
+            childToolGuard: after,
+            authorizeRecovery: async (spec) => recoveryApproved(spec),
+          })
+          const restored = await restoreThroughOperation(reloaded, summary.task_id)
+          await until(() => (titles.get(childOf(summary.task_id))?.length ?? 0) > 1, "recovered title write")
+          state.finishFrame(childOf(summary.task_id))
+          const settled = await reloaded.wait(summary.task_id, AbortSignal.timeout(5000))
+
+          // then
+          expect(restored).toBe(true)
+          expect(settled.status).toBe("completed")
+          const summaryTitles = titles.get(childOf(summary.task_id)) ?? []
+          expect(summaryTitles.length).toBeGreaterThan(1)
+          expect(new Set(summaryTitles)).toEqual(new Set([`Title probe A (${summary.task_id})`]))
+          expect(titles.get(childOf(described.task_id))).toEqual([`Title probe B (${described.task_id})`])
+          expect(titles.get(childOf(bare.task_id))).toEqual([`Native task ${bare.task_id}`])
+        }, guarded(before))
+      })
+    })
+  })
+})
