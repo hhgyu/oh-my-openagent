@@ -2,7 +2,11 @@ import { expect, test } from "bun:test"
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createTaskRecordStore, ChildObservationUncertain } from "@oh-my-opencode/senpi-task/manager-kernel"
+import {
+  createTaskRecordStore,
+  ChildObservationUncertain,
+  withTaskRecordLock,
+} from "@oh-my-opencode/senpi-task/manager-kernel"
 import { createOwnedEventProjection } from "./owned-events"
 import type { OwnedChildObservationView, ObservationRecord } from "../../host/owned-child-observation-types"
 
@@ -116,6 +120,35 @@ test("torn own frame and explicit log bound refuse before further append", () =>
       }
       expect(readFileSync(path, "utf8")).toBe(text)
     }
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+test("re-persisting an already persisted frame does not take the task record lock", () => {
+  // given: the owned frame is already in the own log, and another holder keeps the record lock
+  const dir = mkdtempSync(join(tmpdir(), "omo-owned-fastpath-"))
+  mkdirSync(join(dir, "tasks"))
+  const store = createTaskRecordStore({ project_dir: dir, task: { state_dir: dir } })
+  try {
+    const projection = createOwnedEventProjection("st_000000ef", 0, dir, () => {})
+    for (const event of projection.events(view())) projection.persist(store, event)
+    const recordPath = join(dir, "tasks", "st_000000ef.json")
+
+    // when: the 20ms display pump re-projects the same frame while the lock is held
+    // then: the persisted frame is recognised without waiting on the lock
+    withTaskRecordLock(recordPath, () => {
+      for (const event of projection.events(view())) projection.persist(store, event)
+    })
+
+    // then: a projection that has not reconciled the log yet still takes the lock
+    const fresh = createOwnedEventProjection("st_000000ef", 0, dir, () => {})
+    expect(() =>
+      withTaskRecordLock(recordPath, () => {
+        for (const event of fresh.events(view())) fresh.persist(store, event)
+      }),
+    ).toThrow(/Timed out acquiring task record lock/)
+    expect(readFileSync(join(dir, "logs/st_000000ef.jsonl"), "utf8").trim().split("\n")).toHaveLength(1)
   } finally {
     store.close()
     rmSync(dir, { recursive: true, force: true })
