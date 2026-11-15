@@ -7,7 +7,6 @@ import {
 } from "../v2/computer/command-output-event"
 import { GOAL_COMMAND_OUTPUT_EVENT_TYPE } from "../v2/goal/command-output-event"
 import { MEMORY_COMMAND_OUTPUT_EVENT_TYPE, readMemoryCommandOutputEvent } from "../v2/memory/command-output-event"
-import { TASK_PANEL_OPTION } from "../v2/rpc/task-panel-option"
 import { OPENCODE_V2_NOTICE_DURATION_MS, OPENCODE_V2_NOTICE_MESSAGE, OPENCODE_V2_NOTICE_TITLE } from "./startup-notice"
 
 type NoticeToast = {
@@ -141,44 +140,24 @@ export const opencodeV2Tui = Plugin.define({
         }
       }
       if (!("slot" in context.ui)) return closeMemory
-      const taskPanelEnabled = context.options[TASK_PANEL_OPTION] !== false
-      return Promise.all([
-        import("../v2/tui/dag-panel"),
-        import("../v2/tui/ulw-loop-footer"),
-        taskPanelEnabled ? import("../v2/tui/task-panel") : undefined,
-      ])
-        .then(([{ registerDagStatusPanel }, { registerUlwLoopFooter }, taskPanel]) => {
+      return Promise.all([import("../v2/tui/dag-panel"), import("../v2/tui/ulw-loop-footer")])
+        .then(([{ registerDagStatusPanel }, { registerUlwLoopFooter }]) => {
           const closeDag = registerDagStatusPanel(context)
           let closeFooter: () => void
-          let closeTasks: () => void
           try {
             closeFooter = registerUlwLoopFooter(context)
           } catch (error) {
             closeDag()
             throw error
           }
-          try {
-            closeTasks = taskPanel?.registerTaskStatusPanel(context) ?? (() => undefined)
-          } catch (error) {
+          return () => {
             try {
               closeFooter()
             } finally {
-              closeDag()
-            }
-            throw error
-          }
-          return () => {
-            try {
-              closeTasks()
-            } finally {
               try {
-                closeFooter()
+                closeDag()
               } finally {
-                try {
-                  closeDag()
-                } finally {
-                  closeMemory()
-                }
+                closeMemory()
               }
             }
           }

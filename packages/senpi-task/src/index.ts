@@ -422,7 +422,6 @@ export {
   taskStatusDescription,
   taskStatusLabel,
 } from "./task-widget"
-export type { TaskWidgetEntry, TaskWidgetPhase } from "./task-widget"
 export {
   buildCompletionDetails,
   buildCompletionMessage,

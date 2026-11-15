@@ -226,7 +226,6 @@ export function createNativeTaskService(ctx: OwnedTaskHost, options: Options) {
       ...(options.locationReleased && { locationReleased: options.locationReleased }),
       ...(options.childToolGuard && { childToolGuard: options.childToolGuard }),
       ...(options.childGuardBinding && { childGuardBinding: options.childGuardBinding }),
-      ...(options.onStoreMutation && { onStoreMutation: options.onStoreMutation }),
       notification: { callAuthority: options.callAuthority, rootToken, captureCall: () => currentInvocation().token },
       ...(options.hostGrant && {
         authorizePlannedStart: async (
