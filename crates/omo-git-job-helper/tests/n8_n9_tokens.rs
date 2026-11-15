@@ -33,9 +33,24 @@ fn cross_level(helper_launcher: Launcher, standard_probe: bool) {
     let suffix = unique("n8");
     let medium = sddl::medium_user_sddl();
     let observer = Observer::start(&suffix, (!standard_probe).then_some(medium.as_str()));
+    let member_dir = scratch("n8");
+    // A Medium-integrity helper opens the member image with its own deny-only token, and a checkout volume may
+    // grant read and execute to Administrators only (hosted runners' D:\a), so it launches a copy staged in
+    // the user's temp directory, which the same user's Medium token can always execute.
+    let blocker = match helper_launcher {
+        Launcher::Direct => example("testkit_blocker"),
+        Launcher::Standard => {
+            let staged = member_dir.join("testkit_blocker.exe");
+            std::fs::copy(example("testkit_blocker"), &staged).expect("stage testkit_blocker");
+            staged
+        }
+    };
     let mut op = Op::start(&[], helper_launcher, Stdio::null()).expect("helper run");
-    op.go(&scratch("n8"), &example("testkit_blocker"), &[&suffix])
-        .expect("go");
+    let spawned = op.go(&member_dir, &blocker, &[&suffix]).expect("go");
+    assert!(
+        spawned.starts_with("spawned "),
+        "the helper did not spawn the member: {spawned:?}"
+    );
     assert!(
         observer.wait_for(1, Duration::from_secs(30)),
         "member never connected"
