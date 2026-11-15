@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { projectOwnedChildOutcome, retainedTurnCutOff } from "./owned-child-outcome"
+import { projectOwnedChildOutcome, retainedTurnCutOff, retainedTurnOutcome } from "./owned-child-outcome"
 import type { ObservationRecord, ObservationSnapshot, SafeChildEvent } from "./owned-child-observation-types"
 
 function defined<T>(value: T): NonNullable<T> {
@@ -838,6 +838,61 @@ describe("#given the records a previous observer retained for a turn", () => {
     ]
     expect(retainedTurnCutOff(withIdle(1))).toBe(true)
     expect(retainedTurnCutOff(withIdle(0))).toBe(false)
+  })
+})
+
+describe("#given a finished turn a later observer rebound after its observer went away", () => {
+  const terminal = (record: ObservationRecord) =>
+    record.kind === "host" && record.event.type === "session.execution.succeeded"
+  const later = (type: string, seqGap: number): ObservationRecord => {
+    const end = fixture().records.find(terminal)
+    if (end?.kind !== "host" || !end.event.durable) throw Error("fixture has no durable execution terminal")
+    return {
+      kind: "host",
+      id: `later-${type}`,
+      event: {
+        ...end.event,
+        id: `later-${type}`,
+        type,
+        durable: { ...end.event.durable, seq: end.event.durable.seq + seqGap },
+        data: {},
+      },
+    }
+  }
+  const rebound = (records: readonly ObservationRecord[], uncertainty: readonly string[]) => ({
+    ...fixture(),
+    records,
+    uncertainty,
+  })
+
+  test("#when only observer endings mark it and the host wrote unrelated session events since #then the turn's answer is its outcome", () => {
+    const finished = fixture()
+    const snapshot = rebound([...finished.records, later("session.renamed", 7)], ["observer-disposed", "rebound"])
+
+    const result = retainedTurnOutcome(snapshot)
+
+    expect(result).toMatchObject({ status: "completed", text: projectOwnedChildOutcome(finished).text })
+    expect(result?.terminalEventID).toBe(projectOwnedChildOutcome(finished).terminalEventID)
+  })
+
+  test("#when the binding names a gap other than an observer ending #then no outcome is trusted", () => {
+    expect(retainedTurnOutcome(rebound(fixture().records, ["rebound", "observation-append-failed"]))).toBeUndefined()
+  })
+
+  test("#when a run started after the turn's terminal #then no outcome is trusted", () => {
+    const records = [...fixture().records, later("session.execution.started", 3)]
+    expect(retainedTurnOutcome(rebound(records, ["rebound"]))).toBeUndefined()
+  })
+
+  test("#when the last run ended while the child still owned background work #then it is not a finished turn", () => {
+    const records = fixture().records
+    const at = records.findIndex(terminal)
+    const held = [
+      ...records.slice(0, at),
+      { kind: "idle", id: "idle-1", owned: 1, descendant: 0 } as const,
+      ...records.slice(at),
+    ]
+    expect(retainedTurnOutcome(rebound(held, ["rebound"]))).toBeUndefined()
   })
 })
 

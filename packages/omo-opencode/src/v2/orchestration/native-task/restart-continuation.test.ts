@@ -409,6 +409,49 @@ describe("#given an owned child a reload parked while its turn was still running
   })
 })
 
+describe("#given an owned child whose final run ends while a reload parks it", () => {
+  test("#when the next generation restores it #then the task settles once with that run's answer and nothing is replayed", async () => {
+    await withGuard(async (before) => {
+      await withGuard(async (after) => {
+        await withOwnedRuntimeUnit(async (runtime, state) => {
+          // given: the child is mid-turn when the runtime closes; the host ends the step only inside the teardown
+          const started = await runtime.start({ category: "qa", prompt: "block-until-interrupt" })
+          if (started.kind !== "started") throw Error(JSON.stringify(started))
+          await until(() => state.hostActive(), "child turn running")
+          const childID = String(runtime.get(started.task_id)?.child_session_id)
+          state.hostShutdownOrdering()
+          const reopening = state.reopen({
+            childToolGuard: after,
+            authorizeRecovery: async (spec) => recoveryApproved(spec),
+          })
+          await until(() => state.calls.includes("host-wait"), "shutdown park waits for the step")
+          // the child's final run finishes on its own after the park detached the outcome
+          state.finishFrame(childID)
+          state.endTeardown()
+          const reloaded = await reopening
+          const parked = reloaded.get(started.task_id)
+
+          // when
+          const restored = await restoreThroughOperation(reloaded, started.task_id)
+          const settled = await reloaded.wait(started.task_id, AbortSignal.timeout(5000))
+          const again = await restoreThroughOperation(reloaded, started.task_id)
+
+          // then
+          expect(parked?.status).toBe("running")
+          expect(parked?.residency_state).toBe("persisted_only")
+          expect(restored).toBe(true)
+          expect(settled.status).toBe("completed")
+          expect(settled.final_response).toBe("after managed inputs")
+          expect(settled.observation_uncertain).toBeUndefined()
+          expect(inputs(state.calls)).toEqual([])
+          expect(again).toBe(false)
+          expect(reloaded.get(started.task_id)?.status).toBe("completed")
+        }, guarded(before))
+      })
+    })
+  })
+})
+
 describe("#given owned children started with different label sources", () => {
   test("#when each child is staged and a running one is restored after a reload #then every title write carries the Native task label with its id", async () => {
     await withGuard(async (before) => {

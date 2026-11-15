@@ -54,6 +54,10 @@ export type HeldTurnSettlementInput<Outcome extends HeldTurnOutcome> = {
   // Unreadable probe answers re-arm the confirmation, but only this many in a row (default 3):
   // a session whose state never reads again settles the known error instead of re-arming forever.
   readonly maxUnreadableProbes?: number
+  // Held outcome statuses the confirmation may settle (default: only `error`). A host whose idle edge
+  // can also be lost for a held answer (OpenCode 2: a background notice that never starts its wake
+  // run) lists `completed` too, so a held turn without a live wake source cannot stay held forever.
+  readonly confirmStatuses?: readonly string[]
   readonly wakeSourcesLive?: () => boolean
   // Teardown detached/tore down the handle while a probe was in flight: that flight must never
   // report the held error as failed - the exit path owns the outcome from here (senpi#3262 review).
@@ -90,6 +94,9 @@ export function createHeldTurnSettlement<Outcome extends HeldTurnOutcome>(
   let unreadableProbes = 0
   const scheduleConfirmation = input.scheduleConfirmation ?? defaultConfirmationScheduler
   const maxUnreadableProbes = input.maxUnreadableProbes ?? 3
+  const confirmStatuses = input.confirmStatuses ?? ["error"]
+  const confirmable = (outcome: Outcome | undefined): outcome is Outcome =>
+    outcome !== undefined && confirmStatuses.includes(outcome.status)
 
   // A terminal error outcome with no live continuation must still end the turn: idle is the
   // preferred edge, but a session that never reaches it (and never starts a continuation) would
@@ -99,7 +106,7 @@ export function createHeldTurnSettlement<Outcome extends HeldTurnOutcome>(
   const confirmHeld = (): void => {
     confirmation = undefined
     const outcome = held
-    if (outcome === undefined || outcome.status !== "error") return
+    if (!confirmable(outcome)) return
     if (input.wakeSourcesLive?.() === true) return
     const probe = input.probe
     if (probe === undefined) return
@@ -136,7 +143,7 @@ export function createHeldTurnSettlement<Outcome extends HeldTurnOutcome>(
   }
 
   const rearm = (): void => {
-    if (held === undefined || held.status !== "error") return
+    if (!confirmable(held)) return
     if (input.probe === undefined || input.settleConfirmMs === undefined) return
     if (confirmation !== undefined) return
     confirmation = scheduleConfirmation(confirmHeld, input.settleConfirmMs)
@@ -163,7 +170,7 @@ export function createHeldTurnSettlement<Outcome extends HeldTurnOutcome>(
       }
       held = outcome
       unreadableProbes = 0
-      if (outcome.status === "error") rearm()
+      if (confirmable(outcome)) rearm()
     },
     idle: () => {
       clearConfirmation()

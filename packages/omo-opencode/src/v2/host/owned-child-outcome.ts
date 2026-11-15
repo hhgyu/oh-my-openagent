@@ -133,6 +133,43 @@ export function retainedTurnCutOff(records: readonly ObservationRecord[]): boole
   return open || interrupted || heldForBackground || undelivered.size > 0
 }
 
+/** Uncertainty a retained observation gains only when its observer goes away or a later observer binds
+ * it: each is recorded after the last observed event, so no event before it is missing. */
+const observerEndings = new Set([
+  "rebound",
+  "observer-disposed",
+  "observation-lifetime-ended",
+  "observation-stream-ended",
+])
+
+/** The outcome of a turn a previous observer retained whose last run ended with nothing of its own
+ * pending: not cut off (`retainedTurnCutOff`), a completed or failed run, not held for background work.
+ * Only observer endings may be on the binding; any other uncertainty (an append failure, an overflow, a
+ * custody loss) can hide an event of the turn, so it stays undefined. Native settles a revived session
+ * whose transcript ends with its final answer the same way, without a continuation. */
+export function retainedTurnOutcome(
+  snapshot: ObservationSnapshot,
+  completion?: ChildCompletionPolicy,
+): OwnedChildOutcome | undefined {
+  if (!Array.isArray(snapshot?.uncertainty) || !Array.isArray(snapshot.records)) return undefined
+  if (snapshot.uncertainty.some((reason) => !observerEndings.has(reason))) return undefined
+  const records = snapshot.records
+  if (records.some((record) => record.kind === "uncertain") || retainedTurnCutOff(records)) return undefined
+  const last = records.findLastIndex((record) => record.kind === "host" && terminals.has(record.event.type))
+  if (last < 0) return undefined
+  // Between two observers the host's later session events (a title write, permissions) go unrecorded, so
+  // the cursor is only continuous up to the turn's last terminal. After it, nothing may start a run.
+  const after = records.slice(last + 1)
+  if (after.some((record) => record.kind !== "host" || record.event.type.startsWith("session.execution.")))
+    return undefined
+  const result = projectOwnedChildOutcome(
+    { ...snapshot, records: records.slice(0, last + 1), uncertainty: [] },
+    completion,
+  )
+  if ((result.status !== "completed" && result.status !== "error") || result.held !== undefined) return undefined
+  return result
+}
+
 /** Own observations, not host wait/info.outcome or a fabricated execution identifier. */
 
 export function projectOwnedChildOutcome(
