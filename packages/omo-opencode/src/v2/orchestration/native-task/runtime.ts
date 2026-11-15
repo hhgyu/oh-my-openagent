@@ -22,7 +22,12 @@ import {
   type ChildCreationPort,
   type HostStartAuthority,
 } from "@oh-my-opencode/senpi-task/manager-kernel"
-import { createTaskTerminalObservers, type CompletionDeliverySource } from "@oh-my-opencode/senpi-task/task-operations"
+import {
+  createMutationNotifyingStore,
+  createTaskTerminalObservers,
+  type CompletionDeliverySource,
+  type StoreMutation,
+} from "@oh-my-opencode/senpi-task/task-operations"
 import { createModelCatalog } from "../../host/model-catalog"
 import { openChildJournal } from "../../host/child-journal"
 import { openCompletionIntentJournal } from "../../host/completion-intent-journal"
@@ -154,6 +159,8 @@ export interface NativeOwnedTaskRuntimeOptions {
   /** Genuine CURRENT-call G2 approval over a rebuilt persisted spec (service-owned). Required for
    * any guarded recovery; without a current call it must throw, so autonomous recovery refuses. */
   readonly authorizeRecovery?: (spec: ManagedStartSpec) => Promise<RecoveryAuthorization>
+  /** Observes every task record write of this runtime's store (the OmO task panel's update feed). */
+  readonly onStoreMutation?: (stateDir: string, change: StoreMutation) => void
 }
 type ApprovedTeam = { readonly runId: string; readonly memberName: string }
 const failedInitialization = new WeakMap<object, () => Promise<void>>()
@@ -255,11 +262,21 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       }
     if (errors.length) throw new AggregateError(errors, "Native task initialization cleanup incomplete")
   }
-  const baseStore = createTaskRecordStore({
+  const recordStore = createTaskRecordStore({
     project_dir: ctx.location.directory,
     task: { state_dir: options.stateDir },
   })
-  initializers.push({ close: () => baseStore.close(), done: false })
+  initializers.push({ close: () => recordStore.close(), done: false })
+  const onStoreMutation = options.onStoreMutation
+  const baseStore = onStoreMutation
+    ? createMutationNotifyingStore(recordStore, (change) => {
+        try {
+          onStoreMutation(options.stateDir, change)
+        } catch (error) {
+          console.warn("[oh-my-openagent/v2] task store observer failed", String(error))
+        }
+      })
+    : recordStore
   try {
     const journal = await openChildJournal({ path: join(options.stateDir, "owned-children.sqlite") })
     initializers.push({ close: () => journal.close(), done: false })
@@ -2410,8 +2427,8 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
             }
             if (!cleanup.store) {
               try {
-                baseStore.close()
-                const retained = baseStore.residentFigures()
+                recordStore.close()
+                const retained = recordStore.residentFigures()
                 if (retained.openEventLogs !== 0 || retained.cachedRecords !== 0)
                   throw new Error("Owned store resources retained after close")
                 cleanup.store = true
