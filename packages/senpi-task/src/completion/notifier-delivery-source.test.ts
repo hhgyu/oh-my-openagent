@@ -6,6 +6,9 @@ import { createTaskRecordStore } from "../store/record-store"
 import { taskEventLogPath } from "../store/event-log"
 import { createCompletionNotifier } from "./notifier"
 import { buildCompletionMessage } from "./notification"
+// Loaded here so the fresh-process test's child reads this graph from the shared transpiler cache
+// (test-support/bun-transpiler-cache.ts) instead of compiling it cold inside its 5 s budget.
+import "../tools/task/operations"
 
 describe("optional completion source custody (actual FileStore)", () => {
   test("queued return is pending, unpersisted and duplicate/reconcile do not redispatch", () => {
