@@ -35,6 +35,10 @@ type Frame = {
 
 const terminals = new Set(["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"])
 const finishes = new Set(["stop", "length", "tool-calls"])
+const runEventPrefixes = ["session.step.", "session.text.", "session.reasoning.", "session.tool.", "session.retry."]
+function runEventBeforeAnyStart(type: string): boolean {
+  return terminals.has(type) || runEventPrefixes.some((prefix) => type.startsWith(prefix))
+}
 const endings: Record<string, NonNullable<OwnedChildOutcome["ended"]>> = {
   "session.execution.succeeded": "succeeded",
   "session.execution.failed": "failed",
@@ -193,6 +197,7 @@ export function projectOwnedChildOutcome(
     return uncertain("invalid-snapshot")
   }
   if (snapshot.uncertainty.length > 0) return uncertain("observation-invalidated")
+  const laterTurn = snapshot.binding.key.includes(":turn:")
 
   const ids = new Set<string>()
   const expected = new Set<string>()
@@ -259,6 +264,13 @@ export function projectOwnedChildOutcome(
       fail("missing-durable-cursor")
     }
 
+    // A later turn's observer (a follow-up or a restart continuation, `<journal>:turn:<epoch>:<id>`) binds
+    // to a session that may still be finishing an earlier run: 2.2.6 keeps a running session going across
+    // an in-process location reload and the continuation queues behind it. That run shows its steps and
+    // terminal before the first start observed here and cannot carry this turn's input, so it is skipped;
+    // an own input delivered inside it still has no frame and stays uncertain. The first turn's observer
+    // binds before its session runs anything, so there such events stay a fence.
+    if (frame === undefined && laterTurn && runEventBeforeAnyStart(event.type)) continue
     if (event.type === "session.execution.started") {
       if (frame && !frame.terminal) fail("overlapping-execution")
       if (frame && (frame.delivered.length > 0 || continuesTurn(frame))) turnText = lastOwnedText(frame) || turnText

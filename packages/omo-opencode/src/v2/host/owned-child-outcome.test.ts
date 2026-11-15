@@ -841,6 +841,57 @@ describe("#given the records a previous observer retained for a turn", () => {
   })
 })
 
+describe("#given an observer bound while a run of the session it did not start was still in flight", () => {
+  test("#when that run ends before the observer's own input starts a run #then only the own run is the outcome", () => {
+    // given: a continuation observer after an in-process reload; the run the reload left running ends first
+    const own = fixture()
+    const inFlight = [
+      host("session.step.started", 1001, { assistantMessageID: "prior-run", model: { providerID: "qa", id: "model" } }),
+      host("session.text.started", 1002, { assistantMessageID: "prior-run", ordinal: 0 }),
+      host("session.text.ended", 1003, {
+        assistantMessageID: "prior-run",
+        ordinal: 0,
+        text: "answer of the run in flight",
+      }),
+      host("session.step.ended", 1004, { assistantMessageID: "prior-run", finish: "stop" }),
+      host("session.execution.succeeded", 1005),
+    ]
+    const binding = { ...own.binding, key: "st_fixture:0:turn:1:3b4bba6d-9c61-47eb-903e-8a4f979fc393" }
+    const snapshot = revise({ ...own, binding, records: [...inFlight, ...own.records] }, () => true)
+
+    // when
+    const result = projectOwnedChildOutcome(snapshot)
+
+    // then
+    expect(result).toMatchObject({ status: "completed", text: projectOwnedChildOutcome(own).text })
+  })
+
+  test("#when the observer is the first turn's #then such a run stays a fence", () => {
+    const own = fixture()
+    const stray = [host("session.execution.succeeded", 1001)]
+    expect(projectOwnedChildOutcome(revise({ ...own, records: [...stray, ...own.records] }, () => true)).status).toBe(
+      "uncertain",
+    )
+  })
+
+  test("#when an own input is delivered inside that run #then the outcome stays uncertain", () => {
+    const own = fixture()
+    const input = own.records.find((record) => record.kind === "input")
+    if (input?.kind !== "input") throw Error("fixture has no own input")
+    const binding = { ...own.binding, key: "st_fixture:0:turn:1:3b4bba6d-9c61-47eb-903e-8a4f979fc393" }
+    const snapshot = revise(
+      {
+        ...own,
+        binding,
+        records: [input, host("session.inbox.delivered", 1001, { inboxID: input.inboxID }), ...own.records.slice(1)],
+      },
+      () => true,
+    )
+
+    expect(projectOwnedChildOutcome(snapshot).status).toBe("uncertain")
+  })
+})
+
 describe("#given a finished turn a later observer rebound after its observer went away", () => {
   const terminal = (record: ObservationRecord) =>
     record.kind === "host" && record.event.type === "session.execution.succeeded"
