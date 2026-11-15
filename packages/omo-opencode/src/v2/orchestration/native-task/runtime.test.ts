@@ -75,7 +75,12 @@ async function fixture(
       changeSession(sessionID: string, patch: object): void
       removeByHost(sessionID: string): void
       onUpdate(
-        hook: (input: { sessionID: string; permissions?: unknown; metadata?: unknown }) => void | Promise<void>,
+        hook: (input: {
+          sessionID: string
+          title?: string
+          permissions?: unknown
+          metadata?: unknown
+        }) => void | Promise<void>,
       ): void
       reopen(overrides?: RuntimeOverrides): Promise<Awaited<ReturnType<typeof createNativeOwnedTaskRuntime>>>
       openAlongside(overrides?: RuntimeOverrides): Promise<Awaited<ReturnType<typeof createNativeOwnedTaskRuntime>>>
@@ -141,7 +146,13 @@ async function fixture(
   }
   const hooks = new Map<string, (value: unknown) => unknown>()
   let updateHook:
-    ((input: { sessionID: string; permissions?: unknown; metadata?: unknown }) => void | Promise<void>) | undefined
+    | ((input: {
+        sessionID: string
+        title?: string
+        permissions?: unknown
+        metadata?: unknown
+      }) => void | Promise<void>)
+    | undefined
   function emit(type: string, sessionID: string, data: object = {}) {
     const value = {
       id: `event:${seq}`,
@@ -203,7 +214,7 @@ async function fixture(
       }
     },
     async update(
-      input: { sessionID: string; permissions?: unknown; metadata?: unknown },
+      input: { sessionID: string; title?: string; permissions?: unknown; metadata?: unknown },
       options?: { signal?: AbortSignal },
     ) {
       assertPresent(input.sessionID)
