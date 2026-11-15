@@ -3,7 +3,7 @@ import { delimiter, extname, isAbsolute, join, resolve } from "node:path"
 
 const DEFAULT_WINDOWS_PATHEXT = ".COM;.EXE;.BAT;.CMD"
 
-export function executableNames(bin, platform = process.platform, pathExt = process.env.PATHEXT) {
+function executableNames(bin, platform = process.platform, pathExt = process.env.PATHEXT) {
   if (platform !== "win32" || extname(bin) !== "") return [bin]
   const extensions = (pathExt?.trim() || DEFAULT_WINDOWS_PATHEXT)
     .split(";")
