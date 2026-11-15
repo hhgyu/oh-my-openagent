@@ -14,7 +14,6 @@ import { registerUltrawork } from "./hooks/ultrawork"
 import { createIdleContinuationChain } from "./hooks/idle-continuation-chain"
 import { createUlwLoopStatusRpc } from "./ulw-loop/status-rpc"
 import { loadRuntimeConfig } from "./config/runtime"
-import { TASK_PANEL_OPTION } from "./rpc/task-panel-option"
 import { acquireEffectSessionBackendApi } from "./host/effect-session-backend-api"
 // Type-only: the component modules load SQLite-backed journals, so they are imported only when enabled.
 import type { NativeTaskEffectOwners } from "./orchestration/native-task/component"
@@ -211,7 +210,6 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
           ...(team && { team }),
           ...(dag && { dag: (host) => dag(host, context.rpc) }),
           ...(evalTask && { evalTask: evalTask.port }),
-          ...(context.options?.[TASK_PANEL_OPTION] !== false && { taskStatus: context.rpc }),
         }),
       )
     }

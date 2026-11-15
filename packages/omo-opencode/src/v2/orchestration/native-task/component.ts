@@ -60,7 +60,6 @@ import type { NativeDagComponent, NativeDagHost } from "../native-dag/component"
 import type { NativeTaskTargetPermissionAssociation } from "./service"
 import { registerSkillInvocations } from "./skill-invocations"
 import { nativeTaskStateDir } from "./state-dir"
-import { createTaskStatusRpc, type TaskStatusRpcPort } from "./task-status-rpc"
 import { discoverLeftBehindParents, type LeftBehindParent } from "./left-behind-discovery"
 
 export { nativeTaskStateDir }
@@ -231,8 +230,6 @@ export interface NativeTaskComponentOptions {
   readonly dag?: (host: NativeDagHost) => NativeDagComponent
   /** The eval `tools.task` port: attached once the bridge is ready, so a cell's task runs this component's public `task`. */
   readonly evalTask?: EvalTaskPort
-  /** The OmO task panel RPC (`omo.task`), fed by this component's task store writes. */
-  readonly taskStatus?: TaskStatusRpcPort
 }
 
 export async function registerNativeTaskComponent(
@@ -274,15 +271,6 @@ export async function registerNativeTaskComponent(
     const invocations = await registerSkillInvocations(control)
     closers.push(invocations.close)
     seedTaskIdFloor(directory)
-    const taskStatusPort = options.taskStatus
-    const taskStatus = taskStatusPort ? createTaskStatusRpc({ directory }) : undefined
-    if (taskStatus && taskStatusPort) {
-      const registration = await taskStatus.register(taskStatusPort)
-      closers.push(async () => {
-        taskStatus.close()
-        await registration.dispose()
-      })
-    }
     const prepared = await prepareNativeTaskRuntime({
       cwd: directory,
       models: control,
@@ -372,7 +360,6 @@ export async function registerNativeTaskComponent(
       childToolGuard: owners.guard,
       predecessors: handover,
       locationReleased: locationReleased.signal,
-      ...(taskStatus && { onStoreMutation: (stateDir: string, change) => taskStatus.observe(stateDir, change.record) }),
       // The read-only broker, member task_send, CodeMode `ls` and parent kernel-tool producers are
       // installed; CodeMode fetch GET is bound only for a child granted Native `webfetch`, deny-all
       // otherwise. Other member slots stay unbound, so a selection needing one is refused by the runner.
