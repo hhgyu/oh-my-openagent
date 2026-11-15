@@ -13,6 +13,7 @@ import type { RunnerOutcome } from "@oh-my-opencode/orchestration-core/contracts
 import type { ChildHandle, createSessionBackend } from "../../host/session-backend"
 import type { DurableChildJournal } from "../../host/child-journal"
 import type { OwnedChildObserver } from "../../host/owned-child-observer"
+import type { OwnedChildOutcome } from "../../host/owned-child-observation-types"
 import { retainedTurnCutOff } from "../../host/owned-child-outcome"
 import { createOwnedEventProjection } from "./owned-events"
 import { createOwnedManagedInput, ownedInputID } from "./managed-input"
@@ -271,6 +272,9 @@ export async function createOwnedTaskHandle(input: {
         : new ChildObservationUncertain("owned-outcome-custody-unavailable")
     }
     if (pumpFault) throw pumpFault
+    return runnerOutcome(result)
+  }
+  function runnerOutcome(result: OwnedChildOutcome): RunnerOutcome {
     if (result.status === "uncertain")
       throw new ChildObservationUncertain(result.reason ?? "observation-invalidated", result.startEventID)
     const model = result.model ? { model: `${result.model.providerID}/${result.model.id}` } : {}
@@ -338,15 +342,13 @@ export async function createOwnedTaskHandle(input: {
     )
       throw new Error("Canonical owned reattach receipt differs from current custody")
     // A turn a host restart cut off continues as a new observed turn of this run (Native
-    // `continueInterruptedTurn`); the dead turn's observation uncertainty then names no turn of it.
+    // `continueInterruptedTurn`); the dead turn's observation uncertainty then names no turn of it. A
+    // turn that had already finished settles with its retained answer, so that uncertainty is spent too.
     const continuation = restartContinuation
     restartContinuation = undefined
-    const continuing =
-      continuation !== undefined &&
-      input.recovered === true &&
-      !started &&
-      current === undefined &&
-      retainedTurnCutOff(observer.observation().records)
+    const restarted = continuation !== undefined && input.recovered === true && !started && current === undefined
+    const continuing = restarted && retainedTurnCutOff(observer.observation().records)
+    const retained = restarted && !continuing ? observer.retainedOutcome() : undefined
     // The Native operation has already published this epoch. Only that exact receipt may
     // advance bookkeeping; retained observation/projection/history are deliberately unchanged.
     busy = true
@@ -362,7 +364,7 @@ export async function createOwnedTaskHandle(input: {
       store.mutate(spec.taskId, (fresh) => {
         if (JSON.stringify(fresh) !== JSON.stringify(actual))
           throw new Error("Canonical owned reattach record moved during checkpoint")
-        if (!continuing) return { ...fresh, owned_session: reference }
+        if (!continuing && !retained) return { ...fresh, owned_session: reference }
         const { observation_uncertain: _deadTurn, ...live } = fresh
         return { ...live, owned_session: reference }
       })
@@ -378,6 +380,31 @@ export async function createOwnedTaskHandle(input: {
       busy = false
     }
     if (continuing) continueCutTurn(continuation)
+    else if (retained) settleRetainedTurn(retained)
+  }
+  /** Native revival of a session whose transcript ends with its final answer (`sessionTailNeedsContinuation`
+   * is false): the turn finished before a restart or reload took its observer, so nothing is replayed. Once
+   * the host reports the session idle and no run has started since, the recovered run settles with the
+   * answer the previous observer retained. A run that started meanwhile leaves the outcome uncertain. */
+  function settleRetainedTurn(retained: OwnedChildOutcome): void {
+    const observing = observer
+    current = (async () => {
+      await backend.wait(child, lifetime.signal)
+      if (observing !== observer) throw new ChildObservationUncertain("owned-turn-replaced")
+      if (observing.retainedOutcome()?.terminalEventID !== retained.terminalEventID)
+        throw new ChildObservationUncertain("retained-turn-resumed", retained.startEventID)
+      try {
+        assertOwned()
+        flush()
+      } catch (error) {
+        throw ChildObservationUncertain.is(error)
+          ? error
+          : new ChildObservationUncertain("owned-outcome-custody-unavailable")
+      }
+      if (pumpFault) throw pumpFault
+      return runnerOutcome(retained)
+    })()
+    void current.catch(() => {})
   }
   /** Native `continueInterruptedTurn` for a recovered child whose turn a host restart cut off: the
    * retained observation of the dead turn stays uncertain, so the continuation is a NEW turn of the

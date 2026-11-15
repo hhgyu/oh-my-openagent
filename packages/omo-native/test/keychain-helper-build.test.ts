@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildKeychainHelper } from "../keychain-helper/build"
@@ -26,4 +26,27 @@ describe.skipIf(process.platform !== "darwin")("keychain helper build", () => {
     // then
     expect(existsSync(output)).toBe(true)
   }, 60_000)
+
+  test("#given a universal build #when clang finishes #then nothing is left in the caller's temp dir", async () => {
+    // given
+    const root = mkdtempSync(join(tmpdir(), "omo-keychain-universal-"))
+    dirs.push(root)
+    const callerTemp = join(root, "tmp")
+    mkdirSync(callerTemp)
+    const output = join(root, "out", "omo-keychain")
+    const previous = process.env.TMPDIR
+    process.env.TMPDIR = callerTemp
+
+    // when
+    try {
+      await buildKeychainHelper({ output, flavor: "release" })
+    } finally {
+      if (previous === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = previous
+    }
+
+    // then
+    expect(existsSync(output)).toBe(true)
+    expect(readdirSync(callerTemp)).toEqual([])
+  }, 120_000)
 })

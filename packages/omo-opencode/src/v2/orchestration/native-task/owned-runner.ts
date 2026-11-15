@@ -19,6 +19,7 @@ import type { OwnedChildToolGuard, ChildGuardApproval, ChildGuardBinding } from 
 import { checkHostGrantTarget, type PreparedHostTaskGrant } from "./host-grant"
 import type { createOwnedTaskPlanner } from "./planner"
 import { createOwnedTaskHandle, type OwnedTaskControl } from "./owned-handle"
+import { ownedChildTitle } from "./owned-child-title"
 import { createGuardCustody, type GuardClaim } from "./owned-guard-custody"
 import {
   followParentPermissions,
@@ -425,7 +426,7 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
           child: ownedChild,
           guard: backend.observationGuard(ownedChild),
           store: options.observationStore,
-          title: `Native task ${spec.taskId}`,
+          title: ownedChildTitle(spec.taskId, record),
           completion: "final-text",
           toolMetadataSource: options.metadataSource,
           signal: AbortSignal.any([parent.signal, signal]),

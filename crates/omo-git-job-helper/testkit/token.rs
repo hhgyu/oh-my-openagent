@@ -10,13 +10,15 @@ use std::ffi::c_void;
 use std::path::Path;
 use std::ptr::{null, null_mut};
 
-use windows_sys::Win32::Foundation::{GetLastError, HANDLE};
+use windows_sys::Win32::Foundation::{GetLastError, GENERIC_ALL, HANDLE};
 use windows_sys::Win32::Security::{
-    CreateRestrictedToken, CreateWellKnownSid, GetLengthSid, GetSidSubAuthority,
-    GetSidSubAuthorityCount, GetTokenInformation, SetTokenInformation, TokenElevation,
-    TokenIntegrityLevel, WinBuiltinAdministratorsSid, WinMediumLabelSid, DISABLE_MAX_PRIVILEGE,
-    SECURITY_MAX_SID_SIZE, SID_AND_ATTRIBUTES, TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY,
-    TOKEN_DUPLICATE, TOKEN_ELEVATION, TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
+    AddAccessAllowedAce, CreateRestrictedToken, CreateWellKnownSid, GetLengthSid,
+    GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, InitializeAcl,
+    SetTokenInformation, TokenDefaultDacl, TokenElevation, TokenIntegrityLevel, TokenUser,
+    WinBuiltinAdministratorsSid, WinLocalSystemSid, WinMediumLabelSid, ACCESS_ALLOWED_ACE, ACL,
+    ACL_REVISION, DISABLE_MAX_PRIVILEGE, SECURITY_MAX_SID_SIZE, SID_AND_ATTRIBUTES,
+    TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE,
+    TOKEN_ELEVATION, TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TOKEN_USER,
 };
 use windows_sys::Win32::System::Console::{
     GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
@@ -102,7 +104,63 @@ pub fn restricted_medium_token() -> Result<Owned, String> {
     {
         return Err(format!("integrity {}", error()));
     }
+    standard_default_dacl(&restricted)?;
     Ok(restricted)
+}
+
+/// Gives the restricted token the default DACL of a standard user token (the user and SYSTEM get full access).
+/// The copied default DACL of an elevated runner grants only Administrators and SYSTEM; with Administrators
+/// deny-only, every process the token creates would be closed to the token itself, and a console child's
+/// kernelbase init then fails with STATUS_DLL_INIT_FAILED.
+fn standard_default_dacl(token: &Owned) -> Result<(), String> {
+    let mut user = [0u64; 16];
+    let mut returned = 0u32;
+    // SAFETY: `user` is 128 aligned bytes, enough for a TOKEN_USER and its SID.
+    let ok = unsafe {
+        GetTokenInformation(
+            token.raw(),
+            TokenUser,
+            user.as_mut_ptr().cast(),
+            128,
+            &mut returned,
+        )
+    };
+    if ok == 0 {
+        return Err(format!("token-user {}", error()));
+    }
+    // SAFETY: on success the buffer starts with a TOKEN_USER whose SID lives inside the same buffer.
+    let user_sid = unsafe { (*user.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+    let mut system = well_known(WinLocalSystemSid).map_err(|code| format!("system-sid {code}"))?;
+    let sids = [user_sid, system.as_mut_ptr().cast()];
+    let ace_base = std::mem::size_of::<ACCESS_ALLOWED_ACE>() - std::mem::size_of::<u32>();
+    let mut size = std::mem::size_of::<ACL>();
+    for &sid in &sids {
+        // SAFETY: both SIDs are valid: one from the token query above, one built by CreateWellKnownSid.
+        size += ace_base + usize::try_from(unsafe { GetLengthSid(sid) }).unwrap_or(0);
+    }
+    let mut acl = vec![0u64; size / 8 + 1];
+    let acl_ptr: *mut ACL = acl.as_mut_ptr().cast();
+    let acl_size = u32::try_from(size).map_err(|_| "acl-size".to_owned())?;
+    // SAFETY: `acl` is at least `acl_size` aligned, writable bytes.
+    if unsafe { InitializeAcl(acl_ptr, acl_size, ACL_REVISION) } == 0 {
+        return Err(format!("acl {}", error()));
+    }
+    for &sid in &sids {
+        // SAFETY: the ACL was sized for both entries; `sid` outlives the call.
+        if unsafe { AddAccessAllowedAce(acl_ptr, ACL_REVISION, GENERIC_ALL, sid) } == 0 {
+            return Err(format!("ace {}", error()));
+        }
+    }
+    let dacl = TOKEN_DEFAULT_DACL {
+        DefaultDacl: acl_ptr,
+    };
+    let dacl_ptr: *const c_void = std::ptr::from_ref(&dacl).cast();
+    let dacl_size = u32::try_from(std::mem::size_of::<TOKEN_DEFAULT_DACL>()).unwrap_or(0);
+    // SAFETY: `dacl` points at `acl`, which outlives the call; the handle carries TOKEN_ADJUST_DEFAULT.
+    if unsafe { SetTokenInformation(token.raw(), TokenDefaultDacl, dacl_ptr, dacl_size) } == 0 {
+        return Err(format!("default-dacl {}", error()));
+    }
+    Ok(())
 }
 
 pub fn facts(token: HANDLE) -> Facts {

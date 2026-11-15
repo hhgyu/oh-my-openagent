@@ -136,3 +136,44 @@ describe("OpenCode 2 TUI memory command output", () => {
     expect(t.handlers.size).toBe(0)
   })
 })
+
+describe("OpenCode 2 TUI composer slots", () => {
+  async function claimedSlots(options: Record<string, unknown>): Promise<string[]> {
+    const claims: string[] = []
+    const context = {
+      options,
+      location: undefined,
+      ui: {
+        toast: { show: () => undefined },
+        dialog: { alert: async () => undefined },
+        slot: (claim: { readonly append?: string }) => {
+          claims.push(claim.append ?? "other")
+          return () => undefined
+        },
+      },
+      data: { on: () => () => undefined },
+      storage: { memory: () => [{ revision: 0 }, () => undefined] },
+      client: { rpc: () => ({ status: async () => ({}) }) },
+      theme: { text: { base: "white" } },
+    }
+    const setup: unknown = Reflect.get(tuiModule, "setup")
+    if (typeof setup !== "function") throw new Error("setup missing")
+    const close: unknown = await setup(context)
+    if (typeof close === "function") close()
+    return claims
+  }
+
+  it("#given default or legacy task panel options #when the TUI starts #then only the workflow panel claims the composer top", async () => {
+    // given
+    const defaults = {}
+    const legacy = { "omo-task-panel-enabled": true }
+
+    // when
+    const withDefaults = await claimedSlots(defaults)
+    const withLegacy = await claimedSlots(legacy)
+
+    // then
+    expect(withDefaults.filter((path) => path === "session.composer.top")).toHaveLength(1)
+    expect(withLegacy.filter((path) => path === "session.composer.top")).toHaveLength(1)
+  })
+})

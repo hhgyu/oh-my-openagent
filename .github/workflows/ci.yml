@@ -239,6 +239,13 @@ jobs:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-1.4.4-${{ hashFiles('bun.lock') }}
 
+      # The test process and the bun children its tests start share one transpiler cache, so a child
+      # never compiles a module graph its parent already loaded (test-support/bun-transpiler-cache.ts).
+      - name: Share Bun's transpiler cache with test children
+        if: needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        shell: bash
+        run: echo "BUN_RUNTIME_TRANSPILER_CACHE_PATH=$RUNNER_TEMP/bun-transpiler-cache" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         if: needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
         run: bun install --frozen-lockfile
@@ -825,6 +832,13 @@ jobs:
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-1.4.4-${{ hashFiles('bun.lock') }}
+
+      # The test process and the bun children its tests start share one transpiler cache, so a child
+      # never compiles a module graph its parent already loaded (test-support/bun-transpiler-cache.ts).
+      - name: Share Bun's transpiler cache with test children
+        if: needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        shell: bash
+        run: echo "BUN_RUNTIME_TRANSPILER_CACHE_PATH=$RUNNER_TEMP/bun-transpiler-cache" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         if: needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')

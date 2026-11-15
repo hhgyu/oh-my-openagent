@@ -86,8 +86,8 @@ fn platform_base() -> io::Result<PathBuf> {
 /// when that directory exists.
 #[cfg(any(test, all(unix, not(target_os = "macos"))))]
 fn linux_base(xdg: Option<std::ffi::OsString>, uid: u32, is_dir: impl Fn(&Path) -> bool) -> io::Result<PathBuf> {
-    if let Some(xdg) = xdg.map(PathBuf::from).filter(|dir| dir.is_absolute()) {
-        return Ok(xdg);
+    if let Some(xdg) = xdg.filter(|dir| dir.as_encoded_bytes().first() == Some(&b'/')) {
+        return Ok(PathBuf::from(xdg));
     }
     let fallback = PathBuf::from(format!("/run/user/{uid}"));
     if is_dir(&fallback) {

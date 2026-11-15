@@ -5,7 +5,7 @@ name: Git job helper
 # on the helper PR's branch target it, so it is listed to give them this run.
 on:
   pull_request:
-    branches: [master, dev, fix/10391-windows-job-helper-native]
+    branches: [master, dev, v2/dev, fix/10391-windows-job-helper-native]
     paths:
       - "crates/omo-git-job-helper/**"
       - "Cargo.toml"
@@ -13,7 +13,7 @@ on:
       - "rust-toolchain.toml"
       - ".github/workflows/git-job-helper.yml"
   push:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - "crates/omo-git-job-helper/**"
       - "Cargo.toml"
