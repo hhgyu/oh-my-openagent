@@ -136,3 +136,44 @@ describe("OpenCode 2 TUI memory command output", () => {
     expect(t.handlers.size).toBe(0)
   })
 })
+
+describe("OpenCode 2 TUI task panel", () => {
+  async function claimedSlots(options: Record<string, unknown>): Promise<string[]> {
+    const claims: string[] = []
+    const context = {
+      options,
+      location: undefined,
+      ui: {
+        toast: { show: () => undefined },
+        dialog: { alert: async () => undefined },
+        slot: (claim: { readonly append?: string }) => {
+          claims.push(claim.append ?? "other")
+          return () => undefined
+        },
+      },
+      data: { on: () => () => undefined },
+      storage: { memory: () => [{ revision: 0 }, () => undefined] },
+      client: { rpc: () => ({ status: async () => ({}) }) },
+      theme: { text: { base: "white" } },
+    }
+    const setup: unknown = Reflect.get(tuiModule, "setup")
+    if (typeof setup !== "function") throw new Error("setup missing")
+    const close: unknown = await setup(context)
+    if (typeof close === "function") close()
+    return claims
+  }
+
+  it("claims a composer slot for the task panel unless omo-task-panel-enabled is false", async () => {
+    // given
+    const enabled = {}
+    const disabled = { "omo-task-panel-enabled": false }
+
+    // when
+    const withPanel = await claimedSlots(enabled)
+    const withoutPanel = await claimedSlots(disabled)
+
+    // then
+    expect(withPanel.filter((path) => path === "session.composer.top")).toHaveLength(2)
+    expect(withoutPanel.filter((path) => path === "session.composer.top")).toHaveLength(1)
+  })
+})

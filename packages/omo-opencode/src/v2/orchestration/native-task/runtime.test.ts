@@ -27,6 +27,7 @@ type RuntimeOverrides = Partial<
     | "childGuardBinding"
     | "captureStartAuthority"
     | "locationReleased"
+    | "onStoreMutation"
   >
 >
 type PlannedStartArgs = Parameters<NonNullable<RuntimeOverrides["authorizePlannedStart"]>>
@@ -645,6 +646,31 @@ test("same Native manager category reaches real Native record store and existing
     expect(state.calls.filter((value) => value === "create")).toHaveLength(1)
     await runtime.end(result.task_id)
   })
+})
+
+test("task store writes reach the task panel observer with the runtime's state directory", async () => {
+  const changes: { stateDir: string; taskId: string; status: string | undefined }[] = []
+  await fixture(
+    async (runtime, state) => {
+      // given
+      const result = await runtime.start({ category: "qa", prompt: "controlled task" })
+      if (result.kind !== "started") throw Error(JSON.stringify(result))
+
+      // when
+      await runtime.wait(result.task_id, AbortSignal.timeout(2000))
+
+      // then
+      const own = changes.filter((change) => change.taskId === result.task_id)
+      expect(own.length).toBeGreaterThan(0)
+      expect(own.every((change) => change.stateDir === state.stateDir)).toBe(true)
+      expect(own.at(-1)?.status).toBe("completed")
+      await runtime.end(result.task_id)
+    },
+    {
+      onStoreMutation: (stateDir, change) =>
+        changes.push({ stateDir, taskId: change.taskId, status: change.record?.status }),
+    },
+  )
 })
 
 test("original Native admission planned denial prevents record and child before any stage", async () => {

@@ -107,7 +107,6 @@ export {
   composeStatusLine,
   formatLiveSpend,
   formatRunSpend,
-  formatStatusTarget,
   formatTargetIdentity,
   formatTargetWithModel,
   taskIdentityLabel,
@@ -415,6 +414,15 @@ export type { NoticeLine, NoticeSpec, NoticeTheme, NoticeTone } from "./notice-b
 // omo-task.js/omo-member.js blobs to the pi-tui barrel.
 export { loadPiTui } from "./lazy/pi-tui"
 export { recoveryPresentation } from "./state/recovery-presentation"
+export {
+  formatTaskElapsed,
+  isSuspendedTask,
+  selectLiveTaskRecords,
+  taskRecordStatusTarget,
+  taskStatusDescription,
+  taskStatusLabel,
+} from "./task-widget"
+export type { TaskWidgetEntry, TaskWidgetPhase } from "./task-widget"
 export {
   buildCompletionDetails,
   buildCompletionMessage,

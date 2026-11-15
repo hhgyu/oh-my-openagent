@@ -41,6 +41,10 @@
       "types": "./src/renderer-text.ts",
       "import": "./src/renderer-text.ts"
     },
+    "./task-widget": {
+      "types": "./src/task-widget.ts",
+      "import": "./src/task-widget.ts"
+    },
     "./rpc-spawn": {
       "types": "./src/runners/rpc/spawn.ts",
       "import": "./src/runners/rpc/spawn.ts"
