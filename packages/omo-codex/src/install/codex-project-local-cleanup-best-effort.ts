@@ -7,6 +7,7 @@ import type { ProjectLocalCodexCleanupResult } from "./codex-project-local-clean
 export async function repairProjectLocalCodexArtifactsBestEffort(input: {
   readonly startDirectory: string
   readonly codexHome: string
+  readonly homeDirectory: string
   readonly now?: () => Date
   readonly log: (message: string) => void
 }): Promise<ProjectLocalCodexCleanupResult> {
@@ -14,6 +15,7 @@ export async function repairProjectLocalCodexArtifactsBestEffort(input: {
     return await repairNearestProjectLocalCodexArtifacts({
       startDirectory: input.startDirectory,
       codexHome: input.codexHome,
+      homeDirectory: input.homeDirectory,
       now: input.now,
     })
   } catch (error) {

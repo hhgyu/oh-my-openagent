@@ -18,6 +18,7 @@ export interface CodexCleanupOptions {
   readonly binDir?: string
   readonly platform?: NodeJS.Platform
   readonly projectDirectory?: string
+  readonly homeDirectory?: string
   readonly env?: { readonly [key: string]: string | undefined }
   readonly now?: () => Date
 }
@@ -81,6 +82,7 @@ export async function cleanupCodexLight(input: CodexCleanupOptions = {}): Promis
   const projectCleanup = await repairProjectLocalCodexArtifactsBestEffort({
     startDirectory: projectDirectory,
     codexHome,
+    homeDirectory: input.homeDirectory ?? homedir(),
     now: input.now,
     log: () => undefined,
   })

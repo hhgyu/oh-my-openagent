@@ -200,6 +200,7 @@ export async function runCodexInstaller(options: CodexInstallOptions = {}): Prom
   const projectCleanup = await repairProjectLocalCodexArtifactsBestEffort({
     startDirectory: projectDirectory,
     codexHome,
+    homeDirectory: options.homeDirectory ?? homedir(),
     log,
   })
   for (const configCleanup of projectCleanup.configs) {

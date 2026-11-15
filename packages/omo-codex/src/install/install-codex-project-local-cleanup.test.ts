@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { runCodexInstaller } from "./install-codex"
 
 const resolveTestGitBash = () => ({ found: true, path: "C:\\Git\\bin\\bash.exe", source: "env" }) as const
@@ -120,6 +120,7 @@ describe("install-codex project-local cleanup", () => {
         binDir,
         repoRoot,
         projectDirectory,
+        homeDirectory: dirname(homeRoot),
         platform: "win32",
         astGrepInstaller: skipAstGrepInstall,
         gitBashResolver: resolveTestGitBash,

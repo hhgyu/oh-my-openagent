@@ -1,5 +1,5 @@
-import { cp, lstat, mkdtemp, readdir, rename, rm } from "node:fs/promises"
-import { join, relative, sep } from "node:path"
+import { cp, lstat, mkdir, mkdtemp, readdir, readlink, realpath, rename, rm } from "node:fs/promises"
+import { dirname, join, relative, resolve, sep } from "node:path"
 
 // Codex fingerprints every plugin entry with symlink_metadata, including node_modules.
 // Hooks use component CLIs directly; third-party regular npm shims must remain.
@@ -25,15 +25,7 @@ async function materializeDirectory(directory: string): Promise<void> {
       const staging = await mkdtemp(join(directory, ".omo-materialize-"))
       try {
         const copyPath = join(staging, "entry")
-        await cp(path, copyPath, {
-          recursive: true,
-          dereference: true,
-          filter: async (source) => {
-            if (!source.includes(NPM_BIN_PATH_SEGMENT)) return true
-            const sourceEntry = await lstat(source)
-            return sourceEntry.isFile() || sourceEntry.isDirectory()
-          },
-        })
+        await copyResolved(await resolveLinkTarget(path), copyPath, [])
         await rm(path, { force: true, recursive: true })
         await rename(copyPath, path)
       } finally {
@@ -42,6 +34,34 @@ async function materializeDirectory(directory: string): Promise<void> {
       entry = await lstat(path)
     }
     if (entry.isDirectory()) await materializeDirectory(path)
+  }
+}
+
+// Windows resolves a relative link target against the path used to reach the link, not against
+// the link's real directory, so a Bun workspace link reached through an npm file: junction points
+// at a sibling that does not exist. Resolve every link from its real parent instead.
+async function resolveLinkTarget(linkPath: string): Promise<string> {
+  const realParent = await realpath(dirname(linkPath))
+  return realpath(resolve(realParent, await readlink(linkPath)))
+}
+
+async function copyResolved(source: string, destination: string, ancestors: readonly string[]): Promise<void> {
+  const entry = await lstat(source)
+  if (!entry.isDirectory()) {
+    await cp(source, destination)
+    return
+  }
+  if (ancestors.includes(source)) {
+    throw new Error(`Codex plugin contains a directory link cycle at ${source}`)
+  }
+  await mkdir(destination, { recursive: true })
+  const nextAncestors = [...ancestors, source]
+  for (const name of await readdir(source)) {
+    const childSource = join(source, name)
+    const childEntry = await lstat(childSource)
+    if (childSource.includes(NPM_BIN_PATH_SEGMENT) && !childEntry.isFile() && !childEntry.isDirectory()) continue
+    const resolvedSource = childEntry.isSymbolicLink() ? await resolveLinkTarget(childSource) : childSource
+    await copyResolved(resolvedSource, join(destination, name), nextAncestors)
   }
 }
 

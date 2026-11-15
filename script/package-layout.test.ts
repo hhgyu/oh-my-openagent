@@ -1,7 +1,17 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test"
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { execFileSync } from "node:child_process"
-import { existsSync, readdirSync } from "node:fs"
-import { join, relative, sep } from "node:path"
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join, relative, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url))
@@ -129,19 +139,70 @@ function parsePackedPaths(output: string): Set<string> {
   return packedPaths
 }
 
-// Every test here packs the same unmutated tree, and `bun pm pack --dry-run` walks the whole
-// multi-thousand-file payload on each call, so pack once and reuse the result.
+// Packing the whole checkout walks every build output under dist/ (minutes on a cold Windows
+// cache) and depends on whether a build ran. The tests instead pack a staged layout: the real
+// `files` allowlist and the real tracked ignore guards, the real tracked sources under test, and
+// a placeholder only for each build output the checkout has not produced. Pack once, reuse it.
+const obsoleteForkControlPath = "packages/omo-codex/scripts/install/obsolete-fork.mjs"
+const trackedSourcePathsUnderTest = [
+  "packages/lsp-tools-mcp/package.json",
+  "packages/omo-codex/scripts/install-dist/install-local.mjs",
+  ...webTerminalVisualQaRuntimePaths,
+  ...packageGuidanceDocPaths,
+] as const
+let stagedLayoutRoot: string | undefined
 let cachedPackDryRunPaths: Promise<Set<string>> | undefined
 
 function packDryRunPaths(): Promise<Set<string>> {
-  cachedPackDryRunPaths ??= runPackDryRun()
+  cachedPackDryRunPaths ??= runPackDryRun(stageMinimalPackageLayout())
   return cachedPackDryRunPaths
 }
 
-async function runPackDryRun(): Promise<Set<string>> {
+function stageFile(packagePath: string, content?: string): void {
+  if (!stagedLayoutRoot) throw new Error("package layout stage is not initialized")
+  const stagedPath = join(stagedLayoutRoot, packagePath)
+  mkdirSync(dirname(stagedPath), { recursive: true })
+  if (content === undefined) copyFileSync(join(repositoryRoot, packagePath), stagedPath)
+  else writeFileSync(stagedPath, content)
+}
+
+function stageMinimalPackageLayout(): string {
+  stagedLayoutRoot = mkdtempSync(join(tmpdir(), "omo-package-layout-stage-"))
+  const rootManifest = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8")) as {
+    name: string
+    version: string
+    files: string[]
+  }
+  stageFile(
+    "package.json",
+    `${JSON.stringify({ name: rootManifest.name, version: rootManifest.version, files: rootManifest.files }, null, 2)}\n`,
+  )
+  const ignoreGuards = execFileSync("git", ["ls-files", "--", "*.npmignore", "*.gitignore"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  })
+  for (const guardPath of ignoreGuards.split("\n").filter((line) => line.length > 0)) {
+    stageFile(guardPath)
+  }
+  for (const sourcePath of [...trackedSourcePathsUnderTest, ...collectExpectedAssetPaths()]) {
+    stageFile(sourcePath)
+  }
+  for (const runtimePath of codexMaterializedRuntimePayloadPaths) {
+    if (existsSync(join(repositoryRoot, runtimePath))) stageFile(runtimePath)
+    else stageFile(runtimePath, "// unbuilt runtime payload placeholder for package-layout.test.ts\n")
+  }
+  stageFile(obsoleteForkControlPath, "// obsolete installer fork control for package-layout.test.ts\n")
+  return stagedLayoutRoot
+}
+
+afterAll(() => {
+  if (stagedLayoutRoot) rmSync(stagedLayoutRoot, { recursive: true, force: true })
+})
+
+async function runPackDryRun(packageRoot: string): Promise<Set<string>> {
   const packProcess = Bun.spawn({
     cmd: ["bun", "pm", "pack", "--dry-run", "--ignore-scripts"],
-    cwd: repositoryRoot,
+    cwd: packageRoot,
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -208,6 +269,7 @@ describe("published package layout", () => {
       const packedObsoleteForks = [...packedPaths].filter((packagePath) => packagePath.startsWith(obsoleteForkPrefix))
 
       // then
+      expect(existsSync(join(stagedLayoutRoot ?? "", obsoleteForkControlPath))).toBe(true)
       expect(packedPaths.has(expectedGeneratedInstaller)).toBe(true)
       expect(packedObsoleteForks).toEqual([])
     },
