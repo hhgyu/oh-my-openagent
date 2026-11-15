@@ -476,6 +476,61 @@ describe("#given a child turn that ends while the child still owns background wo
     await observer.dispose()
   })
 
+  test("#when the child's own shell ends and no wake run follows #then the confirmation settles the held answer once", async () => {
+    const f = fixture(),
+      confirmation = manualConfirmation(),
+      observer = await createOwnedChildObserver(f.ctx, {
+        ...f.options,
+        settlement: { confirmMs: 1, schedule: confirmation.schedule },
+      })
+    observer.expectInput("own")
+    const settled: unknown[] = []
+    const waiting = observer.waitForOutcome().then((result) => {
+      settled.push(result)
+      return result
+    })
+    await f.run({ message: "first", text: "waiting on my test run", inbox: "own", background: [shell("sh_1")] })
+    await confirmation.fire()
+    expect(settled).toEqual([])
+    expect(observer.outcome().status).toBe("pending")
+
+    // when: the shell ends, but its notice never starts a run
+    f.emitRaw({ type: "shell.exited", data: { id: "sh_1", status: "exited", exit: 0 } })
+    await settleStream()
+    const armedAfterExit = confirmation.armed()
+    await confirmation.fire()
+
+    // then
+    expect(armedAfterExit).toBe(1)
+    expect(await waiting).toMatchObject({ status: "completed", text: "waiting on my test run" })
+    expect(settled).toHaveLength(1)
+    await observer.dispose()
+  })
+
+  test("#when the held answer's confirmation runs while the wake notice is queued #then it stays held for the wake run", async () => {
+    const f = fixture(),
+      confirmation = manualConfirmation(),
+      observer = await createOwnedChildObserver(f.ctx, {
+        ...f.options,
+        settlement: { confirmMs: 1, schedule: confirmation.schedule },
+      })
+    observer.expectInput("own")
+    const waiting = observer.waitForOutcome()
+    await f.run({ message: "first", text: "waiting", inbox: "own", background: [shell("sh_1")] })
+
+    // when: the shell ends and its notice is queued before the confirmation runs
+    f.emitRaw({ type: "shell.exited", data: { id: "sh_1", status: "exited", exit: 0 } })
+    f.emit("session.inbox.enqueued", { inboxID: "notice" })
+    await settleStream()
+    await confirmation.fire()
+
+    // then: the answer is held until the wake run settles the turn
+    expect(observer.outcome().status).toBe("pending")
+    await f.run({ message: "second", text: "tests passed", inbox: "notice", background: [] })
+    expect(await waiting).toMatchObject({ status: "completed", text: "tests passed" })
+    await observer.dispose()
+  })
+
   test("#when a run fails with nothing of its own pending #then the error settles at once", async () => {
     const f = fixture(),
       confirmation = manualConfirmation(),
