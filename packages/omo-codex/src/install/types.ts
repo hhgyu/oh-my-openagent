@@ -78,6 +78,7 @@ export interface CodexInstallOptions {
   readonly binDir?: string
   readonly repoRoot?: string
   readonly projectDirectory?: string
+  readonly homeDirectory?: string
   readonly platform?: CodexInstallPlatform
   readonly env?: { readonly [key: string]: string | undefined }
   readonly gitBashResolver?: GitBashResolver

@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test"
 import { lstat, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { repairNearestProjectLocalCodexArtifacts } from "./codex-project-local-cleanup"
 
 describe("codex project-local cleanup", () => {
@@ -164,6 +164,7 @@ describe("codex project-local cleanup", () => {
     const result = await repairNearestProjectLocalCodexArtifacts({
       startDirectory: projectDirectory,
       codexHome,
+      homeDirectory: dirname(homeRoot),
     })
 
     // then
@@ -227,6 +228,29 @@ describe("codex project-local cleanup", () => {
       configs: [],
       artifacts: [],
     })
+  })
+
+  test("#given the user's default ~/.codex above the project and CODEX_HOME elsewhere #when repairing #then the default global home is not project state", async () => {
+    // given
+    const root = await mkdtemp(join(tmpdir(), "omo-codex-project-default-home-"))
+    const homeDirectory = join(root, "home")
+    const defaultGlobalConfigPath = join(homeDirectory, ".codex", "config.toml")
+    const projectDirectory = join(homeDirectory, "scratch", "app")
+    await mkdir(projectDirectory, { recursive: true })
+    await mkdir(join(homeDirectory, ".codex"), { recursive: true })
+    await writeFile(defaultGlobalConfigPath, ["[agents]", "max_threads = 99", ""].join("\n"))
+
+    // when
+    const result = await repairNearestProjectLocalCodexArtifacts({
+      startDirectory: projectDirectory,
+      codexHome: join(root, "isolated-codex-home"),
+      homeDirectory,
+    })
+
+    // then
+    expect(result.configPath).toBeNull()
+    expect(result.changed).toBe(false)
+    expect(await readFile(defaultGlobalConfigPath, "utf8")).toContain("max_threads = 99")
   })
 })
 

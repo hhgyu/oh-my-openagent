@@ -11,10 +11,11 @@ import { spawn, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { createHash } from "node:crypto"
 import { homedir, tmpdir } from "node:os"
-import { delimiter, dirname, join, resolve } from "node:path"
+import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createSandbox, seedSandbox } from "./drive.mjs"
 import { isolatedChildEnv } from "./sandbox-child-env.mjs"
+import { resolveSenpiBin } from "./senpi-bin-resolution.mjs"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const mockProviderEntry = join(scriptDir, "task-e2e-mock-provider.ts")
@@ -31,16 +32,7 @@ function fail(message) {
   throw new Error(message)
 }
 
-function findOnPath(bin) {
-  if (bin.includes("/")) return existsSync(bin) ? bin : null
-  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-    const candidate = resolve(dir || ".", bin)
-    if (existsSync(candidate)) return candidate
-  }
-  return null
-}
-
-const senpiBin = process.env.SENPI_BIN ?? findOnPath("senpi")
+const senpiBin = resolveSenpiBin()
 if (senpiBin === null) fail("senpi binary not found (set SENPI_BIN)")
 
 const ISOLATION_EXCLUDE = new Set([
@@ -110,8 +102,11 @@ function runSenpi(sandbox, { prompt, env = {}, args = [], cwd }) {
     env: baseEnv(sandbox, env),
     encoding: "utf8",
     timeout: 120_000,
+    windowsHide: true,
   })
-  return { status: run.status, stdout: run.stdout ?? "", stderr: run.stderr ?? "" }
+  const spawnError = run.error === undefined ? "" : `\n[spawn error] ${run.error.message}`
+  const signal = run.signal === null ? "" : `\n[signal] ${run.signal}`
+  return { status: run.status, stdout: run.stdout ?? "", stderr: `${run.stderr ?? ""}${spawnError}${signal}` }
 }
 
 function waitFor(predicate, { timeoutMs = 90_000, intervalMs = 500, description } = {}) {

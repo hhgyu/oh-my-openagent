@@ -1,4 +1,5 @@
 import { copyFile, lstat, readFile, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { escapeRegExp, findTomlSection, removeSetting } from "./toml-section-editor"
 
@@ -34,12 +35,17 @@ export interface ProjectLocalCodexCleanupResult {
 export async function repairNearestProjectLocalCodexArtifacts(input: {
   readonly startDirectory?: string
   readonly codexHome?: string
+  readonly homeDirectory?: string
   readonly now?: () => Date
 }): Promise<ProjectLocalCodexCleanupResult> {
   if (input.startDirectory === undefined) {
     return emptyProjectLocalCodexCleanupResult()
   }
-  const project = await findProjectLocalCodexConfigs(input.startDirectory, input.codexHome)
+  const project = await findProjectLocalCodexConfigs(
+    input.startDirectory,
+    input.codexHome,
+    input.homeDirectory ?? homedir(),
+  )
   if (project === null) {
     return emptyProjectLocalCodexCleanupResult()
   }
@@ -136,6 +142,7 @@ export function repairProjectLocalCodexConfigText(config: string): {
 async function findProjectLocalCodexConfigs(
   startDirectory: string,
   codexHome: string | undefined,
+  homeDirectory: string,
 ): Promise<{
   readonly projectRoot: string
   readonly configPaths: readonly string[]
@@ -149,12 +156,16 @@ async function findProjectLocalCodexConfigs(
   }
 
   const codexHomeConfigPath = codexHome === undefined ? null : join(resolve(codexHome), "config.toml")
+  const userHome = resolve(homeDirectory)
   let current = resolve(startDirectory)
   const configPathsFromCwd: string[] = []
   while (true) {
+    // $HOME/.codex is the default global Codex home even when CODEX_HOME points elsewhere, and a
+    // project under $HOME cannot own a .codex above it, so $HOME is the ceiling of the walk.
+    const atUserHome = isSamePath(current, userHome)
     const configPath = join(current, ".codex", "config.toml")
-    if (await isRegularProjectLocalConfig(current, configPath)) {
-      if (codexHomeConfigPath === null || resolve(configPath) !== codexHomeConfigPath) {
+    if (!atUserHome && (await isRegularProjectLocalConfig(current, configPath))) {
+      if (codexHomeConfigPath === null || !isSamePath(configPath, codexHomeConfigPath)) {
         configPathsFromCwd.push(configPath)
       }
     }
@@ -170,7 +181,7 @@ async function findProjectLocalCodexConfigs(
     }
 
     const parent = dirname(current)
-    if (parent === current) {
+    if (parent === current || atUserHome) {
       const nearestConfigPath = configPathsFromCwd[0]
       return nearestConfigPath === undefined
         ? null
@@ -182,6 +193,14 @@ async function findProjectLocalCodexConfigs(
     }
     current = parent
   }
+}
+
+function isSamePath(left: string, right: string): boolean {
+  const normalizedLeft = resolve(left)
+  const normalizedRight = resolve(right)
+  return process.platform === "win32"
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight
 }
 
 async function isRegularProjectLocalConfig(directory: string, configPath: string): Promise<boolean> {

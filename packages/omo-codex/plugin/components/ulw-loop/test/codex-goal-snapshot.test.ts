@@ -1,6 +1,7 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	CodexGoalSnapshotError,
@@ -103,10 +104,10 @@ describe("readCodexGoalSnapshotInput", () => {
 
 	it("reads from sample fixture path", async () => {
 		// given
-		const filePath = new URL("./fixtures/codex-goal-snapshot.json", import.meta.url);
+		const filePath = fileURLToPath(new URL("./fixtures/codex-goal-snapshot.json", import.meta.url));
 
 		// when
-		const snapshot = await readCodexGoalSnapshotInput(filePath.pathname);
+		const snapshot = await readCodexGoalSnapshotInput(filePath);
 
 		// then
 		expect(snapshot?.available).toBe(true);

@@ -140,8 +140,15 @@ function attemptOnce(lockPath: string, options: StateLockOptions, now: number, l
 		return { kind: "wait" };
 	} catch (error) {
 		if (hasCode(error, "EINTR")) return { kind: "wait" };
+		if (isWindowsDeletePending(error)) return { kind: "wait" };
 		throw error;
 	}
+}
+// Windows reports a lock file that another process is unlinking as EPERM/EACCES until the last
+// handle closes. That is contention, not a permission failure: back off and retry. A permission
+// error that persists past the deadline still surfaces, because lockTimeout rereads the lock.
+function isWindowsDeletePending(error: unknown): boolean {
+	return process.platform === "win32" && (hasCode(error, "EPERM") || hasCode(error, "EACCES"));
 }
 function writeRecord(holder: Holder): void {
 	const buf = Buffer.from(JSON.stringify(holder.record));

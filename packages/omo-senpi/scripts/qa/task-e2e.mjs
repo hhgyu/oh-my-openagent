@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { basename, delimiter, dirname, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { createSandbox, digestDirectory, seedSandbox } from "./drive.mjs"
 import {
@@ -35,6 +35,7 @@ import {
 import { isAlive, killTree } from "./task-e2e-process.mjs"
 import { runTaskResumeScenarios } from "./task-resume-e2e.mjs"
 import { isolatedChildEnv, sandboxStateDir } from "./sandbox-child-env.mjs"
+import { resolveSenpiBin } from "./senpi-bin-resolution.mjs"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const mockProviderEntry = join(scriptDir, "task-e2e-mock-provider.ts")
@@ -43,15 +44,6 @@ const OMO_CONFIG = {
   categories: {
     mockcat: { description: "Local mock category pinned to the mock provider.", model: "omo-mock/mock-1" },
   },
-}
-
-function findOnPath(bin) {
-  if (bin.includes("/")) return existsSync(bin) ? bin : null
-  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-    const candidate = resolve(dir || ".", bin)
-    if (existsSync(candidate)) return candidate
-  }
-  return null
 }
 
 function seedScenario(script, { withMarker } = {}) {
@@ -217,7 +209,7 @@ async function main() {
   const beforeDigest = digestDirectory(realSenpiAgentDir)
   const beforeSnapshot = snapshotDir(realSenpiAgentDir)
   const providedAgentDir = process.env.SENPI_CODING_AGENT_DIR ? "IGNORED" : "unset"
-  const senpiBin = findOnPath(process.env.SENPI_BIN?.trim() || "senpi")
+  const senpiBin = resolveSenpiBin()
   if (senpiBin === null) {
     console.log(JSON.stringify({ result: "SKIP", reason: "senpi-binary-unavailable", providedAgentDir }))
     return
@@ -272,11 +264,15 @@ async function main() {
     mainSignatures: capture.mainSignatures,
     mainEventSummary: capture.mainEventSummary,
     mainExit: capture.main?.followupExit,
+    mainFirstExit: capture.main?.firstExit,
+    mainFirstSignal: capture.main?.firstSignal,
+    mainFollowupSignal: capture.main?.followupSignal,
     batchTaskIds: capture.batchTaskIds,
   }
   const receipt = evidenceReceipt(payload)
   writeEvidenceMaybe(outDir, receipt)
   console.log(JSON.stringify(receipt))
+  if (result !== "PASS") process.exitCode = 1
 }
 
 function evidenceReceipt(payload) {
@@ -294,6 +290,9 @@ function evidenceReceipt(payload) {
     mainSignatures: payload.mainSignatures,
     mainEventSummary: payload.mainEventSummary,
     mainExit: payload.mainExit,
+    mainFirstExit: payload.mainFirstExit,
+    mainFirstSignal: payload.mainFirstSignal,
+    mainFollowupSignal: payload.mainFollowupSignal,
     batchTaskCount: payload.batchTaskIds?.length ?? 0,
   }
 }
