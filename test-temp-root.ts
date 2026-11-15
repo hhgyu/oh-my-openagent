@@ -3,6 +3,7 @@ import { type ChildProcess, spawn } from "node:child_process"
 import { mkdtempSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
+import { pinBunRuntimeTranspilerCache, TEST_TRANSPILER_CACHE_DIRNAME } from "./test-support/bun-transpiler-cache"
 import { removeTestRootBestEffort, skippedTestRoots } from "./test-support/held-test-root.mjs"
 import reportOnlyPrefixesByOwner from "./test-temp-leak-report-only.json"
 import { isOsCreatedTempEntry, reportOnlyOwner as ownerIn } from "./test-temp-leak-match"
@@ -69,6 +70,8 @@ export function removeAbandonedRunRoots(
 }
 
 const osTempDir = tmpdir()
+// Pinned before TMPDIR moves into the run root below, so the cache outlives the run and is shared by its processes.
+pinBunRuntimeTranspilerCache(process.env, osTempDir)
 const tempEnvironment = ["TMPDIR", "TEMP", "TMP"].map((name) => [name, process.env[name]] as const)
 removeAbandonedRunRoots(osTempDir)
 const runRoot = mkdtempSync(join(osTempDir, RUN_ROOT_PREFIX))
@@ -79,7 +82,14 @@ for (const name of ["TMPDIR", "TEMP", "TMP"] as const) process.env[name] = runRo
 // the plugin logger's file (LOG_FILENAME in shared/plugin-identity.ts) and the module compile cache that
 // Node children enable under os.tmpdir(), and jiti's transpile cache. No test owns them; they are
 // removed with the root.
-const infrastructureEntries = new Set<string>([OWNER_PID_FILE, "oh-my-opencode.log", "node-compile-cache", "jiti"])
+// A nested run started with its own env and this root as its temp dir pins its transpiler cache here.
+const infrastructureEntries = new Set<string>([
+  OWNER_PID_FILE,
+  "oh-my-opencode.log",
+  "node-compile-cache",
+  "jiti",
+  TEST_TRANSPILER_CACHE_DIRNAME,
+])
 
 // A directory that lives for the whole process (a module-level fixture shared by every test file the
 // process runs) has no test or file to own its removal; it goes here and leaves with the root.

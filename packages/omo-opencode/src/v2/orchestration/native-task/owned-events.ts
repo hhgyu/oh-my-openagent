@@ -127,11 +127,17 @@ export function createOwnedEventProjection(
     if (!recordID) throw new ChildObservationUncertain("missing-projection-identity")
     const projection = createHash("sha256").update(`${taskId}\0${epoch}\0${recordID}`).digest("hex")
     assertOwned()
+    const path = join(stateDir, "logs", `${taskId}.jsonl`)
+    // The display pump re-projects every frame every tick. A frame this projection already saw in an
+    // unchanged own log is still there (the log only grows, and any write moves its signature), so it
+    // is answered without creating and deleting the record lock file on every tick.
+    if (persisted.has(projection) && cachedSignature !== undefined && existsSync(path)) {
+      if (signature(path) === cachedSignature) return
+    }
     // Lock+scan reconciles an append whose checkpoint acknowledgement was lost. The projection
     // ID lives IN the own-log frame: no cross-SQLite/JSONL atomicity is claimed.
     withTaskRecordLock(join(stateDir, "tasks", `${taskId}.json`), () => {
       assertOwned()
-      const path = join(stateDir, "logs", `${taskId}.jsonl`)
       if (existsSync(path)) {
         const observed = signature(path)
         if (cachedSignature !== observed) {
