@@ -66,8 +66,14 @@ describe("environment preflight [ADP-3]", () => {
 
   test("an engine that answers engine.hello on the fake backend passes the stdio probe", () => {
     withDir((dir) => {
-      const engine = join(dir, "engine")
-      writeFileSync(engine, `#!/bin/sh\nread line\necho '{"jsonrpc":"2.0","id":1,"result":{}}'\n`)
+      const reply = `{"jsonrpc":"2.0","id":1,"result":{}}`
+      const engine = join(dir, process.platform === "win32" ? "engine.cmd" : "engine")
+      writeFileSync(
+        engine,
+        process.platform === "win32"
+          ? `@echo off\r\nset /p line=\r\necho ${reply}\r\n`
+          : `#!/bin/sh\nread line\necho '${reply}'\n`,
+      )
       chmodSync(engine, 0o755)
       const { environment } = run(dir, engine)
       expect(environment.checks.find((check) => check.name === "engine-stdio")?.ok).toBe(true)
