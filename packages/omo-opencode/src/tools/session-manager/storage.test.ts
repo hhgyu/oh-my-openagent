@@ -5,7 +5,11 @@ import { tmpdir } from "node:os"
 import { randomUUID } from "node:crypto"
 import { unsafeTestValue } from "../../../../../test-support/unsafe-test-value"
 
-const TEST_DIR = join(tmpdir(), `omo-test-session-manager-${randomUUID()}`)
+// mock.restore() does not undo mock.module(), so the mocked shared opencode-storage-paths below keep
+// pointing here for every later test file in this process, and their writers (compaction markers,
+// injected messages) recreate it after this file's cleanup. The directory therefore lives in the
+// process-scoped temp dir, which is removed with the run root.
+const TEST_DIR = join(process.env.OMO_TEST_PROCESS_TMPDIR ?? tmpdir(), `omo-test-session-manager-${randomUUID()}`)
 const TEST_MESSAGE_STORAGE = join(TEST_DIR, "message")
 const TEST_PART_STORAGE = join(TEST_DIR, "part")
 const TEST_SESSION_STORAGE = join(TEST_DIR, "session")

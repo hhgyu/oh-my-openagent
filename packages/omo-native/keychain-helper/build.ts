@@ -1,4 +1,5 @@
-import { mkdir } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 export const KEYCHAIN_HELPER_IDENTIFIER = "com.mengmota.omo-keychain-helper"
@@ -50,9 +51,21 @@ function keychainHelperCompileArgs(build: KeychainHelperBuild): string[] {
 export async function buildKeychainHelper(build: KeychainHelperBuild): Promise<void> {
   if (process.platform !== "darwin") throw new Error("The keychain helper builds on macOS only.")
   await mkdir(dirname(build.output), { recursive: true })
-  const compiler = Bun.spawn(["clang", ...keychainHelperCompileArgs(build)], { stdout: "pipe", stderr: "pipe" })
-  const [stderr, exitCode] = await Promise.all([new Response(compiler.stderr).text(), compiler.exited])
-  if (exitCode !== 0) throw new Error(`clang failed (${exitCode}) building the keychain helper:\n${stderr}`)
+  // A universal (multi -arch) compile-and-link leaves its per-arch objects and per-arch link outputs
+  // (main-XXXXXX, buffer-XXXXXX, ...) in $TMPDIR after clang exits. The build owns a scratch TMPDIR for
+  // clang and removes it, so no caller's temp dir collects them.
+  const scratch = await mkdtemp(join(tmpdir(), "omo-keychain-clang-"))
+  try {
+    const compiler = Bun.spawn(["clang", ...keychainHelperCompileArgs(build)], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, TMPDIR: scratch },
+    })
+    const [stderr, exitCode] = await Promise.all([new Response(compiler.stderr).text(), compiler.exited])
+    if (exitCode !== 0) throw new Error(`clang failed (${exitCode}) building the keychain helper:\n${stderr}`)
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
 }
 
 function parseCli(argv: readonly string[]): KeychainHelperBuild {
