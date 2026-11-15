@@ -260,45 +260,59 @@ const TABLE_DOCS: Readonly<Record<Surface, readonly [constName: string, doc: str
 
 const tsKey = (name: string): string => (/^\w+$/.test(name) ? name : JSON.stringify(name))
 
+// The JS/TS regions are emitted in the repository's `bun fmt` style (bunfig.toml [fmt]: 2-space indent, no
+// semicolons, printWidth 120), so a formatted file and a regenerated file are the same bytes.
+const PRINT_WIDTH = 120
+const INDENT = "  "
+
+function jsArrayStatement(indent: string, lead: string, items: readonly string[]): string {
+  const quoted = items.map((item) => JSON.stringify(item))
+  const oneLine = `${indent}${lead}[${quoted.join(", ")}]`
+  if (oneLine.length <= PRINT_WIDTH) return `${oneLine}\n`
+  return `${indent}${lead}[\n${quoted.map((item) => `${indent}${INDENT}${item},\n`).join("")}${indent}]\n`
+}
+
 function renderProtocolCall(current: string, tables: Record<Surface, [string, Tier, string][]>): string {
   const body = (Object.keys(TABLE_DOCS) as Surface[])
     .map((surface) => {
       const [constName, doc] = TABLE_DOCS[surface]
-      const rows = tables[surface].map(([method, tier, source]) => `\t${tsKey(method)}: "${tier}", // ${source}\n`)
-      return `/** ${doc} */\nexport const ${constName}: MethodPolicies = {\n${rows.join("")}};\n`
+      const rows = tables[surface].map(
+        ([method, tier, source]) => `${INDENT}${tsKey(method)}: "${tier}", // ${source}\n`,
+      )
+      return `/** ${doc} */\nexport const ${constName}: MethodPolicies = {\n${rows.join("")}}\n`
     })
     .join("\n")
   return replaceRegion(current, protocolCallPath, body, "//", "")
 }
 
 function renderPreludeIndex(current: string): string {
-  const rows = chainMethodUnion().map((method) => `\t"${method}",\n`)
-  const body = `const METHOD_ALLOWLIST: readonly string[] = [\n${rows.join("")}];\n`
+  const body = jsArrayStatement("", "const METHOD_ALLOWLIST: readonly string[] = ", chainMethodUnion())
   return replaceRegion(current, "src/index.ts", body, "//", "")
 }
 
 function renderProtocolAllowlistTest(current: string): string {
-  const rows = chainMethodUnion().map((method) => `\t"${method}",\n`)
-  const body = `const CHAIN_METHOD_SNAPSHOT = [\n${rows.join("")}];\n`
+  const body = jsArrayStatement("", "const CHAIN_METHOD_SNAPSHOT = ", chainMethodUnion())
   return replaceRegion(current, protocolAllowlistTestPath, body, "//", "")
 }
 
 function renderHelperNames(current: string): string {
-  const list = (names: readonly string[]): string =>
-    `[${[...new Set(names)]
-      .sort()
-      .map((n) => JSON.stringify(n))
-      .join(", ")}]`
+  const list = (lead: string, names: readonly string[]): string =>
+    jsArrayStatement("", `export const ${lead}: readonly string[] = `, [...new Set(names)].sort())
   const body =
-    `export const CHAIN_METHODS: readonly string[] = ${list(chainMethodUnion())};\n` +
-    `export const ACTION_HELPERS: readonly string[] = ${list(ACTION_HELPERS)};\n` +
-    `export const COMPOSED_HELPERS: readonly string[] = ${list(COMPOSED_HELPERS.map((c) => c.helper))};\n`
+    list("CHAIN_METHODS", chainMethodUnion()) +
+    list("ACTION_HELPERS", ACTION_HELPERS) +
+    list(
+      "COMPOSED_HELPERS",
+      COMPOSED_HELPERS.map((c) => c.helper),
+    )
   return replaceRegion(current, helperNamesPath, body, "//", "")
 }
 
-const jsList = (methods: readonly string[]): string => `[${methods.map((method) => JSON.stringify(method)).join(", ")}]`
 const pyTuple = (methods: readonly string[]): string =>
   `(${methods.map((method) => JSON.stringify(method)).join(", ")}${methods.length === 1 ? "," : ""})`
+
+// src/prelude.js is a published, sha256-pinned asset outside the `bun fmt` scope, so it keeps its tab style.
+const jsList = (methods: readonly string[]): string => `[${methods.map((method) => JSON.stringify(method)).join(", ")}]`
 
 function renderPreludeJs(current: string): string {
   const body = (["desktop", "display", "window", "element"] as const)
