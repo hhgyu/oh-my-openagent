@@ -2,16 +2,22 @@ import {
   buildLiveStatsTokens,
   recoveryPresentation,
   excerptRendererText,
-  formatStatusTarget,
-  formatTargetWithModel,
+  formatTaskElapsed,
+  isSuspendedTask,
+  isTerminalStatus,
   normalizeRendererText,
   rendererVisibleWidth,
   selectLiveActivityVerb,
+  selectLiveTaskRecords,
   taskIdentityLabel,
+  taskRecordStatusTarget,
+  taskStatusDescription,
+  taskStatusLabel,
   type TaskRecord,
   type TaskRunStats,
-  type TaskStatus,
 } from "@oh-my-opencode/senpi-task"
+
+export { taskStatusDescription }
 
 const MAX_WIDGET_ROWS = 5
 const WIDGET_LINE_MAX = 70
@@ -27,45 +33,15 @@ const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 // A parked child is not working, so its row gets a still mark instead of a spinner frame.
 const SUSPENDED_MARK = "‖"
 
-const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set(["completed", "error", "cancelled", "interrupted", "lost"])
-
-export function isTerminal(status: TaskStatus): boolean {
-  return TERMINAL_STATUSES.has(status)
-}
-
-/**
- * Whether a live child is parked rather than running here. The side panel's rule: a host that gave
- * up records `suspension_reason`, while an ordinary suspension (the parent session ended or
- * restarted) shows up only as a residency other than `resident`. Only a child that has not
- * finished can be parked; a finished child is `evicted` or `disposed` and keeps its own status.
- */
-export function isSuspended(record: TaskRecord): boolean {
-  return !isTerminal(record.status) && recoveryPresentation(record) !== undefined
-}
-
-function statusLabel(record: TaskRecord): string {
-  return recoveryPresentation(record)?.state ?? normalizeRendererText(record.status)
-}
+export const isTerminal = isTerminalStatus
+export const isSuspended = isSuspendedTask
+const statusLabel = taskStatusLabel
+const recordStatusTarget = taskRecordStatusTarget
 
 function optionalRendererText(value: string | undefined): string | undefined {
   if (value === undefined) return undefined
   const normalized = normalizeRendererText(value)
   return normalized.length === 0 ? undefined : normalized
-}
-
-// One target for every row shape: the shared status-line grammar (`category:<n>(<model>:<effort>)`
-// | `agent:<n>(<model>:<effort>)`), so agent-routed rows read exactly like category-routed rows.
-function recordStatusTarget(record: TaskRecord): string {
-  return (
-    formatStatusTarget({
-      category: record.category,
-      agentType: record.agent_type,
-      resolvedModel: record.resolved_model,
-      effectiveModel: record.effective_model,
-      model: record.model,
-      fallbackCount: record.fallback_attempts?.length,
-    }) ?? "task"
-  )
 }
 
 function progressHead(record: TaskRecord): string | undefined {
@@ -91,12 +67,9 @@ export function formatTaskRow(record: TaskRecord): string {
   return parts.join(" ")
 }
 
-// The live widget shows work that is still running or parked. A finished child leaves it even when
-// its handle stays resident (a team member waiting for mail): `/tasks` lists it and `task_send`
-// revives it, and a revived child is non-terminal again, so its row returns (#12159).
-function selectWidgetRecords(records: readonly TaskRecord[]): TaskRecord[] {
-  return records.filter((record) => !isTerminal(record.status))
-}
+// A finished child leaves the live widget even when its handle stays resident (a team member waiting
+// for mail): `/tasks` lists it and `task_send` revives it, so its row returns (#12159).
+const selectWidgetRecords = selectLiveTaskRecords
 
 export function buildWidgetRows(records: readonly TaskRecord[]): string[] {
   const selected = selectWidgetRecords(records)
@@ -140,7 +113,7 @@ function formatLiveBackgroundRow(
   const still = suspended || record.status === "paused"
   // A parked child shows no running time: the record has no park timestamp (`updated_at` moves with
   // every revival attempt), and a climbing timer is what made the row look alive.
-  const elapsed = still ? undefined : formatElapsed(record.created_at, now)
+  const elapsed = still ? undefined : formatTaskElapsed(record.created_at, now)
   const frame = still
     ? SUSPENDED_MARK
     : (SPINNER_FRAMES[Math.floor(now / LIVE_STATUS_REFRESH_MS) % SPINNER_FRAMES.length] ?? SPINNER_FRAMES[0])
@@ -186,25 +159,8 @@ function formatLiveBackgroundRow(
   return excerptRendererText(`${frame} ${identity} · ${contextText}`, maxWidth)
 }
 
-export function taskStatusDescription(record: TaskRecord): string {
-  return (
-    optionalRendererText(record.task_summary) ??
-    optionalRendererText(record.description) ??
-    optionalRendererText(record.name) ??
-    normalizeRendererText(record.task_id)
-  )
-}
-
 function liveTaskIdentity(record: TaskRecord): string {
   return taskStatusDescription(record)
-}
-
-function formatElapsed(createdAt: string, now: number): string {
-  const startedAt = Date.parse(createdAt)
-  const elapsedSeconds = Number.isFinite(startedAt) ? Math.max(0, Math.floor((now - startedAt) / 1_000)) : 0
-  const minutes = Math.floor(elapsedSeconds / 60)
-  const seconds = elapsedSeconds % 60
-  return minutes === 0 ? `${seconds}s` : `${minutes}m ${seconds}s`
 }
 
 export function backgroundWidgetRows(

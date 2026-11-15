@@ -2209,6 +2209,7 @@
     "packages/senpi-task/src/store/state-dir.ts",
     "packages/senpi-task/src/store/storable-record.ts",
     "packages/senpi-task/src/task-summary.ts",
+    "packages/senpi-task/src/task-widget.ts",
     "packages/senpi-task/src/team/errors.ts",
     "packages/senpi-task/src/team/index.ts",
     "packages/senpi-task/src/team/liveness-ownership.ts",
