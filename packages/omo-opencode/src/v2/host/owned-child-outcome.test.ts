@@ -124,8 +124,9 @@ test("first-token progress preserves completion but cannot replace or escape the
   )
   expect(projectOwnedChildOutcome(partial).status).not.toBe("completed")
   const unmatched = structuredClone(observed)
-  defined(events(unmatched).find((record) => record.event.type === "session.step.first-token")).event.data
-    .assistantMessageID = "foreign-step"
+  defined(
+    events(unmatched).find((record) => record.event.type === "session.step.first-token"),
+  ).event.data.assistantMessageID = "foreign-step"
   expect(projectOwnedChildOutcome(unmatched).status).toBe("uncertain")
   const unknown = structuredClone(observed)
   defined(events(unknown).find((record) => record.event.type === "session.step.first-token")).event.type =
