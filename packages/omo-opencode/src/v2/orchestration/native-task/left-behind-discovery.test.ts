@@ -61,6 +61,32 @@ describe("#given the task state a previous OpenCode process left in a project", 
     expect(parents[0]?.tasks).toHaveLength(2)
   })
 
+  test("#when the host was upgraded #then a fenced child whose end was never reported is found whatever its status", () => {
+    // given
+    const directory = project()
+    const fenced = (extra: Record<string, unknown>) => ({
+      owned_session: { sessionID: "child", hostVersion: "2.2.6" },
+      notify_on_terminal: true,
+      notification: { run_epoch: 1, notified_epoch: -1 },
+      host_pid: 4242,
+      ...extra,
+    })
+    const reported = { run_epoch: 1, notified_epoch: 1 }
+    const current = { sessionID: "c", hostVersion: "2.3.0" }
+    record(directory, "ses_root", "st_interrupted", fenced({ status: "interrupted" }))
+    record(directory, "ses_root", "st_reported", fenced({ status: "completed", notification: reported }))
+    record(directory, "ses_root", "st_cancelled", fenced({ status: "cancelled" }))
+    record(directory, "ses_root", "st_current", fenced({ status: "completed", owned_session: current }))
+
+    // when
+    const upgraded = discoverLeftBehindParents(directory, 4242, "2.3.0")
+    const unversioned = discoverLeftBehindParents(directory, 4242)
+
+    // then
+    expect(upgraded).toEqual([{ sessionID: "ses_root", depth: 1, tasks: ["st_interrupted"] }])
+    expect(unversioned).toEqual([])
+  })
+
   test("#when the project has no task state #then nothing is found", () => {
     expect(discoverLeftBehindParents(project())).toEqual([])
   })

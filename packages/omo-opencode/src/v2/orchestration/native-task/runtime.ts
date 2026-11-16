@@ -41,6 +41,7 @@ import { createOwnedTaskRecovery, assertRecoverableOwnedRecord, assertOwnedTreeR
 import { createOwnedTaskLifecyclePort } from "./owned-lifecycle"
 import type { OwnedTaskControl } from "./owned-handle"
 import { readOwnedTaskOutput } from "./task-output"
+import { upgradeLostReason, upgradeNoticeDue } from "./upgrade-fence"
 import { createOwnedAncestry, ownedAncestorPath } from "./ancestry"
 import { createParentBindings, type VerifiedParentBinding } from "./parent-binding"
 import { createAcceptedOperationRegistry, createAcceptedOperationLifetime } from "./accepted-operation"
@@ -1116,40 +1117,58 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     }
     /** A retained child is fenced to the host version it was created under: its session cannot be resumed by
      * another host release (host/session-backend.ts). Rather than leave it unreadable and re-refused on every
-     * call, settle it once as lost with the reason, tell its parent once, and keep it readable (D-042). */
+     * call, settle it once as lost with the reason, tell its parent once, and keep it readable (D-042).
+     * A fenced child that already ended under the old host but whose end never reached the parent gets the
+     * same single notice; the delivered epoch on its record is what makes the notice once-only. */
     async function settleUpgradedChild(record: TaskRecord): Promise<boolean> {
       const ref = record.owned_session
       if (!ref || ref.hostVersion === ctx.app.version) return false
-      if (record.status !== "running" && record.status !== "pending" && record.status !== "paused") return true
-      const reason = `OpenCode was upgraded from ${ref.hostVersion} to ${ctx.app.version}; this child session is fenced to its original host version and cannot be resumed`
-      const digest = createHash("sha256")
-        .update(`task-host-upgrade:${record.parent_session_id}:${record.task_id}:${record.notification.run_epoch}`)
-        .digest("hex")
-      // The notice id is derived from the task and its run, so a retry after a failed store write is deduplicated by the host.
-      await ctx.session.synthetic(
-        {
-          sessionID: record.parent_session_id as Parameters<typeof ctx.session.synthetic>[0]["sessionID"],
-          id: `msg_omo_upgrade_${digest.slice(0, 40)}`,
-          text: `Task ${record.task_id} ended as lost: ${reason}. Its output so far stays readable with task_output.`,
-          delivery: "steer",
-          resume: true,
-          metadata: { omoTaskHostUpgrade: record.task_id },
-        },
-        { signal: options.parent.signal },
-      )
+      const due = upgradeNoticeDue(record, ctx.app.version)
+      if (!due) return true
+      const epoch = record.notification.run_epoch
+      // A source the completion journal still holds is delivered by its owner, not by a second notice.
+      const journaled =
+        due === "terminal" &&
+        completionJournal?.findBySource({
+          taskId: record.task_id,
+          nativeEpoch: epoch,
+          parentSessionId: record.parent_session_id,
+          rootSessionId: record.root_session_id,
+          createdAt: record.created_at,
+        })
+      if (journaled && journaled.phase !== "definitively_failed") return true
+      const reason = upgradeLostReason(ref.hostVersion, ctx.app.version)
+      if (due !== "noticed") {
+        const digest = createHash("sha256")
+          .update(`task-host-upgrade:${record.parent_session_id}:${record.task_id}:${epoch}`)
+          .digest("hex")
+        const text =
+          due === "active"
+            ? `Task ${record.task_id} ended as lost: ${reason}. Its output so far stays readable with task_output.`
+            : `Task ${record.task_id} ended as ${record.status} under OpenCode ${ref.hostVersion}, and that was not reported before the upgrade to ${ctx.app.version}. Its output stays readable with task_output.`
+        // The notice id is derived from the task and its run, so a retry after a failed store write is deduplicated by the host.
+        await ctx.session.synthetic(
+          {
+            sessionID: record.parent_session_id as Parameters<typeof ctx.session.synthetic>[0]["sessionID"],
+            id: `msg_omo_upgrade_${digest.slice(0, 40)}`,
+            text,
+            delivery: "steer",
+            resume: true,
+            metadata: { omoTaskHostUpgrade: record.task_id },
+          },
+          { signal: options.parent.signal },
+        )
+      }
       let applied = false
       baseStore.mutate(record.task_id, (fresh) => {
-        if (
-          fresh.owned_session?.journalKey !== ref.journalKey ||
-          fresh.notification.run_epoch !== record.notification.run_epoch
-        )
-          return fresh
-        const result = markRecordLostForReconciliation(fresh, {
-          timestamp: new Date().toISOString(),
-          error_message: reason,
-        })
-        applied = result.applied
-        return result.record
+        if (fresh.owned_session?.journalKey !== ref.journalKey || fresh.notification.run_epoch !== epoch) return fresh
+        const settled =
+          due === "active"
+            ? markRecordLostForReconciliation(fresh, { timestamp: new Date().toISOString(), error_message: reason })
+            : { applied: false, record: fresh }
+        applied = settled.applied
+        const notified = Math.max(epoch, fresh.notification.notified_epoch)
+        return { ...settled.record, notification: { ...settled.record.notification, notified_epoch: notified } }
       })
       if (applied) baseStore.appendEvent(record.task_id, { type: "reconcile_lost", payload: { reason } })
       return true
@@ -1810,15 +1829,18 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
      * receipt, no re-admission): owned by this runtime, or released by its previous runtime and still
      * exactly that released child. A row merely parked by a shutdown, or stranded by a dead host,
      * answers false; such a row is restored only through restoreAfterReload. */
-    function operationTaskOwned(binding: VerifiedParentBinding, id: string): boolean {
+    const operationTaskInScope = (binding: VerifiedParentBinding, id: string): boolean => {
       const parent = bindings.info(binding)
       const row = manager.get(id)
-      if (
-        !row ||
-        row.root_session_id !== parentID ||
-        (row.parent_session_id !== parent.lease.sessionID && row.root_session_id !== parent.lease.sessionID)
+      return (
+        row !== undefined &&
+        row.root_session_id === parentID &&
+        (row.parent_session_id === parent.lease.sessionID || row.root_session_id === parent.lease.sessionID)
       )
-        return false
+    }
+    function operationTaskOwned(binding: VerifiedParentBinding, id: string): boolean {
+      const row = manager.get(id)
+      if (!row || !operationTaskInScope(binding, id)) return false
       if (owns(row)) return true
       const receipt =
         row.child_session_id && !controls.has(id) && !manager.getResidentHandle(id) ? releaseReceipt(id) : undefined
@@ -2132,6 +2154,11 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
           },
           capture: (id) => captureOperationTask(binding, id),
           owned: (id) => operationTaskOwned(binding, id),
+          inScope: (id) => operationTaskInScope(binding, id),
+          upgradeNoticeDue: (id) => {
+            const row = manager.get(id)
+            return row !== undefined && upgradeNoticeDue(row, ctx.app.version) !== undefined
+          },
           resolve,
           captureSendFormattingScope() {
             // Issued only while the original send is still in its authorized frame.

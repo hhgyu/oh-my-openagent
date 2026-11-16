@@ -317,7 +317,7 @@ describe("#given an owned child mid-turn when an in-process reload leaves its ge
 })
 
 describe("#given two finished children a reload parked, one of which the lead revives through task_send", () => {
-  test("#when the lead's task_output lists its tasks #then the revived child is listed and readable and the still-parked sibling no longer fails the listing", async () => {
+  test("#when the lead's task_output lists its tasks #then the revived child is listed and readable and the still-parked sibling is listed read-only without being captured", async () => {
     await withGuard(async (before) => {
       await withGuard(async (after) => {
         await withOwnedRuntimeUnit(async (runtime, state) => {
@@ -353,7 +353,7 @@ describe("#given two finished children a reload parked, one of which the lead re
           })
 
           // then
-          expect(read.listed).toEqual([revived.task_id])
+          expect(read.listed.toSorted()).toEqual([revived.task_id, sibling.task_id].toSorted())
           expect(read.record?.status).toBe("completed")
           expect(read.record?.notification.run_epoch).toBe(1)
           expect(reloaded.get(sibling.task_id)?.residency_state).toBe("persisted_only")

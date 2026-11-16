@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { nativeTaskStateDir } from "./state-dir"
+import { upgradeNoticeDue } from "./upgrade-fence"
 
 const LEFT_BEHIND_STATUSES = new Set(["running", "pending", "paused"])
 const TASK_FILE = /^(st_[0-9a-z]+)\.json$/
@@ -29,13 +30,49 @@ function ownedOnDisk(record: unknown): boolean {
   )
 }
 
+function fencedOnDisk(record: unknown, hostVersion: string): boolean {
+  const notification = field(record, "notification"),
+    runEpoch = field(notification, "run_epoch"),
+    notifiedEpoch = field(notification, "notified_epoch"),
+    failedEpoch = field(notification, "notification_failed_epoch"),
+    fencedTo = field(field(record, "owned_session"), "hostVersion"),
+    status = field(record, "status"),
+    error = field(record, "error_message")
+  if (
+    typeof runEpoch !== "number" ||
+    typeof notifiedEpoch !== "number" ||
+    typeof fencedTo !== "string" ||
+    typeof status !== "string"
+  )
+    return false
+  const facts = {
+    status,
+    killed: field(record, "killed") === true,
+    notify_on_terminal: field(record, "notify_on_terminal") === true,
+    ...(typeof error === "string" && { error_message: error }),
+    notification: {
+      run_epoch: runEpoch,
+      notified_epoch: notifiedEpoch,
+      ...(typeof failedEpoch === "number" && { notification_failed_epoch: failedEpoch }),
+    },
+    owned_session: { hostVersion: fencedTo },
+  }
+  return upgradeNoticeDue(facts, hostVersion) !== undefined
+}
+
 /** Native revives a session's suspended children at `session_start` (`revival-selection.ts`). This finds
  * the sessions that need it after an OpenCode restart: an owned child still running, pending or paused
  * that a previous host either parked (persisted only) or left resident under another process. Every
  * record must live in the state directory its own root session hashes to, so a record cannot name a
  * parent whose storage lives elsewhere. Whether the old host is really gone, and whether the child may
- * be revived, is decided by the restore itself. Never scans when the project directory is $HOME. */
-export function discoverLeftBehindParents(projectDirectory: string, hostPid = process.pid): LeftBehindParent[] {
+ * be revived, is decided by the restore itself. Never scans when the project directory is $HOME.
+ * Given the current host version, a child an upgrade fenced before its parent heard how it ended is found
+ * too, whatever its status, so its parent gets that one notice at startup (D-042). */
+export function discoverLeftBehindParents(
+  projectDirectory: string,
+  hostPid = process.pid,
+  hostVersion?: string,
+): LeftBehindParent[] {
   if (resolve(projectDirectory) === resolve(homedir())) return []
   const root = join(projectDirectory, ".omo", "tasks", "opencode-v2")
   if (!existsSync(root)) return []
@@ -61,17 +98,17 @@ export function discoverLeftBehindParents(projectDirectory: string, hostPid = pr
       if (
         field(record, "task_id") !== id ||
         !ownedOnDisk(record) ||
-        field(record, "killed") === true ||
-        !LEFT_BEHIND_STATUSES.has(String(field(record, "status"))) ||
         typeof parent !== "string" ||
         typeof rootSession !== "string" ||
         typeof depth !== "number" ||
         nativeTaskStateDir(projectDirectory, rootSession) !== stateDir
       )
         continue
+      const fenced = hostVersion !== undefined && fencedOnDisk(record, hostVersion)
+      const live = field(record, "killed") !== true && LEFT_BEHIND_STATUSES.has(String(field(record, "status")))
       const leftBehind =
         residency === "persisted_only" || (residency === "resident" && field(record, "host_pid") !== hostPid)
-      if (!leftBehind) continue
+      if (!fenced && !(live && leftBehind)) continue
       const known = parents.get(parent) ?? { depth, tasks: [] }
       known.depth = Math.min(known.depth, depth)
       known.tasks.push(id)

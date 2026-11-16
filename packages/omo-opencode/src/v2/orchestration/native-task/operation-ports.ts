@@ -43,6 +43,10 @@ export interface NativeOperationAccess {
   capture(id: string): AcceptedTaskProof
   /** Whether `capture` would admit `id` for this call, read without capturing it (no receipt). */
   owned(id: string): boolean
+  /** Whether `id` is a row of the original parent's scope at all, owned or only stored. */
+  inScope(id: string): boolean
+  /** Whether a host upgrade fenced `id` before its parent was told how it ended (D-042). */
+  upgradeNoticeDue(id: string): boolean
   resolve(input: string, options?: { readonly storedSendRefusal: true }): NativeOperationResolution
   captureSendFormattingScope(): () => ReturnType<SendManager["list"]>
   assertParentPark(id: string, epoch: number, continuation?: boolean): void
@@ -118,14 +122,15 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
     // An original late not-found formatter may read only its captured bounded scope.
     if (!lifetime.diagnostics().live) return [...receipts.values()].map((proof) => ({ record: proof.read() }))
     current()
-    // Only rows this call can capture are listed. A sibling the previous generation parked (or a dead
-    // host stranded) is a stored row this runtime does not own until restoreAfterReload or a revive
-    // re-admits it; capturing it here failed every listing verb (task_output by name) of the parent.
+    // Rows this call can capture are listed with a receipt. A sibling the previous generation parked,
+    // a dead host stranded or a host upgrade fenced is a stored row this runtime does not own; capturing
+    // it would fail every listing verb, so it is listed as a plain read-only snapshot without a receipt.
+    // task_output only reads, so such a row stays readable by id and by name and is named in not-found hints.
     return manager
       .list(scope)
-      .filter((item) => access.owned(item.record.task_id))
+      .filter((item) => access.owned(item.record.task_id) || access.inScope(item.record.task_id))
       .map((item) => {
-        accept(item.record.task_id)
+        if (access.owned(item.record.task_id)) accept(item.record.task_id)
         return item
       })
   }
@@ -374,7 +379,8 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
         held: { readonly taskID: string; readonly runEpoch: number; readonly reason: string }[] = []
       for (const { record } of manager.list({ scope: "parent-session", session_id: access.parentSessionID })) {
         const id = record.task_id
-        if (!LEFT_BEHIND_STATUSES.has(record.status) || record.runner_kind !== "owned-session") continue
+        if (record.runner_kind !== "owned-session") continue
+        if (!LEFT_BEHIND_STATUSES.has(record.status) && !access.upgradeNoticeDue(id)) continue
         if (receipts.has(id) || access.owned(id)) continue
         try {
           if (await lifetime.track(access.restoreAfterReload(id))) restored.push(id)
