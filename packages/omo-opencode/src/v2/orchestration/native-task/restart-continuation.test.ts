@@ -452,6 +452,78 @@ describe("#given an owned child whose final run ends while a reload parks it", (
   })
 })
 
+describe("#given an owned child whose run an in-process reload left going and which then ended on its own", () => {
+  test("#when the next generation restores it #then the task settles once with that run's answer and no continuation is sent", async () => {
+    await withGuard(async (before) => {
+      await withGuard(async (after) => {
+        await withOwnedRuntimeUnit(async (runtime, state) => {
+          // given: the park sees the run open, the host keeps it going and it ends after the park
+          const started = await runtime.start({ category: "qa", prompt: "block-until-interrupt" })
+          if (started.kind !== "started") throw Error(JSON.stringify(started))
+          await until(() => state.hostActive(), "child turn running")
+          const childID = String(runtime.get(started.task_id)?.child_session_id)
+          state.keepRunsAcrossPark()
+          const reloaded = await state.reopen({
+            childToolGuard: after,
+            authorizeRecovery: async (spec) => recoveryApproved(spec),
+          })
+          const parked = reloaded.get(started.task_id)
+          state.finishFrame(childID)
+
+          // when
+          const restored = await restoreThroughOperation(reloaded, started.task_id)
+          const settled = await reloaded.wait(started.task_id, AbortSignal.timeout(5000))
+
+          // then
+          expect(parked?.status).toBe("running")
+          expect(parked?.residency_state).toBe("persisted_only")
+          expect(restored).toBe(true)
+          expect(inputs(state.calls)).toEqual([])
+          expect(settled.status).toBe("completed")
+          expect(settled.final_response).toBe("after managed inputs")
+          expect(settled.observation_uncertain).toBeUndefined()
+        }, guarded(before))
+      })
+    })
+  })
+})
+
+describe("#given an owned child whose final run a reload parked and which ran again before it was restored", () => {
+  test("#when the next generation restores it #then the task settles with the latest run's answer", async () => {
+    await withGuard(async (before) => {
+      await withGuard(async (after) => {
+        await withOwnedRuntimeUnit(async (runtime, state) => {
+          // given: the final run ends inside the park's teardown, then a run starts and ends with no observer
+          const started = await runtime.start({ category: "qa", prompt: "block-until-interrupt" })
+          if (started.kind !== "started") throw Error(JSON.stringify(started))
+          await until(() => state.hostActive(), "child turn running")
+          const childID = String(runtime.get(started.task_id)?.child_session_id)
+          state.hostShutdownOrdering()
+          const reopening = state.reopen({
+            childToolGuard: after,
+            authorizeRecovery: async (spec) => recoveryApproved(spec),
+          })
+          await until(() => state.calls.includes("host-wait"), "shutdown park waits for the step")
+          state.finishFrame(childID)
+          state.endTeardown()
+          const reloaded = await reopening
+          state.hostRun(childID, "latest answer between observers")
+
+          // when
+          const restored = await restoreThroughOperation(reloaded, started.task_id)
+          const settled = await reloaded.wait(started.task_id, AbortSignal.timeout(5000))
+
+          // then
+          expect(restored).toBe(true)
+          expect(inputs(state.calls)).toEqual([])
+          expect(settled.status).toBe("completed")
+          expect(settled.final_response).toBe("latest answer between observers")
+        }, guarded(before))
+      })
+    })
+  })
+})
+
 describe("#given owned children started with different label sources", () => {
   test("#when each child is staged and a running one is restored after a reload #then every title write carries the Native task label with its id", async () => {
     await withGuard(async (before) => {

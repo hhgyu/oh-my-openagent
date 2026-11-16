@@ -114,6 +114,11 @@ interface NotificationRecoveryScope extends NotificationRecoveryOrigin {
 const HOST_RESTART_CONTINUATION =
   "Your previous turn was interrupted by a host process restart. Resume your task from its current state and finish it - do not restart from scratch, and do not repeat work already recorded in this session."
 
+/** Senpi leaves an unwritten terminal to the session's next revival. OpenCode 2 revives only at the
+ * next location boot, so a terminal write that fails in-process (a record lock held past its wait) is
+ * re-offered after each delay, about 15 s in total, before the waiters get the persistence error. */
+const TERMINAL_WRITE_RETRY_DELAYS_MS: readonly number[] = [250, 1_000, 2_000, 4_000, 8_000]
+
 export interface NativeTaskNotificationBasis {
   readonly callAuthority: ToolCallAuthority
   readonly rootToken: IssuedToolCall
@@ -1425,6 +1430,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         cwd: ctx.location.directory,
         store,
         config,
+        terminalWriteRetry: { delaysMs: TERMINAL_WRITE_RETRY_DELAYS_MS },
         planner: planner.plan,
         runnerPort: {
           resolve: (mode) => (mode === "in-process" ? runner.runner : undefined),

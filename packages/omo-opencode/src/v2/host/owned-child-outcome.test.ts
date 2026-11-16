@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { projectOwnedChildOutcome, retainedTurnCutOff, retainedTurnOutcome } from "./owned-child-outcome"
+import {
+  ownedBackgroundAfterLastStart,
+  projectOwnedChildOutcome,
+  retainedTurnCutOff,
+  retainedTurnCutReason,
+  retainedTurnOutcome,
+} from "./owned-child-outcome"
 import type { ObservationRecord, ObservationSnapshot, SafeChildEvent } from "./owned-child-observation-types"
 
 function defined<T>(value: T): NonNullable<T> {
@@ -838,6 +844,43 @@ describe("#given the records a previous observer retained for a turn", () => {
     ]
     expect(retainedTurnCutOff(withIdle(1))).toBe(true)
     expect(retainedTurnCutOff(withIdle(0))).toBe(false)
+  })
+  test("#when the turn was cut off #then the reason tells an open run apart from an interrupted, held or undelivered one", () => {
+    const records = fixture().records
+    const at = records.findIndex(terminal)
+    const interrupted = structuredClone(records)
+    const end = interrupted[at]
+    if (end?.kind !== "host") throw Error("fixture has no execution terminal")
+    end.event.type = "session.execution.interrupted"
+    expect(retainedTurnCutReason(records.slice(0, at))).toBe("open")
+    expect(retainedTurnCutReason(interrupted)).toBe("interrupted")
+    expect(
+      retainedTurnCutReason([
+        ...records.slice(0, at),
+        { kind: "idle", id: "idle-1", owned: 1, descendant: 0 },
+        ...records.slice(at),
+      ]),
+    ).toBe("held-for-background")
+    expect(retainedTurnCutReason([{ kind: "input", id: "input:msg_pending", inboxID: "msg_pending" }])).toBe(
+      "undelivered-input",
+    )
+    expect(retainedTurnCutReason(records)).toBeUndefined()
+  })
+  test("#when the host ran idle after the last start #then only the child's own background work counts as waiting", () => {
+    const records = fixture().records
+    const idle = (owned: number, descendant = 0): ObservationRecord => ({
+      kind: "idle",
+      id: `idle-${owned}`,
+      owned,
+      descendant,
+    })
+    const firstStart = records.findIndex(
+      (record) => record.kind === "host" && record.event.type === "session.execution.started",
+    )
+    expect(ownedBackgroundAfterLastStart([...records, idle(1)])).toBe(true)
+    expect(ownedBackgroundAfterLastStart([...records, idle(0, 2)])).toBe(false)
+    expect(ownedBackgroundAfterLastStart([idle(1), ...records.slice(firstStart)])).toBe(false)
+    expect(ownedBackgroundAfterLastStart(records)).toBe(false)
   })
 })
 

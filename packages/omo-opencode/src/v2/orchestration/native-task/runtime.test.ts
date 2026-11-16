@@ -68,6 +68,8 @@ async function fixture(
       holdInputAck(): void
       releaseInputAck(): void
       finishFrame(sessionID: string): void
+      keepRunsAcrossPark(): void
+      hostRun(sessionID: string, text: string): void
       emit(type: string, sessionID: string, data?: object): void
       stateDir: string
       session(sessionID: string): unknown
@@ -136,6 +138,22 @@ async function fixture(
     teardownHeld = new Set<string>(),
     teardownWaiters = new Set<() => void>()
   const blocked = new Set<string>()
+  // OpenCode 2.2.6 in-process reload: the park's interrupt does not stop the run, which goes on and ends on its own.
+  let keepRunsAcrossPark = false
+  const transcripts = new Map<string, unknown[]>()
+  const finishedAnswer = (sessionID: string, text: string) =>
+    transcripts.set(sessionID, [
+      ...(transcripts.get(sessionID) ?? []),
+      {
+        id: `msg_transcript_${transcripts.size}_${Date.now()}`,
+        type: "assistant",
+        agent: "build",
+        model: { providerID: "qa", id: "model" },
+        content: [{ type: "text", text }],
+        finish: "stop",
+        time: { created: Date.now(), completed: Date.now() },
+      },
+    ])
   // Sessions the host itself removed (OpenCode removes a removed lead's children with it):
   // every later call names them with the host's own tagged not-found failure.
   const removedByHost = new Set<string>()
@@ -312,6 +330,7 @@ async function fixture(
     async interrupt({ sessionID }: { sessionID: string }) {
       calls.push("interrupt")
       assertPresent(sessionID)
+      if (keepRunsAcrossPark && blocked.has(sessionID)) return { interrupted: false }
       if (blocked.delete(sessionID)) {
         if (shutdownOrdering) {
           deferredInterrupts.push(sessionID)
@@ -367,8 +386,8 @@ async function fixture(
       }
       sessions.delete(input.sessionID)
     },
-    async context() {
-      return {}
+    async context(input?: { sessionID: string }) {
+      return input?.sessionID === undefined ? {} : structuredClone(transcripts.get(input.sessionID) ?? [])
     },
     instructions: {
       entry: {
@@ -561,8 +580,25 @@ async function fixture(
                   text: "after managed inputs",
                 })
                 emit("session.step.ended", sessionID, { assistantMessageID: "assistant-final", finish: "stop" })
+                finishedAnswer(sessionID, "after managed inputs")
                 emit("session.execution.succeeded", sessionID)
                 blocked.delete(sessionID)
+              },
+              keepRunsAcrossPark: () => {
+                keepRunsAcrossPark = true
+              },
+              hostRun(sessionID, text) {
+                const assistantMessageID = `assistant-host-${crypto.randomUUID()}`
+                emit("session.execution.started", sessionID)
+                emit("session.step.started", sessionID, {
+                  assistantMessageID,
+                  model: { providerID: "qa", id: "model" },
+                })
+                emit("session.text.started", sessionID, { assistantMessageID, ordinal: 0 })
+                emit("session.text.ended", sessionID, { assistantMessageID, ordinal: 0, text })
+                emit("session.step.ended", sessionID, { assistantMessageID, finish: "stop" })
+                finishedAnswer(sessionID, text)
+                emit("session.execution.succeeded", sessionID)
               },
               session: (sessionID) => structuredClone(sessions.get(sessionID)),
               changeSession: (sessionID, patch) => {

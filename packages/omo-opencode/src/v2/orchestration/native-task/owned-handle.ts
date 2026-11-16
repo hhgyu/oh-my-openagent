@@ -14,7 +14,8 @@ import type { ChildHandle, createSessionBackend } from "../../host/session-backe
 import type { DurableChildJournal } from "../../host/child-journal"
 import type { OwnedChildObserver } from "../../host/owned-child-observer"
 import type { OwnedChildOutcome } from "../../host/owned-child-observation-types"
-import { retainedTurnCutOff } from "../../host/owned-child-outcome"
+import { ownedBackgroundAfterLastStart, retainedTurnCutReason } from "../../host/owned-child-outcome"
+import { finishedTurnText } from "../../host/owned-child-transcript"
 import { createOwnedEventProjection } from "./owned-events"
 import { createOwnedManagedInput, ownedInputID } from "./managed-input"
 import { createOwnedTurnTicket } from "./owned-turn"
@@ -347,7 +348,8 @@ export async function createOwnedTaskHandle(input: {
     const continuation = restartContinuation
     restartContinuation = undefined
     const restarted = continuation !== undefined && input.recovered === true && !started && current === undefined
-    const continuing = restarted && retainedTurnCutOff(observer.observation().records)
+    const cutReason = restarted ? retainedTurnCutReason(observer.observation().records) : undefined
+    const continuing = cutReason !== undefined
     const retained = restarted && !continuing ? observer.retainedOutcome() : undefined
     // The Native operation has already published this epoch. Only that exact receipt may
     // advance bookkeeping; retained observation/projection/history are deliberately unchanged.
@@ -379,8 +381,31 @@ export async function createOwnedTaskHandle(input: {
     } finally {
       busy = false
     }
-    if (continuing) continueCutTurn(continuation)
+    if (continuing && continuation !== undefined) continueCutTurn(continuation, cutReason === "open")
     else if (retained) settleRetainedTurn(retained)
+  }
+  /** Native `adoptFinishedTurn`: once the host reports the session idle, the final answer its transcript
+   * ends with, unless the child's last observed run ended waiting on background work it owns. */
+  async function hostFinishedAnswer(): Promise<string | undefined> {
+    await backend.wait(child, lifetime.signal)
+    if (ownedBackgroundAfterLastStart(observer.observation().records)) return undefined
+    try {
+      return finishedTurnText(await backend.currentContext(child))
+    } catch {
+      return undefined
+    }
+  }
+  function adoptedOutcome(answer: string): RunnerOutcome {
+    try {
+      assertOwned()
+      flush()
+    } catch (error) {
+      throw ChildObservationUncertain.is(error)
+        ? error
+        : new ChildObservationUncertain("owned-outcome-custody-unavailable")
+    }
+    if (pumpFault) throw pumpFault
+    return { status: "completed", finalResponse: answer }
   }
   /** Native revival of a session whose transcript ends with its final answer (`sessionTailNeedsContinuation`
    * is false): the turn finished before a restart or reload took its observer, so nothing is replayed. Once
@@ -389,10 +414,13 @@ export async function createOwnedTaskHandle(input: {
   function settleRetainedTurn(retained: OwnedChildOutcome): void {
     const observing = observer
     current = (async () => {
-      await backend.wait(child, lifetime.signal)
+      const latest = await hostFinishedAnswer()
       if (observing !== observer) throw new ChildObservationUncertain("owned-turn-replaced")
       if (observing.retainedOutcome()?.terminalEventID !== retained.terminalEventID)
         throw new ChildObservationUncertain("retained-turn-resumed", retained.startEventID)
+      // A run that started and ended between the two observers is recorded by neither; the host
+      // transcript still ends with its answer, which is the turn's latest.
+      if (latest !== undefined) return adoptedOutcome(latest)
       try {
         assertOwned()
         flush()
@@ -411,11 +439,17 @@ export async function createOwnedTaskHandle(input: {
    * run Native just published, observed under its own key from its own input. Its outcome is this
    * handle's outcome; a continuation that cannot be dispatched settles that outcome as uncertain
    * (never replayed), exactly like any unconfirmed owned input. */
-  function continueCutTurn(text: string): void {
+  function continueCutTurn(text: string, adoptFinished: boolean): void {
     const nativeID = `owned-restart-continuation:${spec.taskId}:${epoch}:${randomUUID()}`
     const hostID = ownedInputID(child.locator, nativeID),
       key = `${journalKey}:turn:${epoch}:${randomUUID()}`
-    const work = controlTail.then(async () => {
+    const work = controlTail.then(async (): Promise<string | undefined> => {
+      // The park saw the run open only: the host may have kept it going and finished it (an in-process
+      // reload). A finished answer settles the turn; nothing is replayed.
+      if (adoptFinished) {
+        const answer = await hostFinishedAnswer()
+        if (answer !== undefined) return answer
+      }
       let fresh: OwnedChildObserver | undefined
       try {
         if (!input.openObserver) throw Error("Owned continuation observer port missing")
@@ -481,10 +515,11 @@ export async function createOwnedTaskHandle(input: {
       // The continuation is admitted: a failed retirement of the dead turn's observer cannot undo it.
       observers.delete(prior)
       await Promise.allSettled([priorInput.close(), prior.dispose()])
+      return undefined
     })
     controlTail = work.catch(() => {})
-    admission = work
-    current = work.then(outcome)
+    admission = work.then(() => undefined)
+    current = work.then((answer) => (answer === undefined ? outcome() : adoptedOutcome(answer)))
     void current.catch(() => {})
   }
   /** Native `onSelfResumed` (omo#9069): the child's own run after its turn settled re-opens the task.

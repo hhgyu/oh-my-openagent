@@ -235,6 +235,104 @@ describe("TaskManager outcome guards", () => {
     expect(manager.residentTaskIds()).not.toContain(taskId)
     expect(disk.load(taskId)?.status).toBe("running")
   })
+
+  describe("#given a host that opts into terminal write retries", () => {
+    function retryingManager(failures: number, delaysMs: readonly number[]) {
+      const project = tempProject()
+      const disk = createTaskRecordStore({ project_dir: project })
+      let refused = 0
+      const store: TaskRecordStore = {
+        ...disk,
+        transition: (taskId, transition) => {
+          if (transition.type === "complete" && refused < failures) {
+            refused++
+            throw new Error(`Timed out acquiring task record lock: ${taskId}.json.lock`)
+          }
+          return disk.transition(taskId, transition)
+        },
+      }
+      const scheduled: Array<{ readonly callback: () => void; readonly ms: number }> = []
+      const made = makeManager({
+        project,
+        store,
+        terminalWriteRetry: { delaysMs, schedule: (callback, ms) => void scheduled.push({ callback, ms }) },
+      })
+      return { ...made, disk, scheduled, refusals: () => refused }
+    }
+
+    test("#when the terminal write fails once and the retry lands #then the waiter settles once with the completed record", async () => {
+      // given
+      const { manager, inProcess, disk, scheduled } = retryingManager(1, [50, 100])
+      const started = await manager.start(baseSpec())
+      if (started.kind !== "started") throw new Error("expected started")
+      const taskId = started.task_id
+      const settlements: TaskRecord[] = []
+      void manager.waitFor(taskId).then((record) => settlements.push(record))
+
+      // when
+      inProcess.handles.get(taskId)?.settle({ status: "completed", finalResponse: "done" })
+      await flush()
+      expect(settlements).toHaveLength(0)
+      expect(disk.load(taskId)?.status).toBe("running")
+      scheduled.shift()?.callback()
+      await flush()
+
+      // then
+      expect(settlements).toHaveLength(1)
+      expect(settlements[0]).toMatchObject({ status: "completed", final_response: "done" })
+      expect(disk.load(taskId)?.status).toBe("completed")
+      expect(scheduled).toHaveLength(0)
+    })
+
+    test("#when every retry fails #then the waiter settles once with the persistence error after the last delay", async () => {
+      // given
+      const { manager, inProcess, disk, scheduled, refusals } = retryingManager(10, [50, 100])
+      const started = await manager.start(baseSpec())
+      if (started.kind !== "started") throw new Error("expected started")
+      const taskId = started.task_id
+      const settlements: TaskRecord[] = []
+      void manager.waitFor(taskId).then((record) => settlements.push(record))
+
+      // when
+      inProcess.handles.get(taskId)?.settle({ status: "completed", finalResponse: "done" })
+      await flush()
+      const delays: number[] = []
+      for (let next = scheduled.shift(); next !== undefined; next = scheduled.shift()) {
+        delays.push(next.ms)
+        next.callback()
+        await flush()
+      }
+
+      // then
+      expect(delays).toEqual([50, 100])
+      expect(refusals()).toBe(3)
+      expect(settlements).toHaveLength(1)
+      expect(settlements[0]?.status).toBe("error")
+      expect(settlements[0]?.error_message).toContain("Timed out acquiring task record lock")
+      expect(manager.residentTaskIds()).not.toContain(taskId)
+      expect(disk.load(taskId)?.status).toBe("running")
+    })
+
+    test("#when the run's ownership moves before the retry #then the retry writes nothing", async () => {
+      // given
+      const { manager, inProcess, disk, scheduled, refusals } = retryingManager(1, [50])
+      const started = await manager.start(baseSpec())
+      if (started.kind !== "started") throw new Error("expected started")
+      const taskId = started.task_id
+      inProcess.handles.get(taskId)?.settle({ status: "completed", finalResponse: "done" })
+      await flush()
+
+      // when
+      manager.forget(taskId, { path: "park" })
+      scheduled.shift()?.callback()
+      await flush()
+
+      // then
+      expect(refusals()).toBe(1)
+      expect(disk.load(taskId)?.status).toBe("running")
+      expect(scheduled).toHaveLength(0)
+    })
+  })
 })
 
 describe("TaskManager background intent", () => {
