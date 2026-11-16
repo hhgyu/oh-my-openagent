@@ -92,6 +92,47 @@ test("actual captured completed step returns exact full text, actual model, and 
   expect(result).not.toHaveProperty("observedToolCalls")
   expect(result.tokens).not.toHaveProperty("cacheRead")
 })
+test("first-token progress preserves completion but cannot replace or escape the current step", () => {
+  // given
+  const snapshot = fixture()
+  const start = defined(events(snapshot).find((record) => record.event.type === "session.step.started"))
+  const progress = host(
+    "session.step.first-token",
+    900,
+    { assistantMessageID: start.event.data.assistantMessageID },
+    start.event.sessionID,
+  )
+  const records = [...snapshot.records]
+  records.splice(records.indexOf(start) + 1, 0, progress)
+  const observed = revise({ ...snapshot, records }, () => true)
+  // when
+  const result = projectOwnedChildOutcome(observed)
+  // then
+  expect(result).toMatchObject({ status: "completed", text: "FINAL_SUCCESS_MARKER", observedSteps: 1 })
+  const partial = revise(
+    observed,
+    (record) =>
+      record.kind !== "host" ||
+      [
+        "session.created",
+        "session.inbox.enqueued",
+        "session.execution.started",
+        "session.inbox.delivered",
+        "session.step.started",
+        "session.step.first-token",
+      ].includes(record.event.type),
+  )
+  expect(projectOwnedChildOutcome(partial).status).not.toBe("completed")
+  const unmatched = structuredClone(observed)
+  defined(events(unmatched).find((record) => record.event.type === "session.step.first-token")).event.data
+    .assistantMessageID = "foreign-step"
+  expect(projectOwnedChildOutcome(unmatched).status).toBe("uncertain")
+  const unknown = structuredClone(observed)
+  defined(events(unknown).find((record) => record.event.type === "session.step.first-token")).event.type =
+    "session.step.future-unknown"
+  expect(projectOwnedChildOutcome(unknown)).toMatchObject({ status: "uncertain", reason: "unknown-step-event" })
+})
+
 test("actual same-execution synthetic continuation returns the final step, never concatenated turns", () => {
   const result = projectOwnedChildOutcome(fixture("continuation"))
   expect(result).toMatchObject({
