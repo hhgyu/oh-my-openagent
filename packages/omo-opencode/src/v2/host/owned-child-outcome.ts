@@ -407,6 +407,7 @@ export function projectOwnedChildOutcome(
         }
       } else if (
         ![
+          "session.step.first-token",
           "session.step.streamed",
           "session.text.delta",
           "session.reasoning.started",

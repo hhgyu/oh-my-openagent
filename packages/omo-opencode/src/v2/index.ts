@@ -240,8 +240,8 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
 
 export function setupV2EffectHost(context: EffectPlugin.Context): Effect.Effect<void, never, Scope.Scope> {
   return Effect.gen(function* () {
-    if (context.app.version !== "2.2.6") {
-      return yield* Effect.die(new Error("Effect session transport requires verified OpenCode 2.2.6"))
+    if (!Bun.semver.satisfies(context.app.version, ">=2.2.6")) {
+      return yield* Effect.die(new Error("Effect session transport requires OpenCode >=2.2.6"))
     }
     // Acquire first: component cleanup can still use this API before its owner finalizer joins requests.
     const bridge = yield* acquireEffectSessionBackendApi(context.session)

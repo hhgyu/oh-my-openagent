@@ -93,7 +93,7 @@ function fixture() {
   const retired: string[] = []
   let next = 0
   const port = createKibitzerChildPort({
-    host: { app: { name: "opencode", version: "2.2.6", channel: "stable" } as never, session: api },
+    host: { app: { name: "opencode", version: "2.3.0", channel: "stable" } as never, session: api },
     directory,
     parentSessionId: "root",
     journalPath,

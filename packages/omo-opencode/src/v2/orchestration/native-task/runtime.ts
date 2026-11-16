@@ -204,8 +204,8 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
   const releasedControls = new Map<string, ReleasedControlReceipt>()
   // Set while this runtime parks its own children for a reload/dispose, so their receipts say so.
   const suspendingForShutdown = new AsyncLocalStorage<true>()
-  if (ctx.app.version !== "2.2.6" || !hasJoinedSessionCancellation(ctx.session))
-    throw new Error("Native task binding requires pinned joined Effect host")
+  if (!Bun.semver.satisfies(ctx.app.version, ">=2.2.6") || !hasJoinedSessionCancellation(ctx.session))
+    throw new Error("Native task binding requires OpenCode >=2.2.6 with joined Effect cancellation")
   if (typeof options.captureStartAuthority !== "function")
     throw new Error("Native task runtime requires a start authority producer")
   if (
