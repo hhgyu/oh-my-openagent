@@ -283,11 +283,12 @@ jobs:
         working-directory: packages/lsp-daemon
 
       # Every OS splits the root suite into two parallel jobs (the Windows
-      # shape): shard 1 runs omo-opencode + memory-core in one serial process,
+      # shape): shard 1 runs omo-opencode + memory-core serially on POSIX and
+      # in two concurrent package processes on Windows (sequential within each).
       # shard 2 runs the shared serial quarantine first and then the remainder.
       # `bun test --parallel` is not used on POSIX: --isolate re-runs the heavy
       # preload per file and OOM-kills the 7 GB runners, and --no-isolate leaks
-      # module state between files. Job-level sharding is the parallelism.
+      # module state between files. POSIX overlaps jobs; Windows shard 1 overlaps packages.
       # Linux: memory-core's stranded-git-lock tests read the host process table. On hosted runners
       # same-uid processes of other sessions cannot be inspected, so on Linux memory-core runs in an
       # unprivileged PID namespace, and the step fails loudly when no namespace can be made instead
@@ -335,7 +336,7 @@ jobs:
           & .github/scripts/windows-ci-telemetry.ps1 `
             -ArtifactDirectory $telemetryDirectory `
             -Invocation "shard-1" `
-            -TestArguments @("test", "packages/omo-opencode", "packages/memory-core")
+            -TestArguments @("script/ci-windows-shard-1.ts", $telemetryDirectory)
 
       - name: Run tests
         id: root-tests-posix-2

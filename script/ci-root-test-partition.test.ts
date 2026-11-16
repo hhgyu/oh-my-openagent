@@ -70,6 +70,7 @@ describe("root test CI partition", () => {
     const job = rootTestJob()
 
     expect(job).toContain("bun test --timeout 20000 packages/omo-opencode packages/memory-core")
+    expect(job).toContain('-TestArguments @("script/ci-windows-shard-1.ts", $telemetryDirectory)')
     expect(job).toContain('-TestArguments @("--config=bunfig.win2.parallel.windows.toml", "test", "--parallel")')
     expect(existsSync(win2ConfigPath)).toBe(true)
     expect(existsSync(win2ParallelConfigPath)).toBe(true)
