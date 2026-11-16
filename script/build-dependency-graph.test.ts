@@ -7,6 +7,12 @@ function present<T>(value: T | null | undefined): T {
 }
 
 describe("build dependency graph", () => {
+  test("#given shared and V2 skills write the same tree #when scheduled #then mirroring completes before V2 staging", () => {
+    const v2SkillsNode = BUILD_NODES.find((node) => node.id === "v2-ulw-loop")
+
+    expect(v2SkillsNode?.deps).toContain("shared-skills-assets")
+  })
+
   test("#given Codex and Senpi share plugin dependencies #when scheduled #then Codex installation completes first", () => {
     const senpiNode = BUILD_NODES.find((node) => node.id === "senpi-plugin")
 
