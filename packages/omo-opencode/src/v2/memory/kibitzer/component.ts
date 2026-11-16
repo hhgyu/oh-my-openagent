@@ -130,9 +130,9 @@ interface SessionRecord {
 
 const KIBITZER_MEMORY_SCHEMA = z.toJSONSchema(kibitzerMemoryInput)
 
-/** The production owned-child capability: verified OpenCode 2.2.6 plus the joined Effect session transport. */
+/** The production owned-child capability requires OpenCode >=2.2.6 and the joined Effect session transport. */
 export function kibitzerHostCapable(host: KibitzerHost): boolean {
-  return host.app?.version === "2.2.6" && isBackendSession(host.session)
+  return Bun.semver.satisfies(host.app?.version ?? "", ">=2.2.6") && isBackendSession(host.session)
 }
 
 export function createKibitzerComponent(deps: KibitzerComponentDeps): KibitzerComponent {
