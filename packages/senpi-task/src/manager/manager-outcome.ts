@@ -5,7 +5,7 @@ import type { SuspensionReason, TaskRecord, TaskRunStats, TaskTransition } from 
 import type { TaskRecordStore } from "../store"
 import type { ManagedChildHandle } from "./child-handle"
 import type { HostSessionReplaced } from "../runners/rpc-host/session-client"
-import type { ForgetOptions } from "./types"
+import type { ForgetOptions, TerminalWriteRetry } from "./types"
 import { isModelTurnFailure, terminalFailureFields } from "./model-refusals"
 import { nowIso } from "./manager-helpers"
 import { createProvisionalExitTracker, type ExitConfirmationSchedule } from "./provisional-exit"
@@ -36,6 +36,7 @@ export type OutcomeTrackerPorts = {
     error: ChildObservationUncertain,
   ) => void
   readonly scheduleExitConfirmation?: ExitConfirmationSchedule
+  readonly terminalWriteRetry?: TerminalWriteRetry
   readonly store: TaskRecordStore
   readonly now: () => number
   readonly liveHandle: (taskId: string) => ManagedChildHandle | undefined
@@ -137,26 +138,60 @@ function errnoField(error: unknown, key: "code" | "syscall" | "path"): string | 
   return typeof value === "string" ? value : undefined
 }
 
+function scheduleRetry(callback: () => void, delayMs: number): void {
+  setTimeout(callback, delayMs).unref?.()
+}
+
 export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker {
   const provisional = createProvisionalExitTracker(ports)
   const turns = new Map<string, object>()
+  function retryStillOwned(taskId: string, owned: TaskRecord, handle: ManagedChildHandle | undefined): boolean {
+    if (ports.liveHandle(taskId) !== handle) return false
+    const fresh = ports.tryLoad(taskId)
+    return (
+      fresh !== null &&
+      fresh.notification.run_epoch === owned.notification.run_epoch &&
+      !STOPPED_RUN_TERMINAL.has(fresh.status)
+    )
+  }
   // A terminal outcome is never lost to a persistence fault (#8050). When the store cannot write the
   // terminal record (Windows EPERM on the rename after the store's own retries), the run is still
   // settled: the residency is released through forget() and every waiter receives a synthesized
   // error terminal naming the failure, so waitFor resolves and a DAG node folds as failed/retryable
   // instead of pinning its dependents forever. The on-disk record stays non-terminal by necessity.
-  function persistTerminal(taskId: string, owned: TaskRecord, timestamp: string, transition: TaskTransition): void {
+  // A host that opted into terminal write retries re-offers the same transition after each delay while
+  // the run is still this handle's and non-terminal; the waiters settle once, on the write that lands
+  // or with the persistence error after the last delay.
+  function persistTerminal(
+    taskId: string,
+    owned: TaskRecord,
+    timestamp: string,
+    transition: TaskTransition,
+    attempt = 0,
+    handle = ports.liveHandle(taskId),
+  ): void {
     try {
       ports.store.transition(taskId, transition)
       publishHostTaskStatus(ports.liveHandle(taskId), taskId, ports.tryLoad(taskId)?.status)
     } catch (error) {
       log("senpi-task manager terminal record write failed", {
         taskId,
+        attempt,
         code: errnoField(error, "code"),
         syscall: errnoField(error, "syscall"),
         path: errnoField(error, "path"),
         error: String(error),
       })
+      const retry = ports.terminalWriteRetry
+      const delay = retry?.delaysMs[attempt]
+      if (retry !== undefined && delay !== undefined) {
+        const schedule = retry.schedule ?? scheduleRetry
+        schedule(() => {
+          if (!retryStillOwned(taskId, owned, handle)) return
+          persistTerminal(taskId, owned, timestamp, transition, attempt + 1, handle)
+        }, delay)
+        return
+      }
       ports.forget(taskId, { path: "park" })
       ports.settleWaiters(taskId, {
         ...owned,

@@ -30,6 +30,11 @@ export type { ExecutionMode, ExecutionModeGate } from "./execution-mode"
 
 // The unified spec both runner adapters accept. A superset: the rpc adapter uses the subset it
 // needs (task_id, cwd, state_dir, prompt); the in-process adapter also consumes model/tools/agent.
+export type TerminalWriteRetry = {
+  readonly delaysMs: readonly number[]
+  readonly schedule?: (callback: () => void, delayMs: number) => void
+}
+
 export type ManagedStartSpec = {
   readonly admission?: StartAdmission
   readonly taskId: string
@@ -297,6 +302,10 @@ export type TaskManagerOptions = {
   readonly cwd: string
   readonly now?: () => number
   readonly scheduleExitConfirmation?: ExitConfirmationSchedule
+  // Opt-in for hosts whose terminal record write can fail transiently in-process (a held record lock)
+  // and that have no session revival to settle the task later. Absent, a failed terminal write
+  // settles the waiters with a persistence error at once (#8050), as Senpi always did.
+  readonly terminalWriteRetry?: TerminalWriteRetry
   // Injected by lifecycle (todo 12). Steering-driven cancel delegates destruction here; defaults to
   // a no-op so the manager stays usable before lifecycle wiring lands.
   readonly destruction?: DestructionPort

@@ -36,6 +36,14 @@ const REAP_UNLINK_RETRY_MS = 25
 const DELETE_PENDING = "delete-pending"
 const sleeper = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT))
 
+/** One live holder kept the record lock past the waiter's holder wait: the lock is busy, not broken. */
+export class TaskRecordLockTimeout extends Error {
+  override readonly name = "TaskRecordLockTimeout"
+  static is(error: unknown): error is TaskRecordLockTimeout {
+    return error instanceof TaskRecordLockTimeout
+  }
+}
+
 export function withTaskRecordLock<T>(recordPath: string, operation: () => T, options: TaskRecordLockOptions = {}): T {
   const lockPath = `${recordPath}.lock`
   mkdirSync(dirname(lockPath), { recursive: true })
@@ -106,7 +114,7 @@ function holderWait(lockPath: string, holderWaitMs: number): (holder: string) =>
       return
     }
     if (now - since >= holderWaitMs) {
-      throw new Error(
+      throw new TaskRecordLockTimeout(
         `Timed out acquiring task record lock: ${lockPath} (${describeHolder(holder)} for ${now - since}ms)`,
       )
     }

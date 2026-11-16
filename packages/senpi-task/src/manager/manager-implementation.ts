@@ -405,6 +405,7 @@ class TaskManagerImpl implements TaskManager {
       observationUncertain: (taskId, handle, epoch, error) =>
         this.markObservationUncertain(taskId, error, handle, epoch),
       scheduleExitConfirmation: options.scheduleExitConfirmation,
+      terminalWriteRetry: options.terminalWriteRetry,
       store: options.store,
       settleIsolation: (taskId, merge) => this.#isolation.settle(taskId, merge),
       now: this.#now,

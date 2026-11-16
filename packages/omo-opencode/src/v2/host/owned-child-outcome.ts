@@ -105,13 +105,22 @@ export function ownedChildSessionState(records: readonly ObservationRecord[]): {
  * transcript-tail decision of Native `continueInterruptedTurn` (`sessionTailNeedsContinuation`:
  * an aborted, unanswered or unfinished tail continues) over the owned observation. */
 export function retainedTurnCutOff(records: readonly ObservationRecord[]): boolean {
+  return retainedTurnCutReason(records) !== undefined
+}
+
+/** Why `retainedTurnCutOff` holds. `open` alone (the last observed execution has no terminal and nothing
+ * else cut the turn) is the one case where the host may still have finished the run after the observer
+ * went away: 2.2.6 keeps a run going across an in-process `location/reload`. */
+export function retainedTurnCutReason(
+  records: readonly ObservationRecord[],
+): "open" | "interrupted" | "held-for-background" | "undelivered-input" | undefined {
   let open = false,
     interrupted = false,
     heldForBackground = false
   let pendingIdle: number | undefined
   const undelivered = new Set<string>()
   for (const record of records) {
-    if (record.kind === "stop") return false
+    if (record.kind === "stop") return undefined
     if (record.kind === "input") {
       undelivered.add(record.inboxID)
       continue
@@ -134,7 +143,21 @@ export function retainedTurnCutOff(records: readonly ObservationRecord[]): boole
       pendingIdle = undefined
     }
   }
-  return open || interrupted || heldForBackground || undelivered.size > 0
+  if (undelivered.size > 0) return "undelivered-input"
+  if (interrupted) return "interrupted"
+  if (heldForBackground) return "held-for-background"
+  return open ? "open" : undefined
+}
+
+/** The host ran `experimental.idle` with background work the child itself owns after the last observed
+ * start: the run that start opened ended waiting on that work, so its answer is not the turn's. */
+export function ownedBackgroundAfterLastStart(records: readonly ObservationRecord[]): boolean {
+  const start = records.findLastIndex(
+    (record) => record.kind === "host" && record.event.type === "session.execution.started",
+  )
+  const idle = records.findLastIndex((record) => record.kind === "idle")
+  const last = records[idle]
+  return idle > start && last?.kind === "idle" && last.owned > 0
 }
 
 /** Uncertainty a retained observation gains only when its observer goes away or a later observer binds
