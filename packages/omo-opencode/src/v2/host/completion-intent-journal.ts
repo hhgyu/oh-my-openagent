@@ -135,6 +135,9 @@ export interface CompletionIntentJournalOptions {
   readonly path: string
   /** Fixed trusted project namespace, not a model-supplied receiving location. */
   readonly namespace: string
+  /** Earlier derivations of the SAME trusted namespace (for example one that also hashed the host version).
+   * A journal still stamped with one is re-stamped to `namespace` in place; its intents are kept. */
+  readonly legacyNamespaces?: readonly string[]
   readonly probeOwner?: typeof probeJournalOwner
   /** Trusted deterministic unit port; production omits it and uses real SELF identity. */
   readonly ownerIdentity?: { readonly pid: number; readonly start: string | null }
@@ -229,6 +232,7 @@ export async function openCompletionIntentJournal(
   options: CompletionIntentJournalOptions,
 ): Promise<CompletionIntentJournal> {
   const namespace = text.parse(options.namespace)
+  const legacyNamespaces = new Set((options.legacyNamespaces ?? []).map((value) => text.parse(value)))
   const path = resolveTrustedChildStatePath(options.path)
   const identity = z
     .object({ pid: integer.refine((value) => value > 0), start: text.nullable() })
@@ -259,10 +263,10 @@ export async function openCompletionIntentJournal(
       )
       db.exec("CREATE INDEX IF NOT EXISTS completion_sources_by_intent ON sources(intent_id)")
       if (fresh) db.query("INSERT INTO metadata VALUES ('namespace',?)").run(namespace)
-      if (
-        db.query<{ value: string }, []>("SELECT value FROM metadata WHERE key='namespace'").get()?.value !== namespace
-      )
-        fail("Foreign completion journal namespace")
+      const stored = db.query<{ value: string }, []>("SELECT value FROM metadata WHERE key='namespace'").get()?.value
+      if (stored !== namespace && stored !== undefined && legacyNamespaces.has(stored))
+        db.query("UPDATE metadata SET value=? WHERE key='namespace'").run(namespace)
+      else if (stored !== namespace) fail("Foreign completion journal namespace")
       db.query("INSERT INTO owners VALUES (?,?)").run(owner.token, JSON.stringify(owner))
     }).immediate()
     function active(): void {

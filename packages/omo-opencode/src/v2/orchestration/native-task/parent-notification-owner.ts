@@ -355,13 +355,14 @@ export function createParentNotificationOwner(options: ParentNotificationOwnerOp
       (error instanceof Error ? error.message || error.name : String(error)).slice(0, 4096) || "notification failure"
     )
   }
+  /** The same receiving session in the same project. The host version a row was written under is history,
+   * not identity: an intent queued before a host upgrade still belongs to this receiver (D-042). */
   function stableReceiver(actual: CompletionIntent["receiver"]) {
     return (
       actual.sessionID === receiver.sessionID &&
       actual.rootSessionID === receiver.rootSessionID &&
       actual.backendID === receiver.backendID &&
-      actual.directory === receiver.directory &&
-      actual.hostVersion === receiver.hostVersion
+      actual.directory === receiver.directory
     )
   }
   function write(

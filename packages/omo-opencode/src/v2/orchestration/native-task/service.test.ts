@@ -337,8 +337,9 @@ async function host(dir: string, closers: (() => Promise<void> | void)[]) {
     },
   }
   withJoinedSessionCancellation(api, "controlled-test")
+  const app = { version: "2.2.6" }
   const ctx = {
-    app: { version: "2.2.6" },
+    app,
     location: { directory: dir },
     session: api,
     agent: {
@@ -538,8 +539,9 @@ async function host(dir: string, closers: (() => Promise<void> | void)[]) {
       return service
     },
     /** A plugin reload: the old service closes and a new one starts over the same state with FRESH session scopes. */
-    async reload() {
+    async reload(hostVersion?: string) {
       await service.close()
+      if (hostVersion !== undefined) app.version = hostVersion
       scopes.dispose()
       scopes = createSessionScopes()
       kernel = createToolKernel({
@@ -2238,6 +2240,45 @@ test("root close parks the complete shared tree after stopping foreground borrow
     expect(controller.signal.aborted).toBe(false)
     expect(f.calls.filter((x) => x === "policy-disposed")).toHaveLength(2)
     await expect(f.service.parent(root.caller)).rejects.toThrow("closing")
+  })
+})
+
+test("a host version change keeps the parent task runtime usable and fences only the old child", async () => {
+  await fixture(async (f) => {
+    // given: a parent that ran a task, with its completion journal written under version A
+    const root = f.raw()
+    const old = await f.invoke((api) => api.start({ category: "qa", prompt: "block" }), root)
+    // when: the host reports version B on the next plugin generation
+    await f.reload("2.3.0")
+    const fresh = f.raw("parent")
+    // then: the parent still starts a task and reads the pre-upgrade task
+    const started = await f.invoke(
+      (api) => api.start({ category: "qa", prompt: "block", run_in_background: true }),
+      fresh,
+    )
+    expect(started.task_id).not.toBe(old.task_id)
+    const row = await f.invoke((api) => Promise.resolve(api.get(old.task_id)), fresh)
+    expect(row.task_id).toBe(old.task_id)
+  })
+})
+
+test("a pre-upgrade child ends lost with exactly one parent notice and stays readable", async () => {
+  await fixture(async (f) => {
+    // given: a running child created under version A and a host upgrade to version B
+    const root = f.raw()
+    const old = await f.invoke((api) => api.start({ category: "qa", prompt: "block", run_in_background: true }), root)
+    await f.reload("2.3.0")
+    const fresh = f.raw("parent")
+    // when: the parent recovers it twice
+    await expect(f.invoke((api) => api.recover(old.task_id), fresh)).rejects.toThrow(
+      "fenced to an earlier OpenCode version",
+    )
+    await expect(f.invoke((api) => api.recover(old.task_id), fresh)).rejects.toThrow("not recoverable")
+    // then: one notice, a terminal lost record that is still readable
+    const notices = f.synthetics.filter((x) => JSON.stringify(x.input).includes("omoTaskHostUpgrade"))
+    expect(notices).toHaveLength(1)
+    const row = await f.invoke((api) => Promise.resolve(api.get(old.task_id)), fresh)
+    expect(row.status).toBe("lost")
   })
 })
 
