@@ -556,3 +556,19 @@ Decision: the namespace is derived from the directory only. Version fencing stay
 Other per-parent journals were checked: owned-release, DAG wake and team lead-delivery namespaces hash only the directory and root or lead session, so they were never affected.
 
 Limits: an upgraded in-flight child is ended as lost, not resumed under the new host. A foreign namespace that is not a declared legacy derivation still fails closed.
+
+
+### D-044: keep `parentID` on OmO child sessions; the host's 2.3.0 child report is a known limit until upstream adds an opt-out (2026-11-16)
+
+On OpenCode 2.3.0 the host's `session/execution/subagent-report.ts` posts a `<subagent sessionID=... state=...>` notice into the parent's inbox and wakes the parent after every busy period of any session that has a `parentID`. Its only gate is `child.parentID`; a child without a host `SubagentJob` still reports. OmO creates task children and hidden memory workers with `host.session.create({ parentID })`, so both are treated as host subagents. OpenCode 2.2.6 produced this report only for children of the host `subagent` tool and commands, so it is unaffected.
+
+Measured on 2.3.0 in an isolated sandbox with a mock model: one background OmO task child (waiting on a 40 s background shell) woke its parent three times: a host `state="running"` notice at 0.3 s, a host `state="completed"` notice at 40 s, and the OmO task completion at 40.6 s. A foreground OmO child also got a host notice. A hidden memory worker wakes the user's session on each run. A host `subagent` child reported normally, as intended.
+
+Options considered:
+- Create OmO children without `parentID`. Rejected: child permission and question prompts surface on the parent through it, the host session list nests the child under it, the memory binding's child-versus-user distinction in `v2/memory/binding.ts` depends on it, and reclaim and the identity checks in `session-backend.ts` and `ancestry.ts` read it.
+- Hide the host notice from the model with the `context` hook. Rejected: the message is still stored and shown, and the wake turn (the cost) still happens.
+- No other public 2.3.0 surface exists: `SessionCreateInput` and `SessionUpdateInput` have no flag, and `SessionHooks` has no hook on the report.
+
+Decision: change no product behavior. Keep `parentID` and adopt the upstream opt-out when it ships. Upstream tracks it as anomalyco/opencode #63786 (`reportToParent: false` for plugin-managed child sessions) and #63894 (hidden-agent gate, `metadata["subagent.notify"] === false`). Once either ships, create OmO task children and memory workers with it, keeping 2.2.6 working (the option is ignored there).
+
+Limits: on 2.3.0 the parent receives extra host notices and wakes per OmO child and per memory worker run, in addition to OmO's single task completion notice. OmO's own notice is not dropped and unrelated host messages are not hidden.
