@@ -343,8 +343,8 @@ export function createSessionBackend(
   async function readiness(signal?: AbortSignal) {
     active()
     signal?.throwIfAborted()
-    if (host.app.version !== "2.2.6")
-      throw new SessionBackendError("unavailable", "Child backend requires verified OpenCode 2.2.6")
+    if (!Bun.semver.satisfies(host.app.version, ">=2.2.6"))
+      throw new SessionBackendError("unavailable", "Child backend requires OpenCode >=2.2.6")
     const info = await host.session.get(
       { sessionID: parent.sessionID },
       { signal: signal ? AbortSignal.any([requestSignal(), signal]) : requestSignal() },

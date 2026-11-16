@@ -22,6 +22,7 @@ import {
   type MemoryLogger,
 } from "./config"
 import { createMemoryJournal } from "./journal"
+import { createMemoryBindingReadiness } from "./binding-readiness"
 import { createMemoryProjection } from "./projection"
 import { createRecallCollector, fileRecallStores, type RecallStores } from "./recall"
 import { createRecallDelivery } from "./recall-delivery"
@@ -142,6 +143,7 @@ export async function registerMemoryComponent(
   const now = options.now ?? Date.now
   const metadata = createSessionMetadataStore(context.session)
   let closed = false
+  const bindingReadiness = createMemoryBindingReadiness(logger)
   // The journal is created after the binder it reads; a bind before that has nothing to catch up.
   let onBound: ((bound: BoundMemorySession) => void) | undefined
   const env = options.env ?? process.env
@@ -286,11 +288,19 @@ export async function registerMemoryComponent(
     maintenance.onBound(bound)
     statusRpc.onBound(bound)
     sync?.onBound(bound)
-    void journal
-      .onBound(bound)
-      .then(() => facts?.onBound(bound))
-      .then(() => reflection?.onBound(bound))
-      .then(() => dreams?.onBound(bound))
+    void bindingReadiness
+      .start(bound, async (signal) => {
+        await journal.onBound(bound, signal)
+        if (!signal.aborted) await facts?.onBound(bound, signal)
+      })
+      .then(async (ready) => {
+        if (!ready || closed || !bindingReadiness.current(bound)) return
+        await reflection?.onBound(bound)
+        if (!closed && bindingReadiness.current(bound)) await dreams?.onBound(bound)
+      })
+      .catch((error: unknown) => {
+        logger.warn("memory bound lifecycle skipped", { sessionID: bound.sessionID, error: describeError(error) })
+      })
   }
   let outputEvents: RpcRegistration<typeof memoryCommandRpc>["events"] | undefined
   const commands =
@@ -336,6 +346,7 @@ export async function registerMemoryComponent(
   const cleanup = (): Promise<void> => {
     disposal ??= (async () => {
       closed = true
+      bindingReadiness.close()
       const results = await Promise.allSettled(registrations.map((registration) => registration.dispose()))
       await collector.idle()
       await userTurns.settled()
@@ -377,6 +388,7 @@ export async function registerMemoryComponent(
     if (context.event !== undefined)
       registrations.push(
         userTurns.register(context.event, (sessionID) => {
+          bindingReadiness.forget(sessionID)
           facts?.onDeleted(sessionID)
           binder.forget(sessionID)
         }),
@@ -489,7 +501,8 @@ export async function registerMemoryComponent(
         // Detached: evaluates after this reconcile counted the turn's steps, never blocks the idle edge.
         if (!closed) triggers?.onIdle(value.sessionID)
         if (!closed) dreams?.onIdle(value.sessionID)
-        await facts?.onIdle(value.sessionID)
+        if (facts !== undefined && (await bindingReadiness.wait(value.sessionID)) && !closed)
+          await facts.onIdle(value.sessionID)
       }),
     )
     if (facts !== undefined && factsPersona !== undefined && context.agent !== undefined) {

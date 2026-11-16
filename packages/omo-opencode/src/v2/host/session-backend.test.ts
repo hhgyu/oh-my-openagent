@@ -141,7 +141,7 @@ test("unissued cleanup retry refuses foreign or revised custody before another c
   }
 })
 
-function fixture() {
+function fixture(version = "2.2.6") {
   const scopes = createSessionScopes()
   const parent = scopes.open(sessionID("parent"), { tools: [], authorize: () => {} })
   let active = true
@@ -244,7 +244,7 @@ function fixture() {
   withJoinedSessionCancellation(api, "controlled-test")
   const backend = createSessionBackend(
     {
-      app: { name: "opencode", version: "2.2.6", channel: "stable" },
+      app: { name: "opencode", version, channel: "stable" },
       location: { directory: "/project" },
       session: api,
     },
@@ -267,6 +267,19 @@ function fixture() {
     },
   }
 }
+
+test("newer supported host stages, prompts and closes an owned child", async () => {
+  // given
+  const f = fixture("2.3.0")
+  // when
+  const child = await f.stage()
+  await f.backend.begin(child, { id: "initial", text: "work" })
+  await f.backend.close(child)
+  // then
+  expect(f.events).toEqual(["create", "prompt", "interrupt", "wait", "remove"])
+  expect(f.sessions.has("child")).toBe(false)
+  await f.backend.dispose()
+})
 
 test("prepared prompt witness starts only at the actual host invocation and cannot be reused", async () => {
   const f = fixture(),
