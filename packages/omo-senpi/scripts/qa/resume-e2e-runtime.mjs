@@ -5,12 +5,13 @@
 // under test. kill() is only a backstop for a wedged run. No timing sleeps: every wait polls a
 // condition on the store/session files, and the AGENT-side bash waits block on driver-written
 // sentinel files so the driver alone decides when a run may finish.
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { seedSandbox } from "./drive.mjs"
 import { isolatedChildEnv, sandboxStateDir } from "./sandbox-child-env.mjs"
+import { senpiRunSpawnOptions, senpiTreeKill } from "./senpi-run-spawn.mjs"
 
 export function seedResumeProject(sandbox, omoConfig) {
   seedSandbox(sandbox)
@@ -52,7 +53,7 @@ export function startResumeRun(input) {
       OMO_SENPI_QA: "1",
       ...(input.extraEnv ?? {}),
     },
-    detached: true,
+    ...senpiRunSpawnOptions(),
     stdio: ["ignore", "pipe", "pipe"],
   })
   if (typeof child.pid === "number") input.onPid?.(child.pid)
@@ -87,8 +88,18 @@ export function startResumeRun(input) {
   return { pid: child.pid, completion, kill: () => killGroup(child.pid) }
 }
 
+// A win32 run is not a process-group leader (senpi-run-spawn.mjs), so its tree is taken with taskkill /T.
+export function resumeRunTreeKill(pid, platform = process.platform) {
+  return platform === "win32" ? senpiTreeKill(pid, platform) : undefined
+}
+
 function killGroup(pid) {
   if (typeof pid !== "number") return
+  const treeKill = resumeRunTreeKill(pid)
+  if (treeKill !== undefined) {
+    spawnSync("taskkill", treeKill.args, { stdio: "ignore", windowsHide: true })
+    return
+  }
   try {
     process.kill(-pid, "SIGKILL")
   } catch {

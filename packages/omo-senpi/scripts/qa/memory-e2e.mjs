@@ -1,21 +1,22 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Live end-to-end QA for the omo-senpi memory component (plan todo 37).
 // Drives the REAL senpi binary in an isolated agent dir + OMO_MEMORY_HOME, then asserts:
 //   S1 memory tool commit -> git repo created + commit, next-run system prompt carries the sentinel block
-//   S2 step-count reflection spawns a quick-category child (shimmed SENPI_BIN) and merges a reflection commit
+//   S2 step-count reflection spawns a quick-category child (mock provider registered as a sandbox extension) and merges a reflection commit
 //   S3 /search finds a prior message across sessions
 //   S4 /palace generates a self-contained 0600 HTML with machine-checkable payload
 //   S5 memory.enabled=false leaves the host byte-identical (no tools, no sentinel, no dirs)
 // Real ~/.senpi/agent and ~/.omo/memory are hashed before/after as the isolation proof.
-import { spawn, spawnSync } from "node:child_process"
+import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { createHash } from "node:crypto"
-import { homedir, tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { homedir } from "node:os"
+import { dirname, isAbsolute, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createSandbox, seedSandbox } from "./drive.mjs"
 import { isolatedChildEnv } from "./sandbox-child-env.mjs"
 import { resolveSenpiBin } from "./senpi-bin-resolution.mjs"
+import { withTelemetryOptOut } from "./telemetry-opt-out-env.mjs"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const mockProviderEntry = join(scriptDir, "task-e2e-mock-provider.ts")
@@ -161,12 +162,53 @@ function writeMockScript(sandbox, script, name = "mock-script.json") {
   return path
 }
 
-function memoryRepos(memoryHome) {
-  const agentsDir = join(memoryHome, "agents")
+function identityRepos(agentsDir) {
   if (!existsSync(agentsDir)) return []
   return readdirSync(agentsDir)
     .map((name) => join(agentsDir, name, "repo"))
     .filter(existsSync)
+}
+
+function reflectionCompletionNames(memoryHome) {
+  const agentsDir = join(memoryHome, "agents")
+  const names = new Set()
+  if (!existsSync(agentsDir)) return names
+  for (const agent of readdirSync(agentsDir)) {
+    const completionsDir = join(agentsDir, agent, "runtime", "reflection", "completions")
+    if (!existsSync(completionsDir)) continue
+    for (const name of readdirSync(completionsDir)) names.add(join(completionsDir, name))
+  }
+  return names
+}
+
+function memoryRepos(memoryHome) {
+  return identityRepos(join(memoryHome, "agents"))
+}
+
+// A `senpi -p` run is one-shot, so its identity binds `<memory>/transient-runs/<token>/agents/<id>`
+// until the identity owns a durable `repo/` (#7765). A run that committed memory leaves its repo there.
+function transientRepos(memoryHome) {
+  const runsDir = join(memoryHome, "transient-runs")
+  if (!existsSync(runsDir)) return []
+  return readdirSync(runsDir).flatMap((token) => identityRepos(join(runsDir, token, "agents")))
+}
+
+// The product sweep promotes such a repo into the durable agents root once its run is gone and the
+// tree has been idle for TRANSIENT_RUN_MAX_AGE_MS (a day). The driver runs that same sweep with the
+// age compressed to zero, so the next one-shot run binds the durable identity that now owns memory.
+async function promoteTransientMemory(memoryHome) {
+  // memory-core is TypeScript with extensionless imports that plain node cannot load; bun can.
+  const sweepModule = join(dirname(fileURLToPath(import.meta.url)), "../../../memory-core/src/transient/sweep.ts")
+  const code =
+    "const { sweepTransientMemoryRuns } = await import(process.argv[1]); " +
+    "console.log(JSON.stringify(await sweepTransientMemoryRuns({ memoryRoot: process.argv[2], maxRunAgeMs: 0 })))"
+  const run = spawnSync("bun", ["-e", code, sweepModule, memoryHome], {
+    encoding: "utf8",
+    env: withTelemetryOptOut(process.env),
+    windowsHide: true,
+  })
+  if (run.status !== 0) throw new Error(`transient memory sweep failed: ${run.stderr.slice(-400)}`)
+  return JSON.parse(run.stdout.trim().split("\n").at(-1))
 }
 
 function gitLog(repo) {
@@ -198,11 +240,14 @@ async function scenario1() {
   const first = runSenpi(sandbox, { prompt: "remember that senpi is a pi harness", env: { MOCK_DUMP_SYSTEM: dumpLog } })
   if (first.status !== 0) return record("S1 first senpi run", false, first.stderr.slice(-400))
 
-  const repos = memoryRepos(join(sandbox.root, "memory"))
-  if (repos.length === 0) return record("S1 repo created", false, "no identity repo under OMO_MEMORY_HOME")
-  const log = gitLog(repos[0])
+  const memoryHome = join(sandbox.root, "memory")
+  const oneShotRepos = transientRepos(memoryHome)
+  if (oneShotRepos.length === 0) return record("S1 repo created", false, "no identity repo under the one-shot run root")
+  const log = gitLog(oneShotRepos[0])
   record("S1 commit landed", log.includes("seed harness fact for QA"), log || "<empty git log>")
   record("S1 author is identity", log.includes("@omo.local"), log.split("\n")[0] ?? "")
+  const promotion = await promoteTransientMemory(memoryHome)
+  record("S1 one-shot memory promoted", memoryRepos(memoryHome).length === 1, JSON.stringify(promotion))
 
   writeMockScript(sandbox, {
     parentSteps: [{ type: "text", text: "answer" }],
@@ -216,12 +261,25 @@ async function scenario1() {
   return { sandbox }
 }
 
+// The reflection child is launched by the host with its own launcher; the engine does not carry a
+// SENPI_BIN override into the host environment, so a shim cannot put the mock provider in front of
+// the child. The mock provider is registered as an extension in the sandbox settings instead: the
+// child loads it (its model is only visible with extensions, the `loadExtensions` route) and the
+// run reads its script from the committed `mock-script.json`.
+function registerMockProviderExtension(sandbox) {
+  const settingsPath = join(sandbox.agentDir, "settings.json")
+  const settings = JSON.parse(readFileSync(settingsPath, "utf8"))
+  writeFileSync(
+    settingsPath,
+    `${JSON.stringify({ ...settings, extensions: [mockProviderEntry] }, null, 2)}
+`,
+  )
+}
+
 async function scenario2() {
   const sandbox = scenarioSandbox()
   writeOmoConfig(sandbox, { trigger: { step_count: 1, on_compaction: false } })
-  const shimPath = join(sandbox.root, "senpi-shim")
-  writeFileSync(shimPath, `#!/bin/sh\nexec ${JSON.stringify(senpiBin)} -e ${JSON.stringify(mockProviderEntry)} "$@"\n`)
-  spawnSync("chmod", ["+x", shimPath])
+  registerMockProviderExtension(sandbox)
 
   writeMockScript(sandbox, {
     parentSteps: [
@@ -244,6 +302,7 @@ async function scenario2() {
   if (first.status !== 0) return record("S2 seeding run", false, first.stderr.slice(-400))
 
   const memoryHome = join(sandbox.root, "memory")
+  await promoteTransientMemory(memoryHome)
   const repos = memoryRepos(memoryHome)
   if (repos.length === 0) return record("S2 repo exists", false, "no repo")
   const repo = repos[0]
@@ -274,8 +333,11 @@ async function scenario2() {
   if (scriptCommitResult.status !== 0)
     return record("S2 child script commit", false, scriptCommitResult.stderr?.toString() ?? "")
 
+  // The seeding run already triggered a reflection (step_count 1) before the child script existed; only a
+  // completion written by the triggering run below proves the merge.
+  const seededCompletions = reflectionCompletionNames(memoryHome)
   writeMockScript(sandbox, { parentSteps: [{ type: "text", text: "triggering turn" }], childSteps: [] })
-  const run = runSenpi(sandbox, { prompt: "trigger one reflection", env: { SENPI_BIN: shimPath } })
+  const run = runSenpi(sandbox, { prompt: "trigger one reflection" })
   if (run.status !== 0) {
     console.error("S2 parent stderr:", run.stderr.slice(-1200))
     return record("S2 parent senpi run", false, run.stderr.slice(-400))
@@ -288,7 +350,9 @@ async function scenario2() {
       for (const agent of readdirSync(agentsDir)) {
         const completionsDir = join(agentsDir, agent, "runtime", "reflection", "completions")
         if (!existsSync(completionsDir)) continue
-        const files = readdirSync(completionsDir).filter((name) => name.endsWith(".json"))
+        const files = readdirSync(completionsDir).filter(
+          (name) => name.endsWith(".json") && !seededCompletions.has(join(completionsDir, name)),
+        )
         if (files.length === 0) continue
         const record_ = JSON.parse(readFileSync(join(completionsDir, files[0]), "utf8"))
         return { record: record_, completionsDir }
@@ -356,6 +420,7 @@ async function scenario3And4() {
   })
   const run = runSenpi(sandbox, { prompt: "say the unique phrase" })
   if (run.status !== 0) return record("S3 seeding senpi run", false, run.stderr.slice(-400))
+  await promoteTransientMemory(join(sandbox.root, "memory"))
 
   const bundleModule = await import("../../src/extension/index.ts")
   const { MemoryFakeExtensionAPI } = await import("../../src/components/memory/memory.test-support.ts")
@@ -401,13 +466,20 @@ async function scenario3And4() {
         sessionManager: { getSessionId: () => "palace-session" },
       }),
     )
-    const htmlPathMatch = String(palacePath || palaceOutput).match(/(\/\S+\.html)/)
-    if (htmlPathMatch === null) return record("S4 palace path returned", false, String(palaceOutput).slice(0, 200))
-    const htmlPath = htmlPathMatch[1]
+    const reportedPath = String(palacePath || palaceOutput).trim()
+    if (!isAbsolute(reportedPath) || !reportedPath.endsWith(".html"))
+      return record("S4 palace path returned", false, reportedPath.slice(0, 200))
+    const htmlPath = reportedPath
     if (!existsSync(htmlPath)) return record("S4 palace file exists", false, htmlPath)
     const mode = statSync(htmlPath).mode & 0o777
     const html = readFileSync(htmlPath, "utf8")
-    record("S4 palace file mode 0600", mode === 0o600, String(mode.toString(8)))
+    // NTFS has no POSIX permission bits: stat reports 0666 whatever the writer asked for, so the 0600
+    // contract is only observable on POSIX hosts. Windows records the reported mode as not applicable.
+    record(
+      "S4 palace file mode 0600",
+      process.platform === "win32" ? true : mode === 0o600,
+      process.platform === "win32" ? `not applicable on win32 (NTFS reports ${mode.toString(8)})` : mode.toString(8),
+    )
     const tabValues = new Set([...html.matchAll(/data-tab="([^"]+)"/g)].map((match) => match[1]))
     record(
       "S4 palace tabs",
@@ -435,7 +507,7 @@ async function scenario5() {
   record("S5 no sentinel when disabled", !dump.includes("<!-- senpi-memory:"), dumpLog)
   record(
     "S5 no memory dirs when disabled",
-    memoryRepos(join(sandbox.root, "memory")).length === 0,
+    memoryRepos(join(sandbox.root, "memory")).length === 0 && transientRepos(join(sandbox.root, "memory")).length === 0,
     join(sandbox.root, "memory"),
   )
 }

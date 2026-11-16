@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { isolatedChildEnv, sandboxStateDir } from "./sandbox-child-env.mjs"
+import { senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 import { readRecordsLenient, waitForRecord, waitForRunningRpcChild } from "./task-rpc-record-wait.mjs"
 export { waitForProcessCompletion, waitForRunningRpcChild } from "./task-rpc-record-wait.mjs"
@@ -161,7 +162,7 @@ export function driveSenpiAsync(senpiBin, sandbox, sessionDir, parentSteps, chil
   return spawn(pinnedBun ?? senpiBin, [...(pinnedBun ? [senpiBin] : []), ...childArgv(sessionDir, prompt)], {
     cwd: sandbox.cwd,
     env: childEnv(sandbox, sessionDir, senpiBin),
-    detached: true,
+    ...senpiRunSpawnOptions(),
     stdio: ["ignore", capture ? "pipe" : "ignore", capture ? "pipe" : "ignore"],
   })
 }

@@ -36,6 +36,14 @@ export type ChildExtensionRunner = {
 }
 
 /**
+ * senpi's prompt options the handle sends. `signal` cancels a prompt that is still in the engine's
+ * preflight (waiting on session work or extension hooks): once the turn is admitted, the engine arms
+ * ref'd turn-deadline timers that only that turn's own end disarms, so a turn admitted after the
+ * child was torn down keeps the host process alive.
+ */
+export type ChildPromptOptions = Partial<InputIdentity> & { readonly signal?: AbortSignal }
+
+/**
  * Structural subset of senpi's AgentSession that the handle drives. The default seam returns a
  * live AgentSession; fakes implement only these members. `model` is what the session actually
  * started on, read by the runner's post-start pin check (#9722); fakes may omit it.
@@ -44,7 +52,7 @@ export type ChildSession = RunHoldSession & {
   readonly sessionId: string
   readonly model?: CatalogModelIdentity
   readonly effectiveServiceTier?: string
-  prompt(text: string, options?: InputIdentity): Promise<void>
+  prompt(text: string, options?: ChildPromptOptions): Promise<void>
   steer(text: string, images?: undefined, options?: InputIdentity): Promise<QueuedInputDisposition>
   followUp(text: string, images?: undefined, options?: InputIdentity): Promise<QueuedInputDisposition>
   abort(): Promise<void>
@@ -175,9 +183,10 @@ async function runTurn(
   observation: TurnObservation,
   completion: ChildCompletionPolicy,
   identity: InputIdentity | undefined,
+  signal: AbortSignal,
 ): Promise<RunnerOutcome> {
   try {
-    await session.prompt(text, identity)
+    await session.prompt(text, { ...identity, signal })
   } catch (error) {
     if (isAborted()) return { status: "cancelled" }
     if (error instanceof Error) {
@@ -222,6 +231,11 @@ function createTrackedChildHandle(
   let aborted = false
   let disposal: Promise<void> | undefined
   let turnActive = false
+  let promptCancel = new AbortController()
+  const cancelTurn = (): void => {
+    aborted = true
+    promptCancel.abort()
+  }
   // Seeded for the restored case; createChildHandle's beginTurn replaces it immediately.
   let running: Promise<RunnerOutcome> = Promise.resolve(settledSessionOutcome(session, completion))
   const observation: TurnObservation = {
@@ -245,7 +259,8 @@ function createTrackedChildHandle(
     observation.provider = undefined
     observation.model = undefined
     observation.baseline = session.getLastAssistantText()
-    running = runTurn(session, text, () => aborted, observation, completion, identity)
+    promptCancel = new AbortController()
+    running = runTurn(session, text, () => aborted, observation, completion, identity, promptCancel.signal)
     void running.then(
       () => {
         turnActive = false
@@ -298,7 +313,7 @@ function createTrackedChildHandle(
       beginTurn(text, identity)
     },
     abort: async () => {
-      aborted = true
+      cancelTurn()
       await session.abort()
     },
     subscribe: (listener) => session.subscribe(listener),
@@ -310,6 +325,7 @@ function createTrackedChildHandle(
       const closing = Promise.withResolvers<void>()
       disposal = closing.promise
       try {
+        cancelTurn()
         unsubscribeObserver()
         void shutDownChildSession(session).then(closing.resolve, closing.reject)
       } catch (error) {

@@ -99,7 +99,7 @@ export function plainValue(value: FmValue): unknown {
 
 /** Run git in a fixture repository; returns stdout, throws on failure. */
 export function git(dir: string, args: readonly string[]): string {
-  const r = Bun.spawnSync(["git", "-C", dir, ...args])
+  const r = Bun.spawnSync(["git", "-C", dir, ...args], { windowsHide: true })
   if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr.toString()}`)
   return r.stdout.toString()
 }
