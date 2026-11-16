@@ -544,3 +544,15 @@ Decision: the V2 runtime accepts stable host versions satisfying `>=2.2.6`, usin
 Verification: isolated real OpenCode 2.3.0 with a local mock model proves plugin initialization, OmO agent registration, parent responses, owned foreground child completion, and parent interruption joining the child's aborted model request. Session events are captured over SSE. Real session counts and the user's OpenCode configuration stay unchanged. Local evidence: `.omo/evidence/20261116-opencode-230-compat/`.
 
 Limits: a minimum version is an admission policy, not proof of compatibility with every future release. Prereleases are excluded by the stable semver range. Unknown lifecycle events still fail closed. The live verification covers 2.3.0 on Windows; it does not claim a full feature, provider, platform or TUI matrix.
+
+### D-042: the completion journal namespace does not include the host version (2026-11-16)
+
+Status: accepted.
+
+Context: after the host moved from OpenCode 2.2.6 to 2.3.0, every parent `task` call failed with `Foreign completion journal namespace`. The completion intent journal was opened under a namespace hashed from the project directory AND `ctx.app.version`, and the journal refuses any stored namespace that differs. A version bump therefore turned the same project's own journal into a foreign one. Children that were created under the old version also failed with `Agent not found: "sisyphus-junior"` because the new host no longer resolved the agent for a session fenced to the old version.
+
+Decision: the namespace is derived from the directory only. Version fencing stays where it protects a child (`session-backend.ts` validation and the `ref.hostVersion` checks in ancestry, owned-runner, parent-notification-authority and owned-handle). A journal still stamped with a previous derivation is re-stamped in place (`legacyNamespaces`: `2.2.6`, the current host version, and every host version recorded on a persisted owned session), so queued intents are kept; any other namespace still fails. The parent-notification receiver no longer compares `hostVersion`, because a pre-upgrade queued intent still belongs to the same receiver. A child that is running, pending or paused under an earlier host version is settled once: one deduplicated parent notice (`omoTaskHostUpgrade`), then the record is marked lost and stays readable through `task_output`. It is not resumed.
+
+Other per-parent journals were checked: owned-release, DAG wake and team lead-delivery namespaces hash only the directory and root or lead session, so they were never affected.
+
+Limits: an upgraded in-flight child is ended as lost, not resumed under the new host. A foreign namespace that is not a declared legacy derivation still fails closed.

@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { createHash, randomUUID } from "node:crypto"
 import { getPidLiveness } from "@oh-my-opencode/memory-core/process-identity"
 import { OmoTaskSettingsSchema, type OmoConfig } from "@oh-my-opencode/omo-config-core"
-import type { AgentDefinition, StartResult } from "@oh-my-opencode/senpi-task"
+import { markRecordLostForReconciliation, type AgentDefinition, type StartResult } from "@oh-my-opencode/senpi-task"
 import {
   createTaskManagerImplementation,
   createTaskRecordStore,
@@ -267,14 +267,23 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       path: join(options.stateDir, "owned-observations.sqlite"),
     })
     initializers.push({ close: () => observationStore.close(), done: false })
+    // The namespace names the project and parent only. The host version is fenced per child and per intent
+    // receiver, never here: a host upgrade must not disable the parent's whole task runtime (D-042).
+    const completionNamespace = (...extra: string[]) =>
+      "opencode2:" +
+      createHash("sha256")
+        .update(JSON.stringify([ctx.location.directory, parentID, ...extra]))
+        .digest("hex")
+    // Journals stamped before D-042 also hashed the host version. Only versions this parent could have run
+    // under are candidates: the pinned 2.2.6 of earlier builds, this host, and every version a stored child names.
+    const legacyHostVersions = new Set<string>(["2.2.6", ctx.app.version])
+    for (const { owned_session } of baseStore.list().records)
+      if (owned_session) legacyHostVersions.add(owned_session.hostVersion)
     const completionJournal = options.notification
       ? await openCompletionIntentJournal({
           path: join(options.stateDir, "owned-completions.sqlite"),
-          namespace:
-            "opencode2:" +
-            createHash("sha256")
-              .update(JSON.stringify([ctx.location.directory, parentID, ctx.app.version]))
-              .digest("hex"),
+          namespace: completionNamespace(),
+          legacyNamespaces: [...legacyHostVersions].map((version) => completionNamespace(version)),
         })
       : undefined
     if (completionJournal) initializers.push({ close: () => completionJournal.close(), done: false })
@@ -312,11 +321,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
     const notificationRecoveryRequests = new AsyncLocalStorage<NotificationRecoveryOrigin>()
     const pendingNotificationReattachments = new WeakMap<
       OwnedTaskControl["handle"],
-      {
-        readonly origin: NotificationRecoveryOrigin
-        readonly control: OwnedTaskControl
-        readonly claimed: ChildRecord
-      }
+      { readonly origin: NotificationRecoveryOrigin; readonly control: OwnedTaskControl; readonly claimed: ChildRecord }
     >()
     const notificationBindingFailures: unknown[] = []
     const notificationOriginsByAuthority = new WeakMap<HostStartAuthority, NotificationStartOrigin>()
@@ -1104,9 +1109,51 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         if (recovering.get(record.task_id) === work) recovering.delete(record.task_id)
       }
     }
+    /** A retained child is fenced to the host version it was created under: its session cannot be resumed by
+     * another host release (host/session-backend.ts). Rather than leave it unreadable and re-refused on every
+     * call, settle it once as lost with the reason, tell its parent once, and keep it readable (D-042). */
+    async function settleUpgradedChild(record: TaskRecord): Promise<boolean> {
+      const ref = record.owned_session
+      if (!ref || ref.hostVersion === ctx.app.version) return false
+      if (record.status !== "running" && record.status !== "pending" && record.status !== "paused") return true
+      const reason = `OpenCode was upgraded from ${ref.hostVersion} to ${ctx.app.version}; this child session is fenced to its original host version and cannot be resumed`
+      const digest = createHash("sha256")
+        .update(`task-host-upgrade:${record.parent_session_id}:${record.task_id}:${record.notification.run_epoch}`)
+        .digest("hex")
+      // The notice id is derived from the task and its run, so a retry after a failed store write is deduplicated by the host.
+      await ctx.session.synthetic(
+        {
+          sessionID: record.parent_session_id as Parameters<typeof ctx.session.synthetic>[0]["sessionID"],
+          id: `msg_omo_upgrade_${digest.slice(0, 40)}`,
+          text: `Task ${record.task_id} ended as lost: ${reason}. Its output so far stays readable with task_output.`,
+          delivery: "steer",
+          resume: true,
+          metadata: { omoTaskHostUpgrade: record.task_id },
+        },
+        { signal: options.parent.signal },
+      )
+      let applied = false
+      baseStore.mutate(record.task_id, (fresh) => {
+        if (
+          fresh.owned_session?.journalKey !== ref.journalKey ||
+          fresh.notification.run_epoch !== record.notification.run_epoch
+        )
+          return fresh
+        const result = markRecordLostForReconciliation(fresh, {
+          timestamp: new Date().toISOString(),
+          error_message: reason,
+        })
+        applied = result.applied
+        return result.record
+      })
+      if (applied) baseStore.appendEvent(record.task_id, { type: "reconcile_lost", payload: { reason } })
+      return true
+    }
     async function recoverControlNow(record: ReturnType<typeof store.load> & {}) {
       assertCandidate(record)
       assertRecoverableOwnedRecord(record, record.parent_session_id)
+      if (await settleUpgradedChild(record))
+        throw new Error("Task was fenced to an earlier OpenCode version and ended as lost; it cannot be resumed")
       const origin = captureNotificationRecovery(record)
       // Guarded: the CURRENT call's fresh approval precedes residency admission/claim/reattach.
       const approval = freshRecoveries ? await freshRecoveries.approve(record) : undefined
@@ -1161,6 +1208,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       if (controls.has(id) || manager.getResidentHandle(id)) return false
       const record = store.load(id)
       if (!record || !record.owned_session) return false
+      if (await settleUpgradedChild(record)) return false
       if (
         record.residency_state === "resident" &&
         record.host_pid !== undefined &&
