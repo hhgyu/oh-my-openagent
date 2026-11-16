@@ -333,6 +333,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path $env:GIT_TRACE2_PERF | Out-Null
           $telemetryDirectory = Join-Path $env:RUNNER_TEMP "windows-root-test-telemetry"
+          & .github/scripts/windows-ci-telemetry.test.ps1 -ArtifactDirectory (Join-Path $telemetryDirectory "owner-proof")
           & .github/scripts/windows-ci-telemetry.ps1 `
             -ArtifactDirectory $telemetryDirectory `
             -Invocation "shard-1" `

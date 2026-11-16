@@ -54,7 +54,17 @@ const runs = ["omo-opencode", "memory-core"].map(async (target) => {
       child.once("close", (code) => resolve(code ?? 1))
     })
     active.delete(child)
-    return { target, args, log, pid: child.pid, exitCode, elapsedMs: Date.now() - started }
+    return {
+      target,
+      args,
+      log,
+      pid: child.pid,
+      exitCode,
+      elapsedMs: Date.now() - started,
+      startedUtc: new Date(started).toISOString(),
+      // CIM child birth times have finer precision than Date.now().
+      exitedUtc: new Date(Date.now() + 1).toISOString(),
+    }
   } finally {
     closeSync(fd)
   }
@@ -65,6 +75,27 @@ try {
   // allSettled also joins a sibling when opening or spawning the other fails.
   const results = await Promise.allSettled(runs)
   writeFileSync(join(directory, "shard-1-packages.json"), JSON.stringify(results, null, 2))
+  const rootsPath = process.env.OMO_CI_PACKAGE_ROOTS_PATH
+  const captureId = process.env.OMO_CI_PACKAGE_ROOTS_CAPTURE_ID
+  if (rootsPath && captureId) {
+    try {
+      writeFileSync(
+        rootsPath,
+        JSON.stringify({
+          schemaVersion: 1,
+          captureId,
+          ownerPid: process.pid,
+          roots: results.flatMap((result) =>
+            result.status === "fulfilled" && result.value.pid
+              ? [{ pid: result.value.pid, startedUtc: result.value.startedUtc, exitedUtc: result.value.exitedUtc }]
+              : [],
+          ),
+        }),
+      )
+    } catch {
+      console.warn("Windows CI telemetry package-root receipt failed; test outcomes remain authoritative.")
+    }
+  }
   for (const result of results) {
     if (result.status === "rejected") {
       console.error(result.reason)
