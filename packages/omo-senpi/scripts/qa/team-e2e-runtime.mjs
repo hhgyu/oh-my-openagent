@@ -4,6 +4,7 @@ import { join, win32 } from "node:path"
 
 import { killProcessGroup } from "./team-e2e-process.mjs"
 import { isolatedChildEnv } from "./sandbox-child-env.mjs"
+import { senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 export {
   cleanupProcessGroups,
@@ -77,7 +78,7 @@ export function startSenpiRun(input) {
       ...(input.obsDir === undefined ? {} : { OMO_TEAM_E2E_OBS: input.obsDir }),
       ...(input.extraEnv ?? {}),
     },
-    detached: true,
+    ...senpiRunSpawnOptions(),
     stdio: ["ignore", "pipe", "pipe"],
   })
   if (typeof child.pid === "number") input.onPid?.(child.pid)

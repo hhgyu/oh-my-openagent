@@ -248,3 +248,43 @@ describe("Native optional tool-child close join", () => {
     expect(events).toEqual(["unsubscribe"])
   })
 })
+
+// senpi's prompt() awaits session work and extension hooks before it admits a turn, and checks its
+// `signal` at each of those awaits. A turn admitted after the child was torn down arms the engine's
+// ref'd turn-deadline timers on a disposed session, and nothing ever disarms them: `senpi -p` stays
+// alive after its parent quit.
+describe("#given a child prompt still waiting in engine preflight", () => {
+  function preflightSession() {
+    const { session, events } = fixture()
+    const preflight = Promise.withResolvers<undefined>()
+    session.prompt = async (_text, options) => {
+      await preflight.promise
+      if (options?.signal?.aborted === true) {
+        const cancelled = new Error("Prompt cancelled before acceptance")
+        cancelled.name = "AbortError"
+        throw cancelled
+      }
+      events.push("turn admitted")
+    }
+    return { session, events, preflight }
+  }
+
+  test.each(["dispose", "abort"] as const)(
+    "#when the handle is torn down by %s #then the prompt is cancelled before its turn is admitted",
+    async (teardown) => {
+      // given
+      const { session, events, preflight } = preflightSession()
+      const handle = createChildHandle({ taskId: "preflight-test", session, promptText: "unit" })
+
+      // when
+      if (teardown === "dispose") await handle.dispose()
+      else await handle.abort()
+      preflight.resolve(undefined)
+      const outcome = await handle.waitForIdle()
+
+      // then
+      expect(events).not.toContain("turn admitted")
+      expect(outcome).toEqual({ status: "cancelled" })
+    },
+  )
+})

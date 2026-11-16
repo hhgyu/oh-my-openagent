@@ -88,12 +88,32 @@ function collectChildProcessCalls(file: string): readonly ChildProcessCall[] {
   return calls
 }
 
+// Bun.spawn and Bun.spawnSync launch console binaries exactly like node:child_process does and take
+// the same windowsHide flag, but they are globals, so the import scan above cannot see them.
+function collectBunSpawnCalls(file: string): readonly ChildProcessCall[] {
+  const source = readFileSync(join(import.meta.dir, file), "utf8")
+  const calls: ChildProcessCall[] = []
+  for (const match of source.matchAll(/(?<![\w$])Bun\.spawn(?:Sync)?\(/g)) {
+    if (isCommentLine(source, match.index)) continue
+    const openingParen = match.index + match[0].length - 1
+    calls.push({
+      file,
+      line: source.slice(0, match.index).split("\n").length,
+      text: `${match[0].slice(0, -1)}${callText(source, openingParen)}`,
+    })
+  }
+  return calls
+}
+
+function productionSpawnCalls(): readonly ChildProcessCall[] {
+  return productionSources().flatMap((file) => [...collectChildProcessCalls(file), ...collectBunSpawnCalls(file)])
+}
+
 describe("memory-core win32 console suppression", () => {
   describe("#given every production child_process call in the memory engine", () => {
     describe("#when each call site is inspected", () => {
       test("#then each one passes windowsHide: true", () => {
-        const offenders = productionSources()
-          .flatMap(collectChildProcessCalls)
+        const offenders = productionSpawnCalls()
           .filter((call) => !call.text.includes("windowsHide: true"))
           .map((call) => `${call.file}:${call.line}`)
 
@@ -101,9 +121,12 @@ describe("memory-core win32 console suppression", () => {
       })
 
       test("#then the audit still reaches the git and start-identity spawn sites it exists for", () => {
-        const audited = productionSources().flatMap(collectChildProcessCalls)
+        const audited = productionSpawnCalls()
 
         expect(audited.map((call) => call.file).filter((file) => file.includes("git/exec")).length).toBeGreaterThan(0)
+        expect(
+          audited.map((call) => call.file).filter((file) => file.includes("sync/space/space")).length,
+        ).toBeGreaterThan(0)
         expect(
           audited.map((call) => call.file).filter((file) => file.includes("locks/process-identity")).length,
         ).toBeGreaterThan(0)

@@ -100,7 +100,7 @@ export function resolveSpaceInRepo(
 function runGit(dir: string, args: readonly string[]): string | null {
   // Never the inherited environment as is: a GIT_DIR / GIT_WORK_TREE the host exported would read and
   // write another repository's config and list its remotes instead of `dir`'s (#12354).
-  const r = Bun.spawnSync(["git", "-C", dir, ...args], { env: memoryGitEnvironment(process.env) })
+  const r = Bun.spawnSync(["git", "-C", dir, ...args], { env: memoryGitEnvironment(process.env), windowsHide: true })
   if (r.exitCode !== 0) return null
   return r.stdout.toString()
 }

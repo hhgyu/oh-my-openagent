@@ -227,6 +227,28 @@ export function stepToAssistantMessage(step: MockStep, callCount: number, modelI
 let parentCallCount = 0
 let childCallCount = 0
 
+function messageText(content: unknown): string {
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
+  return content
+    .map((part: unknown) =>
+      typeof part === "object" && part !== null && "text" in part && typeof part.text === "string" ? part.text : "",
+    )
+    .join("")
+}
+
+// senpi 2026.11.12 sends the system prompt as the request's leading system messages and leaves
+// `context.systemPrompt` unset; older engines set `systemPrompt`. The dump renders whichever is present.
+function renderSystemPrompt(context: Context): string {
+  if (typeof context.systemPrompt === "string") return context.systemPrompt
+  const leading: string[] = []
+  for (const message of context.messages as readonly unknown[]) {
+    if (typeof message !== "object" || message === null || !("role" in message) || message.role !== "system") break
+    leading.push(messageText("content" in message ? message.content : undefined))
+  }
+  return leading.length > 0 ? leading.join("\n") : "null"
+}
+
 function streamMockResponse(streamModel: Model<Api>, context: Context, options?: SimpleStreamOptions) {
   const stream = createLocalAssistantMessageEventStream()
   const script = loadMockScript(context.cwd ?? process.cwd())
@@ -253,8 +275,7 @@ function streamMockResponse(streamModel: Model<Api>, context: Context, options?:
   }
   const dumpTarget = env.MOCK_DUMP_SYSTEM
   if (typeof dumpTarget === "string" && dumpTarget.length > 0) {
-    const systemPrompt = (context as { systemPrompt?: unknown }).systemPrompt
-    const rendered = typeof systemPrompt === "string" ? systemPrompt : JSON.stringify(systemPrompt ?? null)
+    const rendered = renderSystemPrompt(context)
     appendFileSync(dumpTarget, `\n=== model=${streamModel.id} cwd=${context.cwd ?? process.cwd()} ===\n${rendered}\n`)
   }
   // Tool descriptions exist only on the model request, so a driver that asserts on wording
