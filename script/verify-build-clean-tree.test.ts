@@ -7,7 +7,10 @@ import { dirname, join } from "node:path"
 import { findBuildDrift } from "./verify-build-clean-tree"
 
 function git(args: string[], cwd: string): void {
-  execFileSync("git", ["-c", "user.name=omo", "-c", "user.email=omo@example.invalid", ...args], { cwd, stdio: "ignore" })
+  execFileSync("git", ["-c", "user.name=omo", "-c", "user.email=omo@example.invalid", ...args], {
+    cwd,
+    stdio: "ignore",
+  })
 }
 
 function committedRepo(files: Record<string, string>): string {
