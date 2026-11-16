@@ -71,7 +71,6 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
   const userInput = new Set<string>()
   const work = new Set<Promise<unknown>>()
   const sessions = new Map<string, BoundMemorySession>()
-  const binds = new Map<string, Promise<void>>()
   let closed = false
   let closing: Promise<void> | undefined
 
@@ -149,9 +148,6 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
     const model = await latestSessionModel(deps.session, sessionID)
     if (closed || sessions.get(sessionID) !== bound) return
     if (model !== undefined) state.lastSessionModel = model
-    // The bind's catch-up enqueue is detached from the idle edge; its batch counts as a leftover.
-    await binds.get(sessionID)
-    if (closed || sessions.get(sessionID) !== bound) return
     const leftovers = state.settled.has(sessionID) ? [] : await state.runner.queue.listPending().catch(() => [])
     await enqueue(bound, state)
     if (closed || sessions.get(sessionID) !== bound) return
@@ -187,14 +183,10 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
         await state.runner.reconcilePending()
       })()
       track(run, "bind reconcile")
-      const settledRun = run.catch(() => undefined)
-      binds.set(bound.sessionID, settledRun)
-      await settledRun
-      if (binds.get(bound.sessionID) === settledRun) binds.delete(bound.sessionID)
+      await run.catch(() => undefined)
     },
     onDeleted(sessionID) {
       sessions.delete(sessionID)
-      binds.delete(sessionID)
       userInput.delete(sessionID)
       for (const state of states.values()) state.settled.delete(sessionID)
     },
@@ -224,7 +216,6 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
         deps.hosting.close()
         states.clear()
         sessions.clear()
-        binds.clear()
         userInput.clear()
         retireFactsOwner(owner)
       })()

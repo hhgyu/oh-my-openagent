@@ -543,68 +543,6 @@ describe("facts reload recovery", () => {
     expect(ports.requests).toHaveLength(0)
   })
 
-  test("#given a rebind whose final-delta enqueue is still writing #when the first settle decides on leftovers #then it waits for that enqueue and launches the retained batch", async () => {
-    // given
-    const f = fixture({ facts: { debounce_settles: 10 } })
-    f.addSession("root")
-    const first = await register(f)
-    await f.context("root")
-    await f.idle("root")
-    await first.cleanup()
-    const session = f.sessions.get("root")
-    if (session !== undefined) session.messages = conversation("Retained across the reload", "Noted.", "retained")
-    const enqueue = FactsQueue.prototype.enqueue
-    const listPending = FactsQueue.prototype.listPending
-    const bindEntered = Promise.withResolvers<undefined>()
-    const release = Promise.withResolvers<undefined>()
-    let bindEnqueued = false
-    let calls = 0
-    const writes = spyOn(FactsQueue.prototype, "enqueue").mockImplementation(async function (this: FactsQueue, input) {
-      if (++calls > 1) return enqueue.call(this, input)
-      bindEntered.resolve(undefined)
-      await release.promise
-      const result = await enqueue.call(this, input)
-      bindEnqueued = true
-      return result
-    })
-    const leftoverReads: boolean[] = []
-    const reads = spyOn(FactsQueue.prototype, "listPending").mockImplementation(function (this: FactsQueue) {
-      leftoverReads.push(bindEnqueued)
-      return listPending.call(this)
-    })
-    const context = f.host.session.context.bind(f.host.session)
-    let rootReads = 0
-    const hostReads = spyOn(f.host.session, "context").mockImplementation(async (input) => {
-      const messages = await context(input)
-      // After the bind's enqueue is held, root is read by the idle journal reconcile and then by the
-      // settle's session-model lookup, the last step before the settle decides on leftovers.
-      if (input.sessionID === "root" && calls > 0 && ++rootReads === 2) release.resolve(undefined)
-      return messages
-    })
-    try {
-      const next = await register(f)
-      // when
-      await f.prompt("root", "Continue after the reload")
-      await bindEntered.promise
-      if (session !== undefined)
-        session.messages = [
-          ...(session.messages ?? []),
-          ...conversation("Continue after the reload", "Noted.", "next"),
-        ]
-      await f.idle("root")
-      // then
-      expect(leftoverReads[0]).toBe(true)
-      const child = await next.ports.started(1)
-      expect(child.start.prompt).toContain("Retained across the reload")
-      child.finish()
-    } finally {
-      release.resolve(undefined)
-      writes.mockRestore()
-      reads.mockRestore()
-      hostReads.mockRestore()
-    }
-  })
-
   async function strandedRun(f: MemoryFixture) {
     const first = await register(f)
     await settle(f, "root")
