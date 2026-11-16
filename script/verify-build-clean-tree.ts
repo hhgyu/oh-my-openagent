@@ -6,7 +6,7 @@
 // committed artifact no longer matches its sources and fails the job.
 import { spawnSync } from "node:child_process"
 
-export type BuildDriftEntry = { readonly status: string; readonly path: string }
+type BuildDriftEntry = { readonly status: string; readonly path: string }
 
 export function findBuildDrift(cwd: string): BuildDriftEntry[] {
   const result = spawnSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {

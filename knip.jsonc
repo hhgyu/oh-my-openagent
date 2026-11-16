@@ -2145,6 +2145,7 @@
         "script/sync-lazycodex-marketplace.ts",
         "script/takeover-trace-summary.ts",
         "script/test-fast.ts",
+        "script/verify-build-clean-tree.ts",
         "test-env.ts",
         "test-hermetic-home.ts",
         "test-setup.ts",
