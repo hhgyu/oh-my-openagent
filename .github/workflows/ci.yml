@@ -1106,6 +1106,14 @@ jobs:
             exit 1
           fi
 
+      # Dependencies were installed with --ignore-scripts, so `bun run build` above is the first thing
+      # that wrote any generated file. Every committed generated artifact (Senpi bundles under
+      # packages/omo-senpi/plugin, Codex hook manifests, omo-native generated modules, the Codex
+      # installer entrypoint) must come back byte-identical, and the build must not emit an untracked file.
+      - name: Verify the build left every committed file unchanged
+        if: needs.ci-mode.outputs.run_heavy == 'true'
+        run: bun script/verify-build-clean-tree.ts
+
       - name: Verify dist bundle tests
         if: needs.ci-mode.outputs.run_heavy == 'true'
         run: bun test --timeout 20000 packages/omo-opencode/src/shared/dist-bundle-bun-globals.test.ts packages/omo-opencode/src/shared/dist-bundle-prompt-content.test.ts
@@ -1121,6 +1129,7 @@ jobs:
             - Confirms `dist/index.js` and `dist/index.d.ts` exist.
             - Fails when the build regenerates `assets/oh-my-opencode.schema.json` or `assets/omo.schema.json` differently from the committed copy.
             - Fails before building when the committed native service-auth bundle no longer matches its sources (`bun script/build-service-auth.ts --check`).
+            - Fails when `bun run build` changes any committed file or emits an untracked one (`bun script/verify-build-clean-tree.ts`).
             - Runs dist bundle regression tests.
           JOB_SUMMARY_NEXT: Fix the first failing build prerequisite before debugging downstream dist checks; a stale schema artifact is fixed by `bun run build:schema && bun run build:omo-schema` plus committing the result.
         run: GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" bash .github/scripts/write-job-summary.sh
