@@ -447,17 +447,26 @@ describe("#given a lead team whose host reloaded with an un-ACKed member report"
         }
         return synthetic(input, options)
       }
-      const reported = await memberSend(defined(alpha), { to: "lead", message: "restored report" })
-      // then
-      expect(Exit.isSuccess(reported)).toBe(true)
-      if (!Exit.isSuccess(reported)) throw Error("Restored member report failed")
-      const report = details(reported.value)
-      expect(report.kind).toBe("team_message")
-      expect(report.to).toBe("lead")
-      const reportId = report.message_id
-      if (typeof reportId !== "string") throw Error("Missing restored member report id")
-      await entered.promise
+      let enteredTimer: ReturnType<typeof setTimeout> | undefined
       try {
+        const reported = await memberSend(defined(alpha), { to: "lead", message: "restored report" })
+        // then
+        expect(Exit.isSuccess(reported)).toBe(true)
+        if (!Exit.isSuccess(reported)) throw Error("Restored member report failed")
+        const report = details(reported.value)
+        expect(report.kind).toBe("team_message")
+        expect(report.to).toBe("lead")
+        const reportId = report.message_id
+        if (typeof reportId !== "string") throw Error("Missing restored member report id")
+        await new Promise<void>((resolve, reject) => {
+          enteredTimer = setTimeout(
+            () => reject(Error("Restored member report poller reservation not observed within 5000ms")),
+            5000,
+          )
+          entered.promise.then(resolve, reject)
+        })
+        clearTimeout(enteredTimer)
+        enteredTimer = undefined
         expect(
           existsSync(
             join(
@@ -466,23 +475,26 @@ describe("#given a lead team whose host reloaded with an un-ACKed member report"
             ),
           ),
         ).toBe(true)
+        release.resolve()
+        f.ctx.session.synthetic = synthetic
+        // The receipt identifies mail even while the poller holds its hidden reservation.
+        await waitFor(
+          () => processed(f.dir, before.config, before.runId, "lead", reportId),
+          "restored member report delivered",
+        )
+        const fresh = knownMessageIds(f.dir, before.config, before.runId, "lead").filter((id) => !known.includes(id))
+        expect(fresh).toHaveLength(1)
+        expect(fresh).toEqual([reportId])
+        expect(
+          f.synthetics
+            .filter((entry) => entry.input.id === teamDeliveryInputId(before.runId, "lead", reportId))
+            .map((entry) => entry.input.sessionID),
+        ).toEqual([LEAD])
       } finally {
+        if (enteredTimer !== undefined) clearTimeout(enteredTimer)
         release.resolve()
         f.ctx.session.synthetic = synthetic
       }
-      // The receipt identifies mail even while the poller holds its hidden reservation.
-      await waitFor(
-        () => processed(f.dir, before.config, before.runId, "lead", reportId),
-        "restored member report delivered",
-      )
-      const fresh = knownMessageIds(f.dir, before.config, before.runId, "lead").filter((id) => !known.includes(id))
-      expect(fresh).toHaveLength(1)
-      expect(fresh).toEqual([reportId])
-      expect(
-        f.synthetics
-          .filter((entry) => entry.input.id === teamDeliveryInputId(before.runId, "lead", reportId))
-          .map((entry) => entry.input.sessionID),
-      ).toEqual([LEAD])
     })
   })
 
