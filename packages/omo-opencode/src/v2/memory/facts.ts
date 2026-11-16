@@ -55,7 +55,7 @@ export interface MemoryFacts {
   isFactsSession(sessionID: string): boolean
   onPrompt(sessionID: string): void
   onIdle(sessionID: string): Promise<void>
-  onBound(bound: BoundMemorySession): Promise<void>
+  onBound(bound: BoundMemorySession, signal?: AbortSignal): Promise<void>
   onDeleted(sessionID: string): void
   /** `/facts retry`: one launch attempt for the session's identity. */
   retry(sessionID: string): Promise<void>
@@ -175,14 +175,15 @@ export function createMemoryFacts(deps: MemoryFactsDeps): MemoryFacts {
       track(run, "settle")
       await run.catch(() => undefined)
     },
-    async onBound(bound) {
-      if (closed || !factsSettings(bound).enabled) return
+    async onBound(bound, signal) {
+      if (closed || signal?.aborted || !factsSettings(bound).enabled) return
       sessions.set(bound.sessionID, bound)
       const state = stateFor(bound)
       state.settled.delete(bound.sessionID)
       const run = (async () => {
         // A binding recorded by an earlier process means this session may hold an un-enqueued final delta.
-        if (bound.metadata[MEMORY_BINDING_KEY] !== undefined) await enqueue(bound, state)
+        if (bound.metadata[MEMORY_BINDING_KEY] !== undefined) await enqueue(bound, state, signal)
+        if (closed || signal?.aborted || sessions.get(bound.sessionID) !== bound) return
         await state.runner.reconcilePending()
       })()
       track(run, "bind reconcile")

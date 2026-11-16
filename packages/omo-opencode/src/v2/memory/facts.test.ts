@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { existsSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { scheduler } from "node:timers/promises"
 import {
   FactsFailureStore,
   FactsFailuresCorruptError,
@@ -8,6 +9,7 @@ import {
   GitMemoryRepo,
   LockContentionError,
   resolveAutoIdentity,
+  TranscriptJournal,
   type MemoryIdentityPaths,
 } from "@oh-my-opencode/memory-core"
 import { OmoConfigSchema, OmoMemorySettingsSchema } from "@oh-my-opencode/omo-config-core"
@@ -240,6 +242,94 @@ describe("facts extractor child", () => {
 })
 
 describe("facts reload recovery", () => {
+  test.each(["idle", "delete", "close"] as const)(
+    "#given deferred binding recovery #when first idle overlaps %s #then recovery readiness preserves pacing and cancellation",
+    async (edge) => {
+      // given
+      const f = fixture({ facts: { debounce_settles: 10 } })
+      f.addSession("root")
+      const first = await register(f)
+      await f.context("root")
+      await f.idle("root")
+      await first.cleanup()
+      const session = f.sessions.get("root")
+      if (session === undefined) throw new Error("missing root fixture session")
+      session.messages = conversation("Recover this final preference", "Noted.")
+      const next = await register(f)
+      const entered = Promise.withResolvers<undefined>()
+      const held = Promise.withResolvers<undefined>()
+      const journaled = Promise.withResolvers<undefined>()
+      const events: string[] = []
+      const enqueue = FactsQueue.prototype.enqueue
+      const reconcile = TranscriptJournal.prototype.reconcile
+      const pending = FactsQueue.prototype.listPending
+      let recovering = false
+      let idleStarted = false
+      let observePending = true
+      let closing: Promise<void> | undefined
+      const enqueueSpy = spyOn(FactsQueue.prototype, "enqueue").mockImplementation(async function (input) {
+        if (!recovering) {
+          recovering = true
+          entered.resolve(undefined)
+          await held.promise
+          const result = await enqueue.call(this, input)
+          events.push("recovered")
+          return result
+        }
+        return enqueue.call(this, input)
+      })
+      const journalSpy = spyOn(TranscriptJournal.prototype, "reconcile").mockImplementation(async function (...args) {
+        const result = await reconcile.apply(this, args)
+        if (idleStarted) journaled.resolve(undefined)
+        return result
+      })
+      const pendingSpy = spyOn(FactsQueue.prototype, "listPending").mockImplementation(function () {
+        if (observePending) events.push("pending read")
+        return pending.call(this)
+      })
+      try {
+        await f.prompt("root", "Continue")
+        await recoveryCheckpoint(entered.promise, "bind enqueue entered")
+        idleStarted = true
+        const idle = f.idle("root")
+        await recoveryCheckpoint(journaled.promise, "idle journal completed")
+        // Drain runnable continuations after the explicit journal boundary, not a wall-clock sleep.
+        await scheduler.yield()
+        if (edge === "delete") {
+          await f.emitEvent("session.deleted", "root")
+          f.sessions.delete("root")
+        }
+        if (edge === "close") closing = next.cleanup()
+        if (edge !== "idle") await recoveryCheckpoint(idle, "cancelled readiness released idle")
+        expect(events).not.toContain("pending read")
+        if (edge === "idle") {
+          f.addSession("independent")
+          observePending = false
+          await recoveryCheckpoint(settle(f, "independent", "An independent turn"), "independent session settled")
+          expect(next.ports.requests).toHaveLength(0)
+          observePending = true
+        }
+        held.resolve(undefined)
+        await recoveryCheckpoint(idle, "first idle finished")
+        if (closing !== undefined) await recoveryCheckpoint(closing, "close joined recovery")
+        if (edge === "idle") {
+          const child = await recoveryCheckpoint(next.ports.started(1), "recovered extractor started")
+          expect(events.indexOf("recovered")).toBeLessThan(events.indexOf("pending read"))
+          expect(child.start.prompt).toContain("Recover this final preference")
+          child.finish()
+        } else {
+          expect(next.ports.requests).toHaveLength(0)
+        }
+      } finally {
+        held.resolve(undefined)
+        enqueueSpy.mockRestore()
+        journalSpy.mockRestore()
+        pendingSpy.mockRestore()
+        if (closing !== undefined) await closing
+      }
+    },
+  )
+
   test("#given a deleted bound session #when shutdown drains surviving sessions #then its durable queue remains but its final context is not read", async () => {
     const f = fixture({ facts: { debounce_settles: 10 } })
     f.addSession("deleted")
@@ -438,12 +528,12 @@ describe("facts reload recovery", () => {
     // then
     expect(warnings).toContain("facts shutdown drain hit its budget")
     // Shutdown is bounded, but the test still owns the read it deliberately held past that bound.
-    await abortedRead
+    await recoveryCheckpoint(abortedRead, "aborted shutdown read joined")
     const queue = new FactsQueue({ identityPaths: identityPaths(f) })
     expect(await queue.listPending()).toHaveLength(0)
     const next = await register(f)
     await settle(f, "root", "Continue after deadline", "next")
-    const recovered = await next.ports.started(1)
+    const recovered = await recoveryCheckpoint(next.ports.started(1), "shutdown recovery extractor started")
     expect(
       (await queue.listPending())
         .flatMap((entry) => entry.entries)
@@ -568,6 +658,20 @@ describe("facts reload recovery", () => {
     expect(failures.entries.map((entry) => entry.lastReason)).toEqual(["unknown_liveness"])
   })
 })
+
+async function recoveryCheckpoint<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`facts recovery checkpoint: ${label}`)), 5_000)
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
 
 describe("facts skips", () => {
   test.each([

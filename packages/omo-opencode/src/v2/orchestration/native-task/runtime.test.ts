@@ -382,7 +382,7 @@ async function fixture(
   }
   withJoinedSessionCancellation(api, "controlled-test")
   const ctx = {
-    app: { version: "2.2.6" },
+    app: { version: "2.3.0" },
     location: { directory: dir },
     session: api,
     model: {

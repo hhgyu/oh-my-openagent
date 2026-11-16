@@ -192,11 +192,29 @@ test("failed public RPC setup cleans prior agent registration on the same real s
   expect(f.order).toEqual(["register:agents", "register:tool-hook", "dispose:tool-hook", "dispose:agents"])
 })
 
-test("unverified host versions are refused before any domain registration", async () => {
-  for (const version of ["2.2.5", "2.2.7", "unknown"]) {
+test("unsupported host versions are refused before any domain registration", async () => {
+  for (const version of ["2.2.5", "1.99.0", "unknown", "", "2.3.0-beta.1"]) {
     const f = fixture({ version })
-    await expect(Effect.runPromise(Effect.scoped(setupV2EffectHost(f.host)))).rejects.toThrow("verified OpenCode 2.2.6")
+    await expect(Effect.runPromise(Effect.scoped(setupV2EffectHost(f.host)))).rejects.toThrow("OpenCode")
     expect(f.order).toEqual([])
+  }
+})
+
+test("supported host versions install and dispose the Effect domains", async () => {
+  for (const version of ["2.2.6", "2.2.7", "2.3.0", "2.10.0", "2.2.6+build.1"]) {
+    // given
+    const f = fixture({ version })
+    // when
+    await Effect.runPromise(Effect.scoped(setupV2EffectHost(f.host)))
+    // then
+    expect(f.order).toEqual([
+      "register:agents",
+      "register:tool-hook",
+      "register:rpc",
+      "dispose:rpc",
+      "dispose:tool-hook",
+      "dispose:agents",
+    ])
   }
 })
 
