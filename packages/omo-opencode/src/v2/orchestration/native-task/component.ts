@@ -567,7 +567,7 @@ export async function registerNativeTaskComponent(
     // Sessions recover independently, so one approval still waiting cannot hold up another session;
     // a nested parent waits for the level above it (its own parent child is restored there).
     const startupRecovery = (async () => {
-      const parents = discoverLeftBehindParents(directory)
+      const parents = discoverLeftBehindParents(directory, process.pid, control.app.version)
       for (const depth of [...new Set(parents.map((parent) => parent.depth))]) {
         await Promise.all(parents.filter((parent) => parent.depth === depth).map(recoverParent))
       }
