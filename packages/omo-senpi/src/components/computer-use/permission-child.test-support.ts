@@ -101,6 +101,11 @@ export async function permissionOwner(sessionContext?: Readonly<Record<string, s
                     USERPROFILE: cwd,
                     PI_CODING_AGENT_DIR: join(cwd, "agent"),
                     PATH: process.env.PATH ?? "",
+                    // The moved HOME would hide the shared test transpiler cache (test-support/bun-transpiler-cache.ts)
+                    // and leave every child bun compiling the senpi import graph cold.
+                    ...(process.env.BUN_RUNTIME_TRANSPILER_CACHE_PATH === undefined
+                      ? {}
+                      : { BUN_RUNTIME_TRANSPILER_CACHE_PATH: process.env.BUN_RUNTIME_TRANSPILER_CACHE_PATH }),
                   },
                 }),
               }),
