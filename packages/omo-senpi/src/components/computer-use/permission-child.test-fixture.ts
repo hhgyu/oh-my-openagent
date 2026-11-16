@@ -5,17 +5,18 @@ import { capture } from "./permission-event.test-support"
 const root = process.argv[2] ?? ""
 const depth = process.argv[3] ?? "1"
 const send = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`)
-const fixture = await permissionOwner({ role: "child", root_session_id: root, depth })
-fixture.session.extensionRunner?.onRpcEvent((event) => {
-  if (event.name === "computer.permission_required") send({ type: "extension_event", ...event })
+// The real rpc host answers its protocol probe from the first line, while the session boots behind it. Booting the
+// fixture session first made the parent's 10s designated-chain deadline race a cold senpi import graph.
+const booting = permissionOwner({ role: "child", root_session_id: root, depth }).then((owner) => {
+  owner.session.extensionRunner?.onRpcEvent((event) => {
+    if (event.name === "computer.permission_required") send({ type: "extension_event", ...event })
+  })
+  return owner
 })
+const lines = createInterface({ input: process.stdin })[Symbol.asyncIterator]()
 
-for await (const line of createInterface({ input: process.stdin })) {
-  const command = JSON.parse(line)
-  if (command.type === "abort") {
-    send({ type: "response", command: command.type, id: command.id, success: true })
-    break
-  }
+for (let next = await lines.next(); next.done !== true; next = await lines.next()) {
+  const command = JSON.parse(next.value)
   // A task child's engine must hold its designated model chain before its first prompt (#12759).
   if (command.type === "get_protocol_info") {
     send({
@@ -26,6 +27,11 @@ for await (const line of createInterface({ input: process.stdin })) {
       data: { protocolVersion: 1, capabilities: ["retry_fallback_command"] },
     })
     continue
+  }
+  const fixture = await booting
+  if (command.type === "abort") {
+    send({ type: "response", command: command.type, id: command.id, success: true })
+    break
   }
   if (command.type === "get_state") {
     send({
@@ -58,5 +64,5 @@ for await (const line of createInterface({ input: process.stdin })) {
   send({ type: "agent_end", messages: [], willRetry: false })
   send({ type: "agent_idle" })
 }
-await fixture.close()
+await (await booting).close()
 process.exit(0)
