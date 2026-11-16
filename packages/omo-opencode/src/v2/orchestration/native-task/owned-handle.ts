@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { AsyncLocalStorage } from "node:async_hooks"
 import {
   ChildObservationUncertain,
+  TaskRecordLockTimeout,
   type ManagedChildEvent,
   type ManagedChildHandle,
   type ManagedStartSpec,
@@ -21,6 +22,8 @@ import { createOwnedManagedInput, ownedInputID } from "./managed-input"
 import { createOwnedTurnTicket } from "./owned-turn"
 
 type Backend = ReturnType<typeof createSessionBackend>
+const DISPLAY_LOCK_BUDGET_MS = 15_000
+const DISPLAY_LOCK_RETRY_MS = 250
 export interface OwnedTaskControl {
   readonly handle: ManagedChildHandle
   readonly child: ChildHandle
@@ -234,16 +237,41 @@ export async function createOwnedTaskHandle(input: {
   }
   let managedInput = inputPort()
   const lifetime = new AbortController()
+  // The display projection appends under the task record lock. Another writer holding it past the lock's
+  // holder wait is contention, not lost observation: the idempotent projection is retried until the
+  // budget runs out, and only then does it fault the turn.
+  let lockBusySince: number | undefined
+  function displayLockStillBusy(error: unknown): boolean {
+    if (!TaskRecordLockTimeout.is(error)) return false
+    const now = Date.now()
+    lockBusySince ??= now
+    return now - lockBusySince < DISPLAY_LOCK_BUDGET_MS
+  }
+  async function flushThroughBusyLock(): Promise<void> {
+    for (;;) {
+      try {
+        flush()
+        lockBusySince = undefined
+        return
+      } catch (error) {
+        if (!displayLockStillBusy(error)) throw error
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, DISPLAY_LOCK_RETRY_MS))
+    }
+  }
   const pump = (async () => {
     while (!lifetime.signal.aborted) {
       try {
         flush()
+        lockBusySince = undefined
       } catch (error) {
-        pumpFault = ChildObservationUncertain.is(error)
-          ? error
-          : new ChildObservationUncertain("owned-display-unavailable")
-        outcomeWait.abort(pumpFault)
-        break
+        if (!displayLockStillBusy(error)) {
+          pumpFault = ChildObservationUncertain.is(error)
+            ? error
+            : new ChildObservationUncertain("owned-display-unavailable")
+          outcomeWait.abort(pumpFault)
+          break
+        }
       }
       await new Promise<void>((resolve) => {
         const timer = setTimeout(done, 20)
@@ -266,7 +294,7 @@ export async function createOwnedTaskHandle(input: {
     if (pumpFault) throw pumpFault
     try {
       assertOwned()
-      flush()
+      await flushThroughBusyLock()
     } catch (error) {
       throw ChildObservationUncertain.is(error)
         ? error
@@ -395,10 +423,10 @@ export async function createOwnedTaskHandle(input: {
       return undefined
     }
   }
-  function adoptedOutcome(answer: string): RunnerOutcome {
+  async function adoptedOutcome(answer: string): Promise<RunnerOutcome> {
     try {
       assertOwned()
-      flush()
+      await flushThroughBusyLock()
     } catch (error) {
       throw ChildObservationUncertain.is(error)
         ? error
@@ -423,7 +451,7 @@ export async function createOwnedTaskHandle(input: {
       if (latest !== undefined) return adoptedOutcome(latest)
       try {
         assertOwned()
-        flush()
+        await flushThroughBusyLock()
       } catch (error) {
         throw ChildObservationUncertain.is(error)
           ? error
