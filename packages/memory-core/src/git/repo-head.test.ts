@@ -200,7 +200,7 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
   )
 
   it(
-    "#given an unborn branch #when read #then preserves git's null result",
+    "#given an unborn branch #when read #then git's null result comes from the files without a git process",
     async () => {
       // given
       const f = await fixture()
@@ -209,7 +209,7 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
       const head = await f.open().head()
       // then
       expect(head).toBeNull()
-      expect(f.spawns()).toBe(1)
+      expect(f.spawns()).toBe(0)
     },
     GIT_INTEGRATION_TEST_TIMEOUT,
   )

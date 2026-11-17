@@ -1,5 +1,5 @@
 import { existsSync } from "../fs/resilient"
-import { mkdir, rm, writeFile } from "../fs/resilient"
+import { mkdir, readFileSync, rm, writeFile } from "../fs/resilient"
 import { dirname, join } from "node:path"
 import { withGitLockRetry, withSerializedGitConfigMutation } from "./config-lock"
 import { NO_AUTO_MAINTENANCE } from "./no-auto-maintenance"
@@ -14,7 +14,7 @@ import { runMemoryRepoMaintenance } from "./repo-maintenance"
 import { ensureRepoConfigDefaults } from "./repo-config-defaults"
 import { PathCommitTimes } from "./repo-commit-times"
 import { GitRevisionReads } from "./repo-revision-reads"
-import { assertNoUnrelatedChanges } from "./repo-status"
+import { assertNoUnrelatedChanges, porcelainProvesPathChanges } from "./repo-status"
 import { settlePendingRollback } from "./pending-rollback"
 import { assertNoSecretLikeStaging } from "./repo-secret-staging"
 import { withSerializedGitWorktreeMutation } from "./worktree-mutation-queue"
@@ -60,6 +60,15 @@ const EMPTY_INITIAL_COMMIT = "chore: initialize empty local memory"
 // memory lock (omo #10177). Packing belongs to `maintain()` under the maintenance lock only.
 export { NO_AUTO_MAINTENANCE } from "./no-auto-maintenance"
 
+function headFileNamesMain(dir: string): boolean {
+  try {
+    return readFileSync(join(dir, ".git", "HEAD"), "utf8").replace(/\r?\n$/, "") === "ref: refs/heads/main"
+  } catch (error) {
+    if (error instanceof Error && "code" in error) return false
+    throw error
+  }
+}
+
 export class GitMemoryRepo {
   readonly dir: string
   readonly agentId: string
@@ -69,6 +78,7 @@ export class GitMemoryRepo {
   private readonly reads: GitRevisionReads
   private readonly commitTimes: PathCommitTimes
   private readonly commitTimeoutMs: number
+  private readonly listingsBeforeStaging = new WeakMap<readonly string[], string>()
 
   constructor(options: GitMemoryRepoOptions) {
     this.dir = options.dir
@@ -92,8 +102,12 @@ export class GitMemoryRepo {
   async init(options: InitializeGitRepoOptions = {}): Promise<string> {
     await mkdir(this.dir, { recursive: true })
     if (!existsSync(join(this.dir, ".git"))) {
-      await withGitLockRetry(() => this.git(["init", "--template="]))
-      await withGitLockRetry(() => this.git(["symbolic-ref", "HEAD", "refs/heads/main"]))
+      // Git 2.28+ names the branch at init; an older git (or a ref backend whose HEAD file is a stub) still
+      // gets the explicit symbolic-ref, so HEAD always ends on main.
+      await withGitLockRetry(() => this.git(["-c", "init.defaultBranch=main", "init", "--template="]))
+      if (!headFileNamesMain(this.dir)) {
+        await withGitLockRetry(() => this.git(["symbolic-ref", "HEAD", "refs/heads/main"]))
+      }
     }
 
     await (options.installHooks ?? this.hookInstaller)(this.dir)
@@ -141,19 +155,31 @@ export class GitMemoryRepo {
     if (normalized.length === 0) throw new NoEffectiveChangesError(normalized)
 
     await settlePendingRollback(this)
-    await assertNoUnrelatedChanges(this.dir, normalized, () => this.status())
+    const porcelain = await this.status()
+    await assertNoUnrelatedChanges(this.dir, normalized, () => Promise.resolve(porcelain))
     await this.stage(normalized)
+    this.listingsBeforeStaging.set(normalized, porcelain)
     return this.commitPrepared(normalized, reason, author)
   }
 
+  // A listing handed over from commitWrite is the one it read under the same write lock just before staging
+  // exactly these paths. Staging them cannot add an unrelated entry, so that listing still answers the
+  // unrelated-changes check, and it often proves a path change too; each git process saved is tens to
+  // hundreds of ms on a loaded host. It is keyed by commitWrite's own array, so no other call can pick it up,
+  // and a settled rollback unstages entries, so that case falls back to fresh reads.
   async commitPrepared(paths: readonly string[], reason: string, author: GitCommitAuthor): Promise<GitCommitResult> {
+    const listingBeforeStaging = this.listingsBeforeStaging.get(paths)
+    this.listingsBeforeStaging.delete(paths)
     await this.hookInstaller(this.dir)
     const normalized = normalizePathspecs(paths)
     if (normalized.length === 0) throw new NoEffectiveChangesError(normalized)
-    await settlePendingRollback(this)
-    await assertNoUnrelatedChanges(this.dir, normalized, () => this.status())
-    if (!(await this.hasPathChanges(normalized))) throw new NoEffectiveChangesError(normalized)
-    await assertNoSecretLikeStaging(normalized, (argv) => this.gitResult(argv))
+    const porcelain = (await settlePendingRollback(this)) ? undefined : listingBeforeStaging
+    if (porcelain === undefined) await assertNoUnrelatedChanges(this.dir, normalized, () => this.status())
+    const changed =
+      (porcelain !== undefined && porcelainProvesPathChanges(porcelain, normalized)) ||
+      (await this.hasPathChanges(normalized))
+    if (!changed) throw new NoEffectiveChangesError(normalized)
+    await assertNoSecretLikeStaging(normalized, (argv, stdin) => this.gitResult(argv, stdin))
     return this.commitStaged(reason, author)
   }
 

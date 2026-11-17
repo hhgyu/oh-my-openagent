@@ -337,8 +337,8 @@ describe("GitMemoryRepo", () => {
 
     class FlakyLockExec implements GitExec {
       async run(argv: readonly string[], options: GitExecOptions): Promise<GitExecResult> {
-        const verb = argv.find((token) => !token.startsWith("-")) ?? ""
-        const shouldFail = (verb === "symbolic-ref" || verb === "commit") && !failedOnce.has(verb)
+        const verb = argv.find((token, index) => !token.startsWith("-") && argv[index - 1] !== "-c") ?? ""
+        const shouldFail = (verb === "init" || verb === "commit") && !failedOnce.has(verb)
         if (shouldFail) {
           failedOnce.add(verb)
           throw new Error(`fatal: cannot lock ref 'HEAD': Unable to create '${dir}/.git/HEAD.lock': File exists.`)
@@ -354,7 +354,7 @@ describe("GitMemoryRepo", () => {
 
     // then - the transient lock must be retried away, not surfaced
     expect(head).toMatch(/^[0-9a-f]{7,}$/)
-    expect(failedOnce.has("symbolic-ref")).toBe(true)
+    expect(failedOnce.has("init")).toBe(true)
   }, 30_000)
 })
 

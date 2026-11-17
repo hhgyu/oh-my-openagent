@@ -20,8 +20,12 @@ const REPO_ENV = [
   "GIT_CONFIG_PARAMETERS",
 ]
 
-/** Undefined asks the caller to use git's authoritative resolver for an unfamiliar layout. */
-export function readHeadFromFiles(repoDir: string): string | undefined {
+/**
+ * Undefined asks the caller to use git's authoritative resolver for an unfamiliar layout. Null is an unborn
+ * branch: the ref is neither loose nor packed. Loose is read before packed-refs, and `git pack-refs` writes
+ * packed-refs before it deletes the loose file, so a ref being packed is never missed.
+ */
+export function readHeadFromFiles(repoDir: string): string | null | undefined {
   if (REPO_ENV.some((key) => process.env[key] !== undefined)) return undefined
   try {
     const marker = resolve(repoDir, ".git")
@@ -68,7 +72,8 @@ export function readHeadFromFiles(repoDir: string): string | undefined {
     const loose = readText(join(commonDir, ref))
     if (loose !== undefined) return typeof loose === "string" ? objectId(loose) : undefined
     const packed = readText(join(commonDir, "packed-refs"))
-    if (typeof packed !== "string") return undefined
+    if (packed === undefined) return null
+    if (packed === null) return undefined
     let found: string | undefined
     for (const line of packed.split(/\r?\n/)) {
       if (line === "" || line.startsWith("#")) continue
@@ -80,7 +85,7 @@ export function readHeadFromFiles(repoDir: string): string | undefined {
         found = entry[1]
       }
     }
-    return found
+    return found ?? null
   } catch (error) {
     // Files can disappear, become unreadable, or be replaced while refs are updated. Git retains
     // responsibility for the error/null behavior; programming errors must still surface.
