@@ -4,6 +4,7 @@ import type { SessionShutdownEvent } from "@code-yeongyu/senpi"
 import { OMO_SENPI_TASK_RPC_CHILD } from "@oh-my-opencode/senpi-task"
 import type { TaskRecord } from "@oh-my-opencode/senpi-task"
 import { wireHarness } from "./event-bridge.test-harness"
+import { TaskRuntimeContext } from "./runtime-context"
 
 describe("event-bridge session_start recovery chain", () => {
   it("#given a resumed session with a revived record #when session_start fires #then the chain runs in the planned order with the session id threaded", async () => {
@@ -217,6 +218,22 @@ describe("event-bridge session_compact", () => {
 
     await pi.dispatch("session_compact", { type: "session_compact", accepted: true }, {})
     expect(forgottenTaskOutputSessions).toEqual(["parent-session"])
+  })
+})
+
+describe("event-bridge agent_settled", () => {
+  it("#given the parent's run ended while still active at agent_end #when the run settles #then the parent reads idle, so a completion arriving now is delivered at once instead of after the batch window", async () => {
+    // given a real runtime context that captured the parent mid-run at agent_end
+    const runtime = new TaskRuntimeContext("/project")
+    const { pi } = wireHarness("parent-session", { runtime })
+    await pi.dispatch("agent_end", { type: "agent_end" }, { isIdle: () => false })
+    expect(runtime.parentState().kind).toBe("streaming")
+
+    // when senpi settles the run (no active run any more)
+    await pi.dispatch("agent_settled", { type: "agent_settled" }, { isIdle: () => true })
+
+    // then
+    expect(runtime.parentState().kind).toBe("idle")
   })
 })
 
