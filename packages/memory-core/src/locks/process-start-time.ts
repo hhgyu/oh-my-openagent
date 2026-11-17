@@ -46,7 +46,10 @@ export async function readDarwinProcessStartSeconds(pid: number): Promise<number
   const buffer = new Uint8Array(PROC_BSDINFO_SIZE)
   let written = 0
   try {
-    written = procPidInfo(pid, PROC_PIDTBSDINFO, 0n, buffer, PROC_BSDINFO_SIZE)
+    // A nonzero arg makes xnu also look up an exited, unreaped pid (`findzomb`). Without it a lock owner
+    // in its exit window read as null and the caller fell back to spawning /bin/ps, whose exit Bun on
+    // macOS can fail to deliver, leaving the lock wait parked on that probe past its deadline.
+    written = procPidInfo(pid, PROC_PIDTBSDINFO, 1n, buffer, PROC_BSDINFO_SIZE)
   } catch {
     return null
   }

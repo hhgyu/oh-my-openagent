@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { execFile } from "node:child_process"
+import { execFile, spawnSync } from "node:child_process"
 
 import { getProcessStartIdentity, startIdentitiesConflict } from "./process-identity"
 import { readDarwinProcessStartSeconds, readWin32ProcessCreationFiletime } from "./process-start-time"
@@ -102,6 +102,43 @@ describe("darwin process start time", () => {
       // #then
       expect(startSeconds).not.toBeNull()
       expect(identity).toBe(`proc-start-epoch:${startSeconds ?? 0}`)
+    },
+  )
+
+  test.if(onDarwin)(
+    "#given an exited owner its parent has not reaped yet #when the lock identity API resolves it #then it answers in-process without spawning /bin/ps",
+    async () => {
+      // #given: the backgrounded sleep exits, and the exec'd sleep that inherits it never reaps it
+      const before = Math.floor(Date.now() / 1000) - 1
+      const holder = Bun.spawn(["/bin/sh", "-c", "sleep 0 & echo $!; exec sleep 30"], { stdout: "pipe" })
+      try {
+        const reader = holder.stdout.getReader()
+        let printed = ""
+        while (!printed.includes("\n")) {
+          const chunk = await reader.read()
+          if (chunk.done) break
+          printed += new TextDecoder().decode(chunk.value)
+        }
+        reader.releaseLock()
+        const zombie = Number(printed.trim())
+        const state = () => spawnSync("/bin/ps", ["-o", "stat=", "-p", String(zombie)], { encoding: "utf8" }).stdout
+        for (let attempt = 0; attempt < 200 && !state().trim().startsWith("Z"); attempt++)
+          await new Promise((resolve) => setTimeout(resolve, 10))
+        expect(state().trim().startsWith("Z")).toBe(true)
+
+        // #when
+        const startSeconds = await readDarwinProcessStartSeconds(zombie)
+        const identity = await getProcessStartIdentity(zombie)
+
+        // #then
+        const after = Math.ceil(Date.now() / 1000) + 1
+        expect(startSeconds ?? 0).toBeGreaterThanOrEqual(before)
+        expect(startSeconds ?? 0).toBeLessThanOrEqual(after)
+        expect(identity).toBe(`proc-start-epoch:${startSeconds ?? 0}`)
+      } finally {
+        holder.kill("SIGKILL")
+        await holder.exited
+      }
     },
   )
 
