@@ -202,7 +202,6 @@ check_file() {
 }
 
 errors=$(
-  # One listing serves all three checks.
   staged_names=$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR)
 
   # Skills must always be directories: skills/<name>/SKILL.md.

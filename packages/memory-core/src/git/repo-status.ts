@@ -34,14 +34,9 @@ export async function assertNoUnrelatedChanges(
 // path listed twice proves nothing, and the caller then asks git. A quoted path never equals a requested
 // path: git quotes any name holding `"`, and escapes that `"` inside the quotes.
 export function porcelainProvesPathChanges(porcelain: string, paths: readonly string[]): boolean {
-  const lines = porcelain.split(/\r?\n/).filter((line) => line.length >= 4)
-  const names = lines.map((line) => line.slice(3))
-  return lines.some((line, index) => {
-    const path = names[index] ?? ""
-    return (
-      paths.includes(path) &&
-      names.indexOf(path) === names.lastIndexOf(path) &&
-      /^(\?\?| [MDT]|[MADT] )$/.test(line.slice(0, 2))
-    )
+  const lines = porcelain.split(/\r?\n/)
+  return paths.some((path) => {
+    const entries = lines.filter((line) => line.slice(3) === path)
+    return entries.length === 1 && /^(\?\?| [MDT]|[MADT] ) /.test(entries[0] ?? "")
   })
 }

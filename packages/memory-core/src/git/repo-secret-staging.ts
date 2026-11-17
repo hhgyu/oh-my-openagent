@@ -1,5 +1,5 @@
 import type { GitExecResult } from "./exec"
-import { type CatFileRecord, parseCatFileRecords } from "./repo-tree"
+import { readCatFileBatch } from "./repo-tree"
 import { MemorySecretError, secretPatternClassOf } from "./secret"
 
 type GitResult = (argv: readonly string[], stdin?: string) => Promise<GitExecResult>
@@ -42,17 +42,13 @@ async function readStagedBlobs(
   const blobs = new Map<string, string | undefined>()
   const names = paths.filter((path) => !/[\r\n]/.test(path))
   if (names.length < 2) return blobs
-  const result = await gitResult(["cat-file", "--batch"], `${names.map((path) => `:${path}`).join("\n")}\n`)
-  if (result.code !== 0) return blobs
-  let records: CatFileRecord[]
-  try {
-    records = parseCatFileRecords(result.stdoutBytes ?? Buffer.from(result.stdout, "utf8"))
-  } catch {
-    return blobs
-  }
+  const records = await readCatFileBatch(
+    { result: gitResult },
+    names.map((path) => `:${path}`),
+  ).catch(() => [])
   if (records.length !== names.length) return blobs
   names.forEach((path, index) => {
-    const { header, type, content } = records[index] ?? { header: "" }
+    const { header, type, content } = records[index] ?? { oid: "" }
     if (content === undefined ? header === `:${path} missing` : type === "blob") blobs.set(path, content)
   })
   return blobs

@@ -78,7 +78,7 @@ export class GitMemoryRepo {
   private readonly reads: GitRevisionReads
   private readonly commitTimes: PathCommitTimes
   private readonly commitTimeoutMs: number
-  private readonly stagedListings = new WeakMap<readonly string[], string>()
+  private readonly listings = new WeakMap<readonly string[], string>()
 
   constructor(options: GitMemoryRepoOptions) {
     this.dir = options.dir
@@ -158,7 +158,7 @@ export class GitMemoryRepo {
     const porcelain = await this.status()
     await assertNoUnrelatedChanges(this.dir, normalized, () => Promise.resolve(porcelain))
     await this.stage(normalized)
-    this.stagedListings.set(normalized, porcelain)
+    this.listings.set(normalized, porcelain)
     return this.commitPrepared(normalized, reason, author)
   }
 
@@ -168,8 +168,8 @@ export class GitMemoryRepo {
   // hundreds of ms on a loaded host. It is keyed by commitWrite's own array, so no other call can pick it up,
   // and a settled rollback unstages entries, so that case falls back to fresh reads.
   async commitPrepared(paths: readonly string[], reason: string, author: GitCommitAuthor): Promise<GitCommitResult> {
-    const listingBeforeStaging = this.stagedListings.get(paths)
-    this.stagedListings.delete(paths)
+    const listingBeforeStaging = this.listings.get(paths)
+    this.listings.delete(paths)
     await this.hookInstaller(this.dir)
     const normalized = normalizePathspecs(paths)
     if (normalized.length === 0) throw new NoEffectiveChangesError(normalized)

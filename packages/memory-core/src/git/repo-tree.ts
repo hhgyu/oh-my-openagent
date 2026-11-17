@@ -1,5 +1,7 @@
-// Parsers for `git ls-tree` and `git cat-file --batch` output.
+// Parsers for `git ls-tree` output and the `git cat-file --batch` reader.
 
+import type { GitExecResult } from "./exec"
+import { commandError } from "./repo-arguments"
 import type { GitTreeBlobEntry, GitTreeSizedEntry } from "./repo-types"
 
 export function parseLsTreeSized(stdout: string): GitTreeSizedEntry[] {
@@ -34,18 +36,25 @@ export function parseLsTreeBlobs(stdout: string): GitTreeBlobEntry[] {
 }
 
 export interface CatFileRecord {
-  readonly header: string
   readonly oid: string
+  readonly header?: string
   readonly type?: string
   readonly content?: string
 }
 
 /**
- * `<oid> <type> <size>\n<content>\n` records in input order. A header with fewer than three fields or
- * ending in ` missing` (the query echoed back, which may hold spaces for a `:<path>` query) carries no
- * content.
+ * Runs ONE `git cat-file --batch` over `names` and returns its records in input order:
+ * `<oid> <type> <size>\n<content>\n`. A header with fewer than three fields or ending in ` missing` (the
+ * query echoed back, which may hold spaces for a `:<path>` query) carries no content and keeps its header.
  */
-export function parseCatFileRecords(output: Buffer): CatFileRecord[] {
+export async function readCatFileBatch(
+  git: { result(argv: readonly string[], stdin?: string): Promise<GitExecResult> },
+  names: readonly string[],
+): Promise<CatFileRecord[]> {
+  const argv = ["cat-file", "--batch"]
+  const run = await git.result(argv, `${names.join("\n")}\n`)
+  if (run.code !== 0) throw commandError(argv, run)
+  const output = run.stdoutBytes ?? Buffer.from(run.stdout, "utf8")
   const records: CatFileRecord[] = []
   let offset = 0
   while (offset < output.length) {
@@ -55,23 +64,15 @@ export function parseCatFileRecords(output: Buffer): CatFileRecord[] {
     offset = newline + 1
     const [oid = "", type, sizeText] = header.split(" ")
     if (sizeText === undefined || header.endsWith(" missing")) {
-      records.push({ header, oid })
+      records.push({ oid, header })
       continue
     }
     const size = Number.parseInt(sizeText, 10)
     if (!Number.isSafeInteger(size) || size < 0 || offset + size > output.length) {
       throw new Error(`git cat-file --batch output is malformed at "${header}"`)
     }
-    records.push({ header, oid, type, content: output.toString("utf8", offset, offset + size) })
+    records.push({ oid, type, content: output.toString("utf8", offset, offset + size) })
     offset += size + 1
   }
   return records
-}
-
-export function parseCatFileBatch(output: Buffer): Map<string, string> {
-  const blobs = new Map<string, string>()
-  for (const { oid, type, content } of parseCatFileRecords(output)) {
-    if (type === "blob" && content !== undefined) blobs.set(oid, content)
-  }
-  return blobs
 }
