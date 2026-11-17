@@ -2152,6 +2152,8 @@
         "test-temp-leak-match.ts",
         "test-temp-root.ts",
         "crates/omo-computer-core/src/error/tests/check-design-citations.mjs",
+        // run by the opencode-qa bash drivers (common.sh oqa_guarded_spawn, lsp-e2e.sh guarded_exec)
+        ".agents/skills/opencode-qa/scripts/lib/serve-guard.mjs",
       ],
       "ignoreFiles": [
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs

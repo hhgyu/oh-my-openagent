@@ -247,6 +247,90 @@ process_command() {
   /bin/ps -p "$1" -o command= 2>/dev/null || true
 }
 
+native_path() {
+  if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi
+}
+
+driver_os_pid() {
+  if [ -r "/proc/$$/winpid" ]; then cat "/proc/$$/winpid"; else printf '%s' "$$"; fi
+}
+
+# Long-lived children run under lib/serve-guard.mjs (Windows kill-on-close Job
+# Object / POSIX process group + parent watch) so a SIGKILLed driver whose EXIT
+# trap never runs cannot leave them behind. Use inside a `( ... ) &` subshell.
+guarded_exec() {
+  local pid_file="$1"; shift
+  exec bun "$(native_path "$SCRIPT_DIR/lib/serve-guard.mjs")" \
+    --parent-pid "$(driver_os_pid)" --pid-file "$(native_path "$pid_file")" -- "$@"
+}
+
+# start_guarded_opencode_server <opencode_bin> <port> <password> <stdout> <stderr>
+# Sets OPENCODE_PID to the guard pid; stopping the guard stops the server tree.
+start_guarded_opencode_server() {
+  local opencode_bin="$1" port="$2" pass="$3" out_log="$4" err_log="$5"
+  (
+    cd "$SANDBOX_ROOT/project" || exit 1
+    export OPENCODE_SERVER_PASSWORD="$pass"
+    guarded_exec "$SANDBOX_ROOT/opencode-serve.pid" "$opencode_bin" serve --port "$port" --hostname 127.0.0.1
+  ) >"$out_log" 2>"$err_log" &
+  OPENCODE_PID=$!
+}
+
+# Internal fixture body: a separate driver process that brings up an isolated
+# guarded server, records port + sandbox, then idles until it is killed.
+run_guarded_serve_fixture() {
+  local port pass="oqa-$RANDOM$RANDOM"
+  SANDBOX_ROOT="$(mktemp -d -t oqa-lsp-e2e.XXXXXX)" || return 1
+  mkdir -p "$SANDBOX_ROOT/project" "$SANDBOX_ROOT/home" "$SANDBOX_ROOT/data" \
+    "$SANDBOX_ROOT/config" "$SANDBOX_ROOT/cache" "$SANDBOX_ROOT/state"
+  export HOME="$SANDBOX_ROOT/home" OPENCODE_TEST_HOME="$SANDBOX_ROOT/home" \
+    XDG_DATA_HOME="$SANDBOX_ROOT/data" XDG_CONFIG_HOME="$SANDBOX_ROOT/config" \
+    XDG_CACHE_HOME="$SANDBOX_ROOT/cache" XDG_STATE_HOME="$SANDBOX_ROOT/state" \
+    OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_DISABLE_MODELS_FETCH=1
+  port="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close()})')"
+  start_guarded_opencode_server "$(command -v opencode)" "$port" "$pass" "$SANDBOX_ROOT/serve.out.log" "$SANDBOX_ROOT/serve.err.log"
+  wait_http "http://127.0.0.1:$port/global/health" "opencode:$pass" || { fail "guarded fixture server never became ready"; return 1; }
+  printf '%s\n%s\n' "$port" "$SANDBOX_ROOT" >"$EVIDENCE_DIR/guarded-serve.txt"
+  while :; do sleep 1; done
+}
+
+# Self-test: SIGKILL a driver PROCESS that started a guarded server (its EXIT
+# trap never runs); the server must still stop on its own.
+self_test_forced_kill_leaves_no_server() {
+  local root="$1" ev="$1/forced-kill" driver_pid deadline port="" sandbox="" closed=1
+  mkdir -p "$ev"
+  LSP_E2E_INTERNAL_FIXTURE=guarded-serve bash "${BASH_SOURCE[0]}" \
+    --scenario self-test --evidence-dir "$ev" >"$ev/driver.log" 2>&1 &
+  driver_pid=$!
+  deadline=$(( $(date +%s) + 60 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    port="$(sed -n '1p' "$ev/guarded-serve.txt" 2>/dev/null)"
+    [ -n "$port" ] && break
+    kill -0 "$driver_pid" 2>/dev/null || break
+    sleep 0.2
+  done
+  sandbox="$(sed -n '2p' "$ev/guarded-serve.txt" 2>/dev/null)"
+  kill -9 "$driver_pid" 2>/dev/null || true
+  wait "$driver_pid" 2>/dev/null || true
+  if [ -z "$port" ]; then
+    log "self-test forced-kill: guarded fixture never became ready (see $ev/driver.log)"
+    return 1
+  fi
+  deadline=$(( $(date +%s) + 20 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if ! curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$port/global/health"; then closed=0; break; fi
+    sleep 0.25
+  done
+  if [ "$closed" -ne 0 ]; then
+    log "self-test forced-kill: opencode server on port $port outlived its SIGKILLed driver"
+    return 1
+  fi
+  case "$sandbox" in
+    */oqa-lsp-e2e.*) rm -rf "$sandbox" 2>/dev/null || true ;;
+  esac
+  log "self-test forced-kill: server stopped with its SIGKILLed driver (port $port closed)"
+}
+
 wait_for_exit() {
   local pid="$1" attempts=0
   while [ "$attempts" -lt 50 ]; do
@@ -1445,7 +1529,8 @@ NODE
 start_fake_provider() {
   local stdout_log="$EVIDENCE_DIR/fake-provider-stdout.log" port="" attempts=0
   write_fake_provider
-  FAKE_PROVIDER_LOG="$EVIDENCE_DIR/fake-provider.jsonl" node "$SANDBOX_ROOT/fake-provider.mjs" >"$stdout_log" 2>&1 &
+  ( FAKE_PROVIDER_LOG="$EVIDENCE_DIR/fake-provider.jsonl" \
+      guarded_exec "$SANDBOX_ROOT/fake-provider.pid" node "$(native_path "$SANDBOX_ROOT/fake-provider.mjs")" ) >"$stdout_log" 2>&1 &
   FAKE_PID=$!
   while [ "$attempts" -lt 100 ]; do
     port="$(awk '/^FAKE_LISTENING / { print $2; exit }' "$stdout_log" 2>/dev/null || true)"
@@ -2472,6 +2557,9 @@ run_internal_fixture() {
       printf '{"result":"PASS"' >"$RESULT_STAGE"
       while :; do sleep 1; done
       ;;
+    guarded-serve)
+      run_guarded_serve_fixture
+      ;;
     *)
       fail "unknown internal fixture"
       ;;
@@ -2487,7 +2575,8 @@ real_db_count() {
 }
 
 run_self_test() {
-  require_bins bash node jq git sqlite3 curl opencode || return 1
+  require_bins bash node bun jq git sqlite3 curl opencode || return 1
+  local forced_kill_clean=true
   local root before_omo after_omo before_db after_db before_status after_status failures=0 out rc start end
   local fixture_run child sandbox_path attempts health_pid health_port accepted_count previous_opencode_pid
   local sse_pid sse_port previous_sse_ready previous_sse_attempt
@@ -2748,6 +2837,11 @@ NODE
     fixture_run=$((fixture_run + 1))
   done
 
+  if ! self_test_forced_kill_leaves_no_server "$root" >>"$out" 2>&1; then
+    forced_kill_clean=false
+    failures=$((failures + 1))
+  fi
+
   if ! node --input-type=module <<'NODE' >>"$out" 2>&1
 function valid(value) {
   return value?.result === "PASS"
@@ -2845,8 +2939,9 @@ NODE
   [ "$before_db" = "$after_db" ] || failures=$((failures + 1))
   [ "$before_status" = "$after_status" ] || failures=$((failures + 1))
 
-  printf '{"result":"%s","selfTest":true,"malformedArgsRejected":true,"fakePassRejected":true,"skipRejected":true,"hungCommandBounded":true,"healthTimeoutReadinessBounded":true,"sseStartupRetryDeterministic":true,"partialStagingCleanedTwice":true,"interruptCleanupRepeated":true,"qaDependenciesPortable":%s,"cancellationResultFieldsMandatory":true,"clientPackageResultFieldsMandatory":true,"dirtyWorktreePreserved":%s,"realHomesUnchanged":%s}\n' \
+  printf '{"result":"%s","selfTest":true,"malformedArgsRejected":true,"fakePassRejected":true,"skipRejected":true,"hungCommandBounded":true,"healthTimeoutReadinessBounded":true,"sseStartupRetryDeterministic":true,"partialStagingCleanedTwice":true,"interruptCleanupRepeated":true,"forcedDriverKillLeavesNoServer":%s,"qaDependenciesPortable":%s,"cancellationResultFieldsMandatory":true,"clientPackageResultFieldsMandatory":true,"dirtyWorktreePreserved":%s,"realHomesUnchanged":%s}\n' \
     "$( [ "$failures" -eq 0 ] && echo PASS || echo FAIL )" \
+    "$forced_kill_clean" \
     "$qa_dependencies_portable" \
     "$( [ "$before_status" = "$after_status" ] && echo true || echo false )" \
     "$( [ "$before_omo" = "$after_omo" ] && [ "$before_db" = "$after_db" ] && echo true || echo false )"
@@ -2997,12 +3092,8 @@ NODE
   auth="opencode:$pass"
   url="http://127.0.0.1:$port"
   printf '%s\n' "$SANDBOX_ROOT/project" >"$EVIDENCE_DIR/opencode-serve-cwd.txt"
-  (
-    cd "$SANDBOX_ROOT/project" || exit 1
-    export OPENCODE_SERVER_PASSWORD="$pass"
-    exec "$opencode_bin" serve --port "$port" --hostname 127.0.0.1
-  ) >"$EVIDENCE_DIR/opencode-serve.stdout.log" 2>"$EVIDENCE_DIR/opencode-serve.stderr.log" &
-  OPENCODE_PID=$!
+  start_guarded_opencode_server "$opencode_bin" "$port" "$pass" \
+    "$EVIDENCE_DIR/opencode-serve.stdout.log" "$EVIDENCE_DIR/opencode-serve.stderr.log"
   wait_http "$url/global/health" "$auth" || { fail "OpenCode server did not become ready"; return 1; }
 
   encoded_dir="$(urlencode "$SANDBOX_ROOT/project")"
