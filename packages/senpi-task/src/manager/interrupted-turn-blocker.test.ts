@@ -3,7 +3,8 @@ import { join } from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { cleanupProjects, tempProject } from "./__fixtures__/manager-fakes"
-import { sessionTailContinuationBlocker } from "./interrupted-turn"
+import { HOST_RESPAWN_CONTINUATION } from "../runners/rpc-host/reconcile-turn"
+import { sessionTailContinuationBlocker, sessionTailNeedsContinuation } from "./interrupted-turn"
 
 // senpi#3266: the tail classifier behind the awaiting-input flag. It answers WHY a re-joined idle
 // session cannot continue on its own - its last turn was aborted, or it never answered at all.
@@ -74,16 +75,21 @@ describe("sessionTailContinuationBlocker (senpi#3266)", () => {
     await expect(sessionTailContinuationBlocker(path)).resolves.toBeUndefined()
   })
 
-  test("#given an aborted turn followed by extension bookkeeping rows #then the blocker is still the aborted turn", async () => {
-    // given - the hooks' stop state and rules scan a host appends are not conversation
+  test("#given an aborted turn followed by host bookkeeping rows #then the blocker is still the aborted turn and it needs continuation", async () => {
+    // given - the tail a senpi 2026.11.12 quit leaves behind a mid-turn child: the hooks' stop state,
+    // the engine's own session-lifecycle ledger records and the rules scan are not conversation
     const path = transcript(tempProject(), [
       ...ABORTED_TURN,
       { type: "custom", customType: "senpi.hooks.stop-state", data: {} },
+      { type: "custom", customType: "session-lifecycle", data: {} },
+      { type: "custom", customType: "session-lifecycle", data: {} },
       { type: "custom", customType: "pi-rules.scan", data: {} },
+      { type: "custom", customType: "session-lifecycle", data: {} },
     ])
 
     // when / then
     await expect(sessionTailContinuationBlocker(path)).resolves.toBe("aborted")
+    await expect(sessionTailNeedsContinuation(path, HOST_RESPAWN_CONTINUATION)).resolves.toBe(true)
   })
 
   test("#given a missing transcript #then there is no blocker to read", async () => {

@@ -4,6 +4,7 @@ const INITIAL_TAIL_BYTES = 64 * 1024
 
 const BOOKKEEPING_CUSTOM_TYPES = new Set([
   "senpi.hooks.stop-state",
+  "session-lifecycle",
   "pi-rules.scan",
   "senpi-memory.session-binding",
   "rpc_client_message_admission",
