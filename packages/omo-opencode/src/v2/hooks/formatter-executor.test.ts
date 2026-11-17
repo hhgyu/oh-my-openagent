@@ -471,7 +471,16 @@ describe("formatter executor", () => {
       // given
       const holder = Bun.spawn(["sh", "-c", "sleep 0 & echo $!; exec sleep 30"], { stdout: "pipe" })
       try {
-        const zombie = Number((await new Response(holder.stdout).text()).trim().split("\n")[0])
+        // The exec'd sleep keeps stdout open, so read only the first line rather than waiting for EOF.
+        const reader = holder.stdout.getReader()
+        let printed = ""
+        while (!printed.includes("\n")) {
+          const chunk = await reader.read()
+          if (chunk.done) break
+          printed += new TextDecoder().decode(chunk.value)
+        }
+        reader.releaseLock()
+        const zombie = Number(printed.trim())
         const zombieState = () => spawnSync("ps", ["-o", "stat=", "-p", String(zombie)], { encoding: "utf8" }).stdout
         for (let attempt = 0; attempt < 200 && !zombieState().trim().startsWith("Z"); attempt++)
           await new Promise((resolve) => setTimeout(resolve, 10))
