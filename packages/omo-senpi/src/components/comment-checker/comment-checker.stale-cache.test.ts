@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { COMMENT_CHECKER_RELEASE_VERSION, COMMENT_CHECKER_VERSION_MARKER } from "@oh-my-opencode/comment-checker-core"
+import { resolveTarCommand } from "@oh-my-opencode/utils/zip-entry-listing"
 
 import { createRecordingLogger, createTempCwd } from "./comment-checker.test-support"
 import { downloadSenpiCommentCheckerBinary } from "./downloader"
@@ -20,7 +21,7 @@ async function serveRelease(): Promise<{ url: string; requests: () => number }> 
   const stage = createTempCwd()
   writeFileSync(join(stage, "comment-checker"), FRESH_BINARY, { mode: 0o755 })
   const archive = join(createTempCwd(), "release.tar.gz")
-  const result = Bun.spawnSync(["tar", "-czf", archive, "-C", stage, "comment-checker"], {
+  const result = Bun.spawnSync([resolveTarCommand(), "-czf", archive, "-C", stage, "comment-checker"], {
     stdout: "pipe",
     stderr: "pipe",
   })

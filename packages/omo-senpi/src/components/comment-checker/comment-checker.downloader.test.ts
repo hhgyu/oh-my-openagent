@@ -7,6 +7,7 @@ import {
   COMMENT_CHECKER_VERSION_MARKER,
   type CommentCheckerReleaseAsset,
 } from "@oh-my-opencode/comment-checker-core"
+import { resolveTarCommand } from "@oh-my-opencode/utils/zip-entry-listing"
 
 import { CACHE_DIR_NAME } from "../../../../omo-opencode/src/shared/plugin-identity"
 import { createRecordingLogger, createTempCwd } from "./comment-checker.test-support"
@@ -23,7 +24,7 @@ async function serveArchive(status = 200): Promise<{ url: string; requests: () =
   const stage = createTempCwd()
   writeFileSync(join(stage, "comment-checker"), "#!/bin/sh\necho fixture-checker\n", { mode: 0o755 })
   const archive = join(createTempCwd(), "fixture.tar.gz")
-  const result = Bun.spawnSync(["tar", "-czf", archive, "-C", stage, "comment-checker"], {
+  const result = Bun.spawnSync([resolveTarCommand(), "-czf", archive, "-C", stage, "comment-checker"], {
     stdout: "pipe",
     stderr: "pipe",
   })
