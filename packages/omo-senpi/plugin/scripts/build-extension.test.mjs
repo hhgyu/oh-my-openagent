@@ -305,6 +305,20 @@ describe("checkExtensionCurrent", () => {
     expect(taskInputs.some(isDagOperation)).toBe(true)
   })
 
+  test("#given the split extension build #when metafile inputs are inspected #then the builtin agent definitions live only in the lazy task sidecar", async () => {
+    // given / when
+    const { mainInputs, taskInputs } = await sharedOutputs()
+    const prefix = "packages/senpi-task/src/agents/builtin/"
+    const isAgentDefinition = (input) => {
+      const path = toPortableBuildPath(input)
+      return path.includes(prefix) && !path.endsWith(`${prefix}names.ts`)
+    }
+
+    // then
+    expect(mainInputs.filter(isAgentDefinition)).toEqual([])
+    expect(taskInputs.some((input) => toPortableBuildPath(input).endsWith(`${prefix}plan-consultant.ts`))).toBe(true)
+  })
+
   test("#given the split extension build #when metafile inputs are inspected #then the computer-use implementation lives only in its lazy entry", async () => {
     // given / when
     const { mainInputs, computerUseInputs } = await sharedOutputs()

@@ -1,5 +1,5 @@
 import { BUILTIN_CATEGORY_DEFAULTS } from "@oh-my-opencode/senpi-task/category-builtins"
-import { CURATED_READONLY_AGENT_NAMES } from "@oh-my-opencode/senpi-task/agents-builtin"
+import { CURATED_READONLY_AGENT_NAMES } from "@oh-my-opencode/senpi-task/agent-names"
 import type { ResolvedModelRecord, TaskRecord, TaskRunStats } from "@oh-my-opencode/senpi-task"
 
 import type { TaskTerminalEdge } from "../task/terminal-observers"

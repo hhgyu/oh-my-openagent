@@ -13,6 +13,10 @@
       "types": "./src/agents/builtin/index.ts",
       "import": "./src/agents/builtin/index.ts"
     },
+    "./agent-names": {
+      "types": "./src/agents/builtin/names.ts",
+      "import": "./src/agents/builtin/names.ts"
+    },
     "./category-builtins": {
       "types": "./src/category/builtins.ts",
       "import": "./src/category/builtins.ts"

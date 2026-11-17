@@ -1,4 +1,4 @@
-import { CURATED_READONLY_AGENT_NAMES } from "@oh-my-opencode/senpi-task/agents-builtin"
+import { CURATED_READONLY_AGENT_NAMES } from "@oh-my-opencode/senpi-task/agent-names"
 import { BUILTIN_CATEGORY_DEFAULTS } from "@oh-my-opencode/senpi-task/category-builtins"
 
 const NUMBER_PROPERTY = Object.freeze({ type: "number" } as const)
