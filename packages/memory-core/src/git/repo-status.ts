@@ -30,20 +30,18 @@ export async function assertNoUnrelatedChanges(
 // Whether a porcelain listing read BEFORE `git add -A -- <paths>` already proves that, after the add, one of
 // the exact paths differs from HEAD, so the post-add `git status -- <paths>` would print something. Only
 // one-sided entries prove it: worktree-only (` M`, ` D`, ` T`), index-only with a matching worktree (`M `,
-// `A `, `D `, `T `), or an untracked file no other entry names. A rename, a quoted path, an unmerged entry or
-// a path listed twice proves nothing, and the caller then asks git.
+// `A `, `D `, `T `), or an untracked file no other entry names. A rename or copy, an unmerged entry or a
+// path listed twice proves nothing, and the caller then asks git. A quoted path never equals a requested
+// path: git quotes any name holding `"`, and escapes that `"` inside the quotes.
 export function porcelainProvesPathChanges(porcelain: string, paths: readonly string[]): boolean {
-  const entries = porcelain
-    .split(/\r?\n/)
-    .filter((line) => line.length >= 4)
-    .map((line) => ({ index: line[0], worktree: line[1], path: line.slice(3) }))
-  const named = new Map<string, number>()
-  for (const { path } of entries) named.set(path, (named.get(path) ?? 0) + 1)
-  const wanted = new Set(paths)
-  return entries.some(({ index, worktree, path }) => {
-    if (!wanted.has(path) || named.get(path) !== 1 || path.startsWith('"') || path.includes(" -> ")) return false
-    if (index === "?" && worktree === "?") return true
-    if (index === " ") return worktree === "M" || worktree === "D" || worktree === "T"
-    return worktree === " " && (index === "M" || index === "A" || index === "D" || index === "T")
+  const lines = porcelain.split(/\r?\n/).filter((line) => line.length >= 4)
+  const names = lines.map((line) => line.slice(3))
+  return lines.some((line, index) => {
+    const path = names[index] ?? ""
+    return (
+      paths.includes(path) &&
+      names.indexOf(path) === names.lastIndexOf(path) &&
+      /^(\?\?| [MDT]|[MADT] )$/.test(line.slice(0, 2))
+    )
   })
 }

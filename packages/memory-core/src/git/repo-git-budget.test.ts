@@ -123,20 +123,24 @@ describe("GitMemoryRepo git process budget", () => {
     expect(error).toBeInstanceOf(NoEffectiveChangesError)
   })
 
-  it("#given several staged notes with a secret in a later one #when commitWrite runs #then that note is refused by content", async () => {
+  it("#given several staged notes with a secret in a later one and a deleted name with spaces #when commitWrite runs #then that note is refused by content from one batched read", async () => {
     // given
     const dir = await tempDir()
-    const repo = new GitMemoryRepo({ dir, agentId: "agent" })
-    await repo.init({ seedFiles: [{ relativePath: "gone.md", content: "gone\n" }] })
+    const counting = countingExec()
+    const repo = new GitMemoryRepo({ dir, agentId: "agent", exec: counting.exec })
+    await repo.init({ seedFiles: [{ relativePath: "gone note.md", content: "gone\n" }] })
     await writeFile(join(dir, "clean.md"), "clean\n")
     await writeFile(join(dir, "leak.md"), `token: ${"ghp_"}${"a".repeat(36)}\n`)
-    await removeTree(join(dir, "gone.md"))
+    await removeTree(join(dir, "gone note.md"))
+    counting.runs.length = 0
 
     // when
-    const error = await rejectedError(repo.commitWrite(["gone.md", "clean.md", "leak.md"], "batch", author))
+    const error = await rejectedError(repo.commitWrite(["gone note.md", "clean.md", "leak.md"], "batch", author))
 
     // then
     expect(error).toBeInstanceOf(MemorySecretError)
     expect(error.message).toContain("leak.md")
+    expect(counting.runs.filter((argv) => argv.includes("cat-file"))).toHaveLength(1)
+    expect(counting.runs.filter((argv) => argv.includes("show"))).toEqual([])
   })
 })

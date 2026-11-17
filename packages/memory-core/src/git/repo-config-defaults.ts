@@ -70,8 +70,8 @@ async function restoreConvertedCheckouts(dir: string, run: RepoGitRunner): Promi
   // A plain repository with no index file tracks nothing (a fresh init), so there is no checkout to list.
   if (
     process.env.GIT_INDEX_FILE === undefined &&
-    (await isDirectory(join(dir, ".git"))) &&
-    !(await exists(join(dir, ".git", "index")))
+    (await stat(join(dir, ".git")).catch(() => undefined))?.isDirectory() &&
+    (await stat(join(dir, ".git", "index")).catch((error: NodeJS.ErrnoException) => error.code)) === "ENOENT"
   )
     return true
   const listing = await run.result(["ls-files", "--eol", "-z"])
@@ -124,17 +124,6 @@ async function reindexUnchangedCopies(dir: string, run: RepoGitRunner): Promise<
 async function matchesIndexBlob(run: RepoGitRunner, path: string, bytes: Buffer): Promise<boolean> {
   const blob = await run.result(["cat-file", "blob", `:${path}`])
   return blob.code === 0 && Buffer.from(blob.stdout, "utf8").equals(bytes)
-}
-
-async function isDirectory(path: string): Promise<boolean> {
-  return (await stat(path).catch(() => undefined))?.isDirectory() ?? false
-}
-
-async function exists(path: string): Promise<boolean> {
-  return stat(path).then(
-    () => true,
-    (error: NodeJS.ErrnoException) => error.code !== "ENOENT",
-  )
 }
 
 function dropCarriageReturnsBeforeLineFeeds(bytes: Buffer): Buffer {

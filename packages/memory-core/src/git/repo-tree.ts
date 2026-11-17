@@ -33,23 +33,45 @@ export function parseLsTreeBlobs(stdout: string): GitTreeBlobEntry[] {
   return entries
 }
 
-/** `<oid> <type> <size>\n<content>\n` records; `<oid> missing` records carry no content. */
-export function parseCatFileBatch(output: Buffer): Map<string, string> {
-  const blobs = new Map<string, string>()
+export interface CatFileRecord {
+  readonly header: string
+  readonly oid: string
+  readonly type?: string
+  readonly content?: string
+}
+
+/**
+ * `<oid> <type> <size>\n<content>\n` records in input order. A header with fewer than three fields or
+ * ending in ` missing` (the query echoed back, which may hold spaces for a `:<path>` query) carries no
+ * content.
+ */
+export function parseCatFileRecords(output: Buffer): CatFileRecord[] {
+  const records: CatFileRecord[] = []
   let offset = 0
   while (offset < output.length) {
     const newline = output.indexOf(0x0a, offset)
     if (newline === -1) throw new Error("git cat-file --batch output ended inside a record header")
     const header = output.toString("utf8", offset, newline)
     offset = newline + 1
-    const [oid, type, sizeText] = header.split(" ")
-    if (sizeText === undefined) continue
+    const [oid = "", type, sizeText] = header.split(" ")
+    if (sizeText === undefined || header.endsWith(" missing")) {
+      records.push({ header, oid })
+      continue
+    }
     const size = Number.parseInt(sizeText, 10)
-    if (oid === undefined || !Number.isSafeInteger(size) || size < 0 || offset + size > output.length) {
+    if (!Number.isSafeInteger(size) || size < 0 || offset + size > output.length) {
       throw new Error(`git cat-file --batch output is malformed at "${header}"`)
     }
-    if (type === "blob") blobs.set(oid, output.toString("utf8", offset, offset + size))
+    records.push({ header, oid, type, content: output.toString("utf8", offset, offset + size) })
     offset += size + 1
+  }
+  return records
+}
+
+export function parseCatFileBatch(output: Buffer): Map<string, string> {
+  const blobs = new Map<string, string>()
+  for (const { oid, type, content } of parseCatFileRecords(output)) {
+    if (type === "blob" && content !== undefined) blobs.set(oid, content)
   }
   return blobs
 }

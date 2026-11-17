@@ -202,7 +202,7 @@ check_file() {
 }
 
 errors=$(
-  # One listing serves all three checks: every git process is a fresh process start on each commit.
+  # One listing serves all three checks.
   staged_names=$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR)
 
   # Skills must always be directories: skills/<name>/SKILL.md.
