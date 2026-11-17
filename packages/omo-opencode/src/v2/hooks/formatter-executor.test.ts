@@ -10,7 +10,7 @@ import {
   chmodSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { spawnSync } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { dirname, join } from "node:path"
 import type { ToolContext } from "@opencode/plugin/promise/tool"
 import { createFormatterExecutor, FormatterExecutionError } from "./formatter-executor"
@@ -83,6 +83,17 @@ function fixtureGofmt(root: string): string {
   writeFileSync(launcher, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(entry)} "$@"\n`)
   chmodSync(launcher, 0o755)
   return launcher
+}
+// A fresh windows-latest VM measured gofmt.exe's first start at 322-373 ms idle and 804-1064 ms under concurrent
+// spawn load, against 20-175 ms warm; page the image in once so the executor's formatter deadline times only its run.
+async function pageIn(binary: string): Promise<void> {
+  const child = spawn(binary, [], { stdio: ["pipe", "ignore", "ignore"], windowsHide: true })
+  const closed = new Promise((resolvePromise, reject) => {
+    child.once("error", reject)
+    child.once("close", resolvePromise)
+  })
+  child.stdin?.end("package main\n")
+  await closed
 }
 function localGit(root: string, script: string) {
   writeFileSync(join(root, "package.json"), "{}")
@@ -220,7 +231,9 @@ describe("formatter executor", () => {
     // The installed gofmt when the runner has one; otherwise a fixture gofmt that refuses any argv but
     // Native `-w <file>` and writes gofmt's output, so the argv and byte assertions below always run.
     const f = fixture()
-    const binary = Bun.which("gofmt") ?? fixtureGofmt(f.root)
+    const installed = Bun.which("gofmt")
+    if (installed) await pageIn(installed)
+    const binary = installed ?? fixtureGofmt(f.root)
     const executor = createFormatterExecutor({
       directory: f.root,
       authorize: () => {},
