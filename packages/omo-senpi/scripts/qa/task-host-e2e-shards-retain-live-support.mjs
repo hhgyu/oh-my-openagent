@@ -16,6 +16,7 @@ import {
 import { scenarioResult } from "./task-host-e2e-shards-handoff-successors-support.mjs"
 import { fail } from "./task-host-e2e-shards-support.mjs"
 import { childSessionFiles, jsonlLines } from "./task-host-e2e-support.mjs"
+import { senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 export const IDLE_MS = 5_000
 export const terminal = (record) => ["completed", "error", "lost", "cancelled"].includes(record?.status)
@@ -137,7 +138,7 @@ export function startParent(scenario, prompt, session, env = {}) {
   const child = spawn(scenario.sandbox.bin, args, {
     cwd: scenario.sandbox.cwd,
     env: sandboxEnv(scenario.sandbox, env),
-    detached: true,
+    ...senpiRunSpawnOptions(),
     stdio: ["ignore", "pipe", "pipe"],
   })
   const chunks = { stdout: "", stderr: "" }

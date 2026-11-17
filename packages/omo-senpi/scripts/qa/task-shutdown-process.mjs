@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isolatedEnvironment } from "./agent-toolkit-eval-sdk-qa-support.mjs"
 import { engineStateDir } from "./sandbox-child-env.mjs"
+import { killSenpiRunTree, senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 const script = fileURLToPath(import.meta.url)
 const packageRoot = resolve(dirname(script), "../..")
@@ -123,7 +124,7 @@ async function worker(sandbox) {
     watcher?.close()
     session?.dispose()
     if (childPid && alive(childPid)) {
-      process.kill(process.platform === "win32" ? childPid : -childPid, "SIGKILL")
+      killSenpiRunTree(childPid, "SIGKILL")
       console.log(`CLEANUP forced child pid=${childPid}`)
     }
     console.log(`CLEANUP worker=${process.pid} child=${childPid} alive=${childPid ? alive(childPid) : false}`)
@@ -150,17 +151,16 @@ async function supervise() {
     cwd: join(sandbox, "project"),
     env: isolatedEnvironment(sandbox, packageRoot),
     stdio: "inherit",
-    detached: process.platform !== "win32",
-    windowsHide: true,
+    ...senpiRunSpawnOptions(),
   })
   const exit = once(child, "exit")
-  const deadline = setTimeout(() => child.kill("SIGKILL"), 120000)
+  const deadline = setTimeout(() => killSenpiRunTree(child.pid, "SIGKILL"), 120000)
   try {
     const [code] = await exit
     assert.equal(code, 0)
   } finally {
     clearTimeout(deadline)
-    if (alive(child.pid)) child.kill("SIGKILL")
+    if (alive(child.pid)) killSenpiRunTree(child.pid, "SIGKILL")
     rmSync(sandbox, { recursive: true, force: true })
     console.log(
       `CLEANUP supervisor child=${child.pid} alive=${alive(child.pid)} sandboxRemoved=${!existsSync(sandbox)}`,

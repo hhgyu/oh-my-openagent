@@ -32,6 +32,7 @@ import { createHash } from "node:crypto"
 
 import { createSandbox, digestDirectory } from "./drive.mjs"
 import { isolatedChildEnv, sandboxStateDir } from "./sandbox-child-env.mjs"
+import { killSenpiRunTree, senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 // Isolation gate: auth/models/trust byte-identical plus settings.json compared with the live
 // host session's own bookkeeping keys stripped (workflow-skills/tipsHistory/skills - proven to
@@ -452,7 +453,12 @@ function probeStartupNotice(senpiBin, sandbox, sessionDir, expectedText) {
       ],
       // Own process group: the senpi launcher re-execs itself under bun, so the kill must reach the
       // whole group or the grandchild keeps writing into the sandbox after the launcher is gone.
-      { cwd: sandbox.cwd, env: senpiEnv(sandbox, sessionDir), stdio: ["pipe", "pipe", "pipe"], detached: true },
+      {
+        cwd: sandbox.cwd,
+        env: senpiEnv(sandbox, sessionDir),
+        stdio: ["pipe", "pipe", "pipe"],
+        ...senpiRunSpawnOptions(),
+      },
     )
     let stdout = ""
     let found = false
@@ -464,7 +470,7 @@ function probeStartupNotice(senpiBin, sandbox, sessionDir, expectedText) {
       killed = true
       found = matched
       clearTimeout(timer)
-      if (typeof child.pid === "number") process.kill(-child.pid, "SIGKILL")
+      if (typeof child.pid === "number") killSenpiRunTree(child.pid, "SIGKILL")
     }
     const timer = setTimeout(() => stop(false), SENPI_TIMEOUT_MS)
     child.stdout.on("data", (chunk) => {

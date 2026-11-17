@@ -46,6 +46,7 @@ import { withTelemetryOptOut } from "../../telemetry-opt-out-env.mjs"
 import { requireEngineVersion } from "./engine-version.mjs"
 import { QA_TMP_ROOT } from "./qa-tmp.mjs"
 import { sameVersion } from "../../../../../omo-native/bin/lib/same-version.js"
+import { killSenpiRunTree, senpiRunSpawnOptions } from "../../senpi-run-spawn.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -95,7 +96,7 @@ function alive(pid) {
 
 function signalGroup(pid, signal) {
   try {
-    process.kill(-pid, signal)
+    killSenpiRunTree(pid, signal)
   } catch {
     try {
       process.kill(pid, signal)
@@ -826,7 +827,7 @@ export class Tui {
     const proc = Bun.spawn([process.env.THREAD_QA_NODE ?? "node", install.omoJs, ...args], {
       cwd: scratch.work,
       env: { ...scratch.env, ...env },
-      detached: true,
+      ...senpiRunSpawnOptions(),
       terminal: {
         cols,
         rows,
