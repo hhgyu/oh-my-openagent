@@ -6,7 +6,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   realpathSync,
   rmSync,
   watch,
@@ -104,7 +103,7 @@ async function runAttempt(input) {
   let cleanup = { pids: [], terminated: [], verified_dead: [], sandbox_removed: false }
   let before = ""
   let after = ""
-  let buckets = { before: null, after: null }
+  const buckets = { before: null, after: null }
   let taskIds = []
   const reasons = []
   try {
@@ -230,6 +229,8 @@ function startSenpi(senpiBin, parent, projectDir, timeoutMs) {
       env: {
         ...isolatedChildEnv(process.env, parent.agentDir),
         HOME: parent.home,
+        // os.homedir() reads USERPROFILE on win32: without it the run resolves the REAL home.
+        USERPROFILE: parent.home,
         SENPI_CODING_AGENT_DIR: parent.agentDir,
         SENPI_CODING_AGENT_SESSION_DIR: parent.sessionDir,
         SENPI_QA_MOCK_SCRIPT: parent.scriptPath,

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Deliberate-stop lanes of the quit->resume proof (plan todo 22), split from task-resume-e2e.mjs
-// under the 250 pure-LOC ceiling. Each lane pairs its doomed child with a finished witness so
-// "not revived" is measured against a sibling that DID revive in the same resumed process.
+// under the 250 pure-LOC ceiling. Each lane pairs its doomed child with a mid-turn witness so
+// "not revived" is measured against a sibling that DID revive in the same resumed process (a resume
+// eagerly revives only non-terminal children; a completed one waits for task_send, #7550).
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -31,6 +32,12 @@ import { startRun, verdict, witnessRevived, writeLaneLog } from "./task-resume-e
 
 const POLL_MS = 60_000
 
+// A mid-turn child is seeded once its first turn persisted an assistant message and it still runs.
+function midTurnSeeded(sandbox, name) {
+  const record = findTaskByName(sandbox, name)
+  return record?.status === "running" && childSessionHasAssistant(sandbox, record.task_id)
+}
+
 export async function runTaskResumeFailureScenarios(ctx) {
   await runCancelLane(ctx)
   await runKillLane(ctx)
@@ -47,15 +54,15 @@ async function runCancelLane(ctx) {
   const seeded = await pollUntil(
     () => ({
       cancelled: findTaskByName(sandbox, "cancelchild")?.status === "cancelled",
-      witnessDone: findTaskByName(sandbox, "cancelwitness")?.status === "completed",
+      witnessMidTurn: midTurnSeeded(sandbox, "cancelwitness"),
     }),
-    (v) => v.cancelled && v.witnessDone,
+    (v) => v.cancelled && v.witnessMidTurn,
     POLL_MS,
   )
   writeFileSync(sentinel1, "go\n")
   const result1 = await run1.completion
   writeLaneLog(ctx, "resume-cancel-run1", result1)
-  ctx.checks.resume_cancel_setup = verdict(result1.status === 0 && seeded.cancelled && seeded.witnessDone)
+  ctx.checks.resume_cancel_setup = verdict(result1.status === 0 && seeded.cancelled && seeded.witnessMidTurn)
   const cancelTask = findTaskByName(sandbox, "cancelchild")
   const logBefore = taskEventText(sandbox, cancelTask?.task_id ?? "")
   const sentinel2 = join(sandbox.root, "cancel-release-2")
@@ -87,10 +94,10 @@ async function runKillLane(ctx) {
   const run1 = startRun(ctx, sandbox, killRun1Script(sentinel1))
   const seeded = await pollUntil(
     () => ({
-      targetDone: findTaskByName(sandbox, "killchild")?.status === "completed",
-      witnessDone: findTaskByName(sandbox, "killwitness")?.status === "completed",
+      targetMidTurn: midTurnSeeded(sandbox, "killchild"),
+      witnessMidTurn: midTurnSeeded(sandbox, "killwitness"),
     }),
-    (v) => v.targetDone && v.witnessDone,
+    (v) => v.targetMidTurn && v.witnessMidTurn,
     POLL_MS,
   )
   writeFileSync(sentinel1, "go\n")
@@ -98,7 +105,7 @@ async function runKillLane(ctx) {
   writeLaneLog(ctx, "resume-kill-run1", result1)
   const killTask = findTaskByName(sandbox, "killchild")
   ctx.checks.resume_kill_setup = verdict(
-    result1.status === 0 && seeded.targetDone && seeded.witnessDone && killTask !== undefined,
+    result1.status === 0 && seeded.targetMidTurn && seeded.witnessMidTurn && killTask?.status === "running",
   )
   const logBefore = taskEventText(sandbox, killTask?.task_id ?? "")
   if (killTask !== undefined) {
@@ -136,9 +143,9 @@ async function runLruLane(ctx) {
   const seeded = await pollUntil(
     () => ({
       evicted: findTaskByName(sandbox, "lruone")?.residency_state === "evicted",
-      newestDone: findTaskByName(sandbox, "lrutwo")?.status === "completed",
+      newestMidTurn: midTurnSeeded(sandbox, "lrutwo"),
     }),
-    (v) => v.evicted && v.newestDone,
+    (v) => v.evicted && v.newestMidTurn,
     POLL_MS,
   )
   writeFileSync(sentinel1, "go\n")
@@ -146,7 +153,7 @@ async function runLruLane(ctx) {
   writeLaneLog(ctx, "resume-lru-run1", result1)
   const lruOne = findTaskByName(sandbox, "lruone")
   ctx.checks.resume_lru_setup = verdict(
-    result1.status === 0 && seeded.evicted && seeded.newestDone && lruOne !== undefined,
+    result1.status === 0 && seeded.evicted && seeded.newestMidTurn && lruOne !== undefined,
   )
   const logBefore = taskEventText(sandbox, lruOne?.task_id ?? "")
   const sentinel2 = join(sandbox.root, "lru-release-2")

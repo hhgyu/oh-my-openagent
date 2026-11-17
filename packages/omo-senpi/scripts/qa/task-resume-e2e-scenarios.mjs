@@ -10,7 +10,20 @@ export const PONG_TOKEN = "RESUME_PONG_TOKEN"
 export const MIDTURN_CONTINUED_TOKEN = "MIDTURN_CONTINUED_TOKEN"
 export const FINISHED_CHILD_TOKEN = "FINISHED_CHILD_DONE"
 
-const bash = (command) => ({ type: "tool_call", name: "bash", arguments: { command } })
+// Senpi withholds `bash` from the direct tool list while codemode's `eval` is registered, so every
+// agent-side wait runs inside an eval cell the way a model calls it. The cell timeout outlasts the
+// waits' own 60 s bound so a wedged drive fails on that bound, never on the 30 s cell default.
+const WAIT_CELL_TIMEOUT_SECONDS = 120
+const bash = (command) => ({
+  type: "tool_call",
+  name: "eval",
+  arguments: {
+    language: "js",
+    summary: "agent-side driver wait",
+    timeout: WAIT_CELL_TIMEOUT_SECONDS,
+    code: `const r = await tool.bash(${JSON.stringify({ command })}); print(r.text)`,
+  },
+})
 const text = (value) => ({ type: "text", text: value })
 const spawnBackground = (prompt, name) => ({
   type: "tool_call",
@@ -58,24 +71,27 @@ export function happyRun2Script(sentinel) {
 }
 
 // The doomed child must still be RUNNING when task_cancel lands (a completed child is a cancel
-// noop), so it follows the mid-turn route: instant read, then a model-level hang.
+// noop), so it follows the mid-turn route: instant read, then a model-level hang. Every witness is a
+// mid-turn child too: a resume eagerly revives only non-terminal children (a completed one waits
+// for task_send, #7550), so only a mid-turn witness proves the resume's revival pass ran.
 export function cancelRun1Script(sentinel) {
   return {
     parentSteps: [
       spawnBackground("midturn-child doomed unit", "cancelchild"),
       { type: "tool_call", name: "task_cancel", arguments: { name: "cancelchild" } },
-      spawnBackground("finished-child cancel witness", "cancelwitness"),
+      spawnBackground("midturn-child cancel witness", "cancelwitness"),
       bash(waitForFileCommand(sentinel)),
       text("cancel run settled, quitting"),
     ],
   }
 }
 
+// The kill target is mid-turn as well, so `killed: true` is the only thing keeping it suspended.
 export function killRun1Script(sentinel) {
   return {
     parentSteps: [
-      spawnBackground("finished-child external kill target", "killchild"),
-      spawnBackground("finished-child kill witness", "killwitness"),
+      spawnBackground("midturn-child external kill target", "killchild"),
+      spawnBackground("midturn-child kill witness", "killwitness"),
       bash(waitForFileCommand(sentinel)),
       text("kill run settled, quitting"),
     ],
@@ -83,13 +99,14 @@ export function killRun1Script(sentinel) {
 }
 
 // Cap-1 LRU lane: the agent-side record wait guarantees lruone is a terminal idle resident before
-// lrutwo's spawn forces the eviction (only terminal idle residents are evictable).
+// lrutwo's spawn forces the eviction (only terminal idle residents are evictable). lrutwo stays
+// mid-turn so the resume revives it into the single slot.
 export function lruRun1Script(sandbox, sentinel) {
   return {
     parentSteps: [
       spawnBackground("lru-child oldest unit", "lruone"),
       bash(waitForRecordStatusCommand(sandbox, "lruone", "completed")),
-      spawnBackground("lru-child newest unit", "lrutwo"),
+      spawnBackground("midturn-child lru newest witness", "lrutwo"),
       bash(waitForFileCommand(sentinel)),
       text("lru run settled, quitting"),
     ],
