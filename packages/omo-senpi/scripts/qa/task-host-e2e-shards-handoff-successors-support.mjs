@@ -16,6 +16,7 @@ import { sandboxEnv } from "./task-host-e2e-sandbox.mjs"
 import { mainProject, newSandbox, processTable, statusAll, taskConfig } from "./task-host-e2e-shard-cost-support.mjs"
 import { pass } from "./task-host-e2e-shards-support.mjs"
 import { startRoutedCompletionsServer } from "./task-host-e2e-shards-handoff-successors-http.mjs"
+import { senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 export const MOCK_ENTRY = new URL("./task-host-e2e-shard-cost-mock-provider.mjs", import.meta.url).pathname
 
@@ -116,7 +117,7 @@ export function startHttpParent(sandbox, prompt, { session } = {}) {
   const child = spawn(sandbox.bin, args, {
     cwd: sandbox.cwd,
     env: sandboxEnv(sandbox),
-    detached: true,
+    ...senpiRunSpawnOptions(),
     stdio: ["ignore", "pipe", "pipe"],
   })
   const chunks = { stdout: "", stderr: "" }

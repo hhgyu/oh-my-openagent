@@ -155,6 +155,12 @@ export const SPAWN_BYPASSES = [
     call: "spawnSync(process.execPath)",
     reason: RESOLVER,
   },
+  {
+    file: `${QA}/senpi-run-spawn.mjs`,
+    function: "killSenpiRunTree",
+    call: `spawnSync("taskkill")`,
+    reason: "win32 taskkill /T /F of an already running senpi tree; starts no process of ours",
+  },
   { file: `${QA}/session-dag-resume-qa.mjs`, function: "<module>", call: `execFileSync("node")`, reason: RESOLVER },
   {
     file: `${QA}/task-14/version-capability.mjs`,

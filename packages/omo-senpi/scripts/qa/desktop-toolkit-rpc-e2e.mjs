@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url"
 
 import { createSandbox, credentialDigest, seedSandbox } from "./drive.mjs"
 import { withTelemetryOptOut } from "./telemetry-opt-out-env.mjs"
+import { killSenpiRunTree, senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = resolve(here, "../../../..")
@@ -88,7 +89,7 @@ async function runScenario({ name, context, answer }) {
       "--model",
       "mock-1",
     ],
-    { cwd: sandbox.cwd, env, stdio: ["pipe", "pipe", "pipe"], detached: true },
+    { cwd: sandbox.cwd, env, stdio: ["pipe", "pipe", "pipe"], ...senpiRunSpawnOptions() },
   )
   const rows = []
   const waiters = new Set()
@@ -178,7 +179,7 @@ async function runScenario({ name, context, answer }) {
     outcome.error = String(error?.message ?? error)
   } finally {
     try {
-      process.kill(-child.pid, "SIGKILL")
+      killSenpiRunTree(child.pid, "SIGKILL")
     } catch {}
     if (child.exitCode === null && child.signalCode === null) await once(child, "exit")
     outcome.stderrTail = stderr.slice(-2000)

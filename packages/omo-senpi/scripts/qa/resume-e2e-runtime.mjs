@@ -11,7 +11,7 @@ import { join } from "node:path"
 
 import { seedSandbox } from "./drive.mjs"
 import { isolatedChildEnv, sandboxStateDir } from "./sandbox-child-env.mjs"
-import { senpiRunSpawnOptions, senpiTreeKill } from "./senpi-run-spawn.mjs"
+import { killSenpiRunTree, senpiRunSpawnOptions, senpiTreeKill } from "./senpi-run-spawn.mjs"
 
 export function seedResumeProject(sandbox, omoConfig) {
   seedSandbox(sandbox)
@@ -101,7 +101,7 @@ function killGroup(pid) {
     return
   }
   try {
-    process.kill(-pid, "SIGKILL")
+    killSenpiRunTree(pid, "SIGKILL")
   } catch {
     try {
       process.kill(pid, "SIGKILL")

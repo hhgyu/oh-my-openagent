@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url"
 import { createSandbox, seedSandbox } from "./drive.mjs"
 import { watchUntil } from "./kibitzer-sidecar-support.mjs"
 import { isolatedChildEnv } from "./sandbox-child-env.mjs"
+import { killSenpiRunTree, senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(scriptDir, "..", "..", "..", "..")
@@ -139,7 +140,7 @@ function runScenario({ name, answer, senpiArgs = [] }) {
         },
         stdio: ["pipe", "pipe", "pipe"],
         // Own process group: the launcher re-execs under bun, so the kill must reach the whole group.
-        detached: true,
+        ...senpiRunSpawnOptions(),
       },
     )
     let stdout = ""
@@ -155,7 +156,7 @@ function runScenario({ name, answer, senpiArgs = [] }) {
       clearTimeout(timer)
       if (typeof child.pid === "number") {
         try {
-          process.kill(-child.pid, "SIGKILL")
+          killSenpiRunTree(child.pid, "SIGKILL")
         } catch {}
       }
       child.once("exit", () => settle(reason))

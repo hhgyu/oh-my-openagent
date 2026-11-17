@@ -8,6 +8,7 @@ import { join } from "node:path"
 
 import { REAL_AGENT_DIRS, sandboxEnv } from "./task-host-e2e-sandbox.mjs"
 import { daemonStderrTail, generationHostRecord } from "./task-host-e2e-daemon-state.mjs"
+import { senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 export function runBin(sandbox, args, { timeoutMs = 120_000, env = {}, cwd = sandbox.cwd } = {}) {
   const result = spawnSync(sandbox.bin, args, {
@@ -107,7 +108,7 @@ export function spawnParent(sandbox, mockEntry, prompt, { env = {}, capture = fa
   const child = spawn(sandbox.bin, args, {
     cwd: sandbox.cwd,
     env: sandboxEnv(sandbox, env),
-    detached: true,
+    ...senpiRunSpawnOptions(),
     stdio: capture ? ["ignore", "pipe", "pipe"] : ["ignore", "ignore", "ignore"],
   })
   const chunks = { stdout: "", stderr: "" }

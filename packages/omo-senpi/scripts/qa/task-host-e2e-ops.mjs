@@ -27,6 +27,7 @@ import {
   jsonlLines,
   spawnScript,
 } from "./task-host-e2e-support.mjs"
+import { senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 function tmuxAttach(sandbox, run, session) {
   const command = [sandbox.bin, "daemon", "attach", "-e", run.mockEntry, "--provider", "omo-mock", "--model", "mock-1"]
@@ -178,7 +179,7 @@ export async function scenarioH(run) {
   const legacy = spawn(run.legacyBin, ["--mode", "rpc", "--multi-session", "--listen", `unix://${socket}`], {
     cwd: sandbox.cwd,
     env: sandboxEnv(sandbox),
-    detached: true,
+    ...senpiRunSpawnOptions(),
     stdio: ["ignore", "ignore", "ignore"],
   })
   const up = await waitFor(() => (socketInode(socket) === undefined ? undefined : socketInode(socket)), {

@@ -24,6 +24,7 @@ import {
   transcriptSizes,
 } from "./task-host-e2e-support.mjs"
 import { join } from "node:path"
+import { killSenpiRunTree } from "./senpi-run-spawn.mjs"
 
 const DRIVER = "node packages/omo-senpi/scripts/qa/task-host-e2e.mjs"
 
@@ -139,7 +140,7 @@ async function runHandoffSuite(run) {
     }),
   )
   try {
-    process.kill(-parent.child.pid, "SIGKILL")
+    killSenpiRunTree(parent.child.pid, "SIGKILL")
   } catch {
     // already gone
   }
