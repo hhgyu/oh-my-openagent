@@ -5,9 +5,10 @@ import { bunWrite } from "./bun-file-shim"
 import { validateArchiveEntries, type ArchiveEntry } from "./archive-entry-validator"
 import { extractZip } from "./zip-extractor"
 import { readProcessStream } from "./process-stream-reader"
+import { resolveTarCommand } from "./zip-entry-listing"
 
 function isTarTraversalErrorOutput(output: string): boolean {
-  return /path contains '\.\.'|member name contains '\.\.'|removing leading [`'\"]?\.\.\//i.test(output)
+  return /path contains '\.\.'|member name contains '\.\.'|removing leading [`'"]?\.\.\//i.test(output)
 }
 
 export function getCachedBinaryPath(cacheDir: string, binaryName: string): string | null {
@@ -39,7 +40,8 @@ export async function extractTarGz(
   const entries = await listTarEntries(archivePath, options?.cwd)
   validateArchiveEntries(entries, destDir)
 
-  const args = options?.args ?? ["tar", "-xzf", archivePath, "-C", destDir]
+  const [command = "tar", ...rest] = options?.args ?? ["tar", "-xzf", archivePath, "-C", destDir]
+  const args = [command === "tar" ? resolveTarCommand() : command, ...rest]
   const proc = spawn(args, {
     cwd: options?.cwd,
     stdout: "pipe",
@@ -122,7 +124,7 @@ async function listTarEntries(archivePath: string, cwd?: string): Promise<Archiv
   const env: NodeJS.ProcessEnv = { ...process.env, LC_ALL: "C" }
   delete env.TAR_OPTIONS
   // Owner and group names are stored as-is and can contain spaces, so both tars list them as numbers.
-  const proc = spawn(["tar", "--numeric-owner", "-tvzf", archivePath], {
+  const proc = spawn([resolveTarCommand(), "--numeric-owner", "-tvzf", archivePath], {
     cwd,
     env,
     stdout: "pipe",

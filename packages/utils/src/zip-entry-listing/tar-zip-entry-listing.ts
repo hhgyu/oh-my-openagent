@@ -3,6 +3,7 @@ import { spawn } from "../runtime"
 import type { ArchiveEntry } from "../archive-entry-validator"
 import { log } from "../logger"
 import { readProcessStream } from "../process-stream-reader"
+import { resolveTarCommand } from "./tar-command"
 
 function parseTarListedZipEntry(line: string): ArchiveEntry | null {
   const match = line.match(/^([^\s])\S*\s+\d+\s+\S+\s+\S+\s+\d+\s+\S+\s+\d+\s+(?:\d{2}:\d{2}|\d{4})\s+(.*)$/)
@@ -67,7 +68,7 @@ export function parseTarListingOutput(stdout: string): ArchiveEntry[] {
 }
 
 export async function listZipEntriesWithTar(archivePath: string): Promise<ArchiveEntry[]> {
-  const proc = spawn(["tar", "-tvf", archivePath], {
+  const proc = spawn([resolveTarCommand(), "-tvf", archivePath], {
     stdout: "pipe",
     stderr: "pipe",
   })

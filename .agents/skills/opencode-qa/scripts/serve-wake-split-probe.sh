@@ -113,8 +113,10 @@ swsp_start_fake_llm() {
   port_file="$(mktemp -t swsp-port.XXXXXX)"
   OQA_TMPDIRS+=("$port_file")
 
-  FAKE_LLM_LOG="$log_file" FAKE_OPENAI_PORT="${FAKE_OPENAI_PORT:-0}" \
-    bun run --bun "$SCRIPT_DIR/lib/fake-openai-server.mjs" >"$port_file.stdout" 2>&1 &
+  OQA_TMPDIRS+=("$port_file.pid")
+  ( FAKE_LLM_LOG="$log_file" FAKE_OPENAI_PORT="${FAKE_OPENAI_PORT:-0}" \
+      oqa_guarded_spawn "$port_file.pid" bun run --bun "$(oqa_native_path "$SCRIPT_DIR/lib/fake-openai-server.mjs")" ) \
+    >"$port_file.stdout" 2>&1 &
   FAKE_SERVER_PID=$!
   disown "$FAKE_SERVER_PID" 2>/dev/null || true
 
@@ -697,6 +699,8 @@ swsp_self_test() {
     fails=$((fails+1))
   fi
 
+  oqa_assert_no_orphan_after_forced_kill || fails=$((fails+1))
+
   if [ "$fails" -eq 0 ]; then
     printf 'SELF-TEST OK\n'
     return 0
@@ -765,29 +769,18 @@ swsp_run_probe() {
   swsp_write_opencode_config "$XDG_CONFIG_HOME" "$FAKE_SERVER_PORT"
   local sandbox_db="$XDG_DATA_HOME/opencode/opencode.db"
 
-  # Step 4: Start opencode serve (using oqa_start_server internals but with our config)
-  # oqa_start_server includes another oqa_mk_isolated_xdg call which would reset XDG vars.
-  # Instead, start server directly using the already-set XDG vars.
+  # Step 4: Start opencode serve in the already-configured sandbox (oqa_start_server
+  # would create a fresh sandbox and drop our config). oqa_launch_server runs it
+  # under serve-guard so it cannot outlive this driver.
   swsp_info "starting opencode serve..."
-  local port pass
-  port="$(oqa_free_port)"
-  pass="oqa-${RANDOM}${RANDOM}"
-
-  OPENCODE_SERVER_PASSWORD="$pass" opencode serve --port "$port" --hostname 127.0.0.1 \
-    >"$serve_stdout" 2>"$serve_stderr" &
-  OQA_SERVER_PID=$!
-  disown "$OQA_SERVER_PID" 2>/dev/null || true
-  export OQA_SERVER_PORT="$port"
-  export OQA_SERVER_PASS="$pass"
-  export OQA_SERVER_URL="http://127.0.0.1:$port"
-
-  if ! oqa_wait_http "$OQA_SERVER_URL/global/health" "opencode:$pass" 30; then
+  local pass
+  if ! oqa_launch_server "$serve_stdout" "$serve_stderr"; then
     swsp_log "HARNESS_ERROR: opencode serve failed to start"
-    cat "$serve_stderr" >&2 2>/dev/null || true
     printf 'RESULT=HARNESS_ERROR opencode_serve_start_failed\n' | tee -a "$harness_log"
     swsp_stop_fake_llm
     return 1
   fi
+  pass="$OQA_SERVER_PASS"
   swsp_info "opencode serve ready at $OQA_SERVER_URL"
 
   # Encode the working directory for use in URL
