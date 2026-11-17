@@ -8,6 +8,7 @@
 #   1. GET /global/health            -> {"healthy":true,"version":...}
 #   2. GET /doc                      -> OpenAPI spec with >=100 paths
 #   3. GET /session (no credentials) -> HTTP 401 (auth is enforced)
+#   4. SIGKILL a driver that started a server -> the server dies with it
 #
 # Usage:
 #   server-smoke.sh              # run the smoke test
@@ -47,6 +48,8 @@ oqa_server_smoke() {
   else
     oqa_log "FAIL: unauthenticated /session returned $code (expected 401)"; fails=$((fails+1))
   fi
+
+  oqa_assert_no_orphan_after_forced_kill || fails=$((fails+1))
 
   if [ "$fails" -eq 0 ]; then
     oqa_pass "server-smoke"
