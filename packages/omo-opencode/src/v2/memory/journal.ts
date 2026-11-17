@@ -63,7 +63,9 @@ export function createMemoryJournal(deps: MemoryJournalDeps): MemoryJournal {
   async function reconcile(bound: BoundMemorySession, signal?: AbortSignal): Promise<AppendResult> {
     try {
       signal?.throwIfAborted()
-      const messages = await deps.session.context({ sessionID: bound.sessionID })
+      // An aborted reconcile stops waiting on the host read: its result would be discarded, and a stalled read must not
+      // hold the per-session chain that shutdown joins.
+      const messages = await untilAborted(deps.session.context({ sessionID: bound.sessionID }), signal)
       signal?.throwIfAborted()
       return await journalFor(bound).reconcile(projectSessionMessages(messages), signal)
     } catch (error) {
@@ -106,6 +108,24 @@ export function createMemoryJournal(deps: MemoryJournalDeps): MemoryJournal {
       journals.clear()
     },
   }
+}
+
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return work
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason)
+    signal.addEventListener("abort", abort, { once: true })
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", abort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", abort)
+        reject(error)
+      },
+    )
+  })
 }
 
 /** OpenCode 2 session messages -> transcript projections; only user and assistant turns are conversation. */

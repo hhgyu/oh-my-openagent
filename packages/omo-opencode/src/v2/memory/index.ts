@@ -352,6 +352,9 @@ export async function registerMemoryComponent(
       await userTurns.settled()
       await Promise.allSettled([journal.settled(), commands?.settled()])
       if (facts !== undefined) results.push(...(await Promise.allSettled([facts.close()])))
+      // The facts drain flushes the journal under a budget and returns when it expires; a write it started may still
+      // be running, and it must finish before cleanup resolves or it lands after the host removed the directory.
+      await journal.settled()
       // Triggers stop before the component closes, so no evaluation reserves a run after its children die.
       if (triggers !== undefined) results.push(...(await Promise.allSettled([triggers.close()])))
       if (dreams !== undefined) results.push(...(await Promise.allSettled([dreams.close()])))
