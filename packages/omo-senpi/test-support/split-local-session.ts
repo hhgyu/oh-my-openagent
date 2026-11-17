@@ -63,6 +63,12 @@ const scopes = await importDist<{
 const forwarding = await importDist<{ EXTENSION_EVENTS_PLANE: string; serveExtensionEvents(runner: unknown): unknown }>(
   join(senpiDist, "core", "extensions", "two-sided-forwarding.js"),
 )
+// Every agent session starts a fallback logger whose first start removes earlier log generations and then recreates
+// <agentDir>/logs with a marker file, asynchronously. Removing the root before that settles lets it recreate the
+// directory inside the removed root (a leaked temp dir) or fail with ENOENT.
+const fallbackLog = await importDist<{ settledFallbackLoggers(): Promise<void> }>(
+  join(senpiDist, "core", "retry-fallback", "log.js"),
+)
 const sdk = await importDist<{
   createAgentSession(options: Record<string, unknown>): Promise<{ session: SplitSession }>
   DefaultResourceLoader: new (options: Record<string, unknown>) => {
@@ -109,7 +115,12 @@ async function openSession(placement: Placement, extension: ExtensionFactory): P
   const agentDir = join(root, "agent")
   const handAgentDir = join(root, "hand-agent")
   for (const dir of [cwd, agentDir, handAgentDir]) mkdirSync(dir, { recursive: true })
-  const cleanups: Array<() => Promise<void> | void> = [() => rmSync(root, { recursive: true, force: true })]
+  const cleanups: Array<() => Promise<void> | void> = [
+    async () => {
+      await fallbackLog.settledFallbackLoggers()
+      rmSync(root, { recursive: true, force: true })
+    },
+  ]
   const faults: unknown[] = []
   let handToolCalls = 0
   const handProbe: ExtensionFactory = (pi) => {

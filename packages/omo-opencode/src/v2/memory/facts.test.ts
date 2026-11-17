@@ -543,6 +543,53 @@ describe("facts reload recovery", () => {
     expect(ports.requests).toHaveLength(0)
   })
 
+  test("#given a final journal write still running when close exhausts its budget #when cleanup resolves #then no journal reconcile it started is still running", async () => {
+    // given
+    const f = fixture({ facts: { debounce_settles: 10 } })
+    f.addSession("root")
+    const warnings: string[] = []
+    const ports = createScriptedFactsPorts()
+    const cleanup = await registerMemoryComponent(
+      f.host,
+      f.options({
+        logger: { warn: (message) => warnings.push(message) },
+        facts: { createPort: (request) => ports.createPort(request) },
+      }),
+    )
+    cleanups.push(cleanup)
+    await f.context("root")
+    await f.idle("root")
+    const session = f.sessions.get("root")
+    if (session !== undefined) session.messages = conversation("Written during shutdown", "Noted.")
+    let running = 0
+    const original = TranscriptJournal.prototype.reconcile
+    const write = spyOn(TranscriptJournal.prototype, "reconcile").mockImplementation(async function (
+      this: TranscriptJournal,
+      ...input: Parameters<TranscriptJournal["reconcile"]>
+    ) {
+      running += 1
+      try {
+        await scheduler.wait(2_500)
+        return await Reflect.apply(original, this, [input[0]])
+      } finally {
+        running -= 1
+      }
+    })
+
+    // when
+    let runningAtCleanup: number
+    try {
+      await cleanup()
+      runningAtCleanup = running
+    } finally {
+      write.mockRestore()
+    }
+
+    // then
+    expect(warnings).toContain("facts shutdown drain hit its budget")
+    expect(runningAtCleanup).toBe(0)
+  })
+
   async function strandedRun(f: MemoryFixture) {
     const first = await register(f)
     await settle(f, "root")

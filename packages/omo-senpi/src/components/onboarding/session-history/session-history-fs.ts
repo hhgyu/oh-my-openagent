@@ -1,4 +1,4 @@
-import type { Stats } from "node:fs"
+import type { BigIntStats } from "node:fs"
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises"
 
 export interface SessionHistoryFileStats {
@@ -8,6 +8,11 @@ export interface SessionHistoryFileStats {
   readonly dev: number
   readonly ino: number | null
   readonly birthtimeMs: number | null
+  /**
+   * Exact `<dev>:<ino>`, read as bigints. NTFS file IDs often exceed 2^53, where `ino` is null, so two directories
+   * would otherwise lose their identity and be compared by path instead.
+   */
+  readonly identity?: string | null
 }
 
 export interface SessionHistoryFile {
@@ -26,20 +31,22 @@ export interface SessionHistoryFs {
   open(path: string): Promise<SessionHistoryFile>
 }
 
-function toFileStats(stats: Stats): SessionHistoryFileStats {
+export function toFileStats(stats: BigIntStats): SessionHistoryFileStats {
+  const ino = Number(stats.ino)
   return {
     type: stats.isFile() ? "File" : stats.isDirectory() ? "Directory" : "Other",
-    size: stats.size,
-    mtimeMs: Number.isFinite(stats.mtimeMs) ? Math.floor(stats.mtimeMs) : null,
-    dev: stats.dev,
-    ino: Number.isSafeInteger(stats.ino) && stats.ino > 0 ? stats.ino : null,
-    birthtimeMs: Number.isFinite(stats.birthtimeMs) && stats.birthtimeMs > 0 ? Math.floor(stats.birthtimeMs) : null,
+    size: Number(stats.size),
+    mtimeMs: Number(stats.mtimeMs),
+    dev: Number(stats.dev),
+    ino: Number.isSafeInteger(ino) && ino > 0 ? ino : null,
+    birthtimeMs: stats.birthtimeMs > 0n ? Number(stats.birthtimeMs) : null,
+    identity: stats.ino > 0n ? `${stats.dev}:${stats.ino}` : null,
   }
 }
 
 export const nodeSessionHistoryFs: SessionHistoryFs = {
   readDirectory: (path) => readdir(path),
-  stat: async (path) => toFileStats(await stat(path)),
+  stat: async (path) => toFileStats(await stat(path, { bigint: true })),
   realPath: (path) => realpath(path),
   readFileString: (path) => readFile(path, "utf8"),
   async open(path) {
@@ -50,7 +57,7 @@ export const nodeSessionHistoryFs: SessionHistoryFs = {
         const { bytesRead } = await handle.read(buffer, 0, size, null)
         return bytesRead === 0 ? null : buffer.subarray(0, bytesRead)
       },
-      stat: async () => toFileStats(await handle.stat()),
+      stat: async () => toFileStats(await handle.stat({ bigint: true })),
       close: () => handle.close(),
     }
   },

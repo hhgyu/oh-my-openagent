@@ -11,6 +11,7 @@ import {
   listZipEntriesWithPython,
   listZipEntriesWithTar,
   listZipEntriesWithZipInfo,
+  resolveTarCommand,
 } from "./zip-entry-listing"
 
 const WINDOWS_BUILD_WITH_TAR = 17134
@@ -21,7 +22,7 @@ function getWindowsBuildNumber(): number | null {
   const parts = release().split(".")
   if (parts.length >= 3) {
     const build = parseInt(parts[2], 10)
-    if (!isNaN(build)) return build
+    if (!Number.isNaN(build)) return build
   }
   return null
 }
@@ -61,7 +62,7 @@ export async function extractZip(archivePath: string, destDir: string): Promise<
 
     switch (extractor) {
       case "tar":
-        proc = spawn(["tar", "-xf", archivePath, "-C", destDir], {
+        proc = spawn([resolveTarCommand(), "-xf", archivePath, "-C", destDir], {
           stdout: "ignore",
           stderr: "pipe",
         })
@@ -79,7 +80,6 @@ export async function extractZip(archivePath: string, destDir: string): Promise<
           },
         )
         break
-      case "powershell":
       default:
         proc = spawn(
           [

@@ -276,7 +276,7 @@ describe("session-history scanProjects (parity with desktop AgentSessionScanner.
     ])
   })
 
-  it("#given case variants with distinct identities #when scanned #then keeps both off Windows and folds them on Windows", async () => {
+  it("#given case variants with distinct identities beyond 2^53 #when scanned #then keeps both on every platform", async () => {
     // given
     const claudeHomePath = await temp.make("claude-home-")
     const codexHomePath = await temp.make("codex-home-")
@@ -295,22 +295,22 @@ describe("session-history scanProjects (parity with desktop AgentSessionScanner.
       contents: claudeSessionLine(lowerWorkspace),
       mtimeMs: Date.parse("2026-01-01T00:00:00.000Z"),
     })
+    // NTFS file IDs above 2^53 have no exact number form, so `ino` reads null for them, as here.
     const fs = {
       ...nodeSessionHistoryFs,
-      stat: (filePath: string) =>
-        nodeSessionHistoryFs.stat(
-          filePath === upperWorkspace ? backingUpper : filePath === lowerWorkspace ? backingLower : filePath,
-        ),
+      stat: async (filePath: string) => {
+        const backing =
+          filePath === upperWorkspace ? backingUpper : filePath === lowerWorkspace ? backingLower : filePath
+        const stats = await nodeSessionHistoryFs.stat(backing)
+        return backing === filePath ? stats : { ...stats, ino: null }
+      },
     }
 
     // when
     const result = await runScan({ claudeHomePath, codexHomePath, fs })
 
     // then
-    // Windows paths are case-insensitive, so the comparison key folds case there and the variants are one project.
-    expect(result.candidates.map((candidate) => candidate.path)).toEqual(
-      process.platform === "win32" ? [upperWorkspace] : [upperWorkspace, lowerWorkspace],
-    )
+    expect(result.candidates.map((candidate) => candidate.path)).toEqual([upperWorkspace, lowerWorkspace])
   })
 
   it("#given two distinct Codex homes #when scanned #then scans each home once", async () => {
