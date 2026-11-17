@@ -20,6 +20,19 @@ function defined<T>(value: T): NonNullable<T> {
   return value
 }
 
+// A SIGKILLed grandchild is reparented and stays a zombie until its new parent reaps it, and kill(pid, 0) still
+// succeeds for a zombie (XNU answers it explicitly), so "stopped" is: gone, or a zombie per ps.
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+  } catch {
+    return false
+  }
+  if (process.platform === "win32") return true
+  const state = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim()
+  return state !== "" && !state.startsWith("Z")
+}
+
 const roots: string[] = []
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
@@ -447,11 +460,42 @@ describe("formatter executor", () => {
       const reason = Error("HOST_INTERRUPTED")
       f.controller.abort(reason)
       await expect(execution).rejects.toBe(reason)
-      for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow()
+      expect(pids.filter(isRunning)).toEqual([])
     } finally {
       await executor.dispose()
     }
   })
+  test.skipIf(process.platform === "win32")(
+    "#given a killed child its parent never reaps #when liveness is probed #then the zombie reads as stopped",
+    async () => {
+      // given
+      const holder = Bun.spawn(["sh", "-c", "sleep 0 & echo $!; exec sleep 30"], { stdout: "pipe" })
+      try {
+        const zombie = Number((await new Response(holder.stdout).text()).trim().split("\n")[0])
+        const zombieState = () => spawnSync("ps", ["-o", "stat=", "-p", String(zombie)], { encoding: "utf8" }).stdout
+        for (let attempt = 0; attempt < 200 && !zombieState().trim().startsWith("Z"); attempt++)
+          await new Promise((resolve) => setTimeout(resolve, 10))
+        expect(zombieState().trim().startsWith("Z")).toBe(true)
+
+        // when
+        const signalled = (() => {
+          try {
+            process.kill(zombie, 0)
+            return true
+          } catch {
+            return false
+          }
+        })()
+
+        // then
+        expect(signalled).toBe(true)
+        expect(isRunning(zombie)).toBe(false)
+      } finally {
+        holder.kill("SIGKILL")
+        await holder.exited
+      }
+    },
+  )
   test("denied ancestor metadata stops neutral resolver and probe before either can run", async () => {
     const f = fixture()
     writeFileSync(join(f.root, "bun.lock"), "")
