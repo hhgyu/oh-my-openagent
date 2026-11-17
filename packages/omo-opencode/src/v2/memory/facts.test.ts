@@ -439,8 +439,11 @@ describe("facts reload recovery", () => {
       // when
       if (edge === "location.shutdown") {
         await f.emitEvent(edge, "root")
-        await until(async () => (await queue.listPending()).length === 2)
+        // Hook disposal starts only inside the component's cleanup, so it proves the event began the shutdown.
+        // Polling the queue here would take its lock against the bounded drain and starve it past its budget.
+        await until(() => f.disposals() > 0)
       }
+      // Cleanup is memoized, so after a shutdown this joins the drain the event started.
       await cleanup()
       await cleanup()
       // then
