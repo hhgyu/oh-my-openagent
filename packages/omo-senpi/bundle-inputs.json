@@ -2567,6 +2567,7 @@
     "packages/utils/src/zip-entry-listing/powershell-zip-entry-listing.ts",
     "packages/utils/src/zip-entry-listing/python-zip-entry-listing.ts",
     "packages/utils/src/zip-entry-listing/read-zip-symlink-target.ts",
+    "packages/utils/src/zip-entry-listing/tar-command.ts",
     "packages/utils/src/zip-entry-listing/tar-zip-entry-listing.ts",
     "packages/utils/src/zip-entry-listing/zipinfo-zip-entry-listing.ts",
     "packages/utils/tsconfig.json",

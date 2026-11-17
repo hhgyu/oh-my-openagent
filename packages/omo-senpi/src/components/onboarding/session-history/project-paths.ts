@@ -87,7 +87,8 @@ export function createProjectPathRules(input: ProjectPathRulesInput): ProjectPat
   const directoryIdentity = async (target: string, knownStats?: SessionHistoryFileStats): Promise<string> => {
     const resolved = resolve(target)
     const stats = knownStats ?? (await statOrNull(input.fs, resolved))
-    if (stats !== null && stats.ino !== null) return `inode:${stats.dev}:${stats.ino}`
+    const identity = stats?.identity ?? (stats !== null && stats.ino !== null ? `${stats.dev}:${stats.ino}` : null)
+    if (identity !== null) return `inode:${identity}`
     return `path:${normalizeProjectPathForComparison(await realPathOr(input.fs, resolved))}`
   }
 
