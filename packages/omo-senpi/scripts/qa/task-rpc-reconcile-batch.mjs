@@ -25,6 +25,7 @@ import {
   sampleFseventsd,
   withinDeadline,
 } from "./task-rpc-diagnostics.mjs"
+import { senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 const script = fileURLToPath(import.meta.url)
 
@@ -43,7 +44,7 @@ export async function runOne(repo, label, outDir, bun) {
   await sample("start")
   const child = spawn(bun.path, [script, "--worker", repo, "--run-root", root], {
     cwd: repo,
-    detached: true,
+    ...senpiRunSpawnOptions(),
     stdio: ["ignore", "pipe", "pipe"],
     env: withTelemetryOptOut({
       ...process.env,

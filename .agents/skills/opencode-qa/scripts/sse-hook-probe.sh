@@ -69,11 +69,14 @@ oqa_sse_watch() {
 oqa_self_test() {
   oqa_require opencode curl jq || return 1
   if ! oqa_start_server; then oqa_log "FAIL: server did not start"; return 1; fi
+  local fails=0
   if oqa_sse_watch "$OQA_SERVER_URL" "opencode:$OQA_SERVER_PASS" "$OQA_PROJ" "server.connected" 15; then
     oqa_pass "SSE /event opened and delivered server.connected"
-    return 0
+  else
+    oqa_log "FAIL: did not observe server.connected"; fails=$((fails+1))
   fi
-  oqa_log "FAIL: did not observe server.connected"; return 1
+  oqa_assert_no_orphan_after_forced_kill || fails=$((fails+1))
+  [ "$fails" -eq 0 ]
 }
 
 oqa_attach_mode() {

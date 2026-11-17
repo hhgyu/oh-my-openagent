@@ -14,6 +14,7 @@ import { createFirstPaintScheduler, createStartupDeferral, type StartupWorkSched
 import { installToolCaptureRegistry } from "./tool-capture-registry"
 import { createPrewarmDiagnostics } from "./prewarm-diagnostics"
 import { absentSenpiSeamsNotice, installRemoteWakeRefusal } from "./senpi-seams"
+import { installSessionShutdownGate } from "./session-shutdown-gate"
 import type { ComponentContext, ComponentLogger, OmoSenpiComponent, SenpiExtensionAPI } from "./types"
 import { releaseHerdrAgentHint } from "./herdr-agent-hint"
 
@@ -136,6 +137,9 @@ export function composeOmoSenpiExtension(
 
     const absentSeams = absentSenpiSeamsNotice(pi)
     if (absentSeams !== undefined) logger.warn(absentSeams)
+    // First session_shutdown handler of this generation: every later one (and every timer firing while
+    // they are awaited) sees turn-starting sends refused.
+    const shutdownGate = installSessionShutdownGate(pi, logger)
     installRemoteWakeRefusal(pi)
 
     // Install the capture registry and idle coordinator BEFORE the component loop so every component
@@ -149,9 +153,10 @@ export function composeOmoSenpiExtension(
     // senpi-task's completion retry): retirement cancels the armed handle instead of leaving a live
     // 200ms timer behind after a `quit` shutdown.
     const publishChildWork = publishWakeQueueChildWork(pi, logger)
+    const gatedPi = shutdownGate.guard(pi)
     const idleCoordinator = new IdleInjectionCoordinator(
       (message, options) =>
-        deliverItems((native, delivery) => pi.sendMessage(native, delivery), { ...options, message }),
+        deliverItems((native, delivery) => gatedPi.sendMessage(native, delivery), { ...options, message }),
       {
         scheduleFlush: (flush) => {
           const timer = setTimeout(flush, IDLE_FLUSH_BATCH_WINDOW_MS)
@@ -229,7 +234,7 @@ export function composeOmoSenpiExtension(
       }
 
       try {
-        await component.register(prewarmDiagnostics.forComponent(component.name), ctx)
+        await component.register(shutdownGate.guard(prewarmDiagnostics.forComponent(component.name)), ctx)
       } catch (error) {
         logger.error("omo-senpi component registration failed", { component: component.name, error })
       }

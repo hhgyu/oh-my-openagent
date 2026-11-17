@@ -22,6 +22,7 @@ import {
   track,
   waitFor,
 } from "./lib/gateway.mjs"
+import { killSenpiRunTree, senpiRunSpawnOptions } from "../senpi-run-spawn.mjs"
 
 const TOKEN = "QA-TOKEN-sender-death"
 // A sender stuck at startup or on the store lock must fail the step, not hang the run.
@@ -53,7 +54,7 @@ await runScenario("sender-death", async ({ report, scratch, startTui }) => {
   const child = spawn(process.execPath, [SENDER, JSON.stringify(config)], {
     cwd: scratch.work,
     env: { ...scratch.env, NODE_PATH: join(KIT_DIR, "node_modules") },
-    detached: true,
+    ...senpiRunSpawnOptions(),
     stdio: ["pipe", "pipe", "pipe"],
   })
   track(child, "sender")
@@ -63,7 +64,7 @@ await runScenario("sender-death", async ({ report, scratch, startTui }) => {
   const [code, signal] = await new Promise((resolvePromise, rejectPromise) => {
     const timer = setTimeout(() => {
       try {
-        process.kill(-child.pid, "SIGKILL")
+        killSenpiRunTree(child.pid, "SIGKILL")
       } catch {
         // Already gone.
       }

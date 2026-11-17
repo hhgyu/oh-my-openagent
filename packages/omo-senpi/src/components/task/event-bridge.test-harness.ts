@@ -15,6 +15,7 @@ import { wireEventBridge } from "./event-bridge"
 import { fakeSummary } from "./event-bridge.test-fixtures"
 import type { TaskEngine } from "./engine"
 import type { TaskRpcTimers } from "./task-rpc-bridge"
+import type { TaskRuntimeContext } from "./runtime-context"
 import type { SessionTransitionBridge } from "./session-transition-bridge"
 import type { TaskStatusUi } from "./status-ui"
 
@@ -35,6 +36,8 @@ type HarnessOptions = {
   readonly stateDir?: string
   // The run-pause bridge the event bridge drives (absent: run-pause wiring is off).
   readonly runPause?: Parameters<typeof wireEventBridge>[5]["runPause"]
+  // A real runtime context the bridge captures into (absent: captures are only recorded).
+  readonly runtime?: Pick<TaskRuntimeContext, "captureFrom" | "parentState">
 }
 
 export function wireHarness(sessionId?: string, options: HarnessOptions = {}) {
@@ -67,14 +70,15 @@ export function wireHarness(sessionId?: string, options: HarnessOptions = {}) {
 
   const engine = {
     runtime: {
-      captureFrom: () => {
+      captureFrom: (ctx: Parameters<TaskRuntimeContext["captureFrom"]>[0]) => {
         order.push("capture")
+        options.runtime?.captureFrom(ctx)
       },
       sessionId: () => sessionId,
       clearUi: () => {
         order.push("clearUi")
       },
-      parentState: () => ({ kind: "idle" as const }),
+      parentState: () => options.runtime?.parentState() ?? { kind: "idle" as const },
     },
     lifecycle: {
       suspendOnSessionShutdown: async (input: SuspendInput) => {

@@ -34,6 +34,7 @@ import {
   trackCloser,
   verifyCleanup,
 } from "./lib/harness.mjs"
+import { senpiRunSpawnOptions } from "../senpi-run-spawn.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const omoRoot = resolve(here, "..", "..", "..", "..", "..")
@@ -65,7 +66,12 @@ async function startPinnedHost(scratch) {
       "--model",
       "mock-model",
     ],
-    { cwd: scratch.cwd, detached: shouldDetachChildren(), env: scratch.env, stdio: ["pipe", "pipe", "pipe"] },
+    {
+      cwd: scratch.cwd,
+      ...senpiRunSpawnOptions(process.platform, shouldDetachChildren()),
+      env: scratch.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    },
   )
   trackChild(child)
   const needle = `rpc listening on unix://${socket}`

@@ -1,4 +1,5 @@
 import { watch } from "node:fs"
+import { killSenpiRunTree } from "./senpi-run-spawn.mjs"
 
 // This is a failure deadline, not an observation window. Subscribe before triggering work and
 // return on the product transition; an idle machine never pays the loaded-machine allowance.
@@ -50,7 +51,7 @@ export function observeState(root, probe, { trigger = () => {}, timeoutMs = STAT
 export async function stopParent(parent) {
   if (!parent) return
   try {
-    process.kill(-parent.child.pid, "SIGKILL")
+    killSenpiRunTree(parent.child.pid, "SIGKILL")
   } catch (error) {
     if (error.code !== "ESRCH") throw error
   }

@@ -17,6 +17,7 @@
 # No `set -e`: these scripts deliberately probe failure paths (401, refused).
 set -uo pipefail
 
+SCRIPT_DIR_COMMON="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OQA_TMPDIRS=()
 OQA_TMUX_SESSIONS=()
 OQA_CURL_PIDS=()
@@ -130,11 +131,48 @@ oqa_wait_http() {
 #   url="$OQA_SERVER_URL"
 oqa_start_server() {
   oqa_mk_isolated_xdg || return 1
-  local port pass
+  oqa_launch_server "$XDG_STATE_HOME/serve.log" "$XDG_STATE_HOME/serve.log"
+}
+
+# Native path for a non-MSYS child (bun on Windows cannot read /c/... paths).
+oqa_native_path() {
+  if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi
+}
+
+# The driver's OS pid: on MSYS/Git Bash $$ is an MSYS pid, the guard needs the
+# Windows one.
+oqa_driver_os_pid() {
+  if [ -r "/proc/$$/winpid" ]; then cat "/proc/$$/winpid"; else printf '%s' "$$"; fi
+}
+
+# oqa_guarded_spawn <pid-file> <command> [args...]   (run it with `&`)
+# Every long-lived QA child (above all `opencode serve`) MUST start through
+# serve-guard.mjs: Windows kill-on-close Job Object / POSIX process group, plus
+# a parent-pid watch, so the child dies with the driver even when the driver is
+# SIGKILLed or `taskkill /F`ed and its EXIT trap never runs.
+oqa_guarded_spawn() {
+  local pid_file="$1"; shift
+  exec bun "$(oqa_native_path "$SCRIPT_DIR_COMMON/serve-guard.mjs")" \
+    --parent-pid "$(oqa_driver_os_pid)" --pid-file "$(oqa_native_path "$pid_file")" -- "$@"
+}
+
+# Launch an isolated, password-protected server in the CURRENT XDG sandbox
+# (call oqa_mk_isolated_xdg first). Args: stdout_log stderr_log.
+# Sets OQA_SERVER_URL / OQA_SERVER_PASS / OQA_SERVER_PORT / OQA_SERVER_PID
+# (the guard pid) / OQA_SERVER_CHILD_PID_FILE. Call DIRECTLY, never via $(...).
+oqa_launch_server() {
+  local out_log="$1" err_log="$2" port pass
+  oqa_require bun || return 1
   port="$(oqa_free_port)"
   pass="oqa-${RANDOM}${RANDOM}"
-  OPENCODE_SERVER_PASSWORD="$pass" opencode serve --port "$port" --hostname 127.0.0.1 \
-    >"$XDG_STATE_HOME/serve.log" 2>&1 &
+  OQA_SERVER_CHILD_PID_FILE="$XDG_STATE_HOME/serve.child.pid"
+  if [ "$out_log" = "$err_log" ]; then
+    ( OPENCODE_SERVER_PASSWORD="$pass" oqa_guarded_spawn "$OQA_SERVER_CHILD_PID_FILE" \
+        opencode serve --port "$port" --hostname 127.0.0.1 ) >"$out_log" 2>&1 &
+  else
+    ( OPENCODE_SERVER_PASSWORD="$pass" oqa_guarded_spawn "$OQA_SERVER_CHILD_PID_FILE" \
+        opencode serve --port "$port" --hostname 127.0.0.1 ) >"$out_log" 2>"$err_log" &
+  fi
   OQA_SERVER_PID=$!
   disown "$OQA_SERVER_PID" 2>/dev/null || true
   export OQA_SERVER_PORT="$port"
@@ -142,19 +180,35 @@ oqa_start_server() {
   export OQA_SERVER_URL="http://127.0.0.1:$port"
   if ! oqa_wait_http "$OQA_SERVER_URL/global/health" "opencode:$pass" 30; then
     oqa_log "server failed to start; log follows:"
-    cat "$XDG_STATE_HOME/serve.log" >&2 2>/dev/null || true
+    cat "$out_log" >&2 2>/dev/null || true
+    [ "$out_log" = "$err_log" ] || cat "$err_log" >&2 2>/dev/null || true
     return 1
   fi
 }
 
-# Teardown everything the helpers created. Safe to call multiple times.
-oqa_cleanup() {
+# Stop the guarded server tree. Killing the guard closes the Windows job (the
+# kernel kills every process in it); on POSIX the guard kills the child's
+# process group, and the recorded pgid covers a guard that already died.
+oqa_stop_server() {
+  local child_pid=""
+  [ -n "${OQA_SERVER_CHILD_PID_FILE:-}" ] && child_pid="$(tr -d '[:space:]' <"$OQA_SERVER_CHILD_PID_FILE" 2>/dev/null)"
   if [ -n "${OQA_SERVER_PID:-}" ]; then
     kill "$OQA_SERVER_PID" 2>/dev/null || true
-    sleep 0.3
+    local tries=0
+    while kill -0 "$OQA_SERVER_PID" 2>/dev/null && [ "$tries" -lt 30 ]; do sleep 0.1; tries=$((tries+1)); done
     kill -0 "$OQA_SERVER_PID" 2>/dev/null && kill -9 "$OQA_SERVER_PID" 2>/dev/null || true
     OQA_SERVER_PID=""
   fi
+  case "$child_pid" in
+    ''|*[!0-9]*) ;;
+    *) [ -r /proc/$$/winpid ] || kill -9 -- "-$child_pid" 2>/dev/null || true ;;
+  esac
+  OQA_SERVER_CHILD_PID_FILE=""
+}
+
+# Teardown everything the helpers created. Safe to call multiple times.
+oqa_cleanup() {
+  oqa_stop_server
   local s p d
   for s in "${OQA_TMUX_SESSIONS[@]:-}"; do
     [ -n "$s" ] && tmux kill-session -t "$s" 2>/dev/null || true
@@ -172,6 +226,72 @@ oqa_cleanup() {
   OQA_CURL_PIDS=()
 }
 trap oqa_cleanup EXIT
+
+# ---- orphan check ------------------------------------------------------------
+# Kill whatever still listens on 127.0.0.1:<port> (self-test hygiene only, so a
+# failing orphan check never leaves the orphan it detected behind).
+oqa__reap_port_listener() {
+  local port="$1" pid
+  if command -v netstat >/dev/null 2>&1 && command -v taskkill >/dev/null 2>&1; then
+    for pid in $(netstat -ano 2>/dev/null | awk -v p=":$port" '$2 ~ p"$" && $4 == "LISTENING" {print $5}' | sort -u); do
+      oqa_log "reaping orphaned listener pid $pid on port $port"
+      MSYS2_ARG_CONV_EXCL='*' taskkill /T /F /PID "$pid" >/dev/null 2>&1 || true
+    done
+  elif command -v lsof >/dev/null 2>&1; then
+    for pid in $(lsof -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null); do
+      oqa_log "reaping orphaned listener pid $pid on port $port"
+      kill -9 "$pid" 2>/dev/null || true
+    done
+  fi
+}
+
+# oqa_assert_no_orphan_after_forced_kill
+# Starts a driver shell that brings a server up through oqa_start_server, then
+# SIGKILLs that driver so its EXIT trap never runs (the way an agent's shell or
+# tool timeout dies). The server must stop on its own within 20s.
+oqa_assert_no_orphan_after_forced_kill() {
+  local marker driver_pid port="" root="" deadline alive=1
+  marker="$(mktemp -t oqa-orphan.XXXXXX)"
+  bash -c '
+    . "'"$SCRIPT_DIR_COMMON"'/common.sh"
+    oqa_start_server || exit 1
+    printf "%s\n%s\n" "$OQA_SERVER_PORT" "$OQA_XDG_ROOT" > "'"$marker"'"
+    while :; do sleep 1; done
+  ' >/dev/null 2>&1 &
+  driver_pid=$!
+  deadline=$(( $(date +%s) + 60 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    port="$(sed -n '1p' "$marker" 2>/dev/null)"
+    [ -n "$port" ] && break
+    kill -0 "$driver_pid" 2>/dev/null || break
+    sleep 0.2
+  done
+  root="$(sed -n '2p' "$marker" 2>/dev/null)"
+  rm -f "$marker"
+  if [ -z "$port" ]; then
+    kill -9 "$driver_pid" 2>/dev/null || true
+    oqa_log "FAIL: forced-kill driver never brought a server up"
+    return 1
+  fi
+  kill -9 "$driver_pid" 2>/dev/null || true
+  wait "$driver_pid" 2>/dev/null || true
+  deadline=$(( $(date +%s) + 20 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if ! curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$port/global/health"; then
+      alive=0
+      break
+    fi
+    sleep 0.25
+  done
+  [ -n "$root" ] && rm -rf "$root" 2>/dev/null
+  if [ "$alive" -eq 0 ]; then
+    oqa_pass "no opencode server survives a forced (SIGKILL) driver kill (port $port closed)"
+    return 0
+  fi
+  oqa_log "FAIL: opencode server on port $port outlived its SIGKILLed driver"
+  oqa__reap_port_listener "$port"
+  return 1
+}
 
 # ---- self-check ------------------------------------------------------------
 # Run: bash scripts/lib/common.sh --self-check
@@ -251,6 +371,8 @@ oqa__self_check() {
   else
     oqa_log "FAIL: HOME-based opencode shim returned '$shim_result'"; fails=$((fails+1))
   fi
+
+  oqa_assert_no_orphan_after_forced_kill || fails=$((fails+1))
 
   if [ "$fails" -eq 0 ]; then
     oqa_pass "common.sh self-check"

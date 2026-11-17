@@ -19,6 +19,7 @@ import {
   spawnParent,
   waitFor,
 } from "./task-host-e2e-process.mjs"
+import { killSenpiRunTree } from "./senpi-run-spawn.mjs"
 
 /** The engine's own words about who serves the socket: what a parent printed about host/ensure/handoff. */
 function hostLines(text) {
@@ -118,7 +119,7 @@ export async function scenarioA(run) {
   })
   for (const parent of parents) {
     try {
-      process.kill(-parent.child.pid, "SIGKILL")
+      killSenpiRunTree(parent.child.pid, "SIGKILL")
     } catch {
       // already gone
     }
@@ -179,7 +180,7 @@ export async function scenarioA1(run) {
   const pass = singleParentPass(facts)
   facts.driverTeardown = recordMockEvent(sandbox.cwd, { type: "driver_teardown", parentPids: [parent.child.pid] })
   try {
-    process.kill(-parent.child.pid, "SIGKILL")
+    killSenpiRunTree(parent.child.pid, "SIGKILL")
   } catch {
     // already gone
   }

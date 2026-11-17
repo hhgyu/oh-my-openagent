@@ -8,7 +8,7 @@ import { join } from "node:path"
 import { FakeExtensionAPI } from "../../test-support/fake-extension-api"
 import { composeOmoSenpiExtension } from "./compose"
 import { IdleInjectionRetiredError, type IdleInjectionCoordinator } from "./idle-injection-coordinator"
-import type { ComponentLogger, OmoSenpiComponent } from "./types"
+import type { ComponentLogger, OmoSenpiComponent, SenpiExtensionAPI } from "./types"
 
 // Mirrors senpi's reload: after `session_shutdown {reason: "reload"}` the old generation's API throws
 // from every call instead of delivering.
@@ -576,5 +576,67 @@ describe("idle-injection retire on session_shutdown (#10782)", () => {
     expect(
       logger.entries.some((entry) => entry.level === "warn" && entry.message.includes("receipt failed on shutdown")),
     ).toBe(true)
+  })
+})
+
+describe("turn-starting sends while session_shutdown is still being dispatched", () => {
+  it("#given a component whose shutdown handler is still awaited #when another component wakes the session from a timer meanwhile #then no turn reaches senpi, a plain append still does, and the next session_start reopens wakes", async () => {
+    // given a slow shutdown handler (the memory drain) and a component that wakes the parent on its own
+    const pi = new FakeExtensionAPI()
+    const drain = Promise.withResolvers<undefined>()
+    const drainStarted = Promise.withResolvers<undefined>()
+    const registered: { api?: SenpiExtensionAPI } = {}
+    const wakeApi = {
+      sendMessage: (message: Record<string, unknown>, options: Record<string, unknown>) =>
+        registered.api?.sendMessage(message, options),
+      sendUserMessage: (content: string, options: { deliverAs: "followUp" }) =>
+        registered.api?.sendUserMessage(content, options),
+    }
+    const components: OmoSenpiComponent[] = [
+      {
+        name: "memory-like",
+        register(api) {
+          api.on("session_shutdown", async () => {
+            drainStarted.resolve(undefined)
+            await drain.promise
+          })
+        },
+      },
+      {
+        name: "wake-like",
+        register(api) {
+          registered.api = api
+        },
+      },
+    ]
+    await composeOmoSenpiExtension(components, { logger: createRecordingLogger() })(pi)
+
+    // when the wake fires while senpi is still awaiting the shutdown handler
+    const shutdown = pi.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" })
+    await drainStarted.promise
+    const outcomes = [
+      () => wakeApi.sendMessage({ customType: "omo-senpi:wake", content: "task done" }, { triggerTurn: true }),
+      () => wakeApi.sendUserMessage("continue the loop", { deliverAs: "followUp" }),
+    ].map((send) => {
+      try {
+        send()
+        return "sent"
+      } catch {
+        return "refused"
+      }
+    })
+    wakeApi.sendMessage({ customType: "omo-senpi:notice", content: "appended" }, { triggerTurn: false })
+    drain.resolve(undefined)
+    await shutdown
+
+    // then neither wake started a turn, and the producer saw a refusal it can record as undelivered
+    expect(outcomes).toEqual(["refused", "refused"])
+    expect(pi.userMessages).toEqual([])
+    expect(pi.messages.map((call) => call.message["customType"])).toEqual(["omo-senpi:notice"])
+
+    // and a new session generation on the same API wakes normally again
+    await pi.dispatch("session_start", { type: "session_start", reason: "new" })
+    wakeApi.sendMessage({ customType: "omo-senpi:wake", content: "task done" }, { triggerTurn: true })
+    expect(pi.messages.map((call) => call.message["customType"])).toEqual(["omo-senpi:notice", "omo-senpi:wake"])
   })
 })

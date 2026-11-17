@@ -17,6 +17,7 @@ import { basename, delimiter, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isolatedChildEnv, sandboxStateDir } from "./sandbox-child-env.mjs"
 import { withTelemetryOptOut } from "./telemetry-opt-out-env.mjs"
+import { killSenpiRunTree, senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 const COLLISION_TEXT = "Task record already exists"
 const scriptDir = dirname(fileURLToPath(import.meta.url))
@@ -237,7 +238,7 @@ function startSenpi(senpiBin, parent, projectDir, timeoutMs) {
         SENPI_QA_GATE_TIMEOUT_MS: String(timeoutMs),
         OMO_SENPI_QA: "1",
       },
-      detached: true,
+      ...senpiRunSpawnOptions(),
       stdio: ["ignore", "pipe", "pipe"],
     },
   )
@@ -274,7 +275,7 @@ function waitForCompletion(run, timeoutMs, artifactDir, phase) {
 function killProcessGroup(pid) {
   if (!Number.isInteger(pid)) return false
   try {
-    process.kill(-pid, "SIGKILL")
+    killSenpiRunTree(pid, "SIGKILL")
     return true
   } catch (error) {
     if (isMissingProcess(error)) return false

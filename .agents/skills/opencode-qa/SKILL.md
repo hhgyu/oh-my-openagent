@@ -23,6 +23,26 @@ check a flag with `opencode <cmd> --help`.
   scripts already do this; if you run opencode by hand for QA, set
   `XDG_DATA_HOME` / `XDG_CONFIG_HOME` / `XDG_STATE_HOME` / `XDG_CACHE_HOME` to
   temp dirs first.
+- A spawned `opencode serve` (or any other long-lived QA child: fake providers,
+  SSE watchers that outlive one call) must NEVER outlive the driver that started
+  it. Agent shells and tool timeouts kill drivers with SIGKILL / `taskkill /F`,
+  so an EXIT trap alone is not enough, and on Windows killing the
+  `~/.bun/bin/opencode.exe` shim pid leaves the real `opencode.exe` it launched
+  running. Start such children ONLY through the guard:
+  - in bash: `oqa_launch_server` / `oqa_start_server` (servers) or
+    `( oqa_guarded_spawn <pid-file> <cmd> [args...] ) &` (anything else) from
+    `scripts/lib/common.sh`;
+  - from your own driver: `bun scripts/lib/serve-guard.mjs --parent-pid <driver
+    OS pid> [--pid-file <path>] -- <cmd> [args...]`. On Windows it joins a
+    kill-on-close Job Object before spawning, so the whole tree dies when the
+    guard dies for any reason; on POSIX the child leads its own process group.
+    In both cases it watches the parent pid and tears the tree down when the
+    driver disappears.
+  - pass the driver PROCESS pid (Git Bash: `/proc/$$/winpid`; `$$` stays the
+    top-level script inside subshells). Never hand-roll `opencode serve ... &`
+    plus `kill $!`.
+  - a self-test that spawns a server must also SIGKILL a driver and assert the
+    port closes (`oqa_assert_no_orphan_after_forced_kill`).
 - Global text search over the `part` table is a multi-GB scan. Always scope it
   (`--session`, `--recent`, or `--since`). The text script refuses an
   unbounded scan on purpose.
@@ -46,8 +66,9 @@ The local scripts below are the fallback for when Docker is unavailable or on
 Windows.
 
 `common.sh` provides the shared harness (DB path, SQL escaping, isolated XDG
-sandbox, free port, server start/stop, and an EXIT-trap cleanup). It requires
-`opencode`, `sqlite3`, `curl`, `jq`, and `tmux` on PATH.
+sandbox, free port, guarded server start/stop, and an EXIT-trap cleanup). It
+requires `opencode`, `sqlite3`, `curl`, `jq`, and `tmux` on PATH, plus `bun`
+for the serve guard.
 
 ## Router: pick your case
 
@@ -179,13 +200,13 @@ isolated sandbox and clean up on exit.
 
 | Script | Case | Self-test asserts |
 |---|---|---|
-| `scripts/lib/common.sh --self-check` | - | deps present, DB path resolves, SQL escaping, free port, sandbox auto-removed |
+| `scripts/lib/common.sh --self-check` | - | deps present, DB path resolves, SQL escaping, free port, sandbox auto-removed, no server survives a SIGKILLed driver |
 | `scripts/db-session-by-id.sh` | D | id round-trips for a real session |
 | `scripts/db-session-by-name.sh` | D | a derived title needle returns >=1 row |
 | `scripts/db-session-by-text.sh` | D | scoped search hits; unbounded scan refused; bounded search <30s |
 | `scripts/export-roundtrip.sh` | D | export stdout is valid JSON and `.info.id` round-trips |
-| `scripts/server-smoke.sh` | B | `/global/health` healthy, `/doc` >=100 paths, no-auth -> 401 |
-| `scripts/sse-hook-probe.sh` | B | `/event` opens and delivers `server.connected` |
+| `scripts/server-smoke.sh` | B | `/global/health` healthy, `/doc` >=100 paths, no-auth -> 401, no server survives a SIGKILLed driver |
+| `scripts/sse-hook-probe.sh` | B | `/event` opens and delivers `server.connected`, no server survives a SIGKILLed driver |
 | `scripts/tui-smoke.sh` | C | TUI renders under tmux, tears down, real DB untouched |
 
 ## Risks and caveats
