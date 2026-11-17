@@ -56,14 +56,15 @@ function parsePending(raw: string): PendingRollback | null {
 // Runs under the memory-write lock. Only the INDEX entries this write staged are undone; the
 // working tree is never touched, because the failed write already put it back and anything there
 // now is someone's later edit. A record made against another HEAD is dropped without acting: a
-// commit happened since, and the normal dirty checks report whatever is left.
-export async function settlePendingRollback(repo: PendingRollbackRepo): Promise<void> {
+// commit happened since, and the normal dirty checks report whatever is left. Resolves true when it
+// unstaged entries, so a caller holding an earlier status listing knows that listing is stale.
+export async function settlePendingRollback(repo: PendingRollbackRepo): Promise<boolean> {
   const raw = await readFile(markerPath(repo.dir), "utf8").catch(() => undefined)
-  if (raw === undefined || existsSync(join(repo.dir, ".git", "index.lock"))) return
+  if (raw === undefined || existsSync(join(repo.dir, ".git", "index.lock"))) return false
   const pending = parsePending(raw)
   if (pending === null || (await repo.head()) !== pending.head || pending.paths.length === 0) {
     await rm(markerPath(repo.dir), { force: true })
-    return
+    return false
   }
   const atHead = new Set(await repo.lsTree("HEAD"))
   await repo.unstage(
@@ -72,4 +73,5 @@ export async function settlePendingRollback(repo: PendingRollbackRepo): Promise<
   )
   await rm(markerPath(repo.dir), { force: true })
   if ((await repo.status(pending.paths)).trim().length > 0) throw new PendingRollbackEditsKeptError(pending.paths)
+  return true
 }

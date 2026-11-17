@@ -1,10 +1,9 @@
 // Read-only views of committed history: HEAD, trees, blobs and the commit log at a revision.
 
 import type { GitExecResult } from "./exec"
-import { commandError } from "./repo-arguments"
 import { readHeadFromFiles } from "./repo-head"
 import { parseLogOutput, parseLogOutputWithPaths } from "./repo-log"
-import { parseCatFileBatch, parseLsTreeBlobs, parseLsTreeSized } from "./repo-tree"
+import { parseLsTreeBlobs, parseLsTreeSized, readCatFileBatch } from "./repo-tree"
 import type { GitLogOptions, GitTreeBlobEntry, GitTreeSizedEntry, MemoryCommit } from "./repo-types"
 import { STABLE_LOG_OUTPUT } from "./stable-log-output"
 
@@ -60,10 +59,11 @@ export class GitRevisionReads {
   async readBlobs(oids: readonly string[]): Promise<ReadonlyMap<string, string>> {
     const unique = [...new Set(oids)]
     if (unique.length === 0) return new Map()
-    const argv = ["cat-file", "--batch"]
-    const result = await this.git.result(argv, `${unique.join("\n")}\n`)
-    if (result.code !== 0) throw commandError(argv, result)
-    return parseCatFileBatch(result.stdoutBytes ?? Buffer.from(result.stdout, "utf8"))
+    const blobs = new Map<string, string>()
+    for (const { oid, type, content } of await readCatFileBatch(this.git, unique)) {
+      if (type === "blob" && content !== undefined) blobs.set(oid, content)
+    }
+    return blobs
   }
 
   async log(options: GitLogOptions = {}): Promise<readonly MemoryCommit[]> {

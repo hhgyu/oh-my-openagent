@@ -202,15 +202,17 @@ check_file() {
 }
 
 errors=$(
+  staged_names=$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR)
+
   # Skills must always be directories: skills/<name>/SKILL.md.
-  git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR |
+  printf '%s\\n' "$staged_names" |
     grep -E '^(memory/)?skills/[^/]+\\.md$' |
     while IFS= read -r skill_file; do
       printf '  %s: invalid skill path (skills must be folders). Use skills/<name>/SKILL.md\\n' "$skill_file"
     done
 
   # Memory content keys are an allowlist under system/, reference/ and people/.
-  git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR |
+  printf '%s\\n' "$staged_names" |
     grep -E '^(memory/)?(system|reference|people)/.*\\.md$' |
     while IFS= read -r file; do
       check_file "$file" contract
@@ -218,7 +220,7 @@ errors=$(
 
   # SKILL.md is read by the skill loader as strict YAML: same value rules,
   # description required, any key allowed.
-  git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR |
+  printf '%s\\n' "$staged_names" |
     grep -E '^(memory/)?skills/.+/SKILL\\.md$' |
     while IFS= read -r file; do
       check_file "$file" skill
