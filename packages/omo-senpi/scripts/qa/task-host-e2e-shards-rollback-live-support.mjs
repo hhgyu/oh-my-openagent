@@ -16,6 +16,7 @@ import {
   teardownSandbox,
 } from "./task-host-e2e-shard-cost-support.mjs"
 import { sandboxEnv } from "./task-host-e2e-sandbox.mjs"
+import { senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 function config(stateDir) {
   const value = taskConfig({
@@ -44,7 +45,7 @@ function spawnParent(sandbox, project, prompt, session) {
   const child = spawn(sandbox.bin, args, {
     cwd: project.cwd,
     env: sandboxEnv(sandbox),
-    detached: true,
+    ...senpiRunSpawnOptions(),
     stdio: ["ignore", "pipe", "pipe"],
   })
   const events = []

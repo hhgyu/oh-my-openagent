@@ -22,6 +22,7 @@ import { createRequire } from "node:module"
 import { createConnection } from "node:net"
 import { dirname, join, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
+import { senpiRunSpawnOptions } from "../../senpi-run-spawn.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -175,7 +176,7 @@ export async function startRealHost(scratch, { socketPath, extraArgs = [] } = {}
     // (senpi `host-spawn-environment.ts`); without `extension_events` the desktop refuses it.
     {
       cwd: scratch.cwd,
-      detached: shouldDetachChildren(),
+      ...senpiRunSpawnOptions(process.platform, shouldDetachChildren()),
       env: { ...scratch.env, [RPC_CLIENT_CAPABILITIES_ENV]: PINNED_HOST_CLIENT_CAPABILITIES.join(",") },
       stdio: ["pipe", "pipe", "pipe"],
     },

@@ -298,6 +298,14 @@ export function wireEventBridge(
     )
   })
 
+  // agent_end captures the parent while its run is still active; without a capture at the settle edge
+  // the parent keeps reading "streaming", so a completion arriving after the run waits out the batch
+  // window. In print mode senpi can begin session_shutdown inside that window (it does not wait for
+  // background children), which is how a late wake landed on a session already shutting down.
+  pi.on("agent_settled", (_payload, eventCtx) => {
+    engine.runtime.captureFrom(asLiveContext(eventCtx))
+  })
+
   pi.on(
     "before_agent_start",
     (payload, eventCtx) => {

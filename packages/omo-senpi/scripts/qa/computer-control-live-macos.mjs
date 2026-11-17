@@ -43,6 +43,7 @@ import { desktopScenarios } from "./computer-control-live-macos-desktop.mjs"
 import { createSandbox, seedSandbox } from "./drive.mjs"
 import { isolatedChildEnv } from "./sandbox-child-env.mjs"
 import { withTelemetryOptOut } from "./telemetry-opt-out-env.mjs"
+import { killSenpiRunTree, senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(scriptDir, "..", "..", "..", "..")
@@ -282,7 +283,7 @@ function startSession(steps, { preset = "ask", print, env: scenarioEnv = {}, com
         ...scenarioEnv,
       }),
       stdio: [print === undefined ? "pipe" : "ignore", "pipe", "pipe"],
-      detached: true,
+      ...senpiRunSpawnOptions(),
     },
   )
   const events = []
@@ -330,7 +331,7 @@ function startSession(steps, { preset = "ask", print, env: scenarioEnv = {}, com
   const agentEnds = () => events.filter((event) => event.type === "agent_end").length
   const close = () => {
     try {
-      process.kill(-child.pid, "SIGKILL")
+      killSenpiRunTree(child.pid, "SIGKILL")
     } catch {}
     const outcome = {
       audits: auditActions(sandbox.root),

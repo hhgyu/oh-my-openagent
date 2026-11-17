@@ -6,6 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSyn
 import { tmpdir } from "node:os"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { killSenpiRunTree, senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 const script = fileURLToPath(import.meta.url)
 const packageRoot = resolve(dirname(script), "../..")
@@ -223,7 +224,7 @@ async function supervise() {
     child = spawn(process.execPath, [script, "--worker", sandbox, "--plugin-root", pluginRoot], {
       cwd: join(sandbox, "project"),
       env: isolatedEnvironment(sandbox, packageRoot),
-      detached: true,
+      ...senpiRunSpawnOptions(),
       stdio: ["ignore", "pipe", "pipe"],
     })
     log(`BOOTSTRAP sandbox=${sandbox} workerPid=${child.pid}\n`)
@@ -237,7 +238,7 @@ async function supervise() {
       })
       deadline = setTimeout(() => {
         log("FAIL QA deadline exceeded\n")
-        process.kill(-child.pid, "SIGKILL")
+        killSenpiRunTree(child.pid, "SIGKILL")
       }, deadlineMs)
     })
   } finally {
@@ -246,7 +247,7 @@ async function supervise() {
       const survivors = processGroupMembers(child.pid)
       log(`CLEANUP pid-tree survivors=${JSON.stringify(survivors)}\n`)
       if (survivors.length) {
-        process.kill(-child.pid, "SIGKILL")
+        killSenpiRunTree(child.pid, "SIGKILL")
         code = 1
         log("FAIL orphan processes required SIGKILL\n")
       }

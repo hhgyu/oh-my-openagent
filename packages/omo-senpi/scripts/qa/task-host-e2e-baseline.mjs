@@ -12,6 +12,7 @@ import {
   waitFor,
 } from "./task-host-e2e-process.mjs"
 import { CHILD_BUSY, hostConfig, spawnScript } from "./task-host-e2e-support.mjs"
+import { killSenpiRunTree } from "./senpi-run-spawn.mjs"
 
 const LOAD_1000 =
   "node packages/omo-senpi/scripts/qa/task-14/load-1000.mjs --bin <baseline> --host '<baseline> --mode rpc --multi-session --listen unix://<tmp>/load.sock'"
@@ -35,7 +36,7 @@ export async function baselineScenarios(run) {
   const observed = perChild ?? perChildRpcProcesses(sandbox)
   const records = readTaskRecords(sandbox)
   try {
-    process.kill(-parent.child.pid, "SIGKILL")
+    killSenpiRunTree(parent.child.pid, "SIGKILL")
   } catch {
     // already gone
   }

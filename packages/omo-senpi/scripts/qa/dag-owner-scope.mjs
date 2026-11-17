@@ -11,6 +11,7 @@ import { createSandbox, seedSandbox, credentialDigest } from "./drive.mjs"
 import { SESSION_A, SESSION_B, seedRun, snapshot } from "./dag-owner-scope-fixture.mjs"
 import { withTelemetryOptOut } from "./telemetry-opt-out-env.mjs"
 import { windowsTreeKillArgs } from "../../../memory-core/src/concurrency/windows-process-tree.mjs"
+import { killSenpiRunTree, senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, "../../../..")
@@ -68,8 +69,7 @@ function launch(options, sandbox, env, sessionFile, phase, processes) {
   const child = spawn(process.execPath, args, {
     cwd: sandbox.cwd,
     env: { ...env, OMO_DAG_SCOPE_FIXTURE: JSON.stringify({ ...config, phase, readyFd: 3 }) },
-    detached: process.platform !== "win32",
-    windowsHide: true,
+    ...senpiRunSpawnOptions(),
     stdio: ["pipe", "pipe", "pipe", "pipe"],
   })
   const pending = new Map()
@@ -184,7 +184,7 @@ export function signalTree(pid, signal) {
     return
   }
   try {
-    process.kill(-pid, signal)
+    killSenpiRunTree(pid, signal)
   } catch (error) {
     if (error.code !== "ESRCH") throw error
   }
