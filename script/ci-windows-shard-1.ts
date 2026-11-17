@@ -2,6 +2,12 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { createReadStream, closeSync, mkdirSync, openSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { pipeline } from "node:stream/promises"
+import {
+  discoverTestFiles,
+  MEMORY_CORE_PARTITIONS,
+  memoryCoreWeight,
+  partitionByWeight,
+} from "./ci-windows-shard-1-partition"
 
 const directory = process.argv[2]
 if (!directory) throw new Error("Usage: bun script/ci-windows-shard-1.ts <artifact-directory>")
@@ -32,10 +38,22 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGBREAK"] as const) {
   })
 }
 
-// Exactly two package-level processes; each keeps Bun's sequential file loading
-// and the root bunfig/preloads. Never use per-file --parallel or --isolate here.
-const runs = ["omo-opencode", "memory-core"].map(async (target) => {
-  const args = ["test", "--timeout", "30000", `packages/${target}`]
+// One omo-opencode process plus balanced memory-core file sets; each keeps Bun's sequential
+// file loading and the root bunfig/preloads. Never use per-file --parallel or --isolate here.
+const memoryCoreSets = partitionByWeight(
+  discoverTestFiles(join("packages", "memory-core")),
+  memoryCoreWeight,
+  MEMORY_CORE_PARTITIONS,
+)
+const targets = [
+  { target: "omo-opencode", paths: ["packages/omo-opencode"] },
+  ...memoryCoreSets.map((files, index) => ({
+    target: `memory-core-${index + 1}`,
+    paths: files.map((file) => `./packages/memory-core/${file}`),
+  })),
+]
+const runs = targets.map(async ({ target, paths }) => {
+  const args = ["test", "--timeout", "30000", ...paths]
   const log = join(directory, `${target}.log`)
   const fd = openSync(log, "w")
   const started = Date.now()

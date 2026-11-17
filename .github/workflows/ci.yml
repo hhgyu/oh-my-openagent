@@ -284,7 +284,8 @@ jobs:
 
       # Every OS splits the root suite into two parallel jobs (the Windows
       # shape): shard 1 runs omo-opencode + memory-core serially on POSIX and
-      # in two concurrent package processes on Windows (sequential within each).
+      # on Windows in concurrent processes: omo-opencode plus three weight-balanced
+      # memory-core file sets (script/ci-windows-shard-1.ts; sequential within each).
       # shard 2 runs the shared serial quarantine first and then the remainder.
       # `bun test --parallel` is not used on POSIX: --isolate re-runs the heavy
       # preload per file and OOM-kills the 7 GB runners, and --no-isolate leaks

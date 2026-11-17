@@ -35,19 +35,30 @@ test("rendezvous-${target}", async () => {
   }
   await Bun.sleep(${target === "memory-core" ? 300 : 0});
   appendFileSync("receipts", ${JSON.stringify(`${target}:rendezvous\n`)});
+  appendFileSync("test-pids", String(process.pid) + "\\n");
   expect(${failing.includes(target)}).toBe(false);
 });`,
           )
+          mkdirSync(join(directory, "deep"), { recursive: true })
           writeFileSync(
-            join(directory, "nested.test.ts"),
+            join(directory, "deep", "nested_spec.ts"),
             `import { test } from "bun:test";
 import { appendFileSync } from "node:fs";
 test("coverage-${target}", () => {
   appendFileSync("receipts", ${JSON.stringify(`${target}:nested\n`)});
+  appendFileSync("test-pids", String(process.pid) + "\\n");
   console.log("stdout-${target}");
   console.error("stderr-${target}");
 });`,
           )
+        }
+        const memoryCore = join(root, "packages", "memory-core")
+        for (const [path, source] of [
+          ["helper.test-support.ts", 'appendFileSync("receipts", "memory-core:support\\n")'],
+          [join("node_modules", "dep", "dep.test.ts"), 'appendFileSync("receipts", "memory-core:node_modules\\n")'],
+        ]) {
+          mkdirSync(join(memoryCore, path, ".."), { recursive: true })
+          writeFileSync(join(memoryCore, path), `import { appendFileSync } from "node:fs"; ${source};`)
         }
         // when: use the same CLI as CI, with no injected spawn implementation.
         const child = Bun.spawn([process.execPath, runner, "logs"], {
@@ -65,16 +76,23 @@ test("coverage-${target}", () => {
         expect(readFileSync(join(root, "receipts"), "utf8").trim().split("\n").sort()).toEqual(
           targets.flatMap((name) => [`${name}:nested`, `${name}:rendezvous`]).sort(),
         )
-        expect(readFileSync(join(root, "preloads"), "utf8").trim().split("\n").sort()).toEqual(
-          targets.map((target) => readFileSync(join(root, `${target}.started`), "utf8")).sort(),
-        )
-        for (const target of targets) {
-          const log = readFileSync(join(root, "logs", `${target}.log`), "utf8")
-          expect(log).toContain(`stdout-${target}`)
-          expect(log).toContain(`stderr-${target}`)
-          expect(log).not.toContain(`stdout-${targets.find((name) => name !== target)}`)
-          expect(stdout).toContain(`${target}: exit ${failing.includes(target) ? 1 : 0}`)
+        // then: omo-opencode is one process and the memory-core files are split across two more.
+        const preloads = readFileSync(join(root, "preloads"), "utf8").trim().split("\n").sort()
+        expect(preloads).toHaveLength(3)
+        expect(new Set(preloads).size).toBe(3)
+        expect([...new Set(readFileSync(join(root, "test-pids"), "utf8").trim().split("\n"))].sort()).toEqual(preloads)
+        const logs = {
+          "omo-opencode": readFileSync(join(root, "logs", "omo-opencode.log"), "utf8"),
+          "memory-core": readFileSync(join(root, "logs", "memory-core-1.log"), "utf8"),
         }
+        for (const target of targets) {
+          expect(logs[target as keyof typeof logs]).toContain(`stdout-${target}`)
+          expect(logs[target as keyof typeof logs]).toContain(`stderr-${target}`)
+          expect(logs[target as keyof typeof logs]).not.toContain(`stdout-${targets.find((name) => name !== target)}`)
+        }
+        expect(stdout).toContain(`omo-opencode: exit ${failing.includes("omo-opencode") ? 1 : 0}`)
+        expect(stdout).toContain("memory-core-1: exit 0")
+        expect(stdout).toContain(`memory-core-2: exit ${failing.includes("memory-core") ? 1 : 0}`)
       } finally {
         rmSync(root, { recursive: true, force: true })
       }
@@ -99,9 +117,10 @@ test("coverage-${target}", () => {
       // then
       expect(code, stderr).toBe(0)
       const results = JSON.parse(readFileSync(join(root, "logs", "shard-1-packages.json"), "utf8"))
-      expect(results.map((result: { value: { args: string[] } }) => result.value.args)).toEqual(
-        targets.map((target) => ["test", "--timeout", "30000", `packages/${target}`]),
-      )
+      expect(results.map((result: { value: { target: string; args: string[] } }) => result.value)).toMatchObject([
+        { target: "omo-opencode", args: ["test", "--timeout", "30000", "packages/omo-opencode"] },
+        { target: "memory-core-1", args: ["test", "--timeout", "30000", "./packages/memory-core/budget.test.ts"] },
+      ])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
