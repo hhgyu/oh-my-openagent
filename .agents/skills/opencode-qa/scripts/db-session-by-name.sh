@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # db-session-by-name.sh - find opencode sessions whose TITLE matches a substring.
 # Read-only against the LIVE opencode DB. Title search is cheap (the session
-# table is small; ~21k rows scan in milliseconds), so no bounding is needed.
+# table, session_v2 on OpenCode 2.x, is small; ~21k rows scan in milliseconds),
+# so no bounding is needed.
 #
 # Usage:
 #   db-session-by-name.sh "auth refactor"        # newest 20 matches
@@ -23,7 +24,7 @@ oqa_session_by_name() {
       id, title,
       datetime(time_created/1000,'unixepoch') AS created,
       datetime(time_updated/1000,'unixepoch') AS updated
-    FROM session
+    FROM $(oqa_session_table)
     WHERE title LIKE '%$esc%'
     ORDER BY time_created DESC
     LIMIT $limit"
@@ -33,7 +34,7 @@ oqa_self_test() {
   oqa_require opencode jq || return 1
   # Derive a guaranteed-present needle: the first 5 chars of a real title.
   local needle out n
-  needle="$(oqa_db_query "SELECT substr(title,1,5) AS t FROM session WHERE length(title)>=5 ORDER BY time_created DESC LIMIT 1" | jq -r '.[0].t // empty')"
+  needle="$(oqa_db_query "SELECT substr(title,1,5) AS t FROM $(oqa_session_table) WHERE length(title)>=5 ORDER BY time_created DESC LIMIT 1" | jq -r '.[0].t // empty')"
   if [ -z "$needle" ]; then
     oqa_log "FAIL: could not derive a title needle"; return 1
   fi
@@ -49,7 +50,7 @@ oqa_self_test() {
 case "${1:-}" in
   --self-test) oqa_self_test; exit $? ;;
   -h|--help|"")
-    sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     [ -z "${1:-}" ] && exit 2 || exit 0 ;;
   *)
     oqa_require opencode jq || exit 1

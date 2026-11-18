@@ -28,6 +28,16 @@ Raw fallback for EXPLAIN/perf: `sqlite3 "$(opencode db path)" "<SQL>"`. Reads ar
 
 Note the ACTIVE storage in v1.15.13 is the LEGACY pair `message` + `part`; the V2 `session_message` table exists but is EMPTY in this version (a recent session showed 43 message rows, 169 part rows, 0 session_message). Document both but make clear `message`/`part` is what holds current data.
 
+### OpenCode 2.x (checked on v2.3.0)
+
+The storage flipped. 2.x writes sessions to `session_v2` and messages to `session_message`; new sessions have no `session`, `message` or `part` rows. Every legacy `session` row also exists in `session_v2`, so `session_v2` alone covers old and new sessions.
+
+There is no `opencode db` subcommand (`opencode db path` prints the top-level help). Resolve the file with `opencode debug paths` (the `db` line) and read it with `scripts/lib/db-query.mjs <db path> "<SQL>"`, which opens it read-only, sets `PRAGMA query_only`, and accepts only SELECT, WITH and PRAGMA. The scripts pick this route automatically (`oqa_db_layout` in `scripts/lib/common.sh` returns `v2` when `session_v2` and `session_message` exist). Export is `opencode session export <id>`; the JSON keeps the `{info, messages}` shape.
+
+`session_v2` adds `parent_id`, `fork_session_id`, `version`, `time_suspended`, `time_idle`, `idle_outcome`; `model` is JSON `{id, providerID, variant}` (`$.id`, not `$.modelID`).
+
+`session_message(id, session_id, type, seq, time_created, time_updated, data)`, indexed on `(session_id, seq)`, `(session_id, type, seq)` and `(session_id, time_created, id)`. `type` is `user`, `assistant`, `synthetic`, `system`, `compaction`, `idle`, `agent-switched` or `location-switched`. Text lives in `json_extract(data,'$.text')` for user, synthetic and system rows, and in the `$.content[*]` items with `type = 'text'` for assistant rows (other items are `reasoning` and `tool`). Scope text search the same way as on 1.x: `session_id IN (SELECT id FROM session_v2 ORDER BY time_created DESC LIMIT N)`.
+
 ### `session`
 
 | Column | Notes |

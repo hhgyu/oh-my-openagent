@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # export-roundtrip.sh - export a session as clean JSON and verify it round-trips.
 #
-# `opencode export <id>` prints a human line ("Exporting session: ...") to
-# STDERR and the JSON document to STDOUT, so suppress stderr before piping to jq.
+# `opencode export <id>` (1.x; `opencode session export <id>` on 2.x) prints a
+# human line ("Exporting session: ...") to STDERR and the JSON document to
+# STDOUT, so suppress stderr before piping to jq.
 # The JSON shape is { info: {id, slug, projectID, directory, title, tokens,
 # time, ...}, messages: [...] }.
 #
@@ -47,7 +48,11 @@ oqa_export_to_file() {
   fi
   raw="$(mktemp -t oqa-export-raw.XXXXXX)" || return 1
   OQA_TMPDIRS+=("$raw")
-  opencode export "$id" >"$raw" 2>/dev/null || return 1
+  if oqa_has_opencode_db; then
+    opencode export "$id" >"$raw" 2>/dev/null || return 1
+  else
+    opencode session export "$id" >"$raw" 2>/dev/null || return 1
+  fi
   oqa_extract_json_stdout "$raw" "$out"
 }
 
@@ -74,7 +79,7 @@ oqa_validate_export_file() {
 oqa_self_test() {
   oqa_require opencode jq || return 1
   local id out
-  id="$(oqa_db_query "SELECT id FROM session ORDER BY time_created DESC LIMIT 1" | jq -r '.[0].id // empty')"
+  id="$(oqa_db_query "SELECT id FROM $(oqa_session_table) WHERE parent_id IS NULL ORDER BY time_created DESC LIMIT 1" | jq -r '.[0].id // empty')"
   if [ -z "$id" ]; then oqa_log "FAIL: no sessions to export"; return 1; fi
 
   out="$(mktemp -t oqa-export.XXXXXX)" || return 1
@@ -87,7 +92,7 @@ oqa_self_test() {
 case "${1:-}" in
   --self-test) oqa_self_test; exit $? ;;
   -h|--help|"")
-    sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     [ -z "${1:-}" ] && exit 2 || exit 0 ;;
   *)
     oqa_require opencode jq || exit 1

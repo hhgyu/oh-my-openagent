@@ -21,17 +21,47 @@
 #   db-session-by-text.sh --since "7 days" --limit 50 "TODO"
 #   db-session-by-text.sh --self-test
 #
-# Output: JSON array of {session_id, part_id, snippet} (snippet = first 120
-# chars of the matching text part).
+# OpenCode 2.x has no `part` rows for new sessions: text is read from
+# session_message (user/synthetic/system text and assistant text items), scoped
+# the same way through session_v2 and the session_message session indexes.
+#
+# Output: JSON array of {session_id, part_id, snippet} on 1.x, or
+# {session_id, message_id, role, snippet} on 2.x (snippet = first 120 chars of
+# the matching text).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/common.sh"
+
+# OpenCode 2.x keeps message text in session_message: `$.text` for user,
+# synthetic and system rows, `$.content[*]` items of type `text` for assistant
+# rows. $1 is the session scope (an SQL predicate over m.session_id).
+oqa_text_v2() {
+  local scope needle limit esc_txt
+  scope="$1"; needle="$2"; limit="$3"
+  esc_txt="$(oqa_sql_escape "$needle")"
+  oqa_db_query "SELECT session_id, message_id, role, substr(text,1,120) AS snippet FROM (
+      SELECT m.session_id, m.id AS message_id, m.type AS role, m.seq,
+             json_extract(m.data,'\$.text') AS text
+        FROM session_message m
+       WHERE $scope AND m.type IN ('user','synthetic','system')
+      UNION ALL
+      SELECT m.session_id, m.id, m.type, m.seq, json_extract(c.value,'\$.text')
+        FROM session_message m, json_each(m.data,'\$.content') c
+       WHERE $scope AND m.type = 'assistant'
+         AND json_extract(c.value,'\$.type') = 'text')
+    WHERE text LIKE '%$esc_txt%'
+    ORDER BY session_id, seq
+    LIMIT $limit"
+}
 
 oqa_text_scoped() {
   local sid needle limit esc_id esc_txt
   sid="$1"; needle="$2"; limit="${3:-50}"
   esc_id="$(oqa_sql_escape "$sid")"
   esc_txt="$(oqa_sql_escape "$needle")"
+  if [ "$(oqa_db_layout)" = v2 ]; then
+    oqa_text_v2 "m.session_id='$esc_id'" "$needle" "$limit"; return
+  fi
   oqa_db_query "SELECT
       p.session_id AS session_id,
       p.id         AS part_id,
@@ -48,6 +78,10 @@ oqa_text_recent() {
   n="$1"; needle="$2"; limit="${3:-50}"
   case "$n" in (*[!0-9]*|"") n=25 ;; esac
   esc_txt="$(oqa_sql_escape "$needle")"
+  if [ "$(oqa_db_layout)" = v2 ]; then
+    oqa_text_v2 "m.session_id IN (SELECT id FROM session_v2 ORDER BY time_created DESC LIMIT $n)" "$needle" "$limit"
+    return
+  fi
   oqa_db_query "SELECT
       p.session_id AS session_id,
       p.id         AS part_id,
@@ -64,6 +98,13 @@ oqa_text_since() {
   window="$1"; needle="$2"; limit="${3:-50}"
   esc_win="$(oqa_sql_escape "$window")"
   esc_txt="$(oqa_sql_escape "$needle")"
+  if [ "$(oqa_db_layout)" = v2 ]; then
+    oqa_text_v2 "m.session_id IN (
+        SELECT id FROM session_v2
+        WHERE time_created >= (strftime('%s','now','-$esc_win') * 1000)
+        ORDER BY time_created DESC LIMIT 200)" "$needle" "$limit"
+    return
+  fi
   # Cap at the 200 most-recent sessions inside the window and drive
   # part_session_idx via an IN-subquery (newest-first) to stay fast.
   oqa_db_query "SELECT
@@ -113,10 +154,17 @@ oqa_self_test() {
   local fails=0
 
   # 1) scoped: find a recent session with text parts, derive a needle from one.
-  local sid needle out n
-  sid="$(oqa_db_query "SELECT session_id AS s FROM part WHERE json_extract(data,'\$.type')='text' ORDER BY rowid DESC LIMIT 1" | jq -r '.[0].s // empty')"
-  if [ -z "$sid" ]; then oqa_log "FAIL: no text parts found"; return 1; fi
-  needle="$(oqa_db_query "SELECT substr(json_extract(data,'\$.text'),1,8) AS t FROM part WHERE session_id='$(oqa_sql_escape "$sid")' AND json_extract(data,'\$.type')='text' AND length(json_extract(data,'\$.text'))>=8 LIMIT 1" | jq -r '.[0].t // empty')"
+  local sid needle out n row
+  if [ "$(oqa_db_layout)" = v2 ]; then
+    row="$(oqa_db_query "SELECT session_id AS s, substr(json_extract(data,'\$.text'),1,8) AS t FROM session_message WHERE session_id IN (SELECT id FROM session_v2 ORDER BY time_created DESC LIMIT 25) AND type='user' AND length(json_extract(data,'\$.text'))>=8 ORDER BY time_created DESC LIMIT 1")"
+    sid="$(printf '%s' "$row" | jq -r '.[0].s // empty')"
+    if [ -z "$sid" ]; then oqa_log "FAIL: no user text in the 25 newest sessions"; return 1; fi
+    needle="$(printf '%s' "$row" | jq -r '.[0].t // empty')"
+  else
+    sid="$(oqa_db_query "SELECT session_id AS s FROM part WHERE json_extract(data,'\$.type')='text' ORDER BY rowid DESC LIMIT 1" | jq -r '.[0].s // empty')"
+    if [ -z "$sid" ]; then oqa_log "FAIL: no text parts found"; return 1; fi
+    needle="$(oqa_db_query "SELECT substr(json_extract(data,'\$.text'),1,8) AS t FROM part WHERE session_id='$(oqa_sql_escape "$sid")' AND json_extract(data,'\$.type')='text' AND length(json_extract(data,'\$.text'))>=8 LIMIT 1" | jq -r '.[0].t // empty')"
+  fi
   if [ -z "$needle" ]; then oqa_log "FAIL: could not derive a text needle"; return 1; fi
   out="$(oqa_text_main --session "$sid" "$needle")"
   n="$(printf '%s' "$out" | jq 'length')"
@@ -150,7 +198,7 @@ oqa_self_test() {
 case "${1:-}" in
   --self-test) oqa_self_test; exit $? ;;
   -h|--help|"")
-    sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     [ -z "${1:-}" ] && exit 2 || exit 0 ;;
   *)
     oqa_require opencode jq || exit 1

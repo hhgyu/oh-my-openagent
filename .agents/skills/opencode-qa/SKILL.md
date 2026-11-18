@@ -173,7 +173,10 @@ tmux recipe: `references/tui-tmux.md`.
 
 Read-only against the live SQLite DB. The `session` table is small (title and
 id lookups are instant); message text lives in the multi-GB `part` table, so
-text search must be scoped.
+text search must be scoped. OpenCode 2.x has no `opencode db` subcommand and
+keeps sessions in `session_v2` and message text in `session_message`; the
+scripts detect that layout and query through `scripts/lib/db-query.mjs`
+(read-only `node:sqlite` or `bun:sqlite`) instead.
 
 ```bash
 # by id
@@ -188,7 +191,9 @@ bash scripts/db-session-by-text.sh --since "7 days" --limit 50 "TODO"
 bash scripts/export-roundtrip.sh ses_3a4e... > session.json
 ```
 
-Ad hoc queries: `opencode db "<SQL>" --format json`. Schema, tested query
+Ad hoc queries: `opencode db "<SQL>" --format json` on 1.x;
+`node --no-warnings scripts/lib/db-query.mjs "<db path>" "<SQL>"` on 2.x (the
+path is the `db` line of `opencode debug paths`). Schema, tested query
 shapes with timings, the legacy `message`/`part` vs V2 `session_message`
 distinction, and the 25 GB caveat: `references/db-investigation.md`.
 
