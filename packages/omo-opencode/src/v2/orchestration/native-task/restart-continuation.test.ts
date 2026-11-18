@@ -486,6 +486,48 @@ describe("#given an owned child whose run an in-process reload left going and wh
       })
     })
   })
+
+  test("#when the lead sends to it after that run settled the task #then the message starts its next turn", async () => {
+    await withGuard(async (before) => {
+      await withGuard(async (after) => {
+        await withOwnedRuntimeUnit(async (runtime, state) => {
+          // given: the restored task settled with the run the host finished on its own
+          const started = await runtime.start({ category: "qa", prompt: "block-until-interrupt" })
+          if (started.kind !== "started") throw Error(JSON.stringify(started))
+          await until(() => state.hostActive(), "child turn running")
+          const childID = String(runtime.get(started.task_id)?.child_session_id)
+          state.keepRunsAcrossPark()
+          const reloaded = await state.reopen({
+            childToolGuard: after,
+            authorizeRecovery: async (spec) => recoveryApproved(spec),
+          })
+          state.finishFrame(childID)
+          await restoreThroughOperation(reloaded, started.task_id)
+          const settled = await reloaded.wait(started.task_id, AbortSignal.timeout(5000))
+
+          // when
+          const sent = await withOperation(reloaded, (owner) =>
+            owner.send.sendToTask({
+              idOrName: started.task_id,
+              message: "one more thing",
+              deliverAs: "followUp",
+              callerSessionId: "parent",
+            }),
+          )
+          const delivered = await until(() => inputs(state.calls).length > 0, "follow-up delivered").then(
+            () => true,
+            () => false,
+          )
+
+          // then
+          expect(settled.status).toBe("completed")
+          expect(JSON.stringify(sent)).not.toContain("not positively settled")
+          expect(delivered).toBe(true)
+          expect(inputs(state.calls)).toHaveLength(1)
+        }, guarded(before))
+      })
+    })
+  })
 })
 
 describe("#given an owned child whose final run a reload parked and which ran again before it was restored", () => {

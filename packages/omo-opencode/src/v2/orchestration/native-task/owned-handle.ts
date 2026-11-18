@@ -326,6 +326,9 @@ export async function createOwnedTaskHandle(input: {
   let ending: Promise<void> | undefined
   let inputGeneration = 0
   let restartContinuation: string | undefined
+  /** The run epoch a recovered turn settled by adopting the answer the host finished on its own: its
+   * observation stays uncertain by design, so this receipt is what positively settles it for a follow-up. */
+  let adoptedEpoch: number | undefined
   function bindReattachedRun(before: TaskRecord, actual: TaskRecord): void {
     if (disposed || busy || ended || cleanupOnly) throw new Error("Owned reattach bookkeeping is unavailable")
     guard()
@@ -433,6 +436,7 @@ export async function createOwnedTaskHandle(input: {
         : new ChildObservationUncertain("owned-outcome-custody-unavailable")
     }
     if (pumpFault) throw pumpFault
+    adoptedEpoch = epoch
     return { status: "completed", finalResponse: answer }
   }
   /** Native revival of a session whose transcript ends with its final answer (`sessionTailNeedsContinuation`
@@ -804,21 +808,33 @@ export async function createOwnedTaskHandle(input: {
       await current
       if (!input.openObserver) throw new Error("Owned prior turn is not positively settled")
       const needsRecoveredBarrier = !!pumpFault || !settledStatus(observer.outcome().status)
-      const matchesRecoveredTerminal = (record: TaskRecord | null) =>
-        !!recoveredTerminal &&
+      const matchesAdoptedTerminal = (record: TaskRecord | null) =>
+        adoptedEpoch !== undefined &&
         !!record &&
-        epoch === recoveredTerminal.epoch &&
-        prior.notification.run_epoch === recoveredTerminal.epoch &&
-        record.task_id === recoveredTerminal.taskId &&
-        record.created_at === recoveredTerminal.createdAt &&
-        record.parent_session_id === recoveredTerminal.parentSessionId &&
-        record.root_session_id === recoveredTerminal.rootSessionId &&
-        record.depth === recoveredTerminal.depth &&
-        record.status === recoveredTerminal.status &&
-        record.notification.run_epoch === recoveredTerminal.epoch &&
-        record.residency_claim === recoveredTerminal.claim &&
+        epoch === adoptedEpoch &&
+        prior.notification.run_epoch === adoptedEpoch &&
+        record.task_id === spec.taskId &&
+        record.status === "completed" &&
+        record.notification.run_epoch === adoptedEpoch &&
+        record.residency_claim === reference.residencyClaim &&
         !record.killed &&
         record.cancel_requested === undefined
+      const matchesRecoveredTerminal = (record: TaskRecord | null) =>
+        matchesAdoptedTerminal(record) ||
+        (!!recoveredTerminal &&
+          !!record &&
+          epoch === recoveredTerminal.epoch &&
+          prior.notification.run_epoch === recoveredTerminal.epoch &&
+          record.task_id === recoveredTerminal.taskId &&
+          record.created_at === recoveredTerminal.createdAt &&
+          record.parent_session_id === recoveredTerminal.parentSessionId &&
+          record.root_session_id === recoveredTerminal.rootSessionId &&
+          record.depth === recoveredTerminal.depth &&
+          record.status === recoveredTerminal.status &&
+          record.notification.run_epoch === recoveredTerminal.epoch &&
+          record.residency_claim === recoveredTerminal.claim &&
+          !record.killed &&
+          record.cancel_requested === undefined)
       if (needsRecoveredBarrier) {
         if (!matchesRecoveredTerminal(store.load(spec.taskId)))
           throw new Error("Owned prior turn is not positively settled")

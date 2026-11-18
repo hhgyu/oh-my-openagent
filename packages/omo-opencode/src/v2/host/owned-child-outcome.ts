@@ -39,6 +39,19 @@ const runEventPrefixes = ["session.step.", "session.text.", "session.reasoning."
 function runEventBeforeAnyStart(type: string): boolean {
   return terminals.has(type) || runEventPrefixes.some((prefix) => type.startsWith(prefix))
 }
+function settlesEarlierTurnTool(event: SafeChildEvent, frame: Frame | undefined, steps: ReadonlyMap<string, Step>) {
+  const step = event.data.assistantMessageID
+  return (
+    event.type === "session.tool.failed" &&
+    event.data.errorType === "aborted" &&
+    step !== undefined &&
+    !steps.has(step) &&
+    frame !== undefined &&
+    !frame.terminal &&
+    frame.steps.length === 0 &&
+    frame.delivered.length === 0
+  )
+}
 const endings: Record<string, NonNullable<OwnedChildOutcome["ended"]>> = {
   "session.execution.succeeded": "succeeded",
   "session.execution.failed": "failed",
@@ -294,6 +307,10 @@ export function projectOwnedChildOutcome(
     // an own input delivered inside it still has no frame and stays uncertain. The first turn's observer
     // binds before its session runs anything, so there such events stay a fence.
     if (frame === undefined && laterTurn && runEventBeforeAnyStart(event.type)) continue
+    // OpenCode 2.3.0 settles the tool call a restart interrupted (`aborted`, the dead turn's step) only once it
+    // starts the next run, before that run delivers anything: for a restart continuation it is the cut-off turn's
+    // tail, not a step of this one. A step this observer saw start never takes this path.
+    if (laterTurn && settlesEarlierTurnTool(event, frame, steps)) continue
     if (event.type === "session.execution.started") {
       if (frame && !frame.terminal) fail("overlapping-execution")
       if (frame && (frame.delivered.length > 0 || continuesTurn(frame))) turnText = lastOwnedText(frame) || turnText

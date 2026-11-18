@@ -959,6 +959,49 @@ describe("#given an observer bound while a run of the session it did not start w
     )
   })
 
+  test("#when the host settles the cut-off turn's interrupted tool call as the continuation's run starts #then only the own run is the outcome", () => {
+    // given: OpenCode 2.3.0 fails the tool call a restart interrupted (old step id, `aborted`) right after it
+    // starts the run that delivers the restart continuation
+    const own = fixture()
+    const start = own.records.findIndex(
+      (record) => record.kind === "host" && record.event.type === "session.execution.started",
+    )
+    const settled = host("session.tool.failed", 1001, {
+      assistantMessageID: "cut-off-step",
+      callID: "interrupted_shell",
+      errorType: "aborted",
+      executed: false,
+    })
+    const binding = { ...own.binding, key: "st_fixture:0:turn:1:3b4bba6d-9c61-47eb-903e-8a4f979fc393" }
+    const records = [...own.records.slice(0, start + 1), settled, ...own.records.slice(start + 1)]
+    const snapshot = revise({ ...own, binding, records }, () => true)
+
+    // when
+    const result = projectOwnedChildOutcome(snapshot)
+
+    // then
+    expect(result).toMatchObject({ status: "completed", text: projectOwnedChildOutcome(own).text })
+  })
+
+  test("#when the first turn's run carries a tool failure of a step it never saw #then the outcome stays uncertain", () => {
+    const own = fixture()
+    const start = own.records.findIndex(
+      (record) => record.kind === "host" && record.event.type === "session.execution.started",
+    )
+    const stray = host("session.tool.failed", 1001, {
+      assistantMessageID: "unknown-step",
+      callID: "unknown_call",
+      errorType: "aborted",
+      executed: false,
+    })
+    const records = [...own.records.slice(0, start + 1), stray, ...own.records.slice(start + 1)]
+
+    expect(projectOwnedChildOutcome(revise({ ...own, records }, () => true))).toMatchObject({
+      status: "uncertain",
+      reason: "unmatched-step",
+    })
+  })
+
   test("#when an own input is delivered inside that run #then the outcome stays uncertain", () => {
     const own = fixture()
     const input = own.records.find((record) => record.kind === "input")
