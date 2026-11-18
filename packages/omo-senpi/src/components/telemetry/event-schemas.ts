@@ -1,4 +1,4 @@
-import { CURATED_READONLY_AGENT_NAMES } from "@oh-my-opencode/senpi-task/agents-builtin"
+import { CURATED_READONLY_AGENT_NAMES } from "@oh-my-opencode/senpi-task/agent-names"
 import { BUILTIN_CATEGORY_DEFAULTS } from "@oh-my-opencode/senpi-task/category-builtins"
 import { ERROR_CODES } from "@oh-my-opencode/senpi-desktop-protocol"
 import { CATEGORY_CONFIG_SCHEMA } from "./category-config-schema"

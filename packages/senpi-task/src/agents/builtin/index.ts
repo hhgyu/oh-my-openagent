@@ -35,9 +35,7 @@ export const BUILTIN_AGENTS: Readonly<Record<string, AgentDefinition>> = Object.
   BUILTIN_AGENT_DEFAULTS.map((definition) => [definition.name, definition]),
 )
 
-export const CURATED_READONLY_AGENT_NAMES: ReadonlySet<string> = new Set(
-  CURATED_READONLY_AGENT_DEFAULTS.map((definition) => definition.name),
-)
+export { CURATED_READONLY_AGENT_NAMES } from "./names"
 
 export const ULW_REVIEWER_AGENT_NAMES: ReadonlySet<string> = new Set(
   ULW_REVIEWER_AGENT_DEFAULTS.map((definition) => definition.name),
