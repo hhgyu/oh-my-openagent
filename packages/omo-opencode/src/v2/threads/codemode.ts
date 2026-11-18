@@ -12,7 +12,7 @@ import { adaptEvalResult } from "../tools/native-eval-result"
 
 export const THREAD_CODEMODE_METADATA_KEY = "omoThread"
 
-export function threadCodemodeTool(owned: OwnedEvalHostTool): Info {
+function threadCodemodeTool(owned: OwnedEvalHostTool): Info {
   return {
     name: owned.name,
     description: owned.description,
