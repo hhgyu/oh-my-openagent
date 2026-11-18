@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Effect, Exit, Scope } from "effect"
+import { Cause, Effect, Exit, Scope } from "effect"
 import type { ToolDomain, ToolEditor } from "@opencode/plugin/effect/tool"
 import type { PermissionDomain } from "@opencode/plugin/effect/permission"
 import type { ToolContext } from "@opencode/plugin/promise/tool"
@@ -57,7 +57,9 @@ const guarded = (owner: OwnedChildToolGuard): Parameters<typeof withOwnedRuntime
 })
 
 /** One controlled guard generation over the original leaves, closed after `run`. */
-async function withGuard(run: (owner: OwnedChildToolGuard) => Promise<void>): Promise<void> {
+async function withGuard(
+  run: (owner: OwnedChildToolGuard, callRead: (sessionID: string) => Promise<string>) => Promise<void>,
+): Promise<void> {
   const scope = Scope.makeUnsafe(),
     tools = new Map<string, ReturnType<ToolEditor["list"]>[number]>()
   for (const [id, name] of [
@@ -98,8 +100,15 @@ async function withGuard(run: (owner: OwnedChildToolGuard) => Promise<void>): Pr
   const owner = await Effect.runPromise(
     Effect.provideService(acquireOwnedChildToolGuard({ tool, permission }), Scope.Scope, scope),
   )
+  const callRead = async (sessionID: string) => {
+    const leaf = tools.get("opaque-read")
+    if (!leaf) throw Error("controlled read leaf missing")
+    const context = { sessionID, agent: "verified-unit-build" } as unknown as Parameters<typeof leaf.execute>[1]
+    const exit = await Effect.runPromiseExit(leaf.execute({}, context))
+    return Exit.isSuccess(exit) ? "ran" : Cause.pretty(exit.cause)
+  }
   try {
-    await run(owner)
+    await run(owner, callRead)
   } finally {
     await Effect.runPromise(Scope.close(scope, Exit.succeed(undefined)))
   }
@@ -525,6 +534,192 @@ describe("#given an owned child whose run an in-process reload left going and wh
           expect(delivered).toBe(true)
           expect(inputs(state.calls)).toHaveLength(1)
         }, guarded(before))
+      })
+    })
+  })
+})
+
+describe("#given an owned child a reload parked and two live runtimes of the project that both start serving it", () => {
+  test("#when both revive it at once #then exactly one takes it, the other leaves it without a refusal, and the other runtime does not refuse the child's tools", async () => {
+    await withGuard(async (before) => {
+      await withGuard(async (first, callFirst) => {
+        await withGuard(async (second, callSecond) => {
+          await withOwnedRuntimeUnit(async (runtime, state) => {
+            // given: the child is parked, then two runtimes with their own live journal owners open
+            const started = await runtime.start({ category: "qa", prompt: "block-until-interrupt" })
+            if (started.kind !== "started") throw Error(JSON.stringify(started))
+            await until(() => state.hostActive(), "child turn running")
+            const one = await state.reopen({
+              childToolGuard: first,
+              authorizeRecovery: async (spec) => recoveryApproved(spec),
+            })
+            const other = await state.openAlongside({
+              childToolGuard: second,
+              authorizeRecovery: async (spec) => recoveryApproved(spec),
+            })
+            const childID = String(one.get(started.task_id)?.child_session_id)
+
+            // when
+            const outcomes = await Promise.allSettled([
+              restoreThroughOperation(one, started.task_id),
+              restoreThroughOperation(other, started.task_id),
+            ])
+            await until(() => inputs(state.calls).length > 0, "winner's continuation delivered")
+            const firstWon = outcomes[0]?.status === "fulfilled" && outcomes[0].value
+            const loserTool = await (firstWon ? callSecond : callFirst)(childID)
+            const loserSend = await withOperation(firstWon ? other : one, (owner) =>
+              owner.send.sendToTask({
+                idOrName: started.task_id,
+                message: "from the other runtime",
+                deliverAs: "followUp",
+                callerSessionId: "parent",
+              }),
+            ).then(JSON.stringify, String)
+            const loserRestore = await withOperation(firstWon ? other : one, (owner) =>
+              owner.recovery.restoreLeftBehind(),
+            )
+
+            // then
+            expect(loserRestore).toEqual({ restored: [], held: [], elsewhere: [started.task_id] })
+            expect(
+              outcomes.map((outcome) => (outcome.status === "fulfilled" ? outcome.value : String(outcome.reason))),
+            ).toEqual(expect.arrayContaining([true, false]))
+            expect(loserTool).toBe("ran")
+            expect(loserSend).toContain("is held by another live runtime serving this project")
+            expect(inputs(state.calls)).toEqual(["input:queue"])
+          }, guarded(before))
+        })
+      })
+    })
+  })
+})
+
+describe("#given an owned child a reload parked that the next generation has not revived", () => {
+  test("#when the lead cancels it #then the cancel takes its custody and ends it, its session closes, and it is never revived later", async () => {
+    await withGuard(async (before) => {
+      await withGuard(async (after) => {
+        await withOwnedRuntimeUnit(async (runtime, state) => {
+          // given
+          const started = await runtime.start({ category: "qa", prompt: "block-until-interrupt" })
+          if (started.kind !== "started") throw Error(JSON.stringify(started))
+          await until(() => state.hostActive(), "child turn running")
+          const reloaded = await state.reopen({
+            childToolGuard: after,
+            authorizeRecovery: async (spec) => recoveryApproved(spec),
+          })
+          const childID = String(reloaded.get(started.task_id)?.child_session_id)
+          const removesBefore = state.calls.filter((call) => call === "remove").length
+
+          // when
+          const cancelled = await withOperation(reloaded, (owner) =>
+            owner.cancel.cancelTask(started.task_id, "lead cancelled the parked child"),
+          ).then(
+            (value) => value,
+            (error: unknown) => String(error),
+          )
+          const revived = await restoreThroughOperation(reloaded, started.task_id).then(String, String)
+
+          // then
+          expect(cancelled).toEqual(expect.objectContaining({ kind: "cancelled", task_id: started.task_id }))
+          expect(reloaded.get(started.task_id)?.status).toBe("cancelled")
+          expect(state.calls.filter((call) => call === "remove")).toHaveLength(removesBefore + 1)
+          expect(state.session(childID)).toBeUndefined()
+          expect(revived).toBe("false")
+          expect(inputs(state.calls)).toEqual([])
+        }, guarded(before))
+      })
+    })
+  })
+})
+
+describe("#given an owned child a reload parked whose first revival fails before its guard is bound", () => {
+  test("#when the revival is retried #then the retry revives it and Native's continuation is delivered once", async () => {
+    await withGuard(async (before) => {
+      await withGuard(async (after) => {
+        await withOwnedRuntimeUnit(async (runtime, state) => {
+          // given
+          const started = await runtime.start({ category: "qa", prompt: "block-until-interrupt" })
+          if (started.kind !== "started") throw Error(JSON.stringify(started))
+          await until(() => state.hostActive(), "child turn running")
+          let failBinding = true
+          const reloaded = await state.reopen({
+            childToolGuard: after,
+            authorizeRecovery: async (spec) => recoveryApproved(spec),
+            childGuardBinding: (_spec, prepared) => ({
+              coverage,
+              assertCurrent() {},
+              bind(child, assertCurrent) {
+                if (failBinding) {
+                  failBinding = false
+                  throw Error("Controlled guard binding failure")
+                }
+                return { child, agent: prepared.buildAgentID, coverage, assertCurrent }
+              },
+            }),
+          })
+
+          // when
+          const first = await restoreThroughOperation(reloaded, started.task_id).then(String, String)
+          const retried = await restoreThroughOperation(reloaded, started.task_id).then(String, String)
+          if (retried === "true") await until(() => inputs(state.calls).length > 0, "continuation delivered")
+
+          // then
+          expect(first).toContain("Controlled guard binding failure")
+          expect(retried).toBe("true")
+          expect(inputs(state.calls)).toEqual(["input:queue"])
+        }, guarded(before))
+      })
+    })
+  })
+})
+
+describe("#given a restored owned child whose recovered turn waits for the host to finish the run it kept going", () => {
+  test("#when the plugin location reloads again while that run is still going #then the park completes, nothing is reported or replayed, and the next generation continues the turn once", async () => {
+    await withGuard(async (before) => {
+      await withGuard(async (middle) => {
+        await withGuard(async (after) => {
+          await withOwnedRuntimeUnit(async (runtime, state) => {
+            // given: the first park sees the run open and the host keeps it going; the next generation's
+            // restore waits for the host to report the session idle before adopting or continuing the turn
+            const started = await runtime.start({ category: "qa", prompt: "block-until-interrupt" })
+            if (started.kind !== "started") throw Error(JSON.stringify(started))
+            await until(() => state.hostActive(), "child turn running")
+            state.keepRunsAcrossPark()
+            const restoring = await state.reopen({
+              childToolGuard: middle,
+              authorizeRecovery: async (spec) => recoveryApproved(spec),
+            })
+            state.waitUntilIdle()
+            const waitsBefore = state.calls.filter((call) => call === "host-wait").length
+            const restored = await restoreThroughOperation(restoring, started.task_id)
+            await until(
+              () => state.calls.filter((call) => call === "host-wait").length > waitsBefore,
+              "restored turn waits for the host",
+            )
+            // a real interrupt ends the run; the reload's park interrupts it
+            state.keepRunsAcrossPark(false)
+
+            // when
+            const reload = state.reopen({
+              childToolGuard: after,
+              authorizeRecovery: async (spec) => recoveryApproved(spec),
+            })
+            const parkedInTime = await Promise.race([reload.then(() => true), Bun.sleep(3000).then(() => false)])
+            if (!parkedInTime) state.finishFrame(String(restoring.get(started.task_id)?.child_session_id))
+            const reloaded = await reload
+            const parked = reloaded.get(started.task_id)
+            const handed = parkedInTime && (await restoreThroughOperation(reloaded, started.task_id))
+            if (handed) await until(() => inputs(state.calls).length > 0, "continuation delivered")
+
+            // then
+            expect(restored).toBe(true)
+            expect(parkedInTime).toBe(true)
+            expect(parked?.status).toBe("running")
+            expect(parked?.residency_state).toBe("persisted_only")
+            expect(handed).toBe(true)
+            expect(inputs(state.calls)).toEqual(["input:queue"])
+          }, guarded(before))
+        })
       })
     })
   })

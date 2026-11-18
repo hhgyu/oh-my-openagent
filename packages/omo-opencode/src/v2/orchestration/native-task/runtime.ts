@@ -208,6 +208,10 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
   // proves the stored row is still that same released child, never a foreign or changed one. Each
   // receipt is also journaled durably, so a reloaded runtime over the same state keeps the proof.
   const releasedControls = new Map<string, ReleasedControlReceipt>()
+  // Left-behind children a task_cancel of this runtime took custody of (admitStoredForCancel), in memory only.
+  const cancelAdmissions = new Map<string, ReleasedControlReceipt>()
+  // Left-behind children whose journal custody another live runtime of this project took first (claimRevival).
+  const heldByOther = new Set<string>()
   // Set while this runtime parks its own children for a reload/dispose, so their receipts say so.
   const suspendingForShutdown = new AsyncLocalStorage<true>()
   if (!Bun.semver.satisfies(ctx.app.version, ">=2.2.6") || !hasJoinedSessionCancellation(ctx.session))
@@ -1178,6 +1182,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       assertRecoverableOwnedRecord(record, record.parent_session_id)
       if (await settleUpgradedChild(record))
         throw new Error("Task was fenced to an earlier OpenCode version and ended as lost; it cannot be resumed")
+      if (!(await claimRevival(record))) throw heldElsewhere(record, "revived")
       const origin = captureNotificationRecovery(record)
       // Guarded: the CURRENT call's fresh approval precedes residency admission/claim/reattach.
       const approval = freshRecoveries ? await freshRecoveries.approve(record) : undefined
@@ -1239,6 +1244,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         record.host_pid !== process.pid &&
         getPidLiveness(record.host_pid) === "dead"
       ) {
+        if (!(await claimRevival(record))) return false
         await afterRestart(id, () => recoverControl(record))
         return controls.has(id)
       }
@@ -1247,8 +1253,42 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
       if (receipt?.kind !== "suspended") return false
       if (receipt.identity !== operationIdentity(record) || receipt.revision !== record.owned_session.journalRevision)
         throw Error("Suspended child changed since its runtime parked it")
+      if (!(await claimRevival(record))) return false
       await afterRestart(id, () => reviveParkedBeforeSend(id))
       return controls.has(id)
+    }
+    /** Only one runtime revives a left-behind child. Two OpenCode processes serving the project both find
+     * it at startup; the durable child journal admits one live owner, so its claim is taken before any
+     * approval, guard stage or host call. A row another live runtime claimed first is left to that
+     * runtime: no revival here, no refusal and no notice. */
+    function heldElsewhere(record: TaskRecord, verb: string): Error {
+      const pid = record.host_pid === undefined ? "" : ` (pid ${record.host_pid})`
+      return Error(
+        `Task ${record.task_id} is held by another live runtime serving this project${pid}; it cannot be ${verb} here until that runtime releases it.`,
+      )
+    }
+    async function claimRevival(record: TaskRecord): Promise<boolean> {
+      const key = record.owned_session?.journalKey
+      if (!key) return true
+      const before = await journal.read(key)
+      if (!before || before.owner === journal.owner) {
+        heldByOther.delete(record.task_id)
+        return true
+      }
+      try {
+        await journal.claim(key, journal.owner)
+        heldByOther.delete(record.task_id)
+        return true
+      } catch (error) {
+        const after = await journal.read(key)
+        if (!after || after.owner === journal.owner || after.phase === "closed") throw error
+        heldByOther.add(record.task_id)
+        console.info(
+          "[oh-my-openagent/v2] left-behind task child is held by another live runtime of this project",
+          record.task_id,
+        )
+        return false
+      }
     }
     /** Runs one restore of a child a host restart left behind; a cut-off turn it reattaches continues. */
     async function afterRestart(id: string, restore: () => Promise<void>): Promise<void> {
@@ -1850,6 +1890,37 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         receipt.revision === row.owned_session?.journalRevision
       )
     }
+    /** `task_cancel` of a child no runtime holds: parked by a shutdown, stranded by a dead host, or left by a
+     * revival that failed here. The cancel takes the child's journal custody with the same single-owner claim a
+     * revival takes, and admits the row for capture like a row this runtime released; the cancel then ends it
+     * and closes its session, so it never revives. A child another live runtime holds is refused. */
+    async function admitStoredForCancel(binding: VerifiedParentBinding, id: string): Promise<void> {
+      const row = manager.get(id)
+      if (!row || !operationTaskInScope(binding, id) || operationTaskOwned(binding, id)) return
+      const ref = row.owned_session
+      if (!ref || !row.child_session_id || controls.has(id) || manager.getResidentHandle(id)) return
+      if (row.killed || !["running", "pending", "paused"].includes(row.status)) return
+      const elsewhere =
+        row.residency_state === "resident" &&
+        row.host_pid !== undefined &&
+        row.host_pid !== process.pid &&
+        getPidLiveness(row.host_pid) !== "dead"
+      if (elsewhere || !(await claimRevival(row))) throw heldElsewhere(row, "cancelled")
+      const fresh = manager.get(id)
+      if (!fresh || operationIdentity(fresh) !== operationIdentity(row))
+        throw Error("Task changed while its cancel took custody")
+      assertCandidate(fresh, true)
+      remember(fresh)
+      cancelAdmissions.set(
+        id,
+        Object.freeze({
+          taskID: id,
+          identity: operationIdentity(fresh),
+          revision: ref.journalRevision,
+          kind: "released",
+        }),
+      )
+    }
     function captureOperationTask(binding: VerifiedParentBinding, id: string): AcceptedTaskProof {
       const parent = bindings.info(binding)
       const initial = manager.get(id)
@@ -1865,7 +1936,7 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
         // stored row (restored only through restoreAfterReload); anything else stays outside.
         const receipt =
           initial.child_session_id && !controls.has(id) && !manager.getResidentHandle(id)
-            ? releaseReceipt(id)
+            ? (cancelAdmissions.get(id) ?? releaseReceipt(id))
             : undefined
         if (
           !receipt ||
@@ -1873,7 +1944,9 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
           receipt.identity !== operationIdentity(initial) ||
           receipt.revision !== initial.owned_session?.journalRevision
         )
-          throw Error("Operation task has no original owned membership")
+          throw heldByOther.has(id)
+            ? heldElsewhere(initial, "reached")
+            : Error("Operation task has no original owned membership")
         assertCandidate(initial, true)
         remember(initial)
         if (!owns(initial)) throw Error("Operation task has no original owned membership")
@@ -1921,7 +1994,9 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
             control.handle.assertOwned()
           } else {
             // No live control: only our own closed or released receipt for this exact row is custody.
-            const closed = closedControls.get(id) ?? (manager.getResidentHandle(id) ? undefined : releaseReceipt(id))
+            const closed =
+              closedControls.get(id) ??
+              (manager.getResidentHandle(id) ? undefined : (cancelAdmissions.get(id) ?? releaseReceipt(id)))
             if (
               !closed ||
               closed.identity !== operationIdentity(row) ||
@@ -2111,22 +2186,14 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
             },
           })
         }
-        function resolve(
-          input: string,
-          resolveOptions?: { readonly storedSendRefusal: true },
-        ): NativeOperationResolution {
+        /** The row an id or name names in the original scope, without capturing it. */
+        function locate(input: string): TaskRecord | "ambiguous" | undefined {
           const direct = manager.get(input)
-          if (direct) {
-            if (
-              direct.root_session_id !== parentID ||
+          if (direct)
+            return direct.root_session_id !== parentID ||
               (direct.parent_session_id !== parent.lease.sessionID && direct.root_session_id !== parent.lease.sessionID)
-            )
-              return { kind: "missing-in-original-scope" }
-            const stored = resolveOptions?.storedSendRefusal && storedSendRefusal(direct)
-            if (stored) return stored
-            captureOperationTask(binding, direct.task_id).read()
-            return { kind: "found", taskID: direct.task_id }
-          }
+              ? undefined
+              : direct
           const rows = manager.list({ scope: "parent-session", session_id: parent.lease.sessionID })
           const directNames = rows.filter(
             (item) => item.record.parent_session_id === parent.lease.sessionID && item.record.name === input,
@@ -2136,12 +2203,20 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
             : parent.lease.sessionID === parentID
               ? rows.filter((item) => item.record.name === input)
               : []
-          if (named.length > 1) return { kind: "denied", reason: "Ambiguous task name in original scope" }
-          if (!named.length) return { kind: "missing-in-original-scope" }
-          const stored = resolveOptions?.storedSendRefusal && storedSendRefusal(named[0].record)
+          if (named.length > 1) return "ambiguous"
+          return named[0]?.record
+        }
+        function resolve(
+          input: string,
+          resolveOptions?: { readonly storedSendRefusal: true },
+        ): NativeOperationResolution {
+          const row = locate(input)
+          if (row === "ambiguous") return { kind: "denied", reason: "Ambiguous task name in original scope" }
+          if (!row) return { kind: "missing-in-original-scope" }
+          const stored = resolveOptions?.storedSendRefusal && storedSendRefusal(row)
           if (stored) return stored
-          captureOperationTask(binding, named[0].record.task_id).read()
-          return { kind: "found", taskID: named[0].record.task_id }
+          captureOperationTask(binding, row.task_id).read()
+          return { kind: "found", taskID: row.task_id }
         }
         const lifetime = createAcceptedOperationLifetime({ ...lifetimeOptions, registry: acceptedOperations })
         return createNativeOperationPorts(lifetime, {
@@ -2153,6 +2228,11 @@ export async function createNativeOwnedTaskRuntime(ctx: OwnedTaskHost, options: 
             bindings.info(binding, true)
           },
           capture: (id) => captureOperationTask(binding, id),
+          heldElsewhere: (id) => heldByOther.has(id),
+          admitStoredForCancel: (input) => {
+            const row = locate(input)
+            return row && row !== "ambiguous" ? admitStoredForCancel(binding, row.task_id) : Promise.resolve()
+          },
           owned: (id) => operationTaskOwned(binding, id),
           inScope: (id) => operationTaskInScope(binding, id),
           upgradeNoticeDue: (id) => {

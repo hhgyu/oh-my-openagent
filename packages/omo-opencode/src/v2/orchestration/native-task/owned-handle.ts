@@ -237,6 +237,9 @@ export async function createOwnedTaskHandle(input: {
   }
   let managedInput = inputPort()
   const lifetime = new AbortController()
+  // A park or end must not queue behind a recovered turn that waits for the host to go idle: the park's own
+  // interrupt is what ends the run that wait is for.
+  const retiring = new AbortController()
   // The display projection appends under the task record lock. Another writer holding it past the lock's
   // holder wait is contention, not lost observation: the idempotent projection is retried until the
   // budget runs out, and only then does it fault the turn.
@@ -418,7 +421,7 @@ export async function createOwnedTaskHandle(input: {
   /** Native `adoptFinishedTurn`: once the host reports the session idle, the final answer its transcript
    * ends with, unless the child's last observed run ended waiting on background work it owns. */
   async function hostFinishedAnswer(): Promise<string | undefined> {
-    await backend.wait(child, lifetime.signal)
+    await backend.wait(child, AbortSignal.any([lifetime.signal, retiring.signal]))
     if (ownedBackgroundAfterLastStart(observer.observation().records)) return undefined
     try {
       return finishedTurnText(await backend.currentContext(child))
@@ -772,6 +775,7 @@ export async function createOwnedTaskHandle(input: {
   }
   function end(): Promise<void> {
     if (ending) return ending
+    retiring.abort(Error("Owned child is ending"))
     const stopped = stopInputs()
     const next = serialize(async () => {
       await stopped
@@ -1211,6 +1215,7 @@ export async function createOwnedTaskHandle(input: {
     },
     end,
     detach: () => {
+      retiring.abort(Error("Owned child is parking"))
       const stopped = stopInputs()
       return serialize(async () => {
         await stopped

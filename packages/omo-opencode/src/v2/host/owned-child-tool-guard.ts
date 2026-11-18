@@ -69,6 +69,10 @@ export interface OwnedChildToolGuard {
    * backend validates its opaque parked receipt for this exact child. Frees the active claim
    * while keeping the owned-ID deny tombstone; the host deny rule fences fresh snapshots. */
   retireParked(stage: ChildGuardStage, receipt: object, validate: (receipt: object, child: object) => void): void
+  /** A joined stage that was never bound authorized no call. It is dropped, and whatever this guard held for
+   * the ID before it (a parked tombstone it renewed) is in force again, so a failed revival neither leaves the
+   * child refused nor blocks a retry. Calls issued under the dropped stage stay refused. */
+  abandon(stage: ChildGuardStage): void
   /** Trusted binder only: the pre-wrap ORIGINAL executor of the stock `webfetch` host tool with this
    * ID, the one value a binding may name as `network.intrinsicGetOriginal`. Any other tool: undefined. */
   intrinsicGetOriginal(hostID: string): ToolInfo["execute"] | undefined
@@ -86,6 +90,9 @@ type Stage = {
   producerJoin?: Promise<void>
   producersJoined?: boolean
   parkedReceipt?: object
+  /** The stage 
+enewStage replaced, reinstated if this one is abandoned. */
+  previous?: Stage
 }
 const retired = (stage: Stage) => stage.state === "released" || stage.state === "parked"
 const joined = (stage: Stage) =>
@@ -315,6 +322,7 @@ export function acquireOwnedChildToolGuard(domains: {
           approval,
           state: "provisional",
           scope: Scope.makeUnsafe(),
+          ...(previous && { previous }),
         }
         approval.stage = stage
         stages.set(stage.token, stage)
@@ -404,6 +412,18 @@ export function acquireOwnedChildToolGuard(domains: {
         stage.state = "parked"
         stage.parkedReceipt = receipt
         parkedReceipts.add(receipt)
+      },
+      abandon(token) {
+        const stage = stageFor(token)
+        if (stage.binding) throw Error("A bound child stage cannot be abandoned")
+        if (retired(stage)) return
+        if (!joined(stage)) throw Error("Original child effects are not joined")
+        stage.state = "released"
+        stage.approval.stage = undefined
+        const sessionID = stage.token.sessionID
+        if (sessions.get(sessionID) !== stage) return
+        if (stage.previous) sessions.set(sessionID, stage.previous)
+        else sessions.delete(sessionID)
       },
       intrinsicGetOriginal(hostID) {
         current()

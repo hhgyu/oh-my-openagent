@@ -41,6 +41,8 @@ function unitFixture(initial: ListedTool[] = [], sessionID = "unit-parent") {
   const events: string[] = [],
     starts: unknown[] = [],
     updates: unknown[] = [],
+    restores: unknown[] = [],
+    cancels: unknown[] = [],
     entries = [...initial]
   let before: ((event: { tool: string; input: unknown }) => void | Promise<void>) | undefined
   let transform: ((editor: ToolEditor) => void) | undefined
@@ -205,7 +207,19 @@ function unitFixture(initial: ListedTool[] = [], sessionID = "unit-parent") {
                   },
                 },
                 output: { list: () => [], get: () => undefined },
-                recovery: { restoreLeftBehind: async () => ({ restored: [], held: [] }) },
+                recovery: {
+                  restoreLeftBehind: async (options?: unknown) => {
+                    restores.push(options ?? null)
+                    return { restored: [], held: [] }
+                  },
+                },
+                cancel: {
+                  cancelTask: async (id: string) => {
+                    cancels.push(id)
+                    return { kind: "cancelled", task_id: id, previous_status: "running" }
+                  },
+                  get: () => undefined,
+                },
                 reportProgress: (update: Record<string, unknown>) => {
                   void reporting.progress(update)
                 },
@@ -248,6 +262,8 @@ function unitFixture(initial: ListedTool[] = [], sessionID = "unit-parent") {
     events,
     starts,
     updates,
+    restores,
+    cancels,
     waitEntered: waitEntered.promise,
     get resources() {
       return resources
@@ -372,6 +388,22 @@ test("#given unknown task_send fields #when the raw host callback runs #then it 
     },
   })
   expect(f.events).not.toContain("operation")
+  await component.close()
+})
+
+test("#given a task_cancel call #when the bridge restores the parent's left-behind children first #then the child being cancelled is not revived and the cancel reaches it", async () => {
+  // given
+  const f = unitFixture(),
+    component = createNativeTaskBridge(f.options)
+  await component.ready
+
+  // when
+  await f.call("task_cancel", { task_id: "st_cancelled" })
+  await f.call("task_cancel", { name: "named-child" })
+
+  // then
+  expect(f.restores).toEqual([{ except: "st_cancelled" }, { except: "named-child" }])
+  expect(f.cancels).toEqual(["st_cancelled", "named-child"])
   await component.close()
 })
 
