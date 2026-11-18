@@ -39,9 +39,28 @@ oqa_require() {
   return "$missing"
 }
 
-# Absolute path of the active opencode DB (resolves channel / OPENCODE_DB).
+# 0 when the installed opencode has the 1.x `db` subcommand. OpenCode 2.x has
+# none: `opencode db path` prints the top-level help instead of a file path.
+oqa_has_opencode_db() {
+  if [ -z "${OQA_HAS_OPENCODE_DB:-}" ]; then
+    local probe
+    probe="$(opencode db path 2>/dev/null | head -1)"
+    if [ -n "$probe" ] && [ -f "$probe" ]; then OQA_HAS_OPENCODE_DB=1; else OQA_HAS_OPENCODE_DB=0; fi
+  fi
+  [ "$OQA_HAS_OPENCODE_DB" = 1 ]
+}
+
+# Absolute path of the active opencode DB. Order: OPENCODE_DB, the 1.x
+# `opencode db path`, the 2.x `opencode debug paths` db line, the XDG default.
 oqa_db_path() {
-  opencode db path 2>/dev/null | head -1
+  if [ -n "${OPENCODE_DB:-}" ]; then printf '%s\n' "$OPENCODE_DB"; return 0; fi
+  local p
+  if oqa_has_opencode_db; then
+    opencode db path 2>/dev/null | head -1; return 0
+  fi
+  p="$(opencode debug paths 2>/dev/null | awk '$1 == "db" { sub(/^db[ \t]+/, ""); print; exit }')"
+  if [ -n "$p" ]; then printf '%s\n' "$p"; return 0; fi
+  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/opencode.db"
 }
 
 # Escape a value for safe embedding inside a single-quoted SQL literal.
@@ -49,10 +68,46 @@ oqa_sql_escape() {
   printf '%s' "$1" | sed "s/'/''/g"
 }
 
+oqa_db_runtime() {
+  if command -v node >/dev/null 2>&1 && node -e 'require("node:sqlite")' >/dev/null 2>&1; then
+    echo node; return 0
+  fi
+  if command -v bun >/dev/null 2>&1; then echo bun; return 0; fi
+  return 1
+}
+
 # Run a read-only SQL query against the active DB; emit JSON rows.
 # Usage: oqa_db_query "SELECT ... LIMIT 5"
+# 1.x: `opencode db --format json`. 2.x: lib/db-query.mjs, which opens the DB
+# read-only with PRAGMA query_only.
 oqa_db_query() {
-  opencode db "$1" --format json 2>/dev/null
+  if oqa_has_opencode_db; then
+    opencode db "$1" --format json 2>/dev/null; return
+  fi
+  if [ -z "${OQA_DB_RUNTIME:-}" ]; then
+    OQA_DB_RUNTIME="$(oqa_db_runtime)" || { oqa_log "missing dependency: node>=22.5 (node:sqlite) or bun"; return 1; }
+  fi
+  if [ -z "${OQA_DB_FILE:-}" ]; then OQA_DB_FILE="$(oqa_db_path)"; fi
+  if [ "$OQA_DB_RUNTIME" = node ]; then
+    node --no-warnings "$SCRIPT_DIR_COMMON/db-query.mjs" "$OQA_DB_FILE" "$1"
+  else
+    bun "$SCRIPT_DIR_COMMON/db-query.mjs" "$OQA_DB_FILE" "$1"
+  fi
+}
+
+# Storage layout of the active DB: `v2` (OpenCode 2.x: session_v2 +
+# session_message) or `v1` (session + message/part).
+oqa_db_layout() {
+  if [ -z "${OQA_DB_LAYOUT:-}" ]; then
+    local n
+    n="$(oqa_db_query "SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('session_v2','session_message')" | jq -r '.[0].n // 0' 2>/dev/null)"
+    if [ "${n:-0}" = 2 ]; then OQA_DB_LAYOUT=v2; else OQA_DB_LAYOUT=v1; fi
+  fi
+  echo "$OQA_DB_LAYOUT"
+}
+
+oqa_session_table() {
+  if [ "$(oqa_db_layout)" = v2 ]; then echo session_v2; else echo session; fi
 }
 
 # Preserve HOME-based opencode shims after HOME is sandboxed. Some installed
@@ -309,6 +364,23 @@ oqa__self_check() {
     oqa_pass "oqa_db_path -> $dbp"
   else
     oqa_log "FAIL: oqa_db_path returned '$dbp'"; fails=$((fails+1))
+  fi
+
+  local layout table sessions
+  layout="$(oqa_db_layout)"; table="$(oqa_session_table)"
+  sessions="$(oqa_db_query "SELECT count(*) AS n FROM $table" | jq -r '.[0].n // empty' 2>/dev/null)"
+  if [ "${sessions:-0}" -ge 1 ] 2>/dev/null; then
+    oqa_pass "oqa_db_query reads $sessions row(s) from $table (layout $layout)"
+  else
+    oqa_log "FAIL: oqa_db_query on $table (layout $layout) returned '$sessions'"; fails=$((fails+1))
+  fi
+
+  if ! oqa_has_opencode_db; then
+    if oqa_db_query "DELETE FROM $table WHERE 0" >/dev/null 2>&1; then
+      oqa_log "FAIL: db-query.mjs accepted a write statement"; fails=$((fails+1))
+    else
+      oqa_pass "db-query.mjs refuses write statements"
+    fi
   fi
 
   local esc; esc="$(oqa_sql_escape "a'b'c")"

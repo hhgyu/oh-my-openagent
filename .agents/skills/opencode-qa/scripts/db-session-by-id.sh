@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # db-session-by-id.sh - investigate an opencode session by its id (ses_...).
-# Read-only against the LIVE opencode DB via `opencode db ... --format json`.
+# Read-only against the LIVE opencode DB (`opencode db` on 1.x, lib/db-query.mjs
+# on 2.x, which has no `db` subcommand and keeps sessions in session_v2).
 #
 # Usage:
 #   db-session-by-id.sh ses_3a4ee6335ffedFB8f76BPU1Eb3
 #   db-session-by-id.sh --self-test
 #
 # Output: a JSON array with one row (id, slug, title, directory, agent, model,
-# cost, token counts, human-readable created/updated times) or [] if not found.
+# cost, token counts, human-readable created/updated times; on 2.x also
+# parent_id, version and the message count) or [] if not found.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/common.sh"
@@ -16,6 +18,18 @@ oqa_session_by_id() {
   local id esc
   id="$1"
   esc="$(oqa_sql_escape "$id")"
+  if [ "$(oqa_db_layout)" = v2 ]; then
+    oqa_db_query "SELECT
+        id, slug, title, directory, agent, parent_id, version,
+        json_extract(model,'\$.id')         AS model,
+        json_extract(model,'\$.providerID') AS provider,
+        cost, tokens_input, tokens_output,
+        (SELECT count(*) FROM session_message m WHERE m.session_id = s.id) AS messages,
+        datetime(time_created/1000,'unixepoch') AS created,
+        datetime(time_updated/1000,'unixepoch') AS updated
+      FROM session_v2 s WHERE id='$esc'"
+    return
+  fi
   oqa_db_query "SELECT
       id, slug, title, directory, agent,
       json_extract(model,'\$.modelID')   AS model,
@@ -29,7 +43,8 @@ oqa_session_by_id() {
 oqa_self_test() {
   oqa_require opencode jq || return 1
   local id out got
-  id="$(oqa_db_query "SELECT id FROM session ORDER BY time_created DESC LIMIT 1" | jq -r '.[0].id // empty')"
+  # Root sessions only: short-lived child sessions can be deleted between the two queries.
+  id="$(oqa_db_query "SELECT id FROM $(oqa_session_table) WHERE parent_id IS NULL ORDER BY time_created DESC LIMIT 1" | jq -r '.[0].id // empty')"
   if [ -z "$id" ]; then
     oqa_log "FAIL: no sessions in DB to test against"; return 1
   fi
