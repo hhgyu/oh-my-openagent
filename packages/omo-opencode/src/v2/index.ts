@@ -158,13 +158,19 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
       if (disposeGoal) cleanups.push(disposeGoal)
     }
     if (context.options?.["omo-native-eval-enabled"] !== false) {
-      // The Native thread tools are eval-only: they exist only as owned host tools of an eval cell.
+      // The Native thread tools stay out of the direct tool list: owned host tools of an eval cell, and the same
+      // bodies as Code Mode tools for OpenCode's own `execute` cell (D-034).
       const threads = nativeThreadsEnabled(context.options)
         ? (await import("./threads/component")).createThreadComponent(context)
         : undefined
       if (threads) {
         await threads.start()
         cleanups.push(threads.close)
+        const { registerThreadCodemodeTools } = await import("./threads/codemode")
+        const codemode = await registerThreadCodemodeTools(context.tool, threads.tools, (line) =>
+          console.warn(`[oh-my-openagent/v2] ${line}`),
+        )
+        cleanups.push(() => codemode.dispose())
       }
       // Native `eval`, on by default like Native. Registers the tool only; senpi-codemode itself
       // is imported on the first call.

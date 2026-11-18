@@ -193,7 +193,7 @@ export function createFakeThreadHost() {
   }
 }
 
-function callerOf(sessionID: string): ToolContext {
+export function callerOf(sessionID: string): ToolContext {
   return {
     sessionID,
     agent: "build",
