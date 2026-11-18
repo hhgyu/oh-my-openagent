@@ -163,10 +163,13 @@ export async function registerMemoryComponent(
   const projection = createMemoryProjection({ binder, metadata, now, logger })
   const corpusCache = new RecallCorpusCache({ shared: true })
   const seams = options.kibitzer
+  // OpenCode 2.3 reports every linked child turn to the parent and wakes it, even for hidden agents.
+  // Keep the judge off until the host offers a way to suppress those reports for internal children.
+  const canRunKibitzer = kibitzerHostCapable(context) && Bun.semver.satisfies(context.app?.version ?? "", "<2.3.0")
   // The persona is read BEFORE any agent transform: a throw inside a host transform makes OpenCode
   // disable the whole plugin. A missing persona disables only the judge (no recall nudges).
   const persona = (() => {
-    if (seams?.createPort !== undefined || !kibitzerHostCapable(context)) return undefined
+    if (seams?.createPort !== undefined || !canRunKibitzer) return undefined
     try {
       return loadKibitzerPersona()
     } catch (error) {
@@ -187,7 +190,7 @@ export async function registerMemoryComponent(
       ),
   })
   const kibitzer: KibitzerComponent | undefined =
-    seams?.createPort !== undefined || (kibitzerHostCapable(context) && persona !== null)
+    seams?.createPort !== undefined || (canRunKibitzer && persona !== null)
       ? createKibitzerComponent({
           host: context,
           binder,

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
+import { withJoinedSessionCancellation } from "../host/session-cancellation"
 import { registerMemoryComponent, MEMORY_PART_MARKER, RECALL_PART_MARKER } from "./index"
 import type { KibitzerWakeOutcome } from "./kibitzer"
 import { createCountingSlot, createManualTimers, createScriptedPort, type ScriptedPort } from "./kibitzer/test-support"
@@ -72,6 +73,33 @@ const recalledPaths = (system: Awaited<ReturnType<MemoryFixture["context"]>>) =>
     const paths = part.metadata?.paths
     return Array.isArray(paths) ? paths : []
   })
+
+describe("Kibitzer host compatibility", () => {
+  test.each([
+    ["2.2.5", false],
+    ["2.2.6", true],
+    ["2.3.0", false],
+    ["2.4.0", false],
+  ] as const)(
+    "registers the Kibitzer tools on OpenCode %s only when the child can run quietly",
+    async (version, enabled) => {
+      const fixture = createMemoryFixture()
+      fixtures.push(fixture)
+      const host: MemoryFixture["host"] = {
+        ...fixture.host,
+        app: { name: "opencode", version, channel: "stable" },
+        session: withJoinedSessionCancellation(fixture.host.session, "controlled-test"),
+      }
+      const cleanup = await registerMemoryComponent(host, fixture.options())
+      try {
+        expect(fixture.tools.has("memory")).toBe(true)
+        expect(fixture.tools.has("nudge")).toBe(enabled)
+      } finally {
+        await cleanup()
+      }
+    },
+  )
+})
 
 describe("memory recall through the resident Kibitzer judge", () => {
   test("#given a matching note #when the judge accepts a nudge #then the parent receives it once through the context hook and the ledger stops a repeat", async () => {
