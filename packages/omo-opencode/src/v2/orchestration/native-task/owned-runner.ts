@@ -320,6 +320,7 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
     let instructions: { dispose(): Promise<void> | void } | undefined
     let observer: Awaited<ReturnType<typeof createOwnedChildObserver>> | undefined
     let follow: ChildPermissionFollow | undefined
+    let bound = false
     try {
       // Refuse a missing/mismatched run selection BEFORE claiming or touching the retained child.
       const selectedRow = recoveringKey ? await options.journal.read(journalKey) : undefined
@@ -407,6 +408,7 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
           agent: guarded.buildAgentID,
           assertCurrent: assertBound,
         })
+        bound = true
       }
       firstInput()
       const ownedChild = child
@@ -599,6 +601,13 @@ export function createOwnedManagedRunner(options: OwnedRunnerOptions) {
       } catch (failure) {
         failures.push(failure)
       }
+      // A stage never bound authorized no call: a failed revival leaves neither a refused child nor a retained claim.
+      if (guardClaim && !bound && guardCleanup.every((result) => result.status === "fulfilled"))
+        try {
+          await custody.abandon(guardClaim)
+        } catch (failure) {
+          failures.push(failure)
+        }
       if (!failures.length)
         try {
           await (restoring ? custody.finish(guardClaim) : releaseGuard(guardClaim))

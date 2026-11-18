@@ -68,7 +68,8 @@ async function fixture(
       holdInputAck(): void
       releaseInputAck(): void
       finishFrame(sessionID: string): void
-      keepRunsAcrossPark(): void
+      keepRunsAcrossPark(keep?: boolean): void
+      waitUntilIdle(): void
       hostRun(sessionID: string, text: string): void
       emit(type: string, sessionID: string, data?: object): void
       stateDir: string
@@ -140,6 +141,8 @@ async function fixture(
   const blocked = new Set<string>()
   // OpenCode 2.2.6 in-process reload: the park's interrupt does not stop the run, which goes on and ends on its own.
   let keepRunsAcrossPark = false
+  // A host wait on a running session returns only once its run ends, like OpenCode's session.wait.
+  let waitsForIdle = false
   const transcripts = new Map<string, unknown[]>()
   const finishedAnswer = (sessionID: string, text: string) =>
     transcripts.set(sessionID, [
@@ -349,6 +352,10 @@ async function fixture(
       assertPresent(sessionID)
       hostWaitEntered.resolve()
       if (heldHostWait) await hostWaitGate.promise
+      while (waitsForIdle && blocked.has(sessionID)) {
+        options?.signal?.throwIfAborted()
+        await Bun.sleep(5)
+      }
       if (teardownHeld.has(sessionID))
         await new Promise<void>((resolve, reject) => {
           const done = () => {
@@ -584,8 +591,11 @@ async function fixture(
                 emit("session.execution.succeeded", sessionID)
                 blocked.delete(sessionID)
               },
-              keepRunsAcrossPark: () => {
-                keepRunsAcrossPark = true
+              keepRunsAcrossPark: (keep = true) => {
+                keepRunsAcrossPark = keep
+              },
+              waitUntilIdle: () => {
+                waitsForIdle = true
               },
               hostRun(sessionID, text) {
                 const assistantMessageID = `assistant-host-${crypto.randomUUID()}`

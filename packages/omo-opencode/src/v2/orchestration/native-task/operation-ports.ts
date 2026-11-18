@@ -16,10 +16,12 @@ import type { DagTaskOwner, DagTaskOwnerKey, OwnedStartResult } from "@oh-my-ope
 import type { NativeOperationLifetime } from "./accepted-operation"
 
 const LEFT_BEHIND_STATUSES = new Set(["running", "pending", "paused"])
-/** What one restore of a parent's left-behind children did: restored task ids, and the ones it refused
- * (a denied approval, a conflict) that stay parked for a later revival. */
+/** What one restore of a parent's left-behind children did: restored task ids, the ones it refused
+ * (a denied approval, a conflict) that stay parked for a later revival, and the ones another live runtime
+ * of the project claimed first (left to it, not refused). */
 export interface LeftBehindRestore {
   readonly restored: readonly string[]
+  readonly elsewhere: readonly string[]
   readonly held: readonly { readonly taskID: string; readonly runEpoch: number; readonly reason: string }[]
 }
 
@@ -41,6 +43,11 @@ export interface NativeOperationAccess {
   readonly parentSessionID: string
   assertCurrent(): void
   capture(id: string): AcceptedTaskProof
+  /** Before capture for a cancel: takes the custody of a child no runtime holds (parked, stranded by a dead
+   * host, or left by a failed revival here) so the cancel can end it. A child held by another live runtime is refused. */
+  admitStoredForCancel(idOrName: string): Promise<void>
+  /** Whether another live runtime of the project holds id's custody (its revival claim was refused). */
+  heldElsewhere(id: string): boolean
   /** Whether `capture` would admit `id` for this call, read without capturing it (no receipt). */
   owned(id: string): boolean
   /** Whether `id` is a row of the original parent's scope at all, owned or only stored. */
@@ -317,13 +324,17 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
   const cancel: CancelManager = {
     cancelTask(input, reason, extra) {
       current()
-      const resolved = access.resolve(input)
-      if (resolved.kind === "denied") throw Error(resolved.reason)
-      if (resolved.kind === "stored-refusal") throw Error("Stored send refusal is not a cancellation grant")
-      if (resolved.kind === "missing-in-original-scope")
-        return Promise.resolve({ kind: "not_found", reason: `No task found for "${input}".` })
-      accept(resolved.taskID)
-      return lifetime.track(access.cancel(resolved.taskID, reason, extra))
+      return lifetime.track(
+        access.admitStoredForCancel(input).then(() => {
+          const resolved = access.resolve(input)
+          if (resolved.kind === "denied") throw Error(resolved.reason)
+          if (resolved.kind === "stored-refusal") throw Error("Stored send refusal is not a cancellation grant")
+          if (resolved.kind === "missing-in-original-scope")
+            return { kind: "not_found" as const, reason: `No task found for "${input}".` }
+          accept(resolved.taskID)
+          return access.cancel(resolved.taskID, reason, extra)
+        }),
+      )
     },
     get,
   }
@@ -372,18 +383,22 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
      * (`revival-selection.ts`). On OpenCode 2 the parent's next acting task call is that point (a child
      * is revived only inside a genuine current parent action): every child of the original parent a
      * reload parked or a dead host stranded is restored first, so a turn the restart cut off continues.
-     * A refused restore stays held for the next call; the call itself goes on. */
-    async restoreLeftBehind(): Promise<LeftBehindRestore> {
+     * A refused restore stays held for the next call; the call itself goes on. `except` (an id or name) is
+     * the child a `task_cancel` call ends: it is not revived first. */
+    async restoreLeftBehind(options?: { readonly except?: string }): Promise<LeftBehindRestore> {
       current()
       const restored: string[] = [],
+        elsewhere: string[] = [],
         held: { readonly taskID: string; readonly runEpoch: number; readonly reason: string }[] = []
       for (const { record } of manager.list({ scope: "parent-session", session_id: access.parentSessionID })) {
         const id = record.task_id
         if (record.runner_kind !== "owned-session") continue
+        if (options?.except !== undefined && (id === options.except || record.name === options.except)) continue
         if (!LEFT_BEHIND_STATUSES.has(record.status) && !access.upgradeNoticeDue(id)) continue
         if (receipts.has(id) || access.owned(id)) continue
         try {
           if (await lifetime.track(access.restoreAfterReload(id))) restored.push(id)
+          else if (access.heldElsewhere(id)) elsewhere.push(id)
         } catch (error) {
           // A plain permission rejection carries no message.
           const reason = (error instanceof Error ? error.message : String(error)).trim() || "the revival was refused"
@@ -391,7 +406,7 @@ export function createNativeOperationPorts(lifetime: NativeOperationLifetime, ac
           console.warn("[oh-my-openagent/v2] left-behind task child restore held", id, reason)
         }
       }
-      return Object.freeze({ restored, held })
+      return Object.freeze({ restored, held, elsewhere })
     },
     /** A child's live handle when THIS host holds it, only in the original parent (Native DAG recovery's orphan check). */
     residentHandle(id: string) {

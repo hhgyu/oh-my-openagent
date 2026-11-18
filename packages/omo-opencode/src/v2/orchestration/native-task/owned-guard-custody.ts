@@ -70,6 +70,14 @@ export function createGuardCustody(options: {
     claim.released = true
     claims.delete(claim.key)
   }
+  /** A stage that was never bound is dropped, not retained: no call ran under it (the guard's abandon). */
+  async function abandon(claim: GuardClaim | undefined) {
+    if (!claim || claim.released) return
+    await stop(claim)
+    options.owner().abandon(claim.token)
+    claim.released = true
+    claims.delete(claim.key)
+  }
   /** A restore renews the guard's parked tombstone for this ID (or begins on a fresh guard). */
   function begin(
     approval: ChildGuardApproval,
@@ -86,6 +94,7 @@ export function createGuardCustody(options: {
     stop,
     release,
     retireParked,
+    abandon,
     begin,
     finish: (claim: GuardClaim | undefined) => (claim?.parkedReceipt?.() ? retireParked(claim) : release(claim)),
   }

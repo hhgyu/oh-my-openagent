@@ -225,7 +225,11 @@ export function createNativeTaskBridge(options: NativeTaskBridgeOptions) {
         return call.operation(
           async (manager, resolveAncestry, signal, operation) => {
             // task_output is read-only and never revives a child.
-            if (name !== "task_output") await operation.recovery.restoreLeftBehind()
+            // A child being cancelled is ended, not revived first.
+            if (name === "task_cancel") {
+              const target = (input as TaskCancelInput).task_id ?? (input as TaskCancelInput).name
+              await operation.recovery.restoreLeftBehind(target === undefined ? undefined : { except: target })
+            } else if (name !== "task_output") await operation.recovery.restoreLeftBehind()
             if (name === "task_output") {
               const result = await runTaskOutput(
                 { ...resources.outputDependencies(caller), manager: operation.output },
