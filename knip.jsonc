@@ -2088,6 +2088,8 @@
         "script/stage-v2-computer-assets.ts",
         // run by path as the "v2-ulw-loop" node of script/build-nodes.ts (bun run build)
         "script/stage-v2-ulw-loop.ts",
+        // run by path as the "v2-shared-skills" node of script/build-nodes.ts (bun run build)
+        "script/stage-v2-shared-skills.ts",
         "script/wait-registry-versions.mjs",
         "script/senpi-worker-compile.ts",
         "test-support/remove-tree.ts",

@@ -121,6 +121,7 @@ export const BUILD_NODES: BuildNode[] = [
     args: ["script/stage-v2-ulw-loop.ts"],
     deps: ["index", "v2-index", "shared-skills-assets"],
   },
+  { id: "v2-shared-skills", command: "bun", args: ["script/stage-v2-shared-skills.ts"], deps: ["index", "v2-index"] },
   { id: "declarations", command: "tsc", args: ["--emitDeclarationOnly"], deps: [] },
   {
     id: "cli",

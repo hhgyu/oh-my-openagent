@@ -22,7 +22,7 @@ agents/         agent definitions and dynamic prompts
 config/         .omo/omo.jsonc loading and domain transforms
 commands/       command registration
 mcp/            built-in and configured MCP servers
-skills/         shared, user, project, and runtime skills
+skills/         shared (staged Native text via shared-skills.ts), user, project, and runtime skills
 orchestration/  background agents, todos, goal, boulder, team, monitor
 tui/            OpenCode 2 TUI entry
 compat/         event, message, and schema adapters

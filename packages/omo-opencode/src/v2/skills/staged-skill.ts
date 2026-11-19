@@ -30,7 +30,7 @@ export function locateStagedSkillFile(
   return existsSync(file) ? file : undefined
 }
 
-function stagedSkillInfo(name: string, file: string): Skill.Info {
+export function stagedSkillInfo(name: string, file: string): Skill.Info {
   const { data, body } = parseFrontmatter<{ description?: unknown }>(readFileSync(file, "utf8"))
   return {
     id: Skill.ID.make(name),
