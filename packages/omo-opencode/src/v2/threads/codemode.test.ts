@@ -130,6 +130,27 @@ describe("V2 thread tools in Code Mode", () => {
     })
   })
 
+  describe("#given a subagent session (a session with a parent)", () => {
+    test("#when it calls thread_send from Code Mode #then it runs like a root session, unlike eval", async () => {
+      // given
+      const { fake, component } = await setup()
+      fake.addSession({ id: "ses_child", title: "child", parentID: "ses_a", busy: 10, idle: 20 })
+      const host = fakeToolHost()
+      await registerThreadCodemodeTools(host.tool, component.tools, () => undefined)
+
+      // when
+      const result = await codemodeTool(host.tools, "thread_send").execute(
+        { thread: "beta", message: "from a subagent" },
+        callerOf("ses_child"),
+      )
+
+      // then
+      expect(threadResult<Record<string, unknown>>(result)).toMatchObject({ kind: "ok", thread_id: "ses_b" })
+      expect(fake.asserts[0]).toMatchObject({ sessionID: "ses_child", action: "thread_send", resources: ["ses_b"] })
+      expect(fake.synthetics[0]?.text).toContain('"from a subagent"')
+    })
+  })
+
   describe("#given another plugin already registered a thread tool name", () => {
     test("#when registered #then no thread tool is added and the collision is logged", async () => {
       // given

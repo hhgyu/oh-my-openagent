@@ -9,6 +9,7 @@ type Session = {
   id: string
   title?: string
   directory: string
+  parentID?: string
   busy?: number
   idle?: number
   archived?: number
@@ -56,6 +57,7 @@ export function createFakeThreadHost() {
     ...(session.title === undefined ? {} : { title: session.title }),
     ...(session.model === undefined ? {} : { model: session.model }),
     ...(session.metadata === undefined ? {} : { metadata: session.metadata }),
+    ...(session.parentID === undefined ? {} : { parentID: session.parentID }),
     location: { directory: session.directory },
   })
   const find = (sessionID: string) => {
