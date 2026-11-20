@@ -20,6 +20,7 @@ import type {
   ThreadToolResult,
 } from "@oh-my-opencode/thread-core/contracts"
 import {
+  closeOptions,
   closeThread,
   interruptThread,
   setModelOn,
@@ -123,16 +124,12 @@ async function deliver(
     args: value,
   })
   if (sent.kind === "error") return sent
-  const facts = {
-    delivery_id: sent.delivery_id,
-    effective_mode: sent.effective_mode,
-    endpoint: sent.endpoint_kind === null ? null : { kind: sent.endpoint_kind },
-  }
+  const facts = { delivery_id: sent.delivery_id, effective_mode: sent.effective_mode }
   const target = entries.find((candidate) => candidate.thread_id === entry.thread_id) as V2AddressEntry
   if (!handoff)
     return {
       kind: "ok",
-      thread_id: sent.thread_id,
+      thread: sent.thread_id,
       link: summaryOf(target).link,
       delivery: sent.delivery,
       message_seq: sent.message_seq,
@@ -141,7 +138,7 @@ async function deliver(
     }
   return {
     kind: "ok",
-    thread: summaryOf(target),
+    ...summaryOf(target),
     resolved_by: resolvedBy,
     delivery: sent.delivery,
     message_seq: sent.message_seq,
@@ -177,11 +174,17 @@ export function createSessionToolBodies(surface: ThreadSurface) {
       return await interruptThread(control(surface, call, located.entry), value.turn_id)
     },
     thread_close: async (value: ThreadCloseInput, call: ThreadCall): Promise<ThreadToolResult> => {
-      const located = await locate(surface, call, value.thread, value.all_scope)
+      const located = await locate(surface, call, value.thread ?? "self", value.all_scope)
       if (located.kind === "error") return located.result
       if (located.entry.liveness !== "routable")
-        return { kind: "ok", thread_id: located.entry.thread_id, closed: false }
-      return await closeThread(control(surface, call, located.entry))
+        return {
+          kind: "ok",
+          thread: located.entry.thread_id,
+          closed: false,
+          reason: "not_live",
+          dropped_deliveries: [],
+        }
+      return await closeThread(control(surface, call, located.entry), closeOptions(value))
     },
     thread_set_model: async (value: ThreadSetModelInput, call: ThreadCall): Promise<ThreadToolResult> => {
       const located = await locate(surface, call, value.thread, value.all_scope)
@@ -198,7 +201,7 @@ export function createSessionToolBodies(surface: ThreadSurface) {
     thread_rename: async (value: ThreadRenameInput, call: ThreadCall): Promise<ThreadToolResult> => {
       if (value.name === undefined && value.alias === undefined)
         return failure("invalid_arguments", "Pass a new name, a new alias, or both.", "Retry with name or alias.")
-      const located = await locate(surface, call, value.thread, value.all_scope)
+      const located = await locate(surface, call, value.thread ?? "self", value.all_scope)
       if (located.kind === "error") return located.result
       if (located.entry.liveness !== "routable") return NOT_LIVE
       const port = control(surface, call, located.entry)
@@ -242,7 +245,7 @@ export function createSessionToolBodies(surface: ThreadSurface) {
       if (value.thread !== undefined) {
         const located = await locate(surface, call, value.thread, true)
         if (located.kind === "error") return located.result
-        return { kind: "ok", thread: summaryOf(located.entry), deduplicated: true }
+        return { kind: "ok", ...summaryOf(located.entry), deduplicated: true }
       }
       const name = (value.name ?? value.alias)?.trim()
       if (name !== undefined && name.length > 0) {
@@ -256,7 +259,7 @@ export function createSessionToolBodies(surface: ThreadSurface) {
       })
       return {
         kind: "ok",
-        thread: summaryOf(created),
+        ...summaryOf(created),
         deduplicated: false,
         ...(value.alias === undefined
           ? {}

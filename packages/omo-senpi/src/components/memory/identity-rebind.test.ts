@@ -201,8 +201,9 @@ describe("memory identity with auto_identity git (#9659)", () => {
       acquire: async (identity, paths) => {
         syncAcquired.push({ identity, repo: paths.repo })
       },
-      resume: async () => {},
       release: async () => {},
+      idleTurnedOff: async () => {},
+      resumeIdle: async () => {},
       status: async () => null,
       deviceName: () => undefined,
     }

@@ -184,14 +184,6 @@ export function createThreadHostTools(factory: ThreadCallFactory): OwnedEvalHost
     const context = threadCall(call.sessionID, call.caller)
     const bodies = createRelayToolBodies({
       relay: factory.relay,
-      resolveSession: async (address, _callerId, allScope) => {
-        const resolved = resolveTarget(await factory.surface.entries(), address, {
-          all_scope: allScope,
-          callerWorkspaceRoot: await context.workspaceRoot(),
-        })
-        if (resolved.kind === "error") return failure(resolved.code, resolved.message, resolved.next_action)
-        return { id: resolved.entry.thread_id }
-      },
       latestCompletionArm: (durableId) => factory.store.latestCompletionArm(durableId),
       callerRunDeliveries: () => [...run.consumed],
       callerRunHasLocalInput: () => run.local,

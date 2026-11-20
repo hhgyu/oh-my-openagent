@@ -26,7 +26,8 @@ export const GATEWAY_STORE_IDLE_RETIRE_MS = 60_000
 export const PAIR_BUCKET_BURST = 8
 export const PAIR_BUCKET_REFILL_MS = 5_000
 
-export const MAX_FANOUT_PER_TURN = 16
+/** How long a carrier's lease on a woken session lasts (#13037 A3.1.3). */
+export const WAKE_LEASE_MS = 60_000
 
 export const QUEUED_TTL_MS = 24 * 60 * 60 * 1000
 

@@ -1,12 +1,17 @@
 import type { GatewayEndpointRef } from "@oh-my-opencode/thread-core/gateway/adapter"
 import type { GatewayAddressEntry } from "@oh-my-opencode/thread-core/gateway/engine"
 import { threadLink } from "@oh-my-opencode/thread-core/thread-link"
-import { isClosed, type ThreadV2Host, type V2SessionInfo } from "./host"
+import type { ThreadResultSummary, ThreadState } from "@oh-my-opencode/thread-core/contracts"
+import { isClosed, isExecuting, type ThreadV2Host, type V2SessionInfo } from "./host"
 
 const LIST_PAGE = 200
 const LIST_MAX = 2_000
 
-export type V2AddressEntry = GatewayAddressEntry & { readonly info: V2SessionInfo; readonly owner: string }
+export type V2AddressEntry = GatewayAddressEntry & {
+  readonly info: V2SessionInfo
+  readonly owner: string
+  readonly state: ThreadState
+}
 
 export function endpointRef(socket: string, sessionID: string): GatewayEndpointRef {
   return { kind: "rpc_host", socket, routing_id: sessionID, durable_session_id: sessionID }
@@ -31,7 +36,7 @@ export function addressEntry(info: V2SessionInfo, socket: string): V2AddressEntr
     updated_at: new Date(info.time.updated).toISOString(),
     endpoint: archived ? null : endpointRef(socket, info.id),
     surface: info.parentID === undefined ? null : "child",
-    alive: !archived,
+    state: archived ? "inactive" : isExecuting(info) ? "running" : "idle",
     controls: archived ? ["send", "read"] : ["send", "read", "rename", "set_model", "set_reasoning", "interrupt"],
     liveness: archived ? "dead" : "routable",
   }
@@ -53,15 +58,18 @@ export async function listAddressEntries(
   return entries
 }
 
-export function summaryOf(entry: V2AddressEntry) {
-  const {
-    info,
-    owner: _owner,
-    liveness: _liveness,
-    preview: _preview,
-    transport: _transport,
-    aliases: _aliases,
-    ...summary
-  } = entry
-  return { ...summary, link: threadLink(entry.thread_id, sessionTitle(info)) }
+/** A thread as a tool result shows it: flat, `thread` the address every thread tool takes back. */
+export function summaryOf(entry: V2AddressEntry): ThreadResultSummary {
+  return {
+    thread: entry.thread_id,
+    name: entry.name,
+    status: entry.status,
+    state: entry.state,
+    cwd: entry.cwd,
+    created_at: entry.created_at,
+    updated_at: entry.updated_at,
+    link: threadLink(entry.thread_id, sessionTitle(entry.info)),
+    ...(entry.surface === undefined || entry.surface === null ? {} : { surface: entry.surface }),
+    ...(entry.controls === undefined ? {} : { controls: entry.controls }),
+  }
 }

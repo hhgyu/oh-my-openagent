@@ -94,7 +94,7 @@ export function createGatewayServices(
   }
   const relay = createGatewayRelay({ store, engine, endpoints, locate, now })
   const pipeline = createDeliveryPipeline({
-    local: createLocalTransport(engine),
+    local: createLocalTransport(engine, options.sameDeviceWake),
     ...(options.remote === undefined
       ? {}
       : {

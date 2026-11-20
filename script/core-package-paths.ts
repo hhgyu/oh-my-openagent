@@ -6,6 +6,7 @@ export const corePackagePaths = [
   "packages/omo-config-core",
   "packages/delegate-core",
   "packages/orchestration-core",
+  "packages/thread-address-core",
   "packages/prompts-core",
   "packages/rules-engine",
   "packages/agents-md-core",

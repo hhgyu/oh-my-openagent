@@ -16,9 +16,15 @@ export type Harness = {
   readonly helper: string
   readonly buildFlavor: (name: string, build: Omit<KeychainHelperBuild, "output">) => Promise<string>
   readonly fixture: (op: string, ...args: string[]) => Promise<string>
+  /** The fixture on another keychain file, such as OmO's own keychain (#13116). */
+  readonly fixtureAt: (op: string, keychain: string, ...args: string[]) => Promise<string>
   readonly run: (
     request: object | string,
-    options?: { readonly binary?: string; readonly args?: readonly string[] },
+    options?: {
+      readonly binary?: string
+      readonly args?: readonly string[]
+      readonly env?: Readonly<Record<string, string>>
+    },
   ) => Promise<HelperRun>
   readonly dispose: () => Promise<void>
 }
@@ -88,7 +94,8 @@ export async function createHarness(): Promise<Harness> {
     fixtureBinary,
     join(import.meta.dir, "..", "keychain-helper", "test-support", "keychain-fixture.c"),
   ])
-  const fixture = (op: string, ...args: string[]) => output([fixtureBinary, op, keychain, ...args])
+  const fixtureAt = (op: string, at: string, ...args: string[]) => output([fixtureBinary, op, at, ...args])
+  const fixture = (op: string, ...args: string[]) => fixtureAt(op, keychain, ...args)
   await fixture("create")
 
   const run: Harness["run"] = async (request, options = {}) => {
@@ -97,7 +104,7 @@ export async function createHarness(): Promise<Harness> {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      env: {},
+      env: { ...options.env },
     })
     // A helper that refuses its argv replies and exits before reading stdin, so the pipe may already be closed.
     toleratingClosedPipe(() => {
@@ -117,6 +124,7 @@ export async function createHarness(): Promise<Harness> {
     keychain,
     helper,
     fixture,
+    fixtureAt,
     run,
     buildFlavor: async (name, build) => {
       const binary = join(dir, name)

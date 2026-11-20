@@ -5,12 +5,15 @@
 export {
   approveDevice,
   deviceKeyringFromMaterial,
+  disableSync,
   enableSync,
   GitSpaceConfig,
+  isDeviceSyncOff,
   joinAccount,
   listRemotes,
   openAccountSession,
   openDeviceSync,
+  repoHasCommit,
   resolveSpace,
 } from "@oh-my-opencode/memory-core/sync-engine"
 export { failureRpcSync } from "./status-copy"

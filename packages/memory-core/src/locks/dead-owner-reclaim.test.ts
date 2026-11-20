@@ -350,6 +350,61 @@ describe("dead-owner lock reclaim", () => {
     expect(provenDeadTakeoverFor(lockPath, contender.nonce)).toBeUndefined()
   })
 
+  test("#given a dead primary owner whose lock vanishes between the recovery fence and the unlink #when a contender recovers it #then the contender takes the lock", async () => {
+    // #given
+    const lockPath = memoryWriterLockPath(await createLocksDirectory())
+    await writeRecord(lockPath, await deadOwnerRecord("memory-write"))
+    const contender = await createLockRecord("memory-write")
+    const realUnlink = resilientFs.unlink
+    let vanished = false
+    const vanishFirst = spyOn(resilientFs, "unlink").mockImplementation((async (target: string) => {
+      if (target === lockPath && !vanished) {
+        vanished = true
+        await unlink(lockPath)
+      }
+      return realUnlink(target)
+    }) as typeof resilientFs.unlink)
+
+    // #when
+    try {
+      await acquireWithoutDirectorySweep(lockPath, contender, { waitTimeoutMs: 0 })
+    } finally {
+      vanishFirst.mockRestore()
+    }
+
+    // #then
+    // Windows CI (#11644): the fenced unlink met ENOENT and the supervisor failed admission.
+    expect(vanished).toBe(true)
+    const owner = JSON.parse(await readFile(lockPath, "utf8")) as LockRecord
+    expect(owner.nonce).toBe(contender.nonce)
+    expect(await readdir(path.dirname(lockPath))).toEqual([path.basename(lockPath)])
+  })
+
+  test("#given the fenced unlink of a dead primary fails with an error other than ENOENT #when a contender recovers it #then the error surfaces and the recovery lock is released", async () => {
+    // #given
+    const lockPath = memoryWriterLockPath(await createLocksDirectory())
+    await writeRecord(lockPath, await deadOwnerRecord("memory-write"))
+    const realUnlink = resilientFs.unlink
+    const failPrimary = spyOn(resilientFs, "unlink").mockImplementation((async (target: string) => {
+      if (target === lockPath) throw Object.assign(new Error("simulated EIO"), { code: "EIO" })
+      return realUnlink(target)
+    }) as typeof resilientFs.unlink)
+
+    // #when
+    let failure: unknown
+    try {
+      await acquireWithoutDirectorySweep(lockPath, await createLockRecord("memory-write"), { waitTimeoutMs: 0 })
+    } catch (error) {
+      failure = error
+    } finally {
+      failPrimary.mockRestore()
+    }
+
+    // #then
+    expect(failure).toMatchObject({ code: "EIO" })
+    expect(await readdir(path.dirname(lockPath))).toEqual([path.basename(lockPath)])
+  })
+
   test("#given a dead primary owner and a live recovery holder #when six contenders wait #then none publishes a candidate", async () => {
     // #given
     const lockPath = memoryWriterLockPath(await createLocksDirectory())

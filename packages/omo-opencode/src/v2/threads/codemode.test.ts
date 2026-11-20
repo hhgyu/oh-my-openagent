@@ -60,7 +60,7 @@ describe("V2 thread tools in Code Mode", () => {
 
       // then
       expect(host.tools.map((entry) => entry.name).sort()).toEqual(component.tools.map((entry) => entry.name).sort())
-      expect(host.tools).toHaveLength(18)
+      expect(host.tools).toHaveLength(14)
       for (const entry of host.tools) {
         expect(entry.options).toEqual({ codemode: true })
         const owned = component.tools.find((candidate) => candidate.name === entry.name)
@@ -78,9 +78,9 @@ describe("V2 thread tools in Code Mode", () => {
       const result = await codemodeTool(host.tools, "thread_list").execute({}, callerOf("ses_a"))
 
       // then
-      const listed = threadResult<{ kind: string; threads: { thread_id: string }[] }>(result)
+      const listed = threadResult<{ kind: string; threads: { thread: string }[] }>(result)
       expect(listed.kind).toBe("ok")
-      expect(listed.threads.map((thread) => thread.thread_id).sort()).toEqual(["ses_a", "ses_b"])
+      expect(listed.threads.map((thread) => thread.thread).sort()).toEqual(["ses_a", "ses_b"])
       expect(result.content[0]).toMatchObject({ type: "text" })
     })
 
@@ -98,7 +98,7 @@ describe("V2 thread tools in Code Mode", () => {
 
       // then
       const sent = threadResult<Record<string, unknown>>(result)
-      expect(sent).toMatchObject({ kind: "ok", thread_id: "ses_b" })
+      expect(sent).toMatchObject({ kind: "ok", thread: "ses_b" })
       expect(fake.asserts[0]).toMatchObject({
         sessionID: "ses_a",
         action: "thread_send",
@@ -145,7 +145,7 @@ describe("V2 thread tools in Code Mode", () => {
       )
 
       // then
-      expect(threadResult<Record<string, unknown>>(result)).toMatchObject({ kind: "ok", thread_id: "ses_b" })
+      expect(threadResult<Record<string, unknown>>(result)).toMatchObject({ kind: "ok", thread: "ses_b" })
       expect(fake.asserts[0]).toMatchObject({ sessionID: "ses_child", action: "thread_send", resources: ["ses_b"] })
       expect(fake.synthetics[0]?.text).toContain('"from a subagent"')
     })

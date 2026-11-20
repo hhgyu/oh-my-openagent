@@ -80,7 +80,7 @@ export function nativeTeamEnabled(options: Plugin.Context["options"] | undefined
   return options?.["omo-native-team-enabled"] !== false
 }
 
-/** The eighteen `thread_*` eval host tools, on by default like Native. */
+/** The fourteen `thread_*` eval host tools, on by default like Native. */
 function nativeThreadsEnabled(options: Plugin.Context["options"] | undefined): boolean {
   return options?.["omo-native-threads-enabled"] !== false
 }

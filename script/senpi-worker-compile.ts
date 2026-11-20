@@ -11,6 +11,15 @@ const SENPI_COMPILE_ENTRIES = [
   { define: "SENPI_KILL_GUARD_ENTRY", path: "node_modules/@code-yeongyu/senpi/dist/core/kill-guard/index.js" },
 ] as const
 
+/**
+ * `--bytecode` stores the precompiled bytecode of the bundled graph, so a launch skips parsing it (#13440): a boot
+ * took 880 ms p50 on Linux x64 and 214 ms on darwin-arm64 before, 202 ms and 33 ms after. Depth 1 compiles only the
+ * outermost function level ahead of time; it keeps nearly all of the gain at about half the size of full depth, which
+ * cannot fit the budget because the senpi worker entries in the same compile get bytecode too. ESM output is required:
+ * the entry awaits at the top level.
+ */
+export const BYTECODE_COMPILE_ARGS = ["--bytecode", "--format=esm", "--bytecode-depth=1"] as const
+
 /** Bun entry names are relative to --root, not to the relocated executable's cwd. */
 export function senpiWorkerCompileArgs(repoRoot: string): string[] {
   const entries = SENPI_COMPILE_ENTRIES.flatMap(({ define, path }) => {

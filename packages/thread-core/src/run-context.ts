@@ -16,7 +16,7 @@ export type RunContext = {
   chainHop: number
   consumed: string[]
   replyTo: string[]
-  replySenders: { session_id: string; name?: string }[]
+  replySenders: { session_id: string; name?: string; device?: string }[]
   local: boolean
   answered: boolean
 }
@@ -25,12 +25,17 @@ export type RunContext = {
 export type RunInput =
   | { readonly kind: "user" }
   | { readonly kind: "engine" }
+  /** A delivery message without a string id: after an answer it starts a new group with nobody approved, adding no sender. */
+  | { readonly kind: "malformed" }
+  /** RPC input is typed input, never a delivery this session received: its id is the client's to choose (#12317). */
+  | { readonly kind: "rpc" }
   | {
       readonly kind: "delivery"
       readonly id: string
       readonly chainCount: number
       readonly agentSender?: string
       readonly senderName?: string
+      readonly device?: string
     }
 
 export function createRunContext(): RunContext {
@@ -56,21 +61,25 @@ export function createRunContext(): RunContext {
  * allowance, not them.
  */
 export function noteRunInput(run: RunContext, input: RunInput): void {
+  if (input.kind === "malformed") {
+    // Like a delivery it ends an answered group (nothing of the earlier group survives) and, unlike a valid one, adds
+    // no sender; while work is running it joins it as a valid delivery would, adding nothing and keeping the hop.
+    if (run.answered) startGroup(run)
+    return
+  }
   if (input.kind === "engine") {
     if (run.answered) run.consumed = []
     run.answered = false
     return
   }
-  if (run.answered) {
-    run.cause = undefined
-    run.consumed = []
-    run.replyTo = []
-    run.replySenders = []
-    run.chainHop = 0
-    run.local = false
-    run.answered = false
-  }
+  if (run.answered) startGroup(run)
   if (input.kind === "user") {
+    run.local = true
+    return
+  }
+  // RPC input is typed input, never a delivery this session received: its id is the client's to choose, so it is no
+  // cause, no consumed origin and no reply sender, and a send from its run starts a new causal root (#12317).
+  if (input.kind === "rpc") {
     run.local = true
     return
   }
@@ -80,11 +89,28 @@ export function noteRunInput(run: RunContext, input: RunInput): void {
   run.chainHop = Math.max(run.chainHop, input.chainCount)
   if (!run.consumed.includes(input.id)) run.consumed.push(input.id)
   if (input.agentSender !== undefined && !run.replyTo.includes(input.agentSender)) run.replyTo.push(input.agentSender)
-  if (input.agentSender !== undefined && !run.replySenders.some((s) => s.session_id === input.agentSender))
+  if (
+    input.agentSender !== undefined &&
+    !run.replySenders.some(
+      (s) => s.session_id === input.agentSender && s.device === input.device && s.name === input.senderName,
+    )
+  )
     run.replySenders.push({
       session_id: input.agentSender,
       ...(input.senderName === undefined ? {} : { name: input.senderName }),
+      ...(input.device === undefined ? {} : { device: input.device }),
     })
+}
+
+/** A final answer was given: the next input starts a new group, and nothing of the earlier one survives. */
+function startGroup(run: RunContext): void {
+  run.cause = undefined
+  run.consumed = []
+  run.replyTo = []
+  run.replySenders = []
+  run.chainHop = 0
+  run.local = false
+  run.answered = false
 }
 
 /** An assistant message ended: it is a final answer when it calls no tool. */

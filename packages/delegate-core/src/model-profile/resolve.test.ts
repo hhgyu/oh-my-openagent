@@ -11,12 +11,13 @@ describe("prepared Native main-profile selector", () => {
       "anthropic-subscription/claude-fable-5-2",
       "openai/gpt-6-astra",
       "chatgpt-subscription/gpt-6-astra",
+      "chatgpt-subscription/gpt-6.2-astra",
     ]
     for (const [active, provider, modelId, reasoning] of [
       ["daily-normal", "anthropic-subscription", "claude-opus-5-5", "medium"],
-      ["daily-heavy", "anthropic-subscription", "claude-fable-5-2", "xhigh"],
-      ["geeky-normal", "chatgpt-subscription", "gpt-6-astra", "medium"],
-      ["geeky-heavy", "chatgpt-subscription", "gpt-6-astra", "high"],
+      ["daily-heavy", "anthropic-subscription", "claude-fable-5-2", "high"],
+      ["geeky-normal", "chatgpt-subscription", "gpt-6.2-astra", "medium"],
+      ["geeky-heavy", "chatgpt-subscription", "gpt-6.2-astra", "high"],
     ])
       expect(resolveModelProfile({ active, availableModels })).toMatchObject({
         kind: "resolved",
@@ -35,11 +36,15 @@ describe("prepared Native main-profile selector", () => {
       provider: "moonshotai",
       modelId: "kimi-k3.1-pro",
       reasoning: "max",
-      skipped: ["anthropic-subscription/claude-opus-5-5"],
+      skipped: ["anthropic-subscription/claude-opus-5-5", "anthropic-subscription/claude-fable-5-2"],
     })
     expect(resolveModelProfile({ active: "daily-normal", availableModels: [] })).toMatchObject({
       kind: "unavailable",
-      chain: ["anthropic-subscription/claude-opus-5-5", "kimi-coding/kimi-k3.1-pro", "zai/glm-5.3"],
+      chain: [
+        "anthropic-subscription/claude-opus-5-5",
+        "anthropic-subscription/claude-fable-5-2",
+        "kimi-coding/kimi-k3.1-pro",
+      ],
     })
   })
 

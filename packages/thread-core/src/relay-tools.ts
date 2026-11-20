@@ -3,34 +3,18 @@ import type { Static } from "typebox"
 import { UNKNOWN_CALLER } from "./caller"
 import type {
   ThreadAnswerInput,
-  ThreadBindingsInput,
-  ThreadBindInput,
   ThreadOutboxAckInput,
   ThreadOutboxInput,
-  ThreadRebindInput,
   ThreadReportInput,
   ThreadToolResult,
-  ThreadUnbindInput,
   threadToolParamSchemas,
 } from "./contracts"
 import type { GatewayRelay } from "./gateway/relay"
 import { failure } from "./tool-result"
 
-export type RelayToolName =
-  | "thread_bind"
-  | "thread_unbind"
-  | "thread_rebind"
-  | "thread_bindings"
-  | "thread_report"
-  | "thread_outbox"
-  | "thread_outbox_ack"
-  | "thread_answer"
+export type RelayToolName = "thread_report" | "thread_outbox" | "thread_outbox_ack" | "thread_answer"
 
 export const RELAY_TOOL_NAMES: readonly RelayToolName[] = [
-  "thread_bind",
-  "thread_unbind",
-  "thread_rebind",
-  "thread_bindings",
   "thread_report",
   "thread_outbox",
   "thread_outbox_ack",
@@ -49,12 +33,6 @@ export type RelayToolBodies = {
 
 export type RelayToolBodiesContext = {
   readonly relay: GatewayRelay
-  /** Resolves a session address other than the caller itself to its durable id, or answers the failure. */
-  readonly resolveSession: (
-    address: string,
-    callerId: string,
-    allScope: boolean | undefined,
-  ) => Promise<{ readonly id: string } | ThreadToolResult>
   readonly latestCompletionArm: (durableId: string) => Promise<number | null>
   readonly callerRunDeliveries?: () => readonly string[]
   readonly callerRunHasLocalInput?: () => boolean
@@ -62,98 +40,16 @@ export type RelayToolBodiesContext = {
 }
 
 /**
- * The eight relay tools' bodies, shared by every host. They run over the gateway store alone: no host listing is taken
- * unless a session address other than the caller has to be resolved. Mutations are idempotent per `(caller, tool, key)`
- * inside the store transaction that performs them.
+ * The four relay tools' bodies, shared by every host. They run over the gateway store alone and take no host listing.
+ * Binding a chat thread is not a session tool: the gateway writes, moves and expires bindings through the relay SDK as
+ * its own principal. Mutations are idempotent per `(caller, tool, key)` inside the store transaction that performs them.
  */
 export function createRelayToolBodies(context: RelayToolBodiesContext): RelayToolBodies {
   const { relay } = context
 
-  async function sessionOf(
-    address: string | undefined,
-    callerId: string,
-    allScope: boolean | undefined,
-  ): Promise<{ readonly id: string } | ThreadToolResult> {
-    if (address === undefined || address === "self" || (address === callerId && callerId !== UNKNOWN_CALLER)) {
-      if (callerId === UNKNOWN_CALLER)
-        return failure(
-          "caller_context_missing",
-          "The calling session's durable id is unknown.",
-          "Name the session explicitly, or retry from a session that passes its execution context.",
-        )
-      return { id: callerId }
-    }
-    return await context.resolveSession(address, callerId, allScope)
-  }
-
   const principal = (callerId: string) => `session:${callerId}`
 
   return {
-    thread_bind: async ({ value, callerId, key }) => {
-      const input = value as ThreadBindInput
-      const session = await sessionOf(input.session, callerId, input.all_scope)
-      if ("kind" in session) return session
-      return (await relay.bind({
-        principal: principal(callerId),
-        idempotency_key: key,
-        binding: {
-          platform: input.platform,
-          account_id: input.account_id,
-          chat_id: input.chat_id,
-          ...(input.thread_id === undefined ? {} : { thread_id: input.thread_id }),
-          ...(input.root_message_id === undefined ? {} : { root_message_id: input.root_message_id }),
-          ...(input.progress_message_id === undefined ? {} : { progress_message_id: input.progress_message_id }),
-          session_durable_id: session.id,
-          ...(input.direction === undefined ? {} : { direction: input.direction }),
-          ...(input.inbound_mode === undefined ? {} : { inbound_mode: input.inbound_mode }),
-          ...(input.outbound_events === undefined ? {} : { outbound_events: input.outbound_events }),
-          ...(input.policy_id === undefined ? {} : { policy_id: input.policy_id }),
-          ...(input.ttl_seconds === undefined ? {} : { ttl_seconds: input.ttl_seconds }),
-        },
-      })) as ThreadToolResult
-    },
-    thread_unbind: async ({ value, callerId, key }) => {
-      const input = value as ThreadUnbindInput
-      return (await relay.unbind({
-        principal: principal(callerId),
-        idempotency_key: key,
-        binding_id: input.binding_id,
-        expected_revision: input.expected_revision,
-      })) as ThreadToolResult
-    },
-    thread_rebind: async ({ value, callerId, key }) => {
-      const input = value as ThreadRebindInput
-      const session = await sessionOf(input.session, callerId, input.all_scope)
-      if ("kind" in session) return session
-      return (await relay.rebind({
-        principal: principal(callerId),
-        idempotency_key: key,
-        binding_id: input.binding_id,
-        expected_revision: input.expected_revision,
-        session_durable_id: session.id,
-      })) as ThreadToolResult
-    },
-    thread_bindings: async ({ value, callerId }) => {
-      const input = value as ThreadBindingsInput
-      let sessionFilter: string | undefined
-      if (input.session !== undefined) {
-        const session = await sessionOf(input.session, callerId, input.all_scope)
-        if ("kind" in session) return session
-        sessionFilter = session.id
-      }
-      return (await relay.bindings({
-        filter: {
-          ...(sessionFilter === undefined ? {} : { session_durable_id: sessionFilter }),
-          ...(input.platform === undefined ? {} : { platform: input.platform }),
-          ...(input.account_id === undefined ? {} : { account_id: input.account_id }),
-          ...(input.chat_id === undefined ? {} : { chat_id: input.chat_id }),
-          ...(input.thread_id === undefined ? {} : { thread_id: input.thread_id }),
-          ...(input.status === undefined ? {} : { status: input.status }),
-        },
-        ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
-        ...(input.limit === undefined ? {} : { limit: input.limit }),
-      })) as ThreadToolResult
-    },
     thread_report: async ({ value, callerId, key }) => {
       const input = value as ThreadReportInput
       if (callerId === UNKNOWN_CALLER)
@@ -188,7 +84,7 @@ export function createRelayToolBodies(context: RelayToolBodiesContext): RelayToo
           return failure(
             "idempotency_uncertain",
             "An earlier completion report under this key was recorded without its arm sequence, and the session has no completion armed now: its completion was already written, or the arm is gone.",
-            "Read the binding's outbox with thread_outbox to see whether the completion was sent; to arm another, report again under a new idempotency_key.",
+            "Read the binding's outbox with thread_outbox (tool.thread_outbox() in an eval cell) to see whether the completion was sent; to arm another, report again under a new idempotency_key.",
           )
         context.onCompletionArmed?.(callerId, durableArmSeq)
       }

@@ -1,5 +1,6 @@
 import type { DeviceAbsentReason, Provenance } from "@oh-my-opencode/thread-core/gateway/types"
-import type { RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
+import { accountDevices } from "./account"
+import type { RemoteThreadSurface } from "../../remote"
 
 /** This device's account device id, or why a delivery names none. */
 export type ThisDevice = { readonly device: string } | { readonly device_absent: DeviceAbsentReason }
@@ -18,7 +19,7 @@ async function thisDeviceId(remote: RemoteThreadSurface | undefined): Promise<Th
   if (cached !== undefined) return { device: cached }
   let device: string | null
   try {
-    device = await remote.sessions.thisDevice()
+    device = (await accountDevices(remote.client)).here
   } catch {
     return { device_absent: "device_service_unavailable" }
   }

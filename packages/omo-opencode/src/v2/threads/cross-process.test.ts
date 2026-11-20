@@ -46,7 +46,7 @@ describe("V2 thread tools across OpenCode servers of one agent dir", () => {
       expect(
         readdirSync(endpointRegistryDirectory(first.agentDir)).filter((name) => name.endsWith(".json")),
       ).toHaveLength(2)
-      expect((listed["threads"] as { thread_id: string }[]).map((thread) => thread.thread_id).sort()).toEqual([
+      expect((listed["threads"] as { thread: string }[]).map((thread) => thread.thread).sort()).toEqual([
         "ses_a",
         "ses_b",
       ])
@@ -77,10 +77,10 @@ describe("V2 thread tools across OpenCode servers of one agent dir", () => {
       const reply = await callTool(b.tools, "thread_send", "ses_b", { thread: "ses_a", message: "cross pong" })
 
       // then
-      expect(sent).toMatchObject({ kind: "ok", thread_id: "ses_b", delivery: { kind: "started" } })
+      expect(sent).toMatchObject({ kind: "ok", thread: "ses_b", delivery: { kind: "started" } })
       expect(again).toMatchObject({ kind: "ok", deduplicated: true, delivery_id: sent["delivery_id"] })
       expect(second.synthetics.map((entry) => entry.sessionID)).toEqual(["ses_b"])
-      expect(reply).toMatchObject({ kind: "ok", thread_id: "ses_a", delivery: { kind: "started" } })
+      expect(reply).toMatchObject({ kind: "ok", thread: "ses_a", delivery: { kind: "started" } })
       expect(first.synthetics.map((entry) => entry.sessionID)).toEqual(["ses_a"])
       expect(second.asserts[0]).toMatchObject({ metadata: { omoThreadReplyAllowed: true } })
     })
@@ -96,7 +96,7 @@ describe("V2 thread tools across OpenCode servers of one agent dir", () => {
       const interrupted = await callTool(a.tools, "thread_interrupt", "ses_a", { thread: "beta" })
 
       // then
-      expect(read).toMatchObject({ kind: "ok", thread_id: "ses_b", source: "live_host" })
+      expect(read).toMatchObject({ kind: "ok", thread: "ses_b", source: "live_host" })
       expect(interrupted).toMatchObject({ kind: "ok", interrupted: true, turn_id: "30" })
       expect(second.interrupts).toEqual(["ses_b"])
     })

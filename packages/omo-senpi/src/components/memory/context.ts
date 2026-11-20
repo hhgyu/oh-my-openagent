@@ -55,6 +55,10 @@ export function createMemoryIdentityContext(input: {
 }
 
 /** First-write seam: callers invoke this before mutation; reads must never create identity storage. */
+export function getMemoryRepo(context: MemoryIdentityContext): MemoryRepoAccess {
+  return context.repoAccess
+}
+
 export async function ensureIdentityRuntimeDirs(paths: MemoryIdentityPaths): Promise<void> {
   await Promise.all(
     [

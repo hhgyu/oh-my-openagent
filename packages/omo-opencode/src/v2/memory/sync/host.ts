@@ -60,6 +60,7 @@ export function createSyncHost(options: SyncHostOptions): SyncHost {
       },
       runtime: {
         enableSync: async (input) => (await loadEngine()).enableSync(input),
+        disableSync: async (input) => (await loadEngine()).disableSync(input),
         joinAccount: async (input) => (await loadEngine()).joinAccount(input),
         approveDevice: async (input) => (await loadEngine()).approveDevice(input),
       },

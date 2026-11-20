@@ -1,3 +1,4 @@
+import { AsyncResource } from "node:async_hooks"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 
@@ -10,16 +11,18 @@ import {
   noteRunSettled,
   type RunInput,
 } from "@oh-my-opencode/thread-core/run-context"
+import { returnedAtClose, settleGracefulClose } from "./gateway/graceful-close-returns"
 import { createCompletionTracker, type AgentEndFacts } from "@oh-my-opencode/thread-core/gateway/completion"
 import { SESSION_CONTROL_DELIVERY_TYPE } from "@oh-my-opencode/thread-core/gateway/constants"
 import { gatewayDatabasePath } from "@oh-my-opencode/thread-core/gateway/paths"
 import { loadProvenanceWorkspaces } from "./gateway/provenance-config"
 import { resolveProvenance } from "@oh-my-opencode/thread-core/gateway/provenance-resolver"
-import { registerInitialSkills } from "./initial-skills"
+import { registerCreateReceivers } from "./create-receivers"
 import {
   controlSessionOf,
   createControlEndpointRegistrant,
   hostInstanceOf,
+  hostSocketOf,
   sessionControlOf,
   type ControlEndpointRegistrantOptions,
   type SessionControlActionsPort,
@@ -29,9 +32,13 @@ import { createGatewayStore, type GatewayStore } from "@oh-my-opencode/thread-co
 import { registerThreadTools, UNKNOWN_CALLER, type ThreadToolSurfaceOptions } from "./tools"
 import { createLazyLiveThreadSurface } from "./lazy-live-surface"
 import { createDefaultRemoteSurface } from "./remote/default-remote"
+import { registerRemoteMonitorTargets } from "./remote/lazy-ops"
 import { createOmoNativeProductConfig } from "../telemetry/product-identity"
-import { defaultThreadStateDirectory } from "./live-surface-paths"
+import { defaultThreadStateDirectory, isThreadSocket } from "./live-surface-paths"
 import { stampThisDevice } from "./remote/this-device"
+import type { IntakeAdmission } from "@oh-my-opencode/thread-core/gateway/intake-admission"
+import type { SameDeviceWake } from "./gateway/same-device-wake"
+import type { ThreadWakeOptions } from "./wake/runtime"
 
 /**
  * The longest the `agent_settled` handler waits for an armed completion's store write. senpi waits
@@ -40,6 +47,13 @@ import { stampThisDevice } from "./remote/this-device"
  * retried after the store's busy timeout while another process keeps the lock, and logged.
  */
 export const COMPLETION_SETTLE_WAIT_MS = 250
+
+/**
+ * The wake's process-level async scope, captured while senpi imports omo.js. The wake sidecar is first imported
+ * from a `session_start` handler or a send, so a scope created there would inherit that session's handle ledger and
+ * its shutdown would reclaim the carrier's sockets and timers (the device-service registrant's reason, #13457).
+ */
+const wakeProcessScope = new AsyncResource("omo-thread-wake-carrier")
 
 /** The files the pre-gateway mailbox kept its queue in (`gateway/legacy-mailbox.ts`). */
 const LEGACY_MAILBOX_FILES = ["mailbox.jsonl", "mailbox.json"] as const
@@ -68,6 +82,8 @@ export type ThreadComponentOptions = Partial<
   readonly agentDir?: () => string
   readonly store?: GatewayStore
   readonly controlEndpointTest?: ControlEndpointRegistrantOptions["_test"]
+  /** Test seams of the session wake (#13037): the carrier, the consumer and their switches. */
+  readonly wake?: ThreadWakeOptions
 }
 
 type EngineMessage = {
@@ -85,7 +101,12 @@ function messageOf(event: unknown): EngineMessage | undefined {
 type DeliveryDetails = {
   readonly delivery_id?: unknown
   readonly chain_count?: unknown
-  readonly sender?: { readonly kind?: unknown; readonly session_id?: unknown; readonly name?: unknown }
+  readonly sender?: {
+    readonly kind?: unknown
+    readonly session_id?: unknown
+    readonly name?: unknown
+    readonly platform?: unknown
+  }
 }
 
 /** senpi `external-admission.js` `deliveryIdOf`: the delivery a `session_control_delivery` message carries. */
@@ -95,12 +116,17 @@ function deliveryOf(message: EngineMessage):
       readonly chainCount: number
       readonly agentSender: string | undefined
       readonly senderName: string | undefined
+      readonly device: string | undefined
+      readonly rpcInput: boolean
     }
+  | "malformed"
   | undefined {
   if (message.role !== "custom" || message.customType !== SESSION_CONTROL_DELIVERY_TYPE) return undefined
   const details = (message.details ?? undefined) as DeliveryDetails | undefined
   const id = details?.delivery_id
-  if (typeof id !== "string") return undefined
+  // A delivery message without a string id is malformed: after an answer it starts a new group with nobody approved,
+  // and it never passes as a turn the engine started, which would keep the earlier group's allowance (#13056).
+  if (typeof id !== "string") return "malformed"
   const count = details?.chain_count
   return {
     id,
@@ -113,6 +139,29 @@ function deliveryOf(message: EngineMessage):
       typeof details?.sender?.name === "string" && details.sender.name.trim() !== ""
         ? details.sender.name.trim()
         : undefined,
+    device: deliveryDevice(id),
+    // senpi admits a `prompt`/`steer`/`follow_up` sent over the session's RPC socket as this same message, under the
+    // client's `clientMessageId` and with this sender it stamps itself (`session-control-input-commands.js`).
+    rpcInput: details?.sender?.kind === "external" && details.sender.platform === "rpc",
+  }
+}
+
+/**
+ * The device a delivery came from, as the receiving side attested it in the delivery's id: `device:<device>/<id>` names
+ * it (URI-encoded); `rpc:local/<id>` and a bare row id name no device (amendment A4.3.1 of #13037). Those are this
+ * device's deliveries, or another device's admitted on a connection that declared no remote origin (#14048), so a reply
+ * that finds no such session here resolves account-wide (`tools.ts` `locate`).
+ */
+function deliveryDevice(id: string): string | undefined {
+  if (!id.startsWith("device:")) return undefined
+  const rest = id.slice("device:".length)
+  const slash = rest.indexOf("/")
+  const part = slash === -1 ? rest : rest.slice(0, slash)
+  // A device part that is not valid URI encoding is kept as written: it names no listed device, so a reply to it is not_found.
+  try {
+    return decodeURIComponent(part)
+  } catch {
+    return part
   }
 }
 
@@ -127,15 +176,17 @@ function callsTools(message: EngineMessage): boolean {
 function runInputOf(message: EngineMessage): RunInput | undefined {
   if (message.role !== "user" && message.role !== "custom") return undefined
   const delivery = deliveryOf(message)
-  if (delivery !== undefined)
-    return {
-      kind: "delivery",
-      id: delivery.id,
-      chainCount: delivery.chainCount,
-      ...(delivery.agentSender === undefined ? {} : { agentSender: delivery.agentSender }),
-      ...(delivery.senderName === undefined ? {} : { senderName: delivery.senderName }),
-    }
-  return message.role === "user" ? { kind: "user" } : { kind: "engine" }
+  if (delivery === "malformed") return { kind: "malformed" }
+  if (delivery === undefined) return message.role === "user" ? { kind: "user" } : { kind: "engine" }
+  if (delivery.rpcInput) return { kind: "rpc" }
+  return {
+    kind: "delivery",
+    id: delivery.id,
+    chainCount: delivery.chainCount,
+    ...(delivery.agentSender === undefined ? {} : { agentSender: delivery.agentSender }),
+    ...(delivery.senderName === undefined ? {} : { senderName: delivery.senderName }),
+    ...(delivery.device === undefined ? {} : { device: delivery.device }),
+  }
 }
 
 /** senpi's ask_user tool per model family (`ask-user/family.js` `TOOL_NAMES`) and the flag that makes it wait for the answer. */
@@ -183,6 +234,10 @@ function relayedQuestionOf(event: unknown): { readonly call: string; readonly re
     : undefined
 }
 
+/** senpi's `session_shutdown { closed: true }`: a graceful close ended the session on request (omo#14313). */
+const closedOnRequest = (event: unknown): boolean =>
+  typeof event === "object" && event !== null && (event as { readonly closed?: unknown }).closed === true
+
 function durableIdOf(eventCtx: unknown): string | undefined {
   const manager = (eventCtx as { readonly sessionManager?: { readonly getSessionId?: () => unknown } } | undefined)
     ?.sessionManager
@@ -205,6 +260,7 @@ function registerControlEndpoint(
   store: GatewayStore,
   agentDir: () => string,
   onCommandWake: (durableId: string) => Promise<void>,
+  admitIntake: NonNullable<ControlEndpointRegistrantOptions["admitIntake"]>,
 ) {
   const control = options.sessionControl === undefined ? sessionControlOf(pi) : (options.sessionControl ?? undefined)
   if (control === undefined) return undefined
@@ -214,6 +270,7 @@ function registerControlEndpoint(
     agentDir,
     store,
     onCommandWake,
+    admitIntake,
     ...(runtimeInstance === undefined ? {} : { runtimeInstance }),
     log: (line) => ctx.logger.warn(line),
     ...(options.controlEndpointTest === undefined ? {} : { _test: options.controlEndpointTest }),
@@ -230,7 +287,7 @@ function registerControlEndpoint(
       )
   })
   // A session thread_create opened runs on a host, so its initial skills ride with the control endpoint.
-  registerInitialSkills(pi, ctx)
+  registerCreateReceivers(pi, ctx)
   pi.on("session_before_compact", () => registrant.noteCompaction(true))
   pi.on("session_compact", () => registrant.noteCompaction(false))
   // A steer into a session waiting on a question is `not_steerable` (`decision.ts`): the answer comes
@@ -270,9 +327,13 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
         options.remote ??
         createDefaultRemoteSurface({
           version: createOmoNativeProductConfig().packageVersion,
+          // One surface serves every session of this engine, so its client acts as the engine's host instance: engine-wide,
+          // never per session. The thread surface calls only service.status and devices.list, which never read it.
+          sender: { kind: "session", id: runtimeInstance ?? UNKNOWN_CALLER },
           log: (line) => ctx.logger.warn(line),
           permissionPreset: () => pi.getPermissionPreset?.(),
         })
+      registerRemoteMonitorTargets(pi, remote)
       const store =
         options.store ??
         createGatewayStore({
@@ -325,6 +386,44 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
             ),
         },
       )
+      const sessionsDirectory = options.sessionsDirectory ?? (() => join(agentDir(), "sessions"))
+      // The running wake is the process's (one per agent directory, latched), so it opens its own store and never
+      // borrows this component's: this session's shutdown disposes that one, and every later wake would fail on it.
+      // Its worker still retires when idle, since the carrier arms its sweep only while the wake table holds a row
+      // (design A3.1.4).
+      const wakeOptions: ThreadWakeOptions = { ...options.wake }
+      const warn = (line: string) => ctx.logger.warn(line)
+      // The wake's runtime (the carrier and its host connection, the delivery consumer and its device-service client)
+      // lives in its own sidecar (#omo-wake-runtime -> extensions/omo-wake.js): the main bundle carries only the lazy
+      // shells below, and a load that fails answers as if no wake exists rather than taking the send down with it.
+      const wakeRuntime = (): Promise<typeof import("#omo-wake-runtime")> => import("#omo-wake-runtime")
+      let sameDeviceBuilt: Promise<SameDeviceWake> | undefined
+      const sameDeviceWake: SameDeviceWake = {
+        afterSend: async (result) => {
+          sameDeviceBuilt ??= wakeRuntime().then((module) =>
+            module.createSameDeviceWake({
+              options: wakeOptions,
+              store,
+              agentDir,
+              sessionsDirectory,
+              cwd: callerWorkspaceRoot,
+              warn,
+            }),
+          )
+          return await sameDeviceBuilt.then(
+            (wake) => wake.afterSend(result),
+            () => result,
+          )
+        },
+      }
+      let admissionBuilt: Promise<(device: string) => Promise<IntakeAdmission>> | undefined
+      const wakeAdmission = async (device: string): Promise<IntakeAdmission> => {
+        admissionBuilt ??= wakeRuntime().then((module) => module.intakeAdmission(wakeOptions, agentDir))
+        return await admissionBuilt.then(
+          (ask) => ask(device),
+          () => "unknown",
+        )
+      }
       const tools = registerThreadTools(
         pi,
         {
@@ -335,8 +434,9 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
           loadProvenanceWorkspaces,
           onProvenanceWarning,
           diskSessions: options.diskSessions,
-          sessionsDirectory: options.sessionsDirectory ?? (() => join(agentDir(), "sessions")),
+          sessionsDirectory,
           ensureHost: options.ensureHost,
+          sameDeviceWake,
           callerSessionId: options.callerSessionId ?? (() => UNKNOWN_CALLER),
           callerWorkspaceRoot,
           callerTurnId: () => (run.turn === 0 ? undefined : `turn-${run.turn}`),
@@ -367,7 +467,7 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
           )
         }
       }
-      const registrant = registerControlEndpoint(pi, ctx, options, store, agentDir, pickUpArms)
+      const registrant = registerControlEndpoint(pi, ctx, options, store, agentDir, pickUpArms, wakeAdmission)
       // A question this session relayed to a chat thread and then closed itself (answered here, timed out,
       // cancelled) is closed in the store too, so the connector stops holding that thread's later rows behind
       // it. Only a session that relayed a question touches the store for it; an answer that came through
@@ -440,7 +540,34 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
           )
         }
       }
+      const startWake = (eventCtx: unknown): void => {
+        void wakeRuntime()
+          .then((module) =>
+            module.startWakeAtSession(eventCtx, {
+              options: wakeOptions,
+              agentDir,
+              sessionsDirectory,
+              cwd: callerWorkspaceRoot,
+              engineVersion: pi.hostVersion,
+              ensureHost: options.ensureHost,
+              warn,
+              scope: wakeProcessScope,
+            }),
+          )
+          .catch((error: unknown) =>
+            warn(
+              `thread gateway: the session wake runtime could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          )
+      }
+      // The operator daemon is the device's session host: it starts the wake, and with it the delivery consumer, as
+      // soon as it loads omo - a `warm` (`omo daemon run` sends one after its ensure) or its first open - so a host the
+      // device service cold-starts declares its consumer with no session running (#13037 cold wake).
+      const hostSocket = hostSocketOf(pi)
+      if (hostSocket !== undefined && isThreadSocket(hostSocket, wakeOptions.env ?? process.env))
+        startWake({ mode: "rpc" })
       pi.on("session_start", (_event, eventCtx) => {
+        startWake(eventCtx)
         void importLegacyMailbox()
         const durableId = durableIdOf(eventCtx)
         if (durableId !== undefined) void pickUpArms(durableId)
@@ -464,7 +591,7 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
       pi.on("agent_settled", async (_event, eventCtx) => {
         const durableId = durableIdOf(eventCtx)
         // A settle alone keeps the consumed delivery's senders, hop and cause (#13042): the next input decides whether
-        // the work continues (noteInput). The run's deliveries end with the run: a report without binding_id after it
+        // the work continues (noteRunInput). The run's deliveries end with the run: a report without binding_id after it
         // must name its thread.
         noteRunSettled(run)
         if (durableId === undefined) return
@@ -477,7 +604,7 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
           COMPLETION_SETTLE_WAIT_MS,
         )
       })
-      pi.on("session_shutdown", async () => {
+      pi.on("session_shutdown", async (event, eventCtx) => {
         completions.dispose()
         tools.dispose()
         await registrant
@@ -487,7 +614,17 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
               `thread gateway: control endpoint teardown failed: ${error instanceof Error ? error.message : String(error)}`,
             ),
           )
+        const durableId = durableIdOf(eventCtx)
+        if (closedOnRequest(event) && durableId !== undefined)
+          await settleGracefulClose(store, durableId, returnedAtClose(eventCtx)).catch((error: unknown) =>
+            ctx.logger.warn(
+              `thread gateway: the graceful close's unread messages were not answered: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          )
         if (options.store === undefined) await store.dispose().catch(() => undefined)
+        // The surface this component built holds the device-service connection a thread tool opened; left open it keeps
+        // the engine alive after its last session ends (#14054: `omo -p` never exited). A later call reconnects lazily.
+        if (options.remote === undefined) await remote.sessions.close?.().catch(() => undefined)
       })
     },
   }

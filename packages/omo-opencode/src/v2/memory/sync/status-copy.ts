@@ -38,9 +38,13 @@ export function failureRpcSync(status: EngineOnlyStatus): MemoryRpcSync {
   return { state: "failing", failure: rpcFailure(status) }
 }
 
+/** Every kind the desktop does not know reaches it as "unknown"; its reason, action and fields say the rest. */
+const desktopKind = (kind: Failing["failure"]["kind"]): NonNullable<MemoryRpcSync["failure"]>["kind"] =>
+  kind === "stranded_lock" || kind === "auth_expired" || kind === "offline" ? kind : "unknown"
+
 function rpcFailure({ failure, since, attempts }: Omit<Failing, "kind">): NonNullable<MemoryRpcSync["failure"]> {
   return {
-    kind: failure.kind === "oversized_item" ? "unknown" : failure.kind,
+    kind: desktopKind(failure.kind),
     reason: rewriteCommandMentions(failure.reason),
     action: rewriteCommandMentions(failure.action),
     sinceISO: new Date(since).toISOString(),

@@ -6,8 +6,15 @@ import { join } from "node:path"
 import { buildIdentityPaths, type MemoryIdentityPaths } from "../../identity/layout"
 import type { DeviceSync, EngineStatus, SyncSession } from "../engine"
 
-import { SYNC_WAITING_FOR_REPOSITORY, createSyncRunner, type SyncSessionResolver } from "./sync-runner"
+import { createSyncRunner, type SyncRunnerTimers, type SyncSessionResolver } from "./sync-runner"
+import { SyncSessionDeferredError } from "./sync-session-deferred"
 
+// The scenario of fork fix 070661d345, on upstream's runner (launchStart retries a deferred pass): a fresh device binds
+// before its first memory write creates the repository, sync waits, the first write creates it, and sync then starts
+// without a new bind. Later acquires and releases must not leave the repository held off.
+
+const RETRY_MS = 1_000
+const PASS_DEADLINE_MS = 10_000_000
 const dirs: string[] = []
 afterEach(async () => {
   for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true })
@@ -19,17 +26,34 @@ async function freshDevice(): Promise<MemoryIdentityPaths> {
   return buildIdentityPaths(root, "agent")
 }
 
-async function seed(paths: MemoryIdentityPaths): Promise<void> {
+async function firstWrite(paths: MemoryIdentityPaths): Promise<void> {
   await mkdir(join(paths.repo, ".git", "logs"), { recursive: true })
 }
 
 const noRuntime = () => Promise.reject(new Error("the engine sidecar is not loaded in this test"))
 
-function harness(resolveSession: SyncSessionResolver = async () => ({}) as SyncSession) {
+function harness(repoReady: (repo: string) => boolean) {
   const opened: string[] = []
   const closed: string[] = []
   const lines: string[] = []
+  const retries: (() => void)[] = []
   let resolves = 0
+  const timers: SyncRunnerTimers = {
+    setTimeout: (run, ms) => {
+      if (ms < PASS_DEADLINE_MS) retries.push(run)
+      return { unref: () => undefined } as unknown as ReturnType<typeof setTimeout>
+    },
+    clearTimeout: () => undefined,
+  }
+  const resolveSession: SyncSessionResolver = async (request) => {
+    resolves += 1
+    if (!repoReady(request.paths.repo))
+      throw new SyncSessionDeferredError(
+        "the memory repository is not created yet; sync starts after the first memory write.",
+        undefined,
+      )
+    return {} as SyncSession
+  }
   const runner = createSyncRunner({
     loadRuntime: noRuntime,
     logger: {
@@ -37,10 +61,7 @@ function harness(resolveSession: SyncSessionResolver = async () => ({}) as SyncS
       warn: (m: string) => lines.push(`warn ${m}`),
       error: (m: string) => lines.push(`error ${m}`),
     },
-    resolveSession: (request) => {
-      resolves += 1
-      return resolveSession(request)
-    },
+    resolveSession,
     open: async (o): Promise<DeviceSync> => {
       opened.push(o.repoDir)
       return {
@@ -53,49 +74,64 @@ function harness(resolveSession: SyncSessionResolver = async () => ({}) as SyncS
       }
     },
     watchHead: () => () => undefined,
+    deferredRetryMs: RETRY_MS,
+    startPassDeadlineMs: PASS_DEADLINE_MS,
+    timers,
   })
-  return { runner, opened, closed, lines, resolves: () => resolves }
+  const fireRetry = async () => {
+    const run = retries.shift()
+    if (run === undefined) throw new Error("no retry was scheduled")
+    run()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  return { runner, opened, closed, lines, resolves: () => resolves, retries: () => retries.length, fireRetry }
 }
 
 describe("#given a fresh device whose memory repository does not exist at bind", () => {
-  test("#when the first memory write seeds it and resume runs #then one engine starts in the same session", async () => {
+  test("#when the first memory write creates it #then the retry starts one engine without a new bind", async () => {
     const paths = await freshDevice()
-    const h = harness()
+    const repoExists = new Set<string>()
+    const h = harness((repo) => repoExists.has(repo))
 
     await h.runner.acquire("agent", paths, { enabled: true })
-    expect([h.resolves(), h.opened, h.lines]).toEqual([0, [], [SYNC_WAITING_FOR_REPOSITORY]])
+    expect(h.opened).toEqual([])
+    expect(h.lines.some((line) => line.includes("memory sync is waiting"))).toBe(true)
+    expect(h.retries()).toBe(1)
 
-    await seed(paths)
-    await h.runner.resume(paths.repo)
+    await firstWrite(paths)
+    repoExists.add(paths.repo)
+    await h.fireRetry()
+
     expect(h.opened).toEqual([paths.repo])
     expect(await h.runner.status(paths.repo)).toEqual({ kind: "never_synced" })
-
-    await h.runner.resume(paths.repo)
-    expect(h.opened).toEqual([paths.repo])
+    expect(h.lines.some((line) => line.includes("memory sync started"))).toBe(true)
 
     await h.runner.release(paths.repo)
     expect(h.closed).toEqual([paths.repo])
   })
 
-  test("#when resume runs before the repository exists #then nothing is resolved or opened", async () => {
+  test("#when the retry runs before the repository exists #then sync keeps waiting and another retry is scheduled", async () => {
     const paths = await freshDevice()
-    const h = harness()
+    const h = harness(() => false)
 
     await h.runner.acquire("agent", paths, { enabled: true })
-    await h.runner.resume(paths.repo)
+    await h.fireRetry()
 
-    expect([h.resolves(), h.opened]).toEqual([0, []])
+    expect(h.opened).toEqual([])
+    expect(h.retries()).toBe(1)
     await h.runner.release(paths.repo)
   })
 
-  test("#when two sessions hold the repo across the resume #then the engine closes only with the last release", async () => {
+  test("#when two sessions hold the repo across the first write #then the engine closes only with the last release", async () => {
     const paths = await freshDevice()
-    const h = harness()
+    const repoExists = new Set<string>()
+    const h = harness((repo) => repoExists.has(repo))
 
     await h.runner.acquire("agent", paths, { enabled: true })
     await h.runner.acquire("agent", paths, { enabled: true })
-    await seed(paths)
-    await h.runner.resume(paths.repo)
+    await firstWrite(paths)
+    repoExists.add(paths.repo)
+    await h.fireRetry()
     expect(h.opened).toEqual([paths.repo])
 
     await h.runner.release(paths.repo)
@@ -103,46 +139,22 @@ describe("#given a fresh device whose memory repository does not exist at bind",
     await h.runner.release(paths.repo)
     expect(h.closed).toEqual([paths.repo])
   })
-})
 
-describe("#given a start that threw", () => {
-  test("#when resume runs #then it does not retry, and #when another session binds #then that bind retries", async () => {
+  test("#when a session binds after the first write #then it joins the running engine and none is held off", async () => {
     const paths = await freshDevice()
-    await seed(paths)
-    let fail = true
-    const h = harness(async () => {
-      if (fail) throw new Error("transient")
-      return {} as SyncSession
-    })
+    const repoExists = new Set<string>()
+    const h = harness((repo) => repoExists.has(repo))
 
     await h.runner.acquire("agent", paths, { enabled: true })
-    expect(h.lines).toEqual(["error memory sync failed to start"])
-    fail = false
-    await h.runner.resume(paths.repo)
-    expect([h.resolves(), h.opened]).toEqual([1, []])
-
+    await firstWrite(paths)
+    repoExists.add(paths.repo)
+    await h.fireRetry()
     await h.runner.acquire("agent", paths, { enabled: true })
-    expect([h.resolves(), h.opened]).toEqual([2, [paths.repo]])
 
+    expect(h.opened).toEqual([paths.repo])
+    expect(await h.runner.status(paths.repo)).toEqual({ kind: "never_synced" })
     await h.runner.release(paths.repo)
-    expect(h.closed).toEqual([])
     await h.runner.release(paths.repo)
     expect(h.closed).toEqual([paths.repo])
-  })
-})
-
-describe("#given a device with no session to sync with", () => {
-  test("#when another session binds #then the idle start is kept, not retried", async () => {
-    const paths = await freshDevice()
-    await seed(paths)
-    const h = harness(async () => null)
-
-    await h.runner.acquire("agent", paths, { enabled: true })
-    await h.runner.acquire("agent", paths, { enabled: true })
-    await h.runner.resume(paths.repo)
-
-    expect(h.resolves()).toBe(1)
-    await h.runner.release(paths.repo)
-    await h.runner.release(paths.repo)
   })
 })

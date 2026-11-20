@@ -60,6 +60,8 @@ export type ChildSession = RunHoldSession & {
   getLastAssistantText(): string | undefined
   /** Absent on fakes that load no extensions; a live AgentSession always has one. */
   readonly extensionRunner?: ChildExtensionRunner
+  /** Absent on fakes; a live AgentSession resolves it once its shutdown-started work can no longer write. */
+  whenToolChildClosed?(): Promise<void>
   dispose(): void
   /** Present on current SDKs: joins asynchronous dispatcher/tool-child disposal. */
   whenToolChildClosed?(): Promise<void>

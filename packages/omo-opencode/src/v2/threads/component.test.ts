@@ -24,7 +24,7 @@ afterEach(async () => {
 
 describe("V2 thread tools", () => {
   describe("#given the component", () => {
-    test("#then it exposes the eighteen Native thread tools as owned eval host tools only", async () => {
+    test("#then it exposes the fourteen Native thread tools as owned eval host tools only", async () => {
       // given
       const { component } = await setup()
 
@@ -35,8 +35,6 @@ describe("V2 thread tools", () => {
       expect(names).toEqual(
         [
           "thread_answer",
-          "thread_bind",
-          "thread_bindings",
           "thread_close",
           "thread_create",
           "thread_handoff",
@@ -45,13 +43,11 @@ describe("V2 thread tools", () => {
           "thread_outbox",
           "thread_outbox_ack",
           "thread_read",
-          "thread_rebind",
           "thread_rename",
           "thread_report",
           "thread_send",
           "thread_set_model",
           "thread_set_reasoning",
-          "thread_unbind",
         ].sort(),
       )
     })
@@ -77,7 +73,7 @@ describe("V2 thread tools", () => {
       // then
       expect(first).toMatchObject({
         kind: "ok",
-        thread_id: "ses_b",
+        thread: "ses_b",
         delivery: { kind: "started" },
         deduplicated: false,
       })
@@ -109,7 +105,7 @@ describe("V2 thread tools", () => {
 
       // then
       expect(sent).toMatchObject({ kind: "ok" })
-      expect(reply).toMatchObject({ kind: "ok", thread_id: "ses_a" })
+      expect(reply).toMatchObject({ kind: "ok", thread: "ses_a" })
       expect(fake.synthetics.map((entry) => entry.sessionID)).toEqual(["ses_b", "ses_a"])
       expect(fake.asserts[1]).toMatchObject({ metadata: { omoThreadReplyAllowed: true } })
       const evaluation = { action: "thread_send", metadata: { omoThreadReplyAllowed: true }, effect: "ask" }
@@ -176,7 +172,8 @@ describe("V2 thread tools", () => {
       // then
       expect(created).toMatchObject({
         kind: "ok",
-        thread: { name: "worker", cwd: fake.project },
+        name: "worker",
+        cwd: fake.project,
         alias_scope: "local",
         alias_unavailable: "no_remote",
       })
@@ -195,13 +192,13 @@ describe("V2 thread tools", () => {
       const again = await callTool(component.tools, "thread_close", "ses_a", { thread: "ses_b" })
 
       // then
-      expect(interrupted).toMatchObject({ kind: "ok", thread_id: "ses_b", interrupted: true, turn_id: "30" })
-      expect(closed).toMatchObject({ kind: "ok", thread_id: "ses_b", closed: true })
+      expect(interrupted).toMatchObject({ kind: "ok", thread: "ses_b", interrupted: true, turn_id: "30" })
+      expect(closed).toMatchObject({ kind: "ok", thread: "ses_b", closed: true })
       expect(again).toMatchObject({ kind: "ok", closed: false })
       expect(fake.interrupts).toEqual(["ses_b"])
       expect(fake.sessions.get("ses_b")?.metadata?.["omoThreadClosed"]).toBeString()
       const listed = await callTool(component.tools, "thread_list", "ses_a", {})
-      expect(listed["threads"]).toContainEqual(expect.objectContaining({ thread_id: "ses_b", status: "resumable" }))
+      expect(listed["threads"]).toContainEqual(expect.objectContaining({ thread: "ses_b", status: "resumable" }))
       const queued = await callTool(component.tools, "thread_send", "ses_a", { thread: "ses_b", message: "later" })
       expect(queued).toMatchObject({ kind: "ok", delivery: { kind: "queued_offline" } })
       expect(fake.synthetics).toHaveLength(0)
@@ -226,13 +223,13 @@ describe("V2 thread tools", () => {
       const max = await callTool(component.tools, "thread_set_reasoning", "ses_a", { thread: "ses_b", level: "max" })
 
       // then
-      expect((listed["threads"] as { thread_id: string }[]).map((thread) => thread.thread_id).sort()).toEqual([
+      expect((listed["threads"] as { thread: string }[]).map((thread) => thread.thread).sort()).toEqual([
         "ses_a",
         "ses_b",
       ])
       expect(renamed).toMatchObject({ kind: "ok", name: "gamma" })
       expect(conflict).toMatchObject({ kind: "error", error: { code: "name_conflict" } })
-      expect(read).toMatchObject({ kind: "ok", thread_id: "ses_b", source: "live_host" })
+      expect(read).toMatchObject({ kind: "ok", thread: "ses_b", source: "live_host" })
       expect((read["items"] as { role: string }[]).map((item) => item.role)).toEqual(["user", "assistant"])
       expect(high).toMatchObject({ kind: "ok", level: "high" })
       expect(fake.sessions.get("ses_b")?.model).toEqual({ providerID: "mock", id: "m", variant: "high" })
@@ -240,40 +237,6 @@ describe("V2 thread tools", () => {
         kind: "error",
         error: { code: "thinking_level_unsupported", details: { supported: ["high"] } },
       })
-    })
-
-    test("#when A binds itself, reports and reads the outbox #then the relay rows round-trip", async () => {
-      // given
-      const { component } = await setup()
-
-      // when
-      const bound = await callTool(component.tools, "thread_bind", "ses_a", {
-        platform: "slack",
-        account_id: "acct",
-        chat_id: "chat",
-      })
-      const binding = bound["binding"] as { binding_id: string; revision: number }
-      const reported = await callTool(component.tools, "thread_report", "ses_a", {
-        binding_id: binding.binding_id,
-        kind: "milestone",
-        text: "half done",
-      })
-      const outbox = await callTool(component.tools, "thread_outbox", "ses_a", { binding_id: binding.binding_id })
-      const acked = await callTool(component.tools, "thread_outbox_ack", "ses_a", {
-        binding_id: binding.binding_id,
-        cursor: reported["cursor"],
-      })
-      const unbound = await callTool(component.tools, "thread_unbind", "ses_a", {
-        binding_id: binding.binding_id,
-        expected_revision: binding.revision,
-      })
-
-      // then
-      expect(bound).toMatchObject({ kind: "ok", binding: { session_durable_id: "ses_a", status: "active" } })
-      expect(reported).toMatchObject({ kind: "ok", event: "milestone" })
-      expect((outbox["rows"] as { text: string }[]).map((row) => row.text)).toEqual(["half done"])
-      expect(acked).toMatchObject({ kind: "ok", changed: true })
-      expect(unbound).toMatchObject({ kind: "ok", binding: { status: "detached" } })
     })
   })
 })

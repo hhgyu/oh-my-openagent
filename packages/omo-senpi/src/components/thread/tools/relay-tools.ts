@@ -6,21 +6,20 @@ import {
   type ThreadToolName,
   type ThreadToolResult,
 } from "@oh-my-opencode/thread-core/contracts"
-import type { ThreadErrorCode } from "@oh-my-opencode/thread-core/errors"
+import { gatewaySchemaRefusal, type ThreadErrorCode } from "@oh-my-opencode/thread-core/errors"
 import type { GatewayRelay } from "@oh-my-opencode/thread-core/gateway/relay"
-import { metadata, output, resolveStoredSession, type AnyTool, type ToolOutput } from "./internals"
+import { metadata, output, type AnyTool, type ToolOutput } from "./internals"
 import {
   createRelayToolBodies,
   RELAY_TOOL_NAMES,
   type RelayToolCall,
   type RelayToolName,
 } from "@oh-my-opencode/thread-core/relay-tools"
-import { type ThreadHostView, type ThreadHostViewRequest, type ThreadToolSurfaceOptions } from "./ports"
+import type { ThreadToolSurfaceOptions } from "./ports"
 
 export type RelayToolsContext = {
   readonly options: ThreadToolSurfaceOptions
   readonly relay: GatewayRelay
-  readonly view: (request: ThreadHostViewRequest) => Promise<ThreadHostView>
   readonly failure: (
     code: ThreadErrorCode,
     message: string,
@@ -32,10 +31,11 @@ export type RelayToolsContext = {
 type Call<T extends RelayToolName> = RelayToolCall<T>
 
 /**
- * The eight relay tools. They run over the gateway store alone: no host listing is taken unless a
- * session address other than the caller has to be resolved, so a terminal with no host running
- * can still bind, report and read its outbox. Mutations are idempotent per `(caller, tool, key)`
- * inside the store transaction that performs them.
+ * The four relay tools. They run over the gateway store alone and take no host listing, so a
+ * terminal with no host running can still report and read its outbox. Binding a chat thread is
+ * not a session tool: the gateway writes, moves and expires bindings through the relay SDK as its
+ * own principal. Mutations are idempotent per `(caller, tool, key)` inside the store transaction
+ * that performs them.
  */
 export function createRelayTools(context: RelayToolsContext): AnyTool[] {
   const { options, relay, failure } = context
@@ -65,6 +65,8 @@ export function createRelayTools(context: RelayToolsContext): AnyTool[] {
       )
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      const schema = gatewaySchemaRefusal(error)
+      if (schema !== undefined) return output({ kind: "error", error: schema })
       if (message.startsWith("host_unavailable:"))
         return output(
           failure(
@@ -77,7 +79,7 @@ export function createRelayTools(context: RelayToolsContext): AnyTool[] {
         failure(
           "internal_error",
           `Thread relay operation failed: ${message}`,
-          "Call thread_bindings and retry after checking the binding.",
+          "Retry; thread_report (tool.thread_report() in an eval cell) without binding_id uses the chat binding the gateway keeps for this session.",
         ),
       )
     }
@@ -85,11 +87,6 @@ export function createRelayTools(context: RelayToolsContext): AnyTool[] {
 
   const bodies = createRelayToolBodies({
     relay,
-    resolveSession: async (address, callerId, allScope) => {
-      const resolved = await resolveStoredSession(options, context.view, address, callerId, allScope)
-      if (resolved.kind === "error") return { kind: "error", error: resolved }
-      return { id: resolved.entry.thread_id }
-    },
     latestCompletionArm: (durableId) => options.store.latestCompletionArm(durableId),
     ...(options.callerRunDeliveries === undefined ? {} : { callerRunDeliveries: options.callerRunDeliveries }),
     ...(options.callerRunHasLocalInput === undefined ? {} : { callerRunHasLocalInput: options.callerRunHasLocalInput }),

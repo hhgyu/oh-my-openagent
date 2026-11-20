@@ -16,7 +16,7 @@ import {
   type GatewayStoreOptions,
 } from "@oh-my-opencode/thread-core/gateway/store"
 import { FakeSessionRuntime } from "./fake-runtime"
-import type { RemoteThreadSurface } from "@oh-my-opencode/thread-core/remote/ports"
+import type { RemoteThreadSurface } from "../../../remote"
 import { stampThisDevice } from "../../remote/this-device"
 
 // Cross-version conformance runs select a real older facade, which starts its own older worker.
@@ -159,6 +159,8 @@ export function createGatewayHarness(
       durableId: id,
       sessionPath: () => runtime.sessionPath,
       now,
+      // The harness's device service admits every sending device; a test of a refused or silent device builds its own drain.
+      admitIntake: async () => "admitted",
     })
     const engine = engineFor(sessionStore, cwd)
     const created: HarnessSession = {
