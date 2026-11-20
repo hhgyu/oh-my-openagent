@@ -28,7 +28,6 @@ import { engineSidecarSources, resolvePackageDir, senpiPackageDir, type SidecarS
 import { CLAUDE_CODE_PIN_REL_PATH, claudeCodePinFor } from "./claude-code-pin"
 import nativeFixture from "./release-binary-native-fixture.json"
 import { BYTECODE_COMPILE_ARGS, senpiWorkerCompileArgs } from "./senpi-worker-compile"
-export { BYTECODE_COMPILE_ARGS }
 import { parseBuildInfo, type EngineBuildStamp, type OmoBuildInfo } from "../packages/omo-native/build-info"
 import {
   compileDefinesForOmoBinary,
