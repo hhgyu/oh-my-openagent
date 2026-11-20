@@ -221,6 +221,21 @@ export async function stageNativeSharedSkill(skillName, destination) {
   await adaptSkillTree(destination, (content) => applySharedTierAdaptation(skillName, content))
 }
 
+// One skill exactly as the Senpi bundle ships it: the Native source (plus its shared-asset overlay) when Native has its
+// own, else the shared skill with the Native adaptation. The OpenCode 2 build stages every shared skill through this.
+export async function stageNativeSkill(skillName, destination) {
+  const native = nativeSkillSources.find(({ name }) => name === skillName)
+  if (native === undefined) {
+    await stageNativeSharedSkill(skillName, destination)
+    return
+  }
+  const { source, sharedAssets = [] } = native
+  await assertSourceExists(source)
+  await cp(source, destination, { filter: createSkillSourceCopyFilter(source, senpiFilterOptions), recursive: true })
+  await adaptSkillTree(destination, normalizeBlankLines)
+  await overlaySharedAssets(skillName, source, destination, sharedAssets)
+}
+
 export async function syncSkills() {
   await rm(skillsRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   await mkdir(skillsRoot, { recursive: true })
@@ -232,12 +247,8 @@ export async function syncSkills() {
     await adaptSkillTree(destination, normalizeBlankLines)
   }
 
-  for (const { name, source, sharedAssets = [] } of nativeSkillSources) {
-    await assertSourceExists(source)
-    const destination = join(skillsRoot, name)
-    await cp(source, destination, { filter: createSkillSourceCopyFilter(source, senpiFilterOptions), recursive: true })
-    await adaptSkillTree(destination, normalizeBlankLines)
-    await overlaySharedAssets(name, source, destination, sharedAssets)
+  for (const { name } of nativeSkillSources) {
+    await stageNativeSkill(name, join(skillsRoot, name))
   }
 
   const { names } = await getSkillOutputManifest()

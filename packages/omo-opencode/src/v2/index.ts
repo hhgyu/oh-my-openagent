@@ -219,6 +219,11 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
         }),
       )
     }
+    if (context.options?.["omo-shared-skills-enabled"] !== false) {
+      const { locateSharedSkillFiles, registerSharedSkills } = await import("./skills/shared-skills")
+      const sharedSkills = await registerSharedSkills(context.skill, locateSharedSkillFiles())
+      if (sharedSkills) cleanups.push(() => sharedSkills.dispose())
+    }
     cleanups.push(await registerBootstrap(context.rpc))
   } catch (error) {
     for (const cleanup of cleanups.reverse()) {

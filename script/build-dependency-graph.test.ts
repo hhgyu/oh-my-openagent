@@ -13,6 +13,13 @@ describe("build dependency graph", () => {
     expect(v2SkillsNode?.deps).toContain("shared-skills-assets")
   })
 
+  test("#given the staged V2 shared skills live outside the V1 mirror #when scheduled #then they stage after both bundles and never into the mirrored tree", () => {
+    const node = BUILD_NODES.find((candidate) => candidate.id === "v2-shared-skills")
+
+    expect(node?.deps).toEqual(["index", "v2-index"])
+    expect(node?.args).toEqual(["script/stage-v2-shared-skills.ts"])
+  })
+
   test("#given Codex and Senpi share plugin dependencies #when scheduled #then Codex installation completes first", () => {
     const senpiNode = BUILD_NODES.find((node) => node.id === "senpi-plugin")
 
