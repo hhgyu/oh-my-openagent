@@ -95,8 +95,9 @@ export const EMPTY_SWEEP: TransientSweepResult = {
 
 export const idleSyncRunner: SyncRunner = {
   acquire: async () => {},
-  resume: async () => {},
   release: async () => {},
+  idleTurnedOff: async () => {},
+  resumeIdle: async () => {},
   status: async () => null,
   deviceName: () => undefined,
 }

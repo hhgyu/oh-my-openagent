@@ -15,6 +15,7 @@ export type {
   SyncConfigInvalidStatus,
   SyncRunner,
   SyncRunnerOptions,
+  SyncRunnerTimers,
   SyncSessionRequest,
   SyncSessionResolution,
   SyncSessionResolver,
@@ -23,7 +24,7 @@ export type {
 } from "./sync-runner"
 export type { SyncRunnerLogger, SyncRuntime } from "./sync-runner-ports"
 export { SyncConfigError } from "./sync-config-error"
-export { SyncSessionDeferredError } from "./sync-session-deferred"
+export { isSyncSessionDeferred, SyncSessionDeferredError } from "./sync-session-deferred"
 export { createDeviceSessionResolver } from "./device-session-resolver"
 export type { DeviceSessionRuntime } from "./device-session-resolver"
 export type {
@@ -33,7 +34,7 @@ export type {
   DeviceAccountSource,
   KeyringFactory,
 } from "./device-account"
-export type { MemoryRpcSync } from "./memory-rpc-sync"
+export type { DesktopFailureKind, MemoryRpcSync } from "./memory-rpc-sync"
 export { registerSyncRpc } from "./sync-rpc-registration"
 export type {
   SyncRpcAccount,

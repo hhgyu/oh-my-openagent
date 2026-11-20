@@ -16,6 +16,7 @@ import { createSessionBinder, readSessionSurface, releaseSession, type SessionSt
 import { finalizeIdentityRun } from "./transient-identity"
 import type { DeviceAccountSource } from "@oh-my-opencode/memory-core/sync-runner"
 import { selectedDeviceAccountSource } from "./device-session/account-runtime-loader"
+import { joinedDeviceRepoCreator } from "./device-session/joined-repo"
 import { trackMemoryHooks } from "./hook-work"
 import { createDeviceSessionResolver, createSyncRunner, type SyncRunner } from "@oh-my-opencode/memory-core/sync-runner"
 import { readMemoryRpcSync } from "./memory-rpc-sync"
@@ -94,6 +95,11 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
             source: deviceAccount,
             pinDir,
             loadRuntime: () => import("#omo-memory-sync-runtime"),
+            joinedRepo: {
+              joined: async (account) =>
+                (await (await import("#omo-memory-sync-runtime")).loadTrustAnchor(pinDir, account)).ok,
+              create: joinedDeviceRepoCreator(ctx.logger),
+            },
           }),
         })
       const syncLifetime = new AbortController()
@@ -107,6 +113,8 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
               source: deviceAccount,
               memoryRoot,
               pinDir,
+              env,
+              logger: ctx.logger,
               signal: syncLifetime.signal,
               enabled: () => {
                 const state = syncSessionId === undefined ? undefined : sessions.get(syncSessionId)
@@ -119,6 +127,9 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
                   syncSessionId === undefined ? undefined : sessions.get(syncSessionId)?.context?.identityPaths.repo
                 return repo === undefined ? undefined : readMemoryRpcSync((path) => syncRunner.status(path), repo)
               },
+              stopSync: () => syncRunner.idleTurnedOff(),
+              resumeSync: () => syncRunner.resumeIdle(),
+              warn: (message, fields) => ctx.logger.warn(message, fields),
             })
       primeMemoryPersonaAssets({ logger: ctx.logger })
       // Reclaim runs an abnormal exit left behind (#7765): once per memory root per day in this
@@ -226,16 +237,6 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
         wiring.clearStatus(eventCtx)
         releaseSession(sessions.get(surface.id), syncRunner)
         bindSession(surface, eventCtx, { existing: undefined, verifyRepository: false })
-      })
-
-      // A fresh device binds before its first memory write creates the repo; the runner waits, and a
-      // settle after that write starts sync in this session instead of the next one.
-      pi.on("agent_settled", (_payload, eventCtx) => {
-        const repo = sessions.get(readSessionSurface(eventCtx).id)?.syncRepo
-        if (repo === undefined) return
-        void syncRunner.resume(repo).catch((error: unknown) => {
-          ctx.logger.warn("memory sync resume failed", { error: describeError(error) })
-        })
       })
 
       pi.on("session_shutdown", async (payload, eventCtx) => {

@@ -13,7 +13,7 @@ import {
 } from "./host"
 
 export type { ControlHost } from "./host"
-import { sessionTitle } from "./address-book"
+import { addressEntry, sessionTitle, summaryOf } from "./address-book"
 
 /** Native reasoning levels; a session runs one only where its model advertises a host variant of that name. */
 const THINKING_LEVELS: ReadonlySet<string> = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"])
@@ -70,19 +70,20 @@ export function createV2SessionControl(input: {
     async interrupt(turnId) {
       const info = await current()
       const epoch = String(executionEpoch(info))
-      if (!isExecuting(info) || (turnId !== undefined && turnId !== epoch)) return { interrupted: false }
+      if (!isExecuting(info) || (turnId !== undefined && turnId !== epoch))
+        return { interrupted: false, background: { status: "not_supported" } }
       const reply = await host.session.interrupt({ sessionID, resume: false })
-      return { interrupted: reply.interrupted, turn_id: epoch }
+      return { interrupted: reply.interrupted, turn_id: epoch, background: { status: "not_supported" } }
     },
     async close() {
       const info = await current()
-      if (isClosed(info)) return "not_live"
+      if (isClosed(info)) return { outcome: "not_live", dropped_deliveries: [] }
       if (isExecuting(info)) {
         await host.session.interrupt({ sessionID, resume: false })
         await settledOrTimeout()
       }
       await writeSessionMetadata(host.session, sessionID, THREAD_CLOSED_METADATA_KEY, new Date().toISOString())
-      return "closed"
+      return { outcome: "closed", dropped_deliveries: [] }
     },
     async setName(name) {
       await host.session.update({ sessionID, title: name })
@@ -113,6 +114,30 @@ export function createV2SessionControl(input: {
         sessionID,
         model: { providerID: model.providerID, id: model.id, variant: level },
       })
+    },
+    async waitSettled(timeoutMs) {
+      const started = Date.now()
+      const deadline = started + timeoutMs
+      while (Date.now() < deadline) {
+        if (!isExecuting(await current()))
+          return { outcome: "settled", status: "idle", waited_ms: Date.now() - started }
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      return { outcome: "timeout", status: "running", waited_ms: Date.now() - started }
+    },
+    async running() {
+      return isExecuting(await current())
+    },
+    async setArchived() {
+      throw refuse(
+        "unsupported",
+        "OpenCode 2 sessions carry no archived flag a plugin can set.",
+        "Close the thread with thread_close instead.",
+      )
+    },
+    async listed(archived) {
+      const row = summaryOf(addressEntry(await current(), ""))
+      return archived ? { ...row, state: "archived" } : row
     },
     async getMessages() {
       const messages = await host.session.context({ sessionID })

@@ -1,7 +1,7 @@
 // The Native `thread_*` tools in OpenCode Code Mode (D-034 amendment). Native keeps them eval-only, which in Senpi means
 // "withheld from the direct tool list, called from a code cell". OpenCode 2 has its own code cell, Code Mode
 // (`execute`), next to the omo `eval` kernel; a `codemode: true` tool stays out of the direct tool list and is called as
-// `tools.thread_*()` inside `execute`, so the same eighteen tools are offered there too. Both surfaces run the one
+// `tools.thread_*()` inside `execute`, so the same fourteen tools are offered there too. Both surfaces run the one
 // owned tool body, so gateway state, receipts, permission prompts and reply allowance are shared.
 
 import type * as Plugin from "@opencode/plugin/promise/plugin"

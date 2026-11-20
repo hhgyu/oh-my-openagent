@@ -41,7 +41,9 @@ export function owner(id: string) {
   }
 }
 
-export async function setup(enabled: () => boolean = () => true) {
+/** `setup(() => false)` is the sync-disabled shorthand; any other option rides in as an override. */
+export async function setup(input: (() => boolean) | Partial<SyncRpcOptions> = {}) {
+  const overrides: Partial<SyncRpcOptions> = typeof input === "function" ? { enabled: input } : input
   const device = await newDevice()
   const accountAbort = new AbortController()
   const hostAbort = new AbortController()
@@ -75,6 +77,7 @@ export async function setup(enabled: () => boolean = () => true) {
       approvalDisplayed.resolve()
       return (await confirmation) ? { kind: "approved", seq: 2 } : { kind: "declined" }
     },
+    disableSync: async () => ({ kind: "off" }),
   }
   const http = {
     baseUrl: "https://unused.invalid",
@@ -124,7 +127,6 @@ export async function setup(enabled: () => boolean = () => true) {
       if (holdSource) await sourceBarrier.promise
       return account
     },
-    enabled,
     runtime,
     claims: {
       acquire: async () => {
@@ -141,6 +143,7 @@ export async function setup(enabled: () => boolean = () => true) {
     pinDir: "/unused",
     signal: hostAbort.signal,
     syncStatus: async () => ({ state: "paused" }),
+    ...overrides,
   }
   const coordinator = registerSyncRpc(
     {

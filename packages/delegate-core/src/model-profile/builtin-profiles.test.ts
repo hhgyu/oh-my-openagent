@@ -23,13 +23,13 @@ it("preserves picker/default order and retired recommended without silently reso
   ).toMatchObject({ kind: "resolved", profile: { source: "user" }, modelId: "user-choice" })
 })
 
-it("runs daily-heavy as the current Fable, then Fable 5.1, at xhigh", () => {
+it("runs daily-heavy as the current Fable, then Fable 5.1, at high then xhigh", () => {
   expect(
     resolveModelProfile({
       active: "daily-heavy",
       availableModels: ["anthropic-subscription/claude-fable-5-2", "anthropic-subscription/claude-fable-5-1"],
     }),
-  ).toMatchObject({ kind: "resolved", modelId: "claude-fable-5-2", reasoning: "xhigh" })
+  ).toMatchObject({ kind: "resolved", modelId: "claude-fable-5-2", reasoning: "high" })
   expect(
     resolveModelProfile({ active: "daily-heavy", availableModels: ["anthropic-subscription/claude-fable-5-1"] }),
   ).toMatchObject({ kind: "resolved", modelId: "claude-fable-5-1", reasoning: "xhigh" })

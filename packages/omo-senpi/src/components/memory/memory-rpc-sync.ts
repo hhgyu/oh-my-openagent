@@ -24,7 +24,11 @@ export async function readMemoryRpcSync(
         ? { state: "paused" }
         : (await import("#omo-memory-sync-runtime")).failureRpcSync(status)
     case "synced":
-      return { state: "synced", lastSyncedAtISO: new Date(status.at).toISOString() }
+      return {
+        state: "synced",
+        lastSyncedAtISO: new Date(status.at).toISOString(),
+        ...(status.updatedWhileOffline === undefined ? {} : { appliedWhileOffline: status.updatedWhileOffline }),
+      }
     // Both exist only while the engine runs, so their mapping ships with it (sync-status-copy.ts).
     case "failing":
     case "frozen":

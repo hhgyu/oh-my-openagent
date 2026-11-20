@@ -1,4 +1,4 @@
-// The eighteen Native `thread_*` tools on the OpenCode 2 host, kept out of the direct tool list as in Native (63b61a4115):
+// The fourteen Native `thread_*` tools on the OpenCode 2 host, kept out of the direct tool list as in Native (63b61a4115):
 // owned eval host tools (`tools.thread_send(...)` inside a cell) and, through `codemode.ts`, the same bodies as Code
 // Mode tools; never direct model tools. The gateway (store, engine, drain,
 // relay) is the shared `@oh-my-opencode/thread-core` copy; this directory only adapts OpenCode sessions to its ports.

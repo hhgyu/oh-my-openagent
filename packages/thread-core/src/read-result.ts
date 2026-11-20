@@ -27,7 +27,7 @@ export function liveReadResult(
   if (live.kind === "error") return { kind: "error", error: live.error }
   return {
     kind: "ok",
-    thread_id: threadId,
+    thread: threadId,
     link: threadLink(threadId, title),
     items: live.items.map((item, index) => ({
       seq: index + 1,

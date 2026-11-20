@@ -8,7 +8,7 @@ import { packageDirectory, readInstalledVersion } from "../tools/codemode-loader
 import type { GoalContinuationEngine, GoalEngine } from "./engine-types"
 
 const SENPI_PACKAGE = "@code-yeongyu/senpi"
-const GOAL_ENGINE_VERSION = "2026.11.12"
+const GOAL_ENGINE_VERSION = "2026.11.19-5"
 const GOAL_EXTENSION_DIR = join("dist", "core", "extensions", "builtin", "goal")
 
 export type * from "./engine-types"
