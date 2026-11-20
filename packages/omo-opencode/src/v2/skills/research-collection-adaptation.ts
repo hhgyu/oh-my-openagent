@@ -9,11 +9,11 @@ const TEAM_ALONGSIDE =
 const QUESTION_TOOL_REPLACEMENTS: ReadonlyArray<readonly [string, string]> = [
   [
     "in one `ask_user_question` call with `waitForAnswer: false`,",
-    "in one call to the harness question tool (`question` on OpenCode 2, `ask_user_question` or `request_user_input` elsewhere), non-blocking where the harness supports it,",
+    "in one `question` call made after the collection workers have started (the pending prompt does not block them),",
   ],
   [
     "in the same `ask_user_question` call as the format questions, with `waitForAnswer: false`,",
-    "in the same question-tool call as the format questions (`question` on OpenCode 2, `ask_user_question` or `request_user_input` elsewhere), non-blocking where the harness supports it,",
+    "in the same `question` call as the format questions,",
   ],
 ]
 

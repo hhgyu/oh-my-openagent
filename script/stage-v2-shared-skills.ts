@@ -10,6 +10,15 @@ import {
   adaptResearchCollectionForV2,
   RESEARCH_COLLECTION_REFERENCE,
 } from "../packages/omo-opencode/src/v2/skills/research-collection-adaptation"
+import { auditStagedSkills } from "../packages/omo-opencode/src/v2/skills/native-skill-audit"
+import {
+  adaptQuestionCallsForV2,
+  QUESTION_ADAPTED_FILES,
+} from "../packages/omo-opencode/src/v2/skills/question-call-adaptation"
+import {
+  adaptTeamToolsForV2,
+  TEAM_TOOL_ADAPTED_FILES,
+} from "../packages/omo-opencode/src/v2/skills/team-tool-adaptation"
 import { rewriteSkillForV2 } from "../packages/omo-opencode/src/v2/skills/staged-skill"
 
 /**
@@ -48,6 +57,17 @@ async function adaptResearchCollection(repoRoot: string, destination: string): P
   await writeFile(staged, adaptResearchCollectionForV2(await readFile(staged, "utf8"), await readFile(shared, "utf8")))
 }
 
+async function adaptFiles(
+  staged: string,
+  files: readonly string[],
+  adapt: (file: string, text: string) => string,
+): Promise<void> {
+  for (const file of files) {
+    const path = join(staged, file)
+    await writeFile(path, adapt(file, await readFile(path, "utf8")))
+  }
+}
+
 async function stageV2SharedSkills(repoRoot: string): Promise<void> {
   const names = await sharedSkillNames(repoRoot)
   if (names.length === 0) throw new Error("no shared skills found to stage for the V2 host")
@@ -62,6 +82,13 @@ async function stageV2SharedSkills(repoRoot: string): Promise<void> {
       if (name === "ulw-research") await adaptResearchCollection(repoRoot, destination)
       await rewriteTree(destination)
     }
+    await adaptFiles(staged, QUESTION_ADAPTED_FILES, adaptQuestionCallsForV2)
+    await adaptFiles(staged, TEAM_TOOL_ADAPTED_FILES, adaptTeamToolsForV2)
+    const mandatory = auditStagedSkills(staged).filter((hit) => hit.class === "MANDATORY")
+    if (mandatory.length > 0)
+      throw new Error(
+        `staged skills hold Native-only instructions V2 cannot follow:\n${mandatory.map((hit) => `${hit.rule} ${hit.file}:${hit.line}`).join("\n")}`,
+      )
   }
 }
 
