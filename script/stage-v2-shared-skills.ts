@@ -6,6 +6,10 @@ import {
   SKILLS_OWNED_BY_COMPONENTS,
   stagingSourceFor,
 } from "../packages/omo-opencode/src/v2/skills/shared-skills"
+import {
+  adaptResearchCollectionForV2,
+  RESEARCH_COLLECTION_REFERENCE,
+} from "../packages/omo-opencode/src/v2/skills/research-collection-adaptation"
 import { rewriteSkillForV2 } from "../packages/omo-opencode/src/v2/skills/staged-skill"
 
 /**
@@ -13,7 +17,8 @@ import { rewriteSkillForV2 } from "../packages/omo-opencode/src/v2/skills/staged
  * (the root entry lazily loads V2) and dist/v2, in a directory of their own: dist/skills is the V1 mirror of the shared
  * pool and must keep its raw text. Each skill is the text the Senpi bundle ships (Native's own source for ulw-plan and
  * ulw-research, the Native adaptation of the shared skill for the rest, references/ and scripts/ intact; init-deep
- * takes the shared source because its Native override needs the dag SDK and mass-ulw, which V2 lacks),
+ * takes the shared source because its Native override needs the dag SDK and mass-ulw, which V2 lacks; ulw-research's
+ * collection reference takes the shared MASS-research paragraph, whose graph surface is conditional),
  * then only the spellings OpenCode 2 differs on are rewritten (rewriteSkillForV2). ulw-execute is staged by
  * stage-v2-ulw-loop.ts for its own component.
  */
@@ -37,6 +42,12 @@ async function rewriteTree(target: string): Promise<void> {
   }
 }
 
+async function adaptResearchCollection(repoRoot: string, destination: string): Promise<void> {
+  const staged = join(destination, "references", "research-collection.md")
+  const shared = join(repoRoot, "packages", "shared-skills", "skills", RESEARCH_COLLECTION_REFERENCE)
+  await writeFile(staged, adaptResearchCollectionForV2(await readFile(staged, "utf8"), await readFile(shared, "utf8")))
+}
+
 async function stageV2SharedSkills(repoRoot: string): Promise<void> {
   const names = await sharedSkillNames(repoRoot)
   if (names.length === 0) throw new Error("no shared skills found to stage for the V2 host")
@@ -48,6 +59,7 @@ async function stageV2SharedSkills(repoRoot: string): Promise<void> {
       const destination = join(staged, name)
       if (stagingSourceFor(name) === "shared") await stageNativeSharedSkill(name, destination)
       else await stageNativeSkill(name, destination)
+      if (name === "ulw-research") await adaptResearchCollection(repoRoot, destination)
       await rewriteTree(destination)
     }
   }
