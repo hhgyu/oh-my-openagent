@@ -4,7 +4,7 @@ on:
   # A pull request runs the macOS/Windows jobs only with ci:full-matrix (#13802), so the push run on dev is where
   # they run for every merge; platform-red-tracker.yml watches it.
   push:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - "script/qa/computer/conformance/fixtures/**"
       - ".github/workflows/computer-fixtures.yml"
@@ -12,7 +12,7 @@ on:
       - "script/qa/computer/conformance/declarations.ts"
       - "script/qa/computer/conformance/vocabulary.ts"
   pull_request:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - "script/qa/computer/conformance/fixtures/**"
       - ".github/workflows/computer-fixtures.yml"

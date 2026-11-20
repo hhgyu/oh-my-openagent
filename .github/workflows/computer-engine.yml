@@ -2,7 +2,7 @@ name: Computer engine
 
 on:
   push:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - "crates/omo-computer-*/**"
       - "packages/omo-computer-*/**"
@@ -14,7 +14,7 @@ on:
       - "bun.lock"
       - "script/check-cargo-pinned-deps.mjs"
   pull_request:
-    branches: [master, dev]
+    branches: [master, dev, v2/dev]
     paths:
       - "crates/omo-computer-*/**"
       - "packages/omo-computer-*/**"
