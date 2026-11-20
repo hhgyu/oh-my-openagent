@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative, sep } from "node:path"
+import { auditCallArguments } from "./call-argument-audit"
 
 export type AuditClass = "MANDATORY" | "CONDITIONAL"
 
@@ -103,8 +104,10 @@ export function auditNativeSkillText(
 ): AuditHit[] {
   const hits: AuditHit[] = []
   let inBanner = false
+  const bannerLines = new Set<number>()
   text.split("\n").forEach((line, index) => {
     if (line.startsWith("## ")) inBanner = line.startsWith(BANNER_HEADING)
+    if (inBanner) bannerLines.add(index + 1)
     for (const rule of RULES) {
       if (!rule.pattern.test(line)) continue
       const base = { file, line: index + 1, rule: rule.name, text: line.trim().slice(0, 200) }
@@ -124,6 +127,15 @@ export function auditNativeSkillText(
       )
     }
   })
+  for (const finding of auditCallArguments(text, (line) => bannerLines.has(line)))
+    hits.push({
+      file,
+      line: finding.line,
+      rule: finding.rule,
+      class: "MANDATORY",
+      reason: finding.reason,
+      text: finding.text,
+    })
   return hits
 }
 

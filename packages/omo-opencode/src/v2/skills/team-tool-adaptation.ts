@@ -7,11 +7,24 @@ const TOOL_RENAMES: readonly Replacement[] = [
   [/\bteam_send_message\b/g, "task_send"],
   [/\bteam_task_create\b/g, "task_create"],
   [/\bteam_task_update\b/g, "task_update"],
-  [/\bteamRunId=/g, "team_run_id="],
+  [/\bteamRunId\b/g, "team_run_id"],
+  [/\bblockedBy=/g, "blocked_by="],
   [/\bteamName=/g, "team_name="],
-  [/\bkind="announcement", /g, ""],
+  [/\bkind="announcement",\s*/g, ""],
   [/\bbody=/g, "message="],
 ]
+
+const ARGUMENT_FIXES: Readonly<Record<string, readonly Replacement[]>> = {
+  [REFACTOR]: [
+    [/task_send\(team_run_id=<id>, (to=\\"lead\\")/g, "task_send($1"],
+    [/ \+ task_update\(status=completed\)\./, "; the lead marks the step completed on the team tasklist."],
+    [/ \+ task_update\(status=pending\)\./, "; the lead sets the step back to pending on the team tasklist."],
+    [
+      /\\?`task_update\(status=pending\)\\?`/,
+      '`task_update(team_run_id=<id>, task_id=<step task id>, status="pending")`',
+    ],
+  ],
+}
 
 const SHUTDOWN = '`{type: "shutdown_request"}`, then `{type: "shutdown_response", approve: true}`'
 
@@ -47,5 +60,12 @@ export function adaptTeamToolsForV2(file: string, text: string): string {
     if (!pattern.test(current)) throw new Error(`${file}: team-tool anchor drifted: ${pattern}`)
     return current.replace(pattern, replacement)
   }, text)
-  return TOOL_RENAMES.reduce((current, [pattern, replacement]) => current.replace(pattern, replacement), adapted)
+  const renamed = TOOL_RENAMES.reduce(
+    (current, [pattern, replacement]) => current.replace(pattern, replacement),
+    adapted,
+  )
+  return (ARGUMENT_FIXES[file] ?? []).reduce((current, [pattern, replacement]) => {
+    if (!pattern.test(current)) throw new Error(`${file}: team-call argument anchor drifted: ${pattern}`)
+    return current.replace(pattern, replacement)
+  }, renamed)
 }
