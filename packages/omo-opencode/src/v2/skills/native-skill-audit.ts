@@ -60,7 +60,7 @@ export interface AcceptedMention {
  * Mentions left as Native text, each with the reason it is not a normal-path instruction V2 must follow. A hit of a
  * non-forbidden rule outside the staged banner and outside this ledger fails the audit.
  */
-export const ACCEPTED_MENTIONS: readonly AcceptedMention[] = [
+const ACCEPTED_MENTIONS: readonly AcceptedMention[] = [
   {
     file: "ulw-research/",
     rule: "dag",

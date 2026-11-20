@@ -2090,6 +2090,8 @@
         "script/stage-v2-ulw-loop.ts",
         // run by path as the "v2-shared-skills" node of script/build-nodes.ts (bun run build)
         "script/stage-v2-shared-skills.ts",
+        // run by hand (bun script/audit-v2-native-skills.ts --report <path>) to print the classified Native-only hit list of the staged skills; staging enforces the same audit
+        "script/audit-v2-native-skills.ts",
         "script/wait-registry-versions.mjs",
         "script/senpi-worker-compile.ts",
         "test-support/remove-tree.ts",
