@@ -4,8 +4,7 @@ import { createHash } from "node:crypto"
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { BYTECODE_COMPILE_ARGS } from "./build-omo-binary"
-import { senpiWorkerCompileArgs } from "./senpi-worker-compile"
+import { BYTECODE_COMPILE_ARGS, senpiWorkerCompileArgs } from "./senpi-worker-compile"
 import { removeTreeSync } from "../test-support/remove-tree"
 
 test.each(["directory", "bun-link", "external-link"])(

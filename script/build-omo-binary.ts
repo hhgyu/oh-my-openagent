@@ -27,7 +27,8 @@ import { z } from "zod"
 import { engineSidecarSources, resolvePackageDir, senpiPackageDir, type SidecarSource } from "./engine-sidecar-sources"
 import { CLAUDE_CODE_PIN_REL_PATH, claudeCodePinFor } from "./claude-code-pin"
 import nativeFixture from "./release-binary-native-fixture.json"
-import { senpiWorkerCompileArgs } from "./senpi-worker-compile"
+import { BYTECODE_COMPILE_ARGS, senpiWorkerCompileArgs } from "./senpi-worker-compile"
+export { BYTECODE_COMPILE_ARGS }
 import { parseBuildInfo, type EngineBuildStamp, type OmoBuildInfo } from "../packages/omo-native/build-info"
 import {
   compileDefinesForOmoBinary,
@@ -88,15 +89,6 @@ const compileEntry = join(repoRoot, "packages", "omo-native", "compile-entry.ts"
  * speed (darwin-arm64 `--version` p50: plain 214 ms, depth 1 33 ms, full 31 ms).
  */
 export const MAX_BINARY_BYTES = 260 * 1024 * 1024
-
-/**
- * `--bytecode` stores the precompiled bytecode of the bundled graph, so a launch skips parsing it (#13440): a boot
- * took 880 ms p50 on Linux x64 and 214 ms on darwin-arm64 before, 202 ms and 33 ms after. Depth 1 compiles only the
- * outermost function level ahead of time; it keeps nearly all of the gain at about half the size of full depth, which
- * cannot fit the budget because the senpi worker entries in the same compile get bytecode too. ESM output is required:
- * the entry awaits at the top level.
- */
-export const BYTECODE_COMPILE_ARGS = ["--bytecode", "--format=esm", "--bytecode-depth=1"] as const
 
 /** Below this much headroom under the budget, the build warns so growth is seen a release ahead. */
 export const BINARY_HEADROOM_WARN_BYTES = 5 * 1024 * 1024
