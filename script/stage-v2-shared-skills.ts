@@ -1,17 +1,19 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { stageNativeSkill } from "../packages/omo-senpi/plugin/scripts/sync-skills.mjs"
+import { stageNativeSharedSkill, stageNativeSkill } from "../packages/omo-senpi/plugin/scripts/sync-skills.mjs"
 import {
   NATIVE_SKILLS_DIRECTORY,
   SKILLS_OWNED_BY_COMPONENTS,
+  stagingSourceFor,
 } from "../packages/omo-opencode/src/v2/skills/shared-skills"
 import { rewriteSkillForV2 } from "../packages/omo-opencode/src/v2/skills/staged-skill"
 
 /**
  * Stages the shared skills the OpenCode 2 host registers (v2/skills/shared-skills.ts) next to the V2 chunks in dist/
  * (the root entry lazily loads V2) and dist/v2, in a directory of their own: dist/skills is the V1 mirror of the shared
- * pool and must keep its raw text. Each skill is the text the Senpi bundle ships (Native's own source for init-deep,
- * ulw-plan and ulw-research, the Native adaptation of the shared skill for the rest, references/ and scripts/ intact),
+ * pool and must keep its raw text. Each skill is the text the Senpi bundle ships (Native's own source for ulw-plan and
+ * ulw-research, the Native adaptation of the shared skill for the rest, references/ and scripts/ intact; init-deep
+ * takes the shared source because its Native override needs the dag SDK and mass-ulw, which V2 lacks),
  * then only the spellings OpenCode 2 differs on are rewritten (rewriteSkillForV2). ulw-execute is staged by
  * stage-v2-ulw-loop.ts for its own component.
  */
@@ -44,7 +46,8 @@ async function stageV2SharedSkills(repoRoot: string): Promise<void> {
     await mkdir(staged, { recursive: true })
     for (const name of names) {
       const destination = join(staged, name)
-      await stageNativeSkill(name, destination)
+      if (stagingSourceFor(name) === "shared") await stageNativeSharedSkill(name, destination)
+      else await stageNativeSkill(name, destination)
       await rewriteTree(destination)
     }
   }

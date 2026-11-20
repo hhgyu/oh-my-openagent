@@ -11,6 +11,17 @@ export const NATIVE_SKILLS_DIRECTORY = "native-skills"
 /** Skills a V2 component registers itself (with its own continuation); script/stage-v2-shared-skills.ts leaves them out. */
 export const SKILLS_OWNED_BY_COMPONENTS: ReadonlySet<string> = new Set(["ulw-execute"])
 
+/**
+ * Skills whose Native (Senpi) override instructs a path OpenCode 2 cannot run, so the build stages the shared source
+ * instead: init-deep's Native map wave needs the dag SDK (`OMO_DAG_SDK_ROOT`) and the Native-only `mass-ulw` skill, and
+ * V2 binds only the agent-toolkit SDK and has no `mass-ulw`.
+ */
+const SKILLS_STAGED_FROM_SHARED_SOURCE: ReadonlySet<string> = new Set(["init-deep"])
+
+export function stagingSourceFor(name: string): "shared" | "native" {
+  return SKILLS_STAGED_FROM_SHARED_SOURCE.has(name) ? "shared" : "native"
+}
+
 export type StagedSkillFile = { readonly name: string; readonly file: string }
 
 /** script/stage-v2-shared-skills.ts stages these next to the V2 chunks; a directory without SKILL.md is not a skill. */

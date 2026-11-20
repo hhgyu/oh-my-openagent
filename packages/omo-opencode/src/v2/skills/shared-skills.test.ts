@@ -2,7 +2,12 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { locateSharedSkillFiles, NATIVE_SKILLS_DIRECTORY, registerSharedSkills } from "./shared-skills"
+import {
+  locateSharedSkillFiles,
+  NATIVE_SKILLS_DIRECTORY,
+  registerSharedSkills,
+  stagingSourceFor,
+} from "./shared-skills"
 
 const roots: string[] = []
 afterEach(() => {
@@ -132,5 +137,17 @@ describe("V2 shared skills", () => {
     expect(catalog).toEqual([])
     expect(warn).toHaveBeenCalledTimes(1)
     warn.mockRestore()
+  })
+
+  describe("#given the staging source of a skill", () => {
+    test("#when it is init-deep #then the shared source is staged, any other skill keeps the Native text", () => {
+      // given a skill whose Native override needs the dag SDK and mass-ulw, and skills that do not
+      // when the build picks the staging source
+      // then only the first is staged from the shared source
+      expect(stagingSourceFor("init-deep")).toBe("shared")
+      for (const name of ["ulw-plan", "ulw-research", "review-work", "programming"]) {
+        expect(stagingSourceFor(name)).toBe("native")
+      }
+    })
   })
 })
