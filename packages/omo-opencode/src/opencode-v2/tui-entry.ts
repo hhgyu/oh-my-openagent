@@ -140,25 +140,39 @@ export const opencodeV2Tui = Plugin.define({
         }
       }
       if (!("slot" in context.ui)) return closeMemory
-      return Promise.all([import("../v2/tui/dag-panel"), import("../v2/tui/ulw-loop-footer")])
-        .then(([{ registerDagStatusPanel }, { registerUlwLoopFooter }]) => {
+      return Promise.all([
+        import("../v2/tui/dag-panel"),
+        import("../v2/tui/ulw-loop-footer"),
+        import("../v2/tui/thread-open-button"),
+      ])
+        .then(([{ registerDagStatusPanel }, { registerUlwLoopFooter }, { registerThreadOpenButton }]) => {
           const closeDag = registerDagStatusPanel(context)
-          let closeFooter: () => void
+          let closeFooter: (() => void) | undefined
+          let closeThreadButton: (() => void) | undefined
+          const closeTui = () => {
+            try {
+              closeThreadButton?.()
+            } finally {
+              try {
+                closeFooter?.()
+              } finally {
+                closeDag()
+              }
+            }
+          }
           try {
             closeFooter = registerUlwLoopFooter(context)
+            if (typeof context.markdown?.registerCodeBlockRenderer === "function")
+              closeThreadButton = registerThreadOpenButton(context)
           } catch (error) {
-            closeDag()
+            closeTui()
             throw error
           }
           return () => {
             try {
-              closeFooter()
+              closeTui()
             } finally {
-              try {
-                closeDag()
-              } finally {
-                closeMemory()
-              }
+              closeMemory()
             }
           }
         })

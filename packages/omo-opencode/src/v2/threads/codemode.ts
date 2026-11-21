@@ -10,11 +10,12 @@ import type { Info, Result } from "@opencode/plugin/promise/tool"
 import { THREAD_TOOL_METADATA } from "@oh-my-opencode/thread-core/metadata"
 import type { OwnedEvalHostTool } from "../tools/codemode-host-tools"
 import { adaptEvalResult } from "../tools/native-eval-result"
+import { THREAD_OPEN_GUIDANCE } from "./open-button-markdown"
 
 export const THREAD_CODEMODE_METADATA_KEY = "omoThread"
 
 const LIST_GUIDANCE =
-  "Thread tools address peer sessions, not child tasks. In Code Mode, call tools.thread_list() first and use the returned thread value, an alias, or a unique name. For thread_rename and thread_close, omit thread or pass self to act on this session. Leave all_scope unset unless the user asks to search every workspace. When mentioning a thread, use its returned link; if the client cannot open it, give the thread title and suggest /sessions."
+  "Thread tools address peer sessions, not child tasks. In Code Mode, call tools.thread_list() first and use the returned thread value, an alias, or a unique name. For thread_rename and thread_close, omit thread or pass self to act on this session. Leave all_scope unset unless the user asks to search every workspace."
 
 function codeModeExamples(text: string): string {
   return text
@@ -26,7 +27,7 @@ function codeModeExamples(text: string): string {
 function codeModeDescription(owned: OwnedEvalHostTool): string {
   if (owned.name !== "thread_list") return codeModeExamples(owned.description)
   const shared = THREAD_TOOL_METADATA.find(({ name }) => name === owned.name)
-  return `${shared?.description ?? ""} ${LIST_GUIDANCE}`.trimStart()
+  return `${shared?.description ?? ""} ${LIST_GUIDANCE}\n\n${THREAD_OPEN_GUIDANCE}`.trimStart()
 }
 
 function threadCodemodeTool(owned: OwnedEvalHostTool): Info {
