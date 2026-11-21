@@ -102,9 +102,9 @@ opencode run -c "continue"
 opencode run "explain auth" --attach http://127.0.0.1:4096 -p "$OPENCODE_SERVER_PASSWORD"
 ```
 
-Other QA-useful commands: `opencode db path`, `opencode debug paths`,
-`opencode session list --format json`, `opencode models --verbose`. Full flag
-detail in `references/cli-commands.md`.
+To locate the DB, use `opencode db path` on 1.x or the `db` line of
+`opencode debug paths` on 2.x. For other CLI commands and version-specific flags,
+see `references/cli-commands.md`.
 
 ## Case B: a specific hook, action, or event
 
@@ -228,9 +228,8 @@ isolated sandbox and clean up on exit.
 - Installed binary vs dev source: cite dev source paths for internals but
   verify flags against the installed `opencode <cmd> --help`.
 - Isolation: any QA that spawns opencode must use an isolated XDG sandbox so it
-  never pollutes the real DB. Prove it by comparing
-  `sqlite3 "$(opencode db path)" "SELECT count(*) FROM session"` before and
-  after.
+  never pollutes the real DB. Compare real session counts before and after
+  using the version-specific commands in `references/db-investigation.md`.
 - TUI output assertions are fragile; use the API for real assertions.
 
 ## References

@@ -44,23 +44,28 @@ oqa_require() {
 oqa_has_opencode_db() {
   if [ -z "${OQA_HAS_OPENCODE_DB:-}" ]; then
     local probe
-    probe="$(opencode db path 2>/dev/null | head -1)"
+    probe="$(opencode db path 2>/dev/null | sed -n '1{s/\r$//;p;q;}')"
     if [ -n "$probe" ] && [ -f "$probe" ]; then OQA_HAS_OPENCODE_DB=1; else OQA_HAS_OPENCODE_DB=0; fi
   fi
   [ "$OQA_HAS_OPENCODE_DB" = 1 ]
 }
 
-# Absolute path of the active opencode DB. Order: OPENCODE_DB, the 1.x
+# Path of the active opencode DB, or :memory:. Order: OPENCODE_DB, the 1.x
 # `opencode db path`, the 2.x `opencode debug paths` db line, the XDG default.
 oqa_db_path() {
-  if [ -n "${OPENCODE_DB:-}" ]; then printf '%s\n' "$OPENCODE_DB"; return 0; fi
+  local data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/opencode"
+  case "${OPENCODE_DB:-}" in
+    "") ;;
+    :memory:|/*|\\*|[A-Za-z]:[\\/]*) printf '%s\n' "$OPENCODE_DB"; return 0 ;;
+    *) printf '%s\n' "$data_dir/$OPENCODE_DB"; return 0 ;;
+  esac
   local p
   if oqa_has_opencode_db; then
-    opencode db path 2>/dev/null | head -1; return 0
+    opencode db path 2>/dev/null | sed -n '1{s/\r$//;p;q;}'; return 0
   fi
-  p="$(opencode debug paths 2>/dev/null | awk '$1 == "db" { sub(/^db[ \t]+/, ""); print; exit }')"
+  p="$(opencode debug paths 2>/dev/null | awk '$1 == "db" { sub(/^[ \t]*db[ \t]+/, ""); sub(/\r$/, ""); print; exit }')"
   if [ -n "$p" ]; then printf '%s\n' "$p"; return 0; fi
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/opencode.db"
+  printf '%s\n' "$data_dir/opencode.db"
 }
 
 # Escape a value for safe embedding inside a single-quoted SQL literal.
