@@ -12,17 +12,24 @@
 
 ## Where the data lives
 
-Active DB path: `opencode db path` (on this machine `~/.local/share/opencode/opencode.db`).
+Active DB path: `opencode db path` on 1.x, or the `db` line of
+`opencode debug paths` on 2.x.
 
-Derived from XDG data dir + "opencode" + "opencode.db" (or "opencode-<channel>.db" on non-stable channels). Override via env `OPENCODE_DB` (`:memory:`, absolute, or relative-to-data).
+On 1.x the DB defaults to `opencode.db` (or `opencode-<channel>.db` on
+non-stable channels) in `${XDG_DATA_HOME:-$HOME/.local/share}/opencode`.
+The QA helpers accept `OPENCODE_DB` as `:memory:`, an absolute path, or a
+path relative to that OpenCode data directory.
 
 It is large (tens of GB) because the `part` table stores tool output. The `session` table is small (~21k rows; full scans are milliseconds).
 
 ## Access methods
 
-Preferred: `opencode db "<SQL>" --format json` (WAL-safe; resolves the active DB). `--format tsv` default. Bare `opencode db` opens an interactive sqlite3 shell. `opencode db path` prints the file.
+On 1.x, use `opencode db "<SQL>" --format json` (WAL-safe; resolves the active
+DB). `--format tsv` is the default. Bare `opencode db` opens an interactive
+sqlite3 shell. On 2.x use the read-only runner below.
 
-Raw fallback for EXPLAIN/perf: `sqlite3 "$(opencode db path)" "<SQL>"`. Reads are safe alongside a running opencode (WAL allows concurrent readers).
+Raw fallback for EXPLAIN/perf on 1.x:
+`sqlite3 -readonly "$(opencode db path)" "<SQL>"`.
 
 ## Schema (the tables that matter)
 
@@ -198,10 +205,17 @@ Global text search over all parts is a full scan of the largest table and can ta
 
 ## Verifying read-only
 
-All Case D operations are reads. To prove a QA pass did not mutate the DB, compare before and after:
+All Case D operations are reads. Compare real session counts before and
+after any isolated QA run:
 
 ```bash
-sqlite3 "$(opencode db path)" "SELECT count(*) FROM session"
+# OpenCode 1.x
+sqlite3 -readonly "$(opencode db path)" "SELECT count(*) FROM session"
+
+# OpenCode 2.x: use the path from the db line of `opencode debug paths`.
+node --no-warnings scripts/lib/db-query.mjs "<db path>" "SELECT count(*) AS n FROM session_v2"
 ```
 
 These queries are exactly what the `scripts/db-*.sh` helpers run; each ships a `--self-test`.
+To verify just path resolution without touching a real DB, run
+`bash scripts/lib/db-path-self-test.sh` from the `opencode-qa` skill directory.
