@@ -7,16 +7,37 @@
 import type * as Plugin from "@opencode/plugin/promise/plugin"
 import type { Registration } from "@opencode/plugin/promise/registration"
 import type { Info, Result } from "@opencode/plugin/promise/tool"
+import { THREAD_TOOL_METADATA } from "@oh-my-opencode/thread-core/metadata"
 import type { OwnedEvalHostTool } from "../tools/codemode-host-tools"
 import { adaptEvalResult } from "../tools/native-eval-result"
 
 export const THREAD_CODEMODE_METADATA_KEY = "omoThread"
 
+const LIST_GUIDANCE =
+  "Thread tools address peer sessions, not child tasks. In Code Mode, call tools.thread_list() first and use the returned thread value, an alias, or a unique name. For thread_rename and thread_close, omit thread or pass self to act on this session. Leave all_scope unset unless the user asks to search every workspace. When mentioning a thread, use its returned link; if the client cannot open it, give the thread title and suggest /sessions."
+
+function codeModeExamples(text: string): string {
+  return text
+    .replaceAll("(in an eval cell:", "(in Code Mode:")
+    .replace(/\btool\.(thread_\w+)\(\) in an eval cell\b/g, "tools.$1() in Code Mode")
+    .replace(/\btool\.(thread_\w+)\(\)/g, "tools.$1()")
+}
+
+function codeModeDescription(owned: OwnedEvalHostTool): string {
+  if (owned.name !== "thread_list") return codeModeExamples(owned.description)
+  const shared = THREAD_TOOL_METADATA.find(({ name }) => name === owned.name)
+  return `${shared?.description ?? ""} ${LIST_GUIDANCE}`.trimStart()
+}
+
 function threadCodemodeTool(owned: OwnedEvalHostTool): Info {
   return {
     name: owned.name,
-    description: owned.description,
-    input: owned.parameters as Info["input"],
+    description: codeModeDescription(owned),
+    input: JSON.parse(
+      JSON.stringify(owned.parameters, (key, value: unknown) =>
+        key === "description" && typeof value === "string" ? codeModeExamples(value) : value,
+      ),
+    ) as Info["input"],
     options: { codemode: true },
     async execute(input, context): Promise<Result> {
       // A permission verdict (thread_send) is rethrown untouched: OpenCode needs its own error to end the step.

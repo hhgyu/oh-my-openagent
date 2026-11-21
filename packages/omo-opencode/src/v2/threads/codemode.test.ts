@@ -50,7 +50,7 @@ afterEach(async () => {
 
 describe("V2 thread tools in Code Mode", () => {
   describe("#given the thread component and an empty tool registry", () => {
-    test("#when registered #then every owned thread tool is added as a Code Mode tool with the same name and schema", async () => {
+    test("#when registered #then every owned thread tool keeps the same name and input validation rules", async () => {
       // given
       const { component } = await setup()
       const host = fakeToolHost()
@@ -61,10 +61,12 @@ describe("V2 thread tools in Code Mode", () => {
       // then
       expect(host.tools.map((entry) => entry.name).sort()).toEqual(component.tools.map((entry) => entry.name).sort())
       expect(host.tools).toHaveLength(14)
+      const validation = (schema: unknown) =>
+        JSON.parse(JSON.stringify(schema, (key, value: unknown) => (key === "description" ? undefined : value)))
       for (const entry of host.tools) {
         expect(entry.options).toEqual({ codemode: true })
         const owned = component.tools.find((candidate) => candidate.name === entry.name)
-        expect(entry.input).toEqual(owned?.parameters as Info["input"])
+        expect(validation(entry.input)).toEqual(validation(owned?.parameters))
       }
     })
 

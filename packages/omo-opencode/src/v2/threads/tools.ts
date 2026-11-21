@@ -59,6 +59,8 @@ function output(result: ThreadToolResult): EvalHostToolResult {
 }
 
 function description(name: ThreadToolName): string {
+  if (name === "thread_interrupt")
+    return "Stops a running turn in another OpenCode session. It does not stop background jobs started by that turn."
   const entry = THREAD_TOOL_METADATA.find((candidate) => candidate.name === name)
   if (entry === undefined) throw Error(`missing thread metadata for ${name}`)
   // The family guideline is Native's one system-prompt line; a cell reads it on thread_list, where every flow starts.
