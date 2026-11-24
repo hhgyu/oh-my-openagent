@@ -44,17 +44,25 @@ describe("omo-senpi ultrawork references do not arm", () => {
       "Do not load mass-ulw or ulw-research or launch your own workflow.",
       "Don't use ulw for this, just answer",
       "never run ulw-loop, ultrawork, or any skill here",
-      "avoid ulw, ultrawork",
-      "avoid ulw or ultrawork or ulw-loop",
-      "No ulw-loop, ulw-plan, ultrawork",
-      'avoid using "ulw" or ultrawork',
-      "avoid ulw, ultrawork please",
-      'avoid using "ulw" or ultrawork for this task',
-      "avoid ulw, ultrawork entirely",
-      "avoid ulw, ultrawork or ulw-loop for now",
-      "skip ulw and ultrawork completely",
-      "avoid ulw or ultrawork at all",
-      "avoid ulw, ultrawork today",
+    ]) {
+      expect({ text, effective: classify(text).effective }).toEqual({ text, effective: false })
+      expect(classify(text).suppressionReason).toBe("negated_mention")
+    }
+  })
+
+  // #14389: pasted advice that forbids the mode armed it. A prohibition word right before the keyword
+  // ("avoid ulw", "no ultrawork", a bulleted rule list) is advice, not a request.
+  it("#given advice that forbids the mode without a 'do not use' verb #when classified #then it does not arm", () => {
+    for (const text of [
+      "avoid ulw for small fixes",
+      "No ultrawork here, a quick answer is enough.",
+      "skip ulw this time",
+      "answer without ultrawork",
+      "don't ulw this one",
+      "never ultrawork a one-line change",
+      "avoid using ulw or mass-ulw on this repo",
+      "skip ulw, ulw-loop and ultrawork here",
+      "Rules from the guide:\n- avoid ulw on tiny tasks\n- no ultrawork for docs\n- skip ulw-loop when unsure",
     ]) {
       expect({ text, effective: classify(text).effective }).toEqual({ text, effective: false })
       expect(classify(text).suppressionReason).toBe("negated_mention")
@@ -74,14 +82,6 @@ describe("omo-senpi ultrawork references do not arm", () => {
       "ulw-execute the plan",
       "ulw",
       "ULW fix it",
-      "ulw fix it",
-      "No ulw-loop, just ulw this",
-      "No ulw-loop, ulw this instead",
-      "avoid ulw or ultrawork, ulw the fix instead",
-      "avoid ulw,\nulw fix it",
-      `avoid ${Array(100).fill("ulw").join(", ")}, ulw the fix instead`,
-      "avoid ulw-loop or ulw-plan, then ulw this",
-      "avoid ulw, ultrawork and ulw-loop; ulw the fix",
       "ULTRAWORK: ship the release",
       "이거 끝까지 해줘 ulw",
       "mass ulw research the market",
@@ -95,6 +95,13 @@ describe("omo-senpi ultrawork references do not arm", () => {
       "ulw fix src/foo.ts",
       "ulw-loop.",
       "ulw-plan.",
+      "avoid regressions, ulw the fix",
+      "no worries, ulw this",
+      "skip the docs. ulw the fix",
+      // The prohibition covers only the keyword list it names; a comma then a request still arms (#14392 review M1).
+      "No ulw-loop, just ulw this",
+      "skip ulw-plan, ulw the fix",
+      "without ultrawork the answer was bad, so ulw this",
     ]) {
       expect({ text, effective: classify(text).effective }).toEqual({ text, effective: true })
     }
@@ -120,5 +127,46 @@ describe("omo-senpi ultrawork references do not arm", () => {
       pi,
       await dispatchInput(pi, "Do not load mass-ulw or ulw-research. Results go to .omo/ulw/x.md", "interactive"),
     )
+  })
+})
+
+// Reviewed cases beyond dev 7e0921df8a: retain ambiguous lists, but honor an explicit later request.
+describe("reviewed prohibition boundaries", () => {
+  it.each([
+    "avoid ulw, ultrawork",
+    "avoid ulw or ultrawork or ulw-loop",
+    "No ulw-loop, ulw-plan, ultrawork",
+    "avoid using \"ulw\" or ultrawork",
+    "avoid ulw, ultrawork please",
+    "avoid using \"ulw\" or ultrawork for this task",
+    "avoid ulw, ultrawork entirely",
+    "avoid ulw, ultrawork today",
+    "avoid ulw, ultrawork this week",
+  ])("list or qualifier that dev arms: %s", (text) => {
+    expect(classify(text).effective).toBe(false)
+  })
+  it.each([
+    "avoid ulw, ultrawork or ulw-loop for now",
+    "skip ulw and ultrawork completely",
+    "avoid ulw or ultrawork at all",
+  ])("prohibition that dev also suppresses: %s", (text) => {
+    expect(classify(text).effective).toBe(false)
+  })
+  it.each([
+    "ulw fix it",
+    "No ulw-loop, just ulw this",
+    "No ulw-loop, ulw this instead",
+    "avoid ulw or ultrawork, ulw the fix instead",
+    "avoid ulw,\nulw fix it",
+    `avoid ${Array(100).fill("ulw").join(", ")}, ulw the fix instead`,
+    "avoid ulw-loop or ulw-plan, then ulw this",
+    "avoid ulw, ultrawork and ulw-loop; ulw the fix",
+  ])("affirmative clause that dev also arms: %s", (text) => {
+    expect(classify(text).effective).toBe(true)
+  })
+  it.each([
+    "don't use ulw here, ulw it later",
+  ])("explicit imperative after a negated verb that dev suppresses: %s", (text) => {
+    expect(classify(text).effective).toBe(true)
   })
 })

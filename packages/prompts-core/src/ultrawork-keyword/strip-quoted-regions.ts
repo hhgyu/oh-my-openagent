@@ -17,8 +17,6 @@ const URL_SPAN = /(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:\/\/[^\s<>"'`]+/gi
 // negated verb's objects are masked up to the next sentence or clause break. A comma does not end
 // the clause, so a comma-separated list of prohibitions stays masked; `but`, `then`, `instead`, `however` or a dash
 // does, because what follows is the request ("Do not use tmux, but ulw the fix").
-const NEGATED_INVOCATION =
-  /\b(?:do\s+not|don['\u2019]t|dont|never)\s+(?:load|use|run|invoke|start|trigger|arm|enable)\b[^.;:!?\n]*?(?=[.;:!?\n]|\s(?:but|then|instead|however)\b|\s[\u2014\u2013-]\s|$)/gi
 
 // Advice that forbids the mode without a "do not use" verb ("avoid ulw", "no ultrawork", "skip ulw-loop",
 // "don't ulw this", a pasted rule list) is not a request either (#14389). Only the keyword list the prohibition
@@ -29,7 +27,14 @@ const QUOTED_ITEM = new RegExp(`^${PROHIBITED_ITEM}$`, "i")
 const LIST_ITEM = `(?:${PROHIBITED_ITEM}|\\x01+)`
 const LIST_SEPARATOR = String.raw`(?:[ \t]*,[ \t]*(?:(?:or|and|nor)[ \t]+)?|[ \t]+(?:or|and|nor)[ \t]+|[ \t]*\/[ \t]*)`
 // "ulw the fix" starts a request; "ultrawork for this task" still names the prohibited mode.
-const AFFIRMATIVE_ITEM = String.raw`${PROHIBITED_ITEM}[ \t]+(?:this|that|it|the|these|those|my|our|your|their|a|an)\b`
+const TIME_UNIT = String.raw`(?:time|day|week|month|year|morning|afternoon|evening|night|weekend|quarter)s?\b`
+const REQUEST_OBJECT = String.raw`(?:(?:this|that|these|those)\b(?![ \t]+${TIME_UNIT})|(?:it|the|my|our|your|their|a|an)\b)`
+const AFFIRMATIVE_ITEM = String.raw`(?:ultrawork|ulw)\b[ \t]+${REQUEST_OBJECT}`
+const NEGATED_INVOCATION = new RegExp(
+  String.raw`\b(?:do\s+not|don['\u2019]t|dont|never)\s+(?:load|use|run|invoke|start|trigger|arm|enable)\b[^.;:!?\n]*?` +
+    String.raw`(?=[.;:!?\n]|\s(?:but|then|instead|however)\b|\s[\u2014\u2013-]\s|,[ \t]*${AFFIRMATIVE_ITEM}|$)`,
+  "gi",
+)
 const PROHIBITED_KEYWORD = new RegExp(
   String.raw`\b(?:avoid(?:ing)?|skip(?:ping)?|without|no|never|do[ \t]+not|don['\u2019]t|dont)[ \t]+(?:(?:using|use[ \t]+of|the)[ \t]+)?` +
     String.raw`${LIST_ITEM}(?:${LIST_SEPARATOR}(?!${AFFIRMATIVE_ITEM})${LIST_ITEM})*`,
