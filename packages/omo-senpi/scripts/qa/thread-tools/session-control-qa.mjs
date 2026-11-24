@@ -141,7 +141,7 @@ trackCloser(() => rmSync(liveStateDirectory, { recursive: true, force: true }))
 try {
   const { createThreadTools } = await threadComponent("tools")
   const { createLiveThreadSurface, resolveThreadSocket } = await threadComponent("live-surface")
-  const { createGatewayStore } = await threadComponent("gateway/store")
+  const { createGatewayStore } = await import("@oh-my-opencode/thread-core/gateway/store")
   const storeAt = (agentDir) => {
     const store = createGatewayStore({ agentDir })
     stores.push(store)
@@ -182,6 +182,7 @@ try {
             api: "openai-completions",
             models: ["mock-model", "mock-model-fast", "mock-model-deep"].map((id) => ({
               id,
+              ...(id === "mock-model-deep" ? { reasoning: true, thinkingLevelMap: { max: "max" } } : {}),
               baseUrl: fake.url,
               api: "openai-completions",
               contextWindow: 128000,
@@ -293,6 +294,66 @@ try {
     (await surface.listSessions()).find((session) => (session.durableSessionId ?? session.sessionId) === threadA)
       ?.sessionId ?? threadA
   const supported = await surface.getAvailableThinkingLevels(routingA).catch(() => undefined)
+  const missingProvider = await call(tools, "thread_set_model", {
+    thread: threadA,
+    model: "absent/fake:max",
+    all_scope: true,
+  })
+  const details = missingProvider.kind === "error" ? missingProvider.error.details : undefined
+  record(
+    "14445-a",
+    "absent-provider",
+    missingProvider.kind === "error" &&
+      missingProvider.error.code === "model_not_found" &&
+      details?.reason === "provider_not_configured" &&
+      details?.provider === "absent" &&
+      JSON.stringify(details?.available_providers) === '["mock"]'
+      ? "pass"
+      : "fail",
+    JSON.stringify(details),
+  )
+  const max = await call(tools, "thread_set_model", {
+    thread: threadA,
+    model: "mock/mock-model-deep:max",
+    all_scope: true,
+  })
+  const state = await surface.getState(routingA)
+  record(
+    "14445-c",
+    "max-round-trip",
+    max.kind === "ok" &&
+      max.model.id === "mock-model-deep" &&
+      state.model?.id === "mock-model-deep" &&
+      state.thinkingLevel === "max"
+      ? "pass"
+      : "fail",
+    `result=${max.kind} engineModel=${state.model?.id} engineThinking=${state.thinkingLevel}`,
+  )
+  const rejectedMax = await call(tools, "thread_set_model", {
+    thread: threadA,
+    model: "mock/mock-model-fast:max",
+    all_scope: true,
+  })
+  const afterRefusal = await surface.getState(routingA)
+  record(
+    "14445-b",
+    "unsupported-max",
+    rejectedMax.kind === "error" &&
+      rejectedMax.error.code === "thinking_level_unsupported" &&
+      afterRefusal.model?.id === "mock-model-deep" &&
+      afterRefusal.thinkingLevel === "max"
+      ? "pass"
+      : "fail",
+    `${errorCode(rejectedMax)} engineModel=${afterRefusal.model?.id} engineThinking=${afterRefusal.thinkingLevel}`,
+  )
+  const reset = await call(tools, "thread_set_model", {
+    thread: threadA,
+    model: "mock/mock-model-fast",
+    all_scope: true,
+  })
+  const resetState = await surface.getState(routingA)
+  if (reset.kind !== "ok" || resetState.model?.id !== "mock-model-fast")
+    throw new Error("Failed to restore mock-model-fast before reasoning checks")
 
   // 8. a level the active model DOES support is accepted and echoed with its scope
   if (supported === undefined || supported.length === 0) {

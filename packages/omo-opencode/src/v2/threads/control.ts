@@ -95,6 +95,10 @@ export function createV2SessionControl(input: {
         held: false,
       }
     },
+    async getModelState() {
+      const { model } = await current()
+      return model && { model: { provider: model.providerID, id: model.id }, thinkingLevel: model.variant }
+    },
     async setModel(provider, id) {
       await host.session.switchModel({ sessionID, model: { providerID: provider, id } })
       return { provider, id }

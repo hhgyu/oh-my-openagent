@@ -9,6 +9,10 @@
       "types": "./index.d.ts",
       "import": "./src/index.ts"
     },
+    "./model-decorators": {
+      "types": "./src/model-decorators.ts",
+      "import": "./src/model-decorators.ts"
+    },
     "./atomic-write": {
       "types": "./src/atomic-write.ts",
       "import": "./src/atomic-write.ts"
