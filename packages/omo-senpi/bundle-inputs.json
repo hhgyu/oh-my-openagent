@@ -895,6 +895,7 @@
     "packages/omo-opencode/package.json",
     "packages/omo-opencode/src/cli/service-auth/account-home.ts",
     "packages/omo-opencode/src/cli/service-auth/accounts-gate.ts",
+    "packages/omo-opencode/src/cli/service-auth/bun-gio-shim.ts",
     "packages/omo-opencode/src/cli/service-auth/credential-lock.ts",
     "packages/omo-opencode/src/cli/service-auth/credential-owner.ts",
     "packages/omo-opencode/src/cli/service-auth/device-name.ts",

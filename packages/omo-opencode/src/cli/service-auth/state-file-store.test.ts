@@ -91,6 +91,8 @@ describe.skipIf(process.platform === "win32")("the Linux sign-in state file (#71
       expect(lines).toHaveLength(1)
       expect(lines[0]).toContain("open")
       expect(lines.join("\n")).not.toContain(secret.token)
+      await expect(store.write({ token: "replacement" })).rejects.toThrow("refused")
+      expect(await readFile(file, "utf8")).toBe(JSON.stringify(secret))
     }
   })
 

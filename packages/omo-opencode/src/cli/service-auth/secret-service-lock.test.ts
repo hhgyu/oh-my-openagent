@@ -12,6 +12,7 @@ const FAKE_SECRET_SERVICE = `
 import sys, os
 from gi.repository import Gio, GLib
 mode = sys.argv[1]
+with open(os.path.join(os.path.dirname(__file__), "server.pid"), "w") as f: print(os.getpid(),file=f)
 state = {"locked": mode not in ("unlocked", "lookup", "migration", "relock")}
 COLLECTION = "/org/freedesktop/secrets/aliases/default"
 xml = """<node><interface name="org.freedesktop.Secret.Collection"><property name="Locked" type="b" access="read"/></interface>
@@ -49,7 +50,11 @@ def unlock(conn, sender, path, iface, method, params, invocation):
         return
     if method == 'GetSecret':
         value = b'synthetic-value' if mode == 'lookup' else open(os.environ['TEST_RING'],'rb').read()
-        if mode == 'relock': state['locked'] = True
+        if mode == 'relock':
+            state['locked'] = True
+            with open(os.environ['TEST_RING']+'.denied','w') as f: f.write('IsLocked')
+            invocation.return_dbus_error('org.freedesktop.Secret.Error.IsLocked','synthetic relock')
+            return
         invocation.return_value(GLib.Variant('((oayays))', (('/session',[],list(value),'text/plain'),)))
         return
     if mode == "error":
@@ -218,12 +223,13 @@ describe.skipIf(!canRun)(
         if (cli) {
           mkdirSync(privateDir, { recursive: true, mode: 0o700 })
           mkdirSync(bin)
-          symlinkSync(Bun.which("gdbus")!, join(bin, "gdbus"))
+          const gdbus = Bun.which("gdbus")
+          if (!gdbus) throw new Error("missing fixture prerequisite: gdbus")
+          symlinkSync(gdbus, join(bin, "gdbus"))
           symlinkSync(process.execPath, join(bin, "bun"))
           const record = { ...grant, ...privateKeys }
           writeFileSync(privateFile, JSON.stringify(record), { mode: 0o600 })
-          if (fake === "relock")
-            writeFileSync(ring, JSON.stringify({ ...record, device: { ...record.device, id: "other" } }))
+          if (fake === "relock") writeFileSync(ring, JSON.stringify(record))
           writeFileSync(
             preload,
             `import fs,{existsSync,readFileSync,writeFileSync,appendFileSync,unlinkSync} from "node:fs"; import {mock} from "bun:test"; const originalRead=fs.readFileSync; mock.module("node:fs",()=>({...fs,readFileSync:(name,...args)=>name==="/etc/passwd" ? "fixture:x:"+process.getuid()+":0::"+process.env.HOME+":/bin/sh" : originalRead(name,...args)})); const path=${JSON.stringify(ring)}; Object.defineProperty(Bun,"secrets",{value:{ get:async()=>{appendFileSync(path+".reads","g");return existsSync(path)?readFileSync(path,"utf8"):null},set:async({value})=>writeFileSync(path,value),delete:async()=>{unlinkSync(path);return true}}}); Object.assign(globalThis,{[Symbol.for("omo.test.serviceAccountsOpen")]:true})`,
@@ -232,7 +238,7 @@ describe.skipIf(!canRun)(
         const start =
           fake === "none"
             ? ""
-            : `python3 ${JSON.stringify(fakePath)} ${fake} > "$D/ready" & until grep -q READY "$D/ready" 2>/dev/null; do :; done;`
+            : `python3 ${JSON.stringify(fakePath)} ${fake} > "$D/ready" & server=$!; trap 'kill "$server" 2>/dev/null; wait "$server" 2>/dev/null || :' EXIT; until grep -q READY "$D/ready" 2>/dev/null; do :; done;`
         const run = spawnSync(
           "dbus-run-session",
           [
@@ -259,6 +265,10 @@ describe.skipIf(!canRun)(
             },
           },
         )
+        if (fake !== "none") {
+          const pid = Number(readFileSync(join(dir, "server.pid"), "utf8"))
+          expect(existsSync(`/proc/${pid}`)).toBe(false)
+        }
         if (cli) {
           expect(Bun.which("python3", { PATH: bin })).toBeNull()
           if (fake === "migration") {
@@ -269,9 +279,10 @@ describe.skipIf(!canRun)(
           } else {
             expect(run.status).not.toBe(0)
             expect(existsSync(privateFile)).toBe(true)
-            expect(JSON.parse(readFileSync(ring, "utf8")).device.id).toBe("other")
+            expect(readFileSync(ring, "utf8")).toBe(readFileSync(privateFile, "utf8"))
             expect(readFileSync(ring + ".reads", "utf8")).toBe("g")
-            expect(run.stderr).toContain("could not be verified")
+            expect(existsSync(ring + ".denied")).toBe(true)
+            expect(run.stderr).toContain("Cannot verify the Linux keyring item without prompting")
           }
           return "checked"
         }

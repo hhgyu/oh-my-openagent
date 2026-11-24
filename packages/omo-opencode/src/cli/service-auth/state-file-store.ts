@@ -149,7 +149,16 @@ export async function writeStateFile(dir: string, name: string, contents: string
     } finally {
       await handle.close()
     }
-    await rename(temp, join(dir, name))
+    const entry = join(dir, name)
+    const previous = await lstat(entry).catch((error: unknown) => {
+      if (errnoCode(error) === "ENOENT") return null
+      throw error
+    })
+    if (previous) {
+      const refusal = previous.isSymbolicLink() ? "symlink" : fileRefusal(previous, uid)
+      if (refusal) throw new StateFileRefused(refusal)
+    }
+    await rename(temp, entry)
   } catch (error) {
     await rm(temp, { force: true })
     throw error
