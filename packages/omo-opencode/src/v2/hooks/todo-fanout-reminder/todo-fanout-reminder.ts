@@ -1,4 +1,5 @@
 import type * as Plugin from "@opencode/plugin/promise/plugin"
+import { isUltraworkKeywordEnabled, type OmoKeywordDetectorSettings } from "@oh-my-opencode/omo-config-core"
 import type { Registration } from "@opencode/plugin/promise/registration"
 import type { Result } from "@opencode/plugin/promise/tool"
 import { sharedPromptArmingLedger, type PromptArmingLedger, type TodoFanoutArming } from "./prompt-arming"
@@ -7,6 +8,7 @@ import { TODO_FANOUT_REMINDER } from "./reminder"
 type Host = Pick<Plugin.Context, "tool" | "session" | "event" | "options"> & Partial<Pick<Plugin.Context, "location">>
 
 export interface TodoFanoutReminderOptions {
+  readonly keywordDetector?: OmoKeywordDetectorSettings
   /** Ultrawork arming ledger. Defaults to the shared directive and reminder ledger. */
   readonly arming?: TodoFanoutArming
 }
@@ -53,6 +55,7 @@ export async function registerTodoFanoutReminder(
   options: TodoFanoutReminderOptions = {},
 ): Promise<() => Promise<void>> {
   if (
+    !isUltraworkKeywordEnabled(options.keywordDetector) ||
     context.options?.[DISABLED_FLAG] === true ||
     context.options?.["omo-senpi-disabled"] === true ||
     process.env.OMO_SENPI_DISABLED === "1"

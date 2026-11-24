@@ -1,4 +1,5 @@
 import type * as Plugin from "@opencode/plugin/promise/plugin"
+import { isUltraworkKeywordEnabled, type OmoKeywordDetectorSettings } from "@oh-my-opencode/omo-config-core"
 import type { Registration } from "@opencode/plugin/promise/registration"
 import type { SessionContext, SessionPrompt } from "@opencode/plugin/promise/session"
 import { resolveVariant, ultraworkPromptVariants, type VariantTable } from "@oh-my-opencode/prompts-core"
@@ -43,8 +44,11 @@ function carriesDirective(context: SessionContext): boolean {
 }
 
 /** Registers ultrawork keyword arming and directive injection; the cleanup disposes both hooks. */
-export async function registerUltrawork(host: Host): Promise<() => Promise<void>> {
-  if (isDisabled(host)) return async () => {}
+export async function registerUltrawork(
+  host: Host,
+  settings?: OmoKeywordDetectorSettings,
+): Promise<() => Promise<void>> {
+  if (isDisabled(host) || !isUltraworkKeywordEnabled(settings)) return async () => {}
   const arming = sharedPromptArmingLedger(host)
   const stop = new AbortController()
   let pump: Promise<void> | undefined

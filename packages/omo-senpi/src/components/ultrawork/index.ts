@@ -1,4 +1,6 @@
 import { isGpt6AstraModel } from "@oh-my-opencode/model-core"
+import { isUltraworkKeywordEnabled } from "@oh-my-opencode/omo-config-core"
+import { loadSenpiOmoConfig } from "../config-resolution"
 import {
   classifyUltraworkInput,
   isUltraworkInput,
@@ -117,6 +119,7 @@ export function createUltraworkComponent(arming: SessionArming = sharedSessionAr
   return {
     name: "ultrawork",
     register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
+      if (!isUltraworkKeywordEnabled(loadSenpiOmoConfig({ cwd: pi.cwd }).config.keyword_detector)) return
       pi.on("input", (payload: unknown, eventCtx: unknown): SenpiInputEventResult =>
         handleInput(pi, payload, ctx, arming, eventCtx),
       )

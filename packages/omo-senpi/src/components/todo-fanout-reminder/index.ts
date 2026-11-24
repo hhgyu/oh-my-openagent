@@ -1,4 +1,6 @@
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
+import { isUltraworkKeywordEnabled } from "@oh-my-opencode/omo-config-core"
+import { loadSenpiOmoConfig } from "../config-resolution"
 import { sharedSessionArming, type SessionArming } from "../ultrawork/index"
 import { TODO_FANOUT_REMINDER } from "./reminder"
 
@@ -14,6 +16,7 @@ export function createTodoFanoutReminderComponent(arming: SessionArming = shared
   return {
     name: "todo-fanout-reminder",
     register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
+      if (!isUltraworkKeywordEnabled(loadSenpiOmoConfig({ cwd: pi.cwd }).config.keyword_detector)) return
       const remindedSessionIds = new Set<string>()
       let anonymousReminded = false
 

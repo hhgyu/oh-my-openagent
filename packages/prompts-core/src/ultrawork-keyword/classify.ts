@@ -65,7 +65,7 @@ export function classifyUltraworkInput(
   input: UltraworkClassificationInput,
   snapshot: ArmingSnapshot,
 ): UltraworkClassification {
-  const quotedText = stripQuotedSpans(input.text)
+  const quotedText = stripQuotedSpans(input.text, true)
   const visibleText = maskNegatedInvocations(quotedText)
   const matches = [...visibleText.matchAll(new RegExp(ULTRAWORK_CURRENT_PROMPT_PATTERN.source, "gi"))]
   let matchedUlw = false

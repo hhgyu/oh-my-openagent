@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { OmoKeywordDetectorSettings } from "@oh-my-opencode/omo-config-core"
 import type * as Plugin from "@opencode/plugin/promise/plugin"
 import type { SessionContext, SessionPrompt } from "@opencode/plugin/promise/session"
 import { ULTRAWORK_DEFAULT_PROMPT, ULTRAWORK_GPT_PROMPT } from "@oh-my-opencode/prompts-core"
@@ -87,11 +88,41 @@ describe("registerUltrawork", () => {
       ['what does "ulw" mean', false],
       ["open mass-ulw-refactor.md", false],
       ["do not use ulw here", false],
+      ["skip ulw, ulw-loop and ultrawork here", false],
+      ["avoid using ulw or mass-ulw", false],
+      ["No ulw-loop, just ulw this", true],
     ])("#when the prompt is %p #then arming is %p", async (text, armed) => {
       const f = fixture()
       await registerUltrawork(f.host)
       await f.prompt("s1", text)
       expect(f.request("s1")).toHaveLength(armed ? 1 : 0)
+    })
+
+    test("#when project keyword settings restrict expansion #then deny wins over allow", async () => {
+      for (const [settings, count] of [
+        [{ enabled_expansions: [] }, 0],
+        [{ disabled_keywords: ["ultrawork"], enabled_expansions: ["ultrawork"] }, 0],
+        [{ enabled_expansions: ["ultrawork"] }, 1],
+      ] satisfies [OmoKeywordDetectorSettings, number][]) {
+        const f = fixture()
+        const cleanup = await registerUltrawork(f.host, settings)
+        const fanout = await registerTodoFanoutReminder(f.host as Parameters<typeof registerTodoFanoutReminder>[0], {
+          keywordDetector: settings,
+        })
+        await f.prompt("configured", "ulw fix it")
+        expect(f.request("configured")).toHaveLength(count)
+        const event = {
+          sessionID: "configured",
+          status: "completed",
+          tool: "todowrite",
+          input: { todos: [{}] },
+          result: { content: "" },
+        }
+        await f.hooks.get("tool:execute.after")?.(event)
+        expect(Boolean(event.result.content)).toBe(count === 1)
+        await fanout()
+        await cleanup()
+      }
     })
 
     test("#when the session keeps working and re-mentions the keyword #then every request carries exactly one directive", async () => {

@@ -845,6 +845,7 @@
     "packages/omo-config-core/src/schema/git-master.ts",
     "packages/omo-config-core/src/schema/harness.ts",
     "packages/omo-config-core/src/schema/index.ts",
+    "packages/omo-config-core/src/schema/keyword-detector.ts",
     "packages/omo-config-core/src/schema/legacy-category-names.ts",
     "packages/omo-config-core/src/schema/legacy-harness-names.ts",
     "packages/omo-config-core/src/schema/memory-agreements.ts",
