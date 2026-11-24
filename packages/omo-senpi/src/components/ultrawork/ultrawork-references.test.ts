@@ -154,6 +154,10 @@ describe("reviewed prohibition boundaries", () => {
     "avoid ulw, ultrawork or ulw-loop for now",
     "skip ulw and ultrawork completely",
     "avoid ulw or ultrawork at all",
+    "please avoid using ulw or ultrawork this entire session.",
+    "avoid using ulw or ultrawork the whole time",
+    "avoid using ulw or ultrawork all day",
+    "avoid using ulw or ultrawork just for now",
   ])("prohibition that dev also suppresses: %s", (text) => {
     expect(classify(text).effective).toBe(false)
   })
@@ -171,6 +175,8 @@ describe("reviewed prohibition boundaries", () => {
     "avoid ulw-loop, ulw those files",
     "avoid ulw-loop, ulw the rest instead",
     "avoid ulw-loop, ulw now",
+    "skip ulw, ultrawork the whole repo",
+    "avoid ulw-loop, ulw all the files",
   ])("affirmative clause that dev also arms: %s", (text) => {
     expect(classify(text).effective).toBe(true)
   })

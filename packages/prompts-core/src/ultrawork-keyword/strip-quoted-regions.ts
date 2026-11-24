@@ -28,12 +28,17 @@ const LIST_ITEM = `(?:${PROHIBITED_ITEM}|\\x01+)`
 const LIST_SEPARATOR = String.raw`(?:[ \t]*,[ \t]*(?:(?:or|and|nor)[ \t]+)?|[ \t]+(?:or|and|nor)[ \t]+|[ \t]*\/[ \t]*)`
 // "ulw the fix" starts a request; "ultrawork for this task" still names the prohibited mode.
 const PERIOD_NOUN = String.raw`(?:today|tonight|(?:time|moment|second|minute|hour|day|week|weekend|month|quarter|year|sprint|session|round|turn|run|iteration|cycle|phase|release|morning|afternoon|evening|night)s?)\b`
-const PERIOD_COMPLEMENT = String.raw`[ \t]+(?:next[ \t]+)?${PERIOD_NOUN}`
-const DEMONSTRATIVE = String.raw`(?:this|that|these|those)\b(?!${PERIOD_COMPLEMENT})`
-const NOUN_PHRASE = String.raw`(?:the|a|an|my|our|your|their|next|every)\b(?!${PERIOD_COMPLEMENT})[ \t]+[a-z]`
+const DETERMINER = String.raw`(?:this|that|these|those|the|a|an|my|our|your|their|next|every|each|all)`
+const PERIOD_PHRASE =
+  String.raw`(?:(?:for|during|in|over|until|through|throughout)[ \t]+)?(?:${DETERMINER}[ \t]+)?` +
+  String.raw`(?:(?:entire|whole|full|remaining|next|rest[ \t]+of(?:[ \t]+the)?)[ \t]+)*${PERIOD_NOUN}`
+const TEMPORAL_ADVERB = String.raw`(?:for[ \t]+(?:now|today|a[ \t]+while)|today|tonight|now[ \t]+on|anymore|again|this[ \t]+once|at[ \t]+all)\b`
+const TEMPORAL_QUALIFIER = String.raw`(?:(?:just|only|even)[ \t]+)?(?:${TEMPORAL_ADVERB}|${PERIOD_PHRASE})`
+const DEMONSTRATIVE = String.raw`(?:this|that|these|those)\b`
+const NOUN_PHRASE = String.raw`${DETERMINER}[ \t]+[a-z]`
 const OBJECT = String.raw`(?:it|them|everything|all|something|anything|each|both|one|me|us|him|her|you)\b`
 const REQUEST_MARKER = String.raw`(?:instead|just|but|then|rather|now)\b`
-const AFFIRMATIVE_ITEM = String.raw`(?:ultrawork|ulw)\b[ \t]+(?:${REQUEST_MARKER}|${OBJECT}|${DEMONSTRATIVE}|${NOUN_PHRASE})`
+const AFFIRMATIVE_ITEM = String.raw`(?:ultrawork|ulw)\b[ \t]+(?!${TEMPORAL_QUALIFIER})(?:${REQUEST_MARKER}|${OBJECT}|${DEMONSTRATIVE}|${NOUN_PHRASE})`
 const NEGATED_INVOCATION = new RegExp(
   String.raw`\b(?:do\s+not|don['\u2019]t|dont|never)\s+(?:load|use|run|invoke|start|trigger|arm|enable)\b[^.;:!?\n]*?` +
     String.raw`(?=[.;:!?\n]|\s(?:but|then|instead|however)\b|\s[\u2014\u2013-]\s|,[ \t]*(?:${AFFIRMATIVE_ITEM}|${REQUEST_MARKER}[ \t]+(?:ulw|ultrawork)\b)|$)`,
