@@ -25,9 +25,12 @@ const NEGATED_INVOCATION =
 // names is masked: "ulw or mass-ulw", "ulw, ulw-loop and ultrawork". A comma that is not part of such a list ends it,
 // so "No ulw-loop, just ulw this" and "avoid regressions, ulw the fix" still arm.
 const PROHIBITED_ITEM = String.raw`(?:mass[-\s]?)?(?:ultrawork|ulw)(?:[-_](?:loop|plan|research|execute|mass))?\b`
+const QUOTED_ITEM = new RegExp(`^${PROHIBITED_ITEM}$`, "i")
+const LIST_ITEM = `(?:${PROHIBITED_ITEM}|\\x01+)`
+const LIST_SEPARATOR = String.raw`(?:\s*,\s*(?:(?:or|and|nor)\s+)?|\s+(?:or|and|nor)\s+|\s*\/\s*)`
 const PROHIBITED_KEYWORD = new RegExp(
   String.raw`\b(?:avoid(?:ing)?|skip(?:ping)?|without|no|never|do\s+not|don['\u2019]t|dont)\s+(?:(?:using|use\s+of|the)\s+)?` +
-    String.raw`${PROHIBITED_ITEM}(?:(?:\s*,\s*${PROHIBITED_ITEM})*\s*,?\s*(?:or|and|nor|\/)\s*${PROHIBITED_ITEM})?`,
+    String.raw`${LIST_ITEM}(?:${LIST_SEPARATOR}${LIST_ITEM})*`,
   "gi",
 )
 
@@ -47,7 +50,7 @@ function mask(region: string): string {
   return region.replace(/[^\r\n]/g, "\0")
 }
 
-export function stripQuotedSpans(text: string): string {
+export function stripQuotedSpans(text: string, retainListItems = false): string {
   if (RELAY_HEADER.test(text)) return mask(text)
   let visible = text.replace(INJECTED_BLOCK, mask)
   const fenceStart = /^ {0,3}(`{3,}|~{3,})[^\n]*(?:\n|$)/gm
@@ -62,11 +65,13 @@ export function stripQuotedSpans(text: string): string {
     visible = visible.slice(0, opening.index) + mask(visible.slice(opening.index, end)) + visible.slice(end)
     fenceStart.lastIndex = end
   }
+  const maskQuote = (quote: string) =>
+    retainListItems && QUOTED_ITEM.test(quote.slice(1, -1)) ? "\x01".repeat(quote.length) : mask(quote)
   return visible
     .replace(INLINE_CODE, mask)
     .replace(BLOCK_QUOTE_LINE, mask)
-    .replace(DOUBLE_QUOTED, mask)
-    .replace(SINGLE_QUOTED, mask)
+    .replace(DOUBLE_QUOTED, maskQuote)
+    .replace(SINGLE_QUOTED, maskQuote)
     .replace(URL_SPAN, mask)
 }
 
@@ -75,5 +80,5 @@ export function maskNegatedInvocations(text: string): string {
 }
 
 export function stripQuotedRegions(text: string): string {
-  return maskNegatedInvocations(stripQuotedSpans(text))
+  return maskNegatedInvocations(stripQuotedSpans(text, true)).replace(/\x01/g, "\0")
 }

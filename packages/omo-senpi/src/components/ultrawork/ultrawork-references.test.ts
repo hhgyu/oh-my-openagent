@@ -44,6 +44,10 @@ describe("omo-senpi ultrawork references do not arm", () => {
       "Do not load mass-ulw or ulw-research or launch your own workflow.",
       "Don't use ulw for this, just answer",
       "never run ulw-loop, ultrawork, or any skill here",
+      "avoid ulw, ultrawork",
+      "avoid ulw or ultrawork or ulw-loop",
+      "No ulw-loop, ulw-plan, ultrawork",
+      'avoid using "ulw" or ultrawork',
     ]) {
       expect({ text, effective: classify(text).effective }).toEqual({ text, effective: false })
       expect(classify(text).suppressionReason).toBe("negated_mention")
@@ -63,6 +67,10 @@ describe("omo-senpi ultrawork references do not arm", () => {
       "ulw-execute the plan",
       "ulw",
       "ULW fix it",
+      "ulw fix it",
+      "No ulw-loop, just ulw this",
+      "avoid ulw-loop or ulw-plan, then ulw this",
+      "avoid ulw, ultrawork and ulw-loop; ulw the fix",
       "ULTRAWORK: ship the release",
       "이거 끝까지 해줘 ulw",
       "mass ulw research the market",
