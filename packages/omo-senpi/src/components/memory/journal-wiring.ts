@@ -50,6 +50,9 @@ function isJournalLockFailure(error: unknown): boolean {
   return false
 }
 
+/** Each journal retains its transcript rows for no-reread settles; a long-lived host bounds how many sessions keep them. */
+const MAX_RETAINED_JOURNALS = 16
+
 export function createMemoryJournalWiring(options: MemoryJournalWiringOptions): MemoryJournalWiring {
   const createJournal =
     options.createJournal ??
@@ -62,9 +65,17 @@ export function createMemoryJournalWiring(options: MemoryJournalWiringOptions): 
 
   function journalFor(sessionId: string): TranscriptJournal {
     const cached = journals.get(sessionId)
-    if (cached !== undefined) return cached
+    if (cached !== undefined) {
+      journals.delete(sessionId)
+      journals.set(sessionId, cached)
+      return cached
+    }
     const journal = createJournal(join(options.identityPaths.transcripts, sessionId))
     journals.set(sessionId, journal)
+    for (const oldest of journals.keys()) {
+      if (journals.size <= MAX_RETAINED_JOURNALS) break
+      journals.delete(oldest)
+    }
     return journal
   }
 

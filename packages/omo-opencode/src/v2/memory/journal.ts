@@ -38,6 +38,9 @@ export interface MemoryJournal {
   clear(): void
 }
 
+/** Each journal retains its transcript rows for no-reread settles; a long-lived host bounds how many sessions keep them. */
+const MAX_RETAINED_JOURNALS = 16
+
 /**
  * OpenCode 2 transcript journal (Senpi `journal-wiring.ts`). Senpi reconciles its persisted branch on
  * `session_start` and `agent_settled`; here the bind of a root session and `experimental.idle` read the
@@ -52,10 +55,17 @@ export function createMemoryJournal(deps: MemoryJournalDeps): MemoryJournal {
 
   function journalFor(bound: BoundMemorySession): TranscriptJournal {
     const dir = join(bound.paths.transcripts, bound.sessionID)
-    let journal = journals.get(dir)
-    if (journal === undefined) {
-      journal = createJournal(dir)
-      journals.set(dir, journal)
+    const cached = journals.get(dir)
+    if (cached !== undefined) {
+      journals.delete(dir)
+      journals.set(dir, cached)
+      return cached
+    }
+    const journal = createJournal(dir)
+    journals.set(dir, journal)
+    for (const oldest of journals.keys()) {
+      if (journals.size <= MAX_RETAINED_JOURNALS) break
+      journals.delete(oldest)
     }
     return journal
   }
