@@ -29,15 +29,17 @@ const LIST_SEPARATOR = String.raw`(?:[ \t]*,[ \t]*(?:(?:or|and|nor)[ \t]+)?|[ \t
 // "ulw the fix" starts a request; "ultrawork for this task" still names the prohibited mode.
 const PERIOD_NOUN = String.raw`(?:today|tonight|(?:time|moment|second|minute|hour|day|week|weekend|month|quarter|year|sprint|session|round|turn|run|iteration|cycle|phase|release|morning|afternoon|evening|night)s?)\b`
 const DETERMINER = String.raw`(?:this|that|these|those|the|a|an|my|our|your|their|next|every|each|all)`
-const PERIOD_COUNT = String.raw`(?:one|two|three|several|(?:a[ \t]+)?few|a[ \t]+couple[ \t]+of)`
-const PERIOD_ORDER = String.raw`(?:first|second|third|last|next|final|previous)`
+const UNITS = String.raw`(?:one|two|three|four|five|six|seven|eight|nine)`
+const NUMBER_WORD = String.raw`(?:${UNITS}(?:[ \t]+hundred)?|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- \t]${UNITS})?|hundred)`
+const COUNT = String.raw`(?:\d+|${NUMBER_WORD}|a[ \t]+couple(?:[ \t]+of)?|(?:a[ \t]+)?few|an?|several|many|some)`
+const PERIOD_ORDER = String.raw`(?:first|second|third|last|next|final|previous|past|coming)`
 const PERIOD_PHRASE =
   String.raw`(?:(?:for|during|in|over|until|through|throughout)[ \t]+)?(?:${DETERMINER}[ \t]+)?` +
-  String.raw`(?:(?:entire|whole|full|remaining|${PERIOD_ORDER}|${PERIOD_COUNT}|rest[ \t]+of(?:[ \t]+the)?)[ \t]+)*${PERIOD_NOUN}`
+  String.raw`(?:(?:entire|whole|full|remaining|${PERIOD_ORDER}|rest[ \t]+of(?:[ \t]+the)?)[ \t]+)*(?:${COUNT}[ \t]+)?${PERIOD_NOUN}`
 const TEMPORAL_ADVERB = String.raw`(?:for[ \t]+(?:now|today|a[ \t]+while)|today|tonight|now[ \t]+on|anymore|again|this[ \t]+once|at[ \t]+all)\b`
 const TEMPORAL_QUALIFIER = String.raw`(?:(?:just|only|even)[ \t]+)?(?:${TEMPORAL_ADVERB}|${PERIOD_PHRASE})`
 const DEMONSTRATIVE = String.raw`(?:this|that|these|those)\b`
-const NOUN_PHRASE = String.raw`${DETERMINER}[ \t]+[a-z]`
+const NOUN_PHRASE = String.raw`(?:${DETERMINER}[ \t]+(?:${COUNT}[ \t]+)?|${COUNT}[ \t]+)[a-z]`
 const OBJECT = String.raw`(?:it|them|everything|all|something|anything|each|both|one|me|us|him|her|you)\b`
 const REQUEST_MARKER = String.raw`(?:instead|just|but|then|rather|now)\b`
 const AFFIRMATIVE_ITEM = String.raw`(?:ultrawork|ulw)\b[ \t]+(?!${TEMPORAL_QUALIFIER})(?:${REQUEST_MARKER}|${OBJECT}|${DEMONSTRATIVE}|${NOUN_PHRASE})`
