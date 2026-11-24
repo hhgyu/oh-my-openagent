@@ -1,6 +1,8 @@
-import { describe, expect, onTestFinished, test } from "bun:test"
+import { describe, expect, onTestFinished, spyOn, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { chmod, lstat, mkdir, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises"
+import { chmod, lstat, mkdir, open, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   createStateFileStore,
@@ -32,6 +34,16 @@ async function fileStore(home: string) {
   return { store, lines, dir: stateFileDirectory(home), file: join(stateFileDirectory(home), "omo-cli-test.json") }
 }
 
+function supportsFifo(): boolean {
+  if (process.platform === "win32") return false
+  const dir = mkdtempSync(join(tmpdir(), "omo-fifo-probe-"))
+  try {
+    return spawnSync("mkfifo", [join(dir, "pipe")]).status === 0
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 describe.skipIf(process.platform === "win32")("the Linux sign-in state file (#7185b)", () => {
   test("#given a wide umask #when a sign-in is written #then the dir is 0700 and the file 0600", async () => {
     const home = await temporaryHome()
@@ -44,6 +56,20 @@ describe.skipIf(process.platform === "win32")("the Linux sign-in state file (#71
     expect((await stat(dir)).mode & 0o777).toBe(0o700)
     expect((await stat(file)).mode & 0o777).toBe(0o600)
     expect(await store.read()).toEqual(secret)
+  })
+
+  test("direct file creation preserves owner permissions under restrictive umask", async () => {
+    const home = await temporaryHome()
+    const { dir, file } = await fileStore(home)
+    await mkdir(join(home, ".omo"), { recursive: true })
+    const mask = process.umask(0o777)
+    try {
+      await writeStateFile(dir, "omo-cli-test.json", "synthetic", uid)
+    } finally {
+      process.umask(mask)
+    }
+    expect((await stat(dir)).mode & 0o777).toBe(0o700)
+    expect((await stat(file)).mode & 0o777).toBe(0o600)
   })
 
   test("#when a write replaces the file #then no temp file is left beside it", async () => {
@@ -83,17 +109,41 @@ describe.skipIf(process.platform === "win32")("the Linux sign-in state file (#71
     expect(await readFile(target, "utf8")).toBe(JSON.stringify(secret))
   })
 
-  test.skipIf(spawnSync("mkfifo", ["--version"]).status !== 0)(
-    "#given a FIFO in the file's place #then it is refused without blocking",
-    async () => {
-      const home = await temporaryHome()
-      const { store, dir, file, lines } = await fileStore(home)
-      await mkdir(dir, { recursive: true, mode: 0o700 })
-      expect(spawnSync("mkfifo", ["-m", "600", file]).status).toBe(0)
-      expect(await store.read()).toBeNull()
-      expect(lines[0]).toContain("not-a-file")
-    },
-  )
+  test("clear syncs its directory after unlink", async () => {
+    const home = await temporaryHome(),
+      { store, dir, file } = await fileStore(home)
+    await store.write(secret)
+    const handle = await open(dir, "r"),
+      proto: typeof handle = Object.getPrototypeOf(handle)
+    const sync = proto.sync
+    let synced = false
+    const expected = await handle.stat()
+    const spy = spyOn(proto, "sync").mockImplementation(async function (this: typeof handle) {
+      const st = await this.stat()
+      if (st.dev === expected.dev && st.ino === expected.ino)
+        synced = await lstat(file).then(
+          () => false,
+          (err: NodeJS.ErrnoException) => err.code === "ENOENT",
+        )
+      await sync.call(this)
+    })
+    try {
+      await store.clear()
+      expect(synced).toBe(true)
+    } finally {
+      spy.mockRestore()
+      await handle.close()
+    }
+  })
+
+  test.skipIf(!supportsFifo())("#given a FIFO in the file's place #then it is refused without blocking", async () => {
+    const home = await temporaryHome()
+    const { store, dir, file, lines } = await fileStore(home)
+    await mkdir(dir, { recursive: true, mode: 0o700 })
+    expect(spawnSync("mkfifo", ["-m", "600", file]).status).toBe(0)
+    expect(await store.read()).toBeNull()
+    expect(lines[0]).toContain("not-a-file")
+  })
 
   test("#given an open directory #then a read is refused and a write writes nothing", async () => {
     const home = await temporaryHome()

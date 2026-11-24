@@ -11,6 +11,7 @@ import {
 } from "./keychain-helper/darwin-backend"
 import { HelperItemNotOwned, HelperOldSlotsFull, type WriteIntent } from "./keychain-helper/darwin-store"
 import { bindKeychainHelper, type LockedStore, lockedStoreView } from "./keychain-helper/store-binding"
+import { readUnlockedSecret } from "./unlocked-secret-read"
 import { probeSecretServiceLock, type SecretServiceLockProbe } from "./secret-service-lock"
 import { heldCredentialLease, withCredentialLock } from "./credential-lock"
 import { type KeyringRelation, type OpenKeyringState, lockedLinuxSelection, routeLinuxStore } from "./linux-store-route"
@@ -334,6 +335,11 @@ export function createSealedStore<T>(
     pending: (message) => new KeychainApprovalPendingError(message),
     ...(keychainHelper === undefined ? {} : { options: keychainHelper }),
   })
+  const nativeLinux =
+    platform === "linux" &&
+    typeof Bun !== "undefined" &&
+    secrets === Bun.secrets &&
+    !(Symbol.for("omo.test.injectedSecrets") in secrets)
   secrets = helper.secrets
   const readsOf = (api: SecretApi): Map<string, Promise<string | null>> => {
     const known = processReads.get(api)
@@ -488,13 +494,11 @@ export function createSealedStore<T>(
     writeKeyring,
     notice,
     ...(home === undefined ? {} : { home }),
+    readiness: () => answered(secrets, false, `${slot}:relation`).then(() => undefined),
     async relation(text) {
       let stored: string | null
       try {
-        const relationSlot = `${slot}:relation`
-        // A previous lease may still be waiting for native approval. Its result predates this lock.
-        if (readsOf(secrets).has(relationSlot)) await answered(secrets, false, relationSlot)
-        stored = await answered(secrets, false, relationSlot)
+        stored = nativeLinux ? await readUnlockedSecret(key) : await answered(secrets, true)
       } catch (error) {
         throw error instanceof CredentialStoreError ? error : unavailable(error)
       }
@@ -509,7 +513,7 @@ export function createSealedStore<T>(
     async moveToKeyring(text) {
       try {
         await secrets.set({ ...key, value: text })
-        if ((await answered(secrets, true)) !== text)
+        if ((nativeLinux ? await readUnlockedSecret(key) : await answered(secrets, true)) !== text)
           throw new CredentialStoreError(
             `${platformName} did not return the sign-in it was given; it stays in the private file until it does.`,
           )

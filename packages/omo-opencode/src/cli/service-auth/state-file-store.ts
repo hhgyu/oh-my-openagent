@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import { constants, type Stats } from "node:fs"
-import { lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises"
-import { join } from "node:path"
+import { chmod, lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises"
+import { dirname, join } from "node:path"
 import { accountHome } from "./account-home"
 import { withCredentialLock } from "./credential-lock"
 import type { SealedStore } from "./keystore"
@@ -105,18 +105,31 @@ async function removeTempLeftovers(dir: string, name: string): Promise<void> {
     if (entry.startsWith(`.${name}.`) && entry.endsWith(".tmp")) await rm(join(dir, entry), { force: true })
 }
 
+async function mkdirPrivate(dir: string): Promise<void> {
+  try {
+    await mkdir(dir, { mode: 0o700 })
+  } catch (error) {
+    if (errnoCode(error) === "EEXIST") return
+    if (errnoCode(error) !== "ENOENT") throw error
+    await mkdirPrivate(dirname(dir))
+    return mkdirPrivate(dir)
+  }
+  await chmod(dir, 0o700)
+}
+
 /**
  * Replaces the file atomically: a temp file created 0600 (never wider, whatever the umask) in the same private dir,
  * written and synced, then renamed over the old one, then the dir synced. A refused dir is never written to.
  */
 export async function writeStateFile(dir: string, name: string, contents: string, uid: number): Promise<void> {
-  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await mkdirPrivate(dir)
   await checkDir(dir, uid)
   await removeTempLeftovers(dir, name)
   const temp = join(dir, `.${name}.${randomBytes(8).toString("hex")}.tmp`)
   try {
     const handle = await open(temp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
     try {
+      await handle.chmod(0o600)
       await handle.writeFile(contents, "utf8")
       await handle.sync()
     } finally {
@@ -128,9 +141,15 @@ export async function writeStateFile(dir: string, name: string, contents: string
     throw error
   }
   // The rename is durable only once the directory entry is; a filesystem that cannot sync a directory still renamed.
-  const directory = await open(dir, O_RDONLY | O_DIRECTORY)
+  await syncDirectory(dir)
+}
+
+async function syncDirectory(dir: string): Promise<void> {
+  const directory = await open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
   try {
-    await directory.sync().catch(() => undefined)
+    await directory.sync().catch((error: unknown) => {
+      if (!["EINVAL", "ENOTSUP", "EOPNOTSUPP"].includes(errnoCode(error) ?? "")) throw error
+    })
   } finally {
     await directory.close()
   }
@@ -140,6 +159,7 @@ export async function writeStateFile(dir: string, name: string, contents: string
 async function removeStateFile(dir: string, name: string): Promise<void> {
   await removeTempLeftovers(dir, name)
   await rm(join(dir, name), { force: true })
+  await syncDirectory(dir)
 }
 
 export type StateFileStore<T> = SealedStore<T> & {

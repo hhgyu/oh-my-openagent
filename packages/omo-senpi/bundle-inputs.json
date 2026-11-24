@@ -933,6 +933,7 @@
     "packages/omo-opencode/src/cli/service-auth/sync-account/index.ts",
     "packages/omo-opencode/src/cli/service-auth/sync-pin-retire.ts",
     "packages/omo-opencode/src/cli/service-auth/terminal-text.ts",
+    "packages/omo-opencode/src/cli/service-auth/unlocked-secret-read.ts",
     "packages/omo-opencode/src/config-migration/category-deep-split.ts",
     "packages/omo-opencode/src/config-migration/deep-diff.ts",
     "packages/omo-opencode/src/config-migration/discovery-paths.ts",

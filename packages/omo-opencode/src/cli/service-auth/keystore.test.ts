@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test"
+import { heldCredentialLease } from "./credential-lock"
 import { randomUUID } from "node:crypto"
-import { lstat, readFile, stat } from "node:fs/promises"
+import { chmod, lstat, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import {
   createCredentialStore,
@@ -489,4 +490,44 @@ describe("Linux with no Secret Service keeps the shared sign-in in a private sta
       stderr.mockRestore()
     }
   })
+  stateFileTest("migration's approval-capable lookup starts outside the credential lock", async () => {
+    const home = await temporaryHome()
+    await linuxStore(home, null, "absent").write(record)
+    const mem = memorySecrets()
+    const contexts: boolean[] = []
+    const store = linuxStore(
+      home,
+      {
+        ...mem.api,
+        get: async (key) => {
+          contexts.push(heldCredentialLease(api, home) !== undefined)
+          return mem.api.get(key)
+        },
+      },
+      "unlocked",
+    )
+    expect(await store.read()).toMatchObject(record)
+    expect(contexts[0]).toBe(false)
+    expect(contexts).toContain(true)
+  })
+  test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "verified migration uses the keyring when the private directory refuses unlink",
+    async () => {
+      const home = await temporaryHome()
+      await linuxStore(home, null, "absent").write(record)
+      const dir = join(home, ".omo", "account-state")
+      await chmod(dir, 0o500)
+      const mem = memorySecrets(),
+        notices: string[] = []
+      try {
+        const store = linuxStore(home, mem.api, "unlocked", notices)
+        expect(await store.read()).toMatchObject(record)
+        expect(store.storage?.()).toBe("keyring")
+        expect(await missing(stateFile(home))).toBe(false)
+        expect(notices.join(" ")).toContain("could not remove")
+      } finally {
+        await chmod(dir, 0o700)
+      }
+    },
+  )
 })

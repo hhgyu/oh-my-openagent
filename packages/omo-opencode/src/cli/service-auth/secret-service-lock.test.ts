@@ -14,6 +14,7 @@ state = {"locked": mode != "unlocked"}
 COLLECTION = "/org/freedesktop/secrets/aliases/default"
 xml = """<node><interface name="org.freedesktop.Secret.Collection"><property name="Locked" type="b" access="read"/></interface>
 <interface name="org.freedesktop.Secret.Service"><method name="Unlock"><arg name="objects" type="ao" direction="in"/><arg name="unlocked" type="ao" direction="out"/><arg name="prompt" type="o" direction="out"/></method></interface></node>"""
+xml = xml.replace('<method name="Unlock">','''<method name="SearchItems"><arg type="a{ss}" direction="in"/><arg type="ao" direction="out"/><arg type="ao" direction="out"/></method><method name="OpenSession"><arg type="s" direction="in"/><arg type="v" direction="in"/><arg type="v" direction="out"/><arg type="o" direction="out"/></method><method name="Unlock">''').replace('</node>', '''<interface name="org.freedesktop.Secret.Item"><method name="GetSecret"><arg type="o" direction="in"/><arg type="(oayays)" direction="out"/></method></interface></node>''')
 node = Gio.DBusNodeInfo.new_for_xml(xml)
 def get_property(conn, sender, path, iface, name):
     return GLib.Variant("b", state["locked"])
@@ -27,6 +28,17 @@ REPLIES = {
     "locked": ([], "/org/freedesktop/secrets/prompt/u1", False),
 }
 def unlock(conn, sender, path, iface, method, params, invocation):
+    if method == 'SearchItems':
+        expected = {'service':'omo-cli','account':'synthetic','xdg:schema':'com.oven-sh.bun.Secret'}
+        assert params.unpack()[0] == expected
+        invocation.return_value(GLib.Variant('(aoao)', (['/item'],[])))
+        return
+    if method == 'OpenSession':
+        invocation.return_value(GLib.Variant('(vo)', (GLib.Variant('s',''),'/session')))
+        return
+    if method == 'GetSecret':
+        invocation.return_value(GLib.Variant('((oayays))', (('/session',[],list(b'synthetic-value'),'text/plain'),)))
+        return
     if mode == "error":
         invocation.return_dbus_error("org.freedesktop.Secret.Error.NoSuchObject", "no such collection")
         return
@@ -35,6 +47,7 @@ def unlock(conn, sender, path, iface, method, params, invocation):
         state["locked"] = False
     invocation.return_value(GLib.Variant("(aoo)", (unlocked, prompt)))
 def on_bus(conn, name):
+    conn.register_object("/item", node.interfaces[2], unlock, None, None)
     conn.register_object("/org/freedesktop/secrets", node.interfaces[1], unlock, None, None)
     if mode != "no-default-collection":
         conn.register_object(COLLECTION, node.interfaces[0], None, get_property, None)
@@ -153,7 +166,8 @@ describe.skipIf(!canRun)(
   "probeSecretServiceLock against a fake Secret Service on a private D-Bus (desktop#3509)",
   () => {
     const probeIn = (
-      fake: "locked" | "resolved" | "raced" | "stuck" | "error" | "unlocked" | "none" | "no-default-collection",
+      fake:
+        "lookup" | "locked" | "resolved" | "raced" | "stuck" | "error" | "unlocked" | "none" | "no-default-collection",
     ): string => {
       const dir = mkdtempSync(join(tmpdir(), "omo-secret-service-"))
       try {
@@ -165,19 +179,17 @@ describe.skipIf(!canRun)(
         mkdirSync(services, { recursive: true })
         writeFileSync(join(services, "org.freedesktop.secrets.service"), HANGING_SECRET_SERVICE)
         const probeModule = join(import.meta.dir, "secret-service-lock.ts")
+        const command =
+          fake === "lookup"
+            ? `const {readUnlockedSecret} = await import(${JSON.stringify(join(import.meta.dir, "unlocked-secret-read.ts"))}); console.log(await readUnlockedSecret({service:"omo-cli", name:"synthetic"}))`
+            : `const { probeSecretServiceLock } = await import(${JSON.stringify(probeModule)}); console.log(await probeSecretServiceLock())`
         const start =
           fake === "none"
             ? ""
             : `python3 ${JSON.stringify(fakePath)} ${fake} > "$D/ready" & until grep -q READY "$D/ready" 2>/dev/null; do :; done;`
         const run = spawnSync(
           "dbus-run-session",
-          [
-            `--config-file=${busConfig}`,
-            "--",
-            "bash",
-            "-c",
-            `D=${JSON.stringify(dir)}; ${start} bun -e 'const { probeSecretServiceLock } = await import(${JSON.stringify(probeModule)}); console.log(await probeSecretServiceLock())'`,
-          ],
+          [`--config-file=${busConfig}`, "--", "bash", "-c", `D=${JSON.stringify(dir)}; ${start} bun -e '${command}'`],
           { encoding: "utf8", timeout: 20_000, env: { ...process.env, XDG_DATA_HOME: join(dir, "data") } },
         )
         return run.stdout.trim().split("\n").at(-1) ?? ""
@@ -185,6 +197,10 @@ describe.skipIf(!canRun)(
         rmSync(dir, { recursive: true, force: true })
       }
     }
+
+    test("reads an unlocked synthetic item without Unlock or Prompt", () => {
+      expect(probeIn("lookup")).toBe("synthetic-value")
+    })
 
     // #14039: a locked collection is asked to Unlock; only a finished unlock (prompt "/") followed by Locked=false counts.
     test.each([

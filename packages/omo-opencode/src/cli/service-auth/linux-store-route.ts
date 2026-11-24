@@ -1,6 +1,6 @@
 import type { LockedStore } from "./keychain-helper/store-binding"
 import { accountHome } from "./account-home"
-import { withCredentialLock } from "./credential-lock"
+import { heldCredentialLease, withCredentialLock } from "./credential-lock"
 import { CredentialStoreError, InvalidCredentialState, type CredentialStorage, type SealedStore } from "./keystore"
 import type { StateFileStore } from "./state-file-store"
 
@@ -31,6 +31,7 @@ export function routeLinuxStore<T>(input: {
   readonly probe: () => Promise<OpenKeyringState>
   readonly keyringText: () => Promise<string | null>
   readonly parse: (text: string) => T
+  readonly readiness: () => Promise<void>
   readonly relation: (text: string) => Promise<KeyringRelation>
   /** Writes the stored text to the keyring and reads it back; throws, keeping the file, when either step fails. */
   readonly moveToKeyring: (text: string) => Promise<void>
@@ -49,7 +50,16 @@ export function routeLinuxStore<T>(input: {
       const relation = await input.relation(text)
       if (relation === "empty" || relation === "older") {
         await input.moveToKeyring(text)
-        if (!keepSource) await file.clear()
+        if (!keepSource) {
+          try {
+            await file.clear()
+          } catch {
+            notice(
+              `omo: the sign-in was verified in the keyring, but OmO could not remove the private file in ${file.directory()}.`,
+              "migration",
+            )
+          }
+        }
         return
       }
       if (keptNoticed) return
@@ -64,6 +74,7 @@ export function routeLinuxStore<T>(input: {
     if (answer === "absent") return "file"
     if (await file.present()) {
       if (answer === "unknown") return "file"
+      if (!heldCredentialLease(input.api, input.home)) await input.readiness()
       await migrate(keepSource)
       return "keyring"
     }
@@ -115,6 +126,9 @@ export function routeLinuxStore<T>(input: {
     )
   }
   return {
+    prepare: async () => {
+      if ((await file.present()) && (await input.probe()) === "unlocked") await input.readiness()
+    },
     read: async () => (await target()).read(),
     readAuthoritative: async () => (await target()).readAuthoritative(),
     write: async (value) => {
