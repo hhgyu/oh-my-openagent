@@ -346,7 +346,14 @@ try {
       : "fail",
     `${errorCode(rejectedMax)} engineModel=${afterRefusal.model?.id} engineThinking=${afterRefusal.thinkingLevel}`,
   )
-  await call(tools, "thread_set_model", { thread: threadA, model: "mock/mock-model-fast", all_scope: true })
+  const reset = await call(tools, "thread_set_model", {
+    thread: threadA,
+    model: "mock/mock-model-fast",
+    all_scope: true,
+  })
+  const resetState = await surface.getState(routingA)
+  if (reset.kind !== "ok" || resetState.model?.id !== "mock-model-fast")
+    throw new Error("Failed to restore mock-model-fast before reasoning checks")
 
   // 8. a level the active model DOES support is accepted and echoed with its scope
   if (supported === undefined || supported.length === 0) {

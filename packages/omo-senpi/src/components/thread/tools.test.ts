@@ -474,6 +474,22 @@ describe("thread session controls", () => {
     expect((await f.getState()).model).toEqual({ provider: "openai", id: "gpt-previous" })
   })
 
+  test("a lost restore acknowledgement preserves the level refusal when readback confirms restoration", async () => {
+    const f = fixture()
+    const original = f.setModel.getMockImplementation()
+    if (!original) throw new Error("Missing fixture setModel")
+    f.setModel.mockImplementation(async (...args) => {
+      const result = await original(...args)
+      if (args[2] === "gpt-previous") throw new Error("Restore acknowledgement lost")
+      return result
+    })
+    f.setThinkingLevel.mockRejectedValue(new Error("thinking_level_unsupported:unsupported"))
+    expect(await runner(f)("thread_set_model", { thread: "peer", model: "openai/gpt-x:max" })).toMatchObject({
+      kind: "error",
+      error: { code: "thinking_level_unsupported" },
+    })
+  })
+
   test("#14445: set_model reports a partial commit when the previous model cannot be restored", async () => {
     const f = fixture()
     const setModel = f.setModel.getMockImplementation()

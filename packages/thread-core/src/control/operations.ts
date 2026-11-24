@@ -241,6 +241,9 @@ async function restoreModelState(
         return partial("restore_unconfirmed")
     }
   } catch (error) {
+    const restored = await control.getModelState().catch(() => undefined)
+    if (restored && sameModel(restored.model, previous.model) && restored.thinkingLevel === previous.thinkingLevel)
+      return
     return partial(error)
   }
 }
