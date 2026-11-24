@@ -24,12 +24,14 @@ export function retireSyncPinOnDiscard(options: {
       return false
     }
   }
+  const guidance =
+    "If it belongs to this sign-in's account, clear it with `omo account retire-sync --account <id>`. Do not retire the pin of an account that is still signed in here, such as the desktop's."
   const hook = async (discarded: DiscardedCredential) => {
     if (discarded.kind === "unreadable") {
       // Nothing is left in place when this machine holds no live pin, so nothing is reported.
       if (await livePin())
         options.log(
-          "memory sync: a stored sign-in could not be read when its keys were discarded; its sync pin was left in place",
+          `memory sync: a stored sign-in could not be read when its keys were discarded; its sync pin was left in place. ${guidance}`,
         )
       return
     }
@@ -40,9 +42,7 @@ export function retireSyncPinOnDiscard(options: {
       // clear it, since `omo account show` keeps answering `joined` for it (#13662). The live pin may as well belong to
       // another account still signed in here (the desktop's), which only the user can tell apart, so the line says so.
       if (await livePin())
-        options.log(
-          "memory sync: the account of this sign-in is unknown, so a sync pin was kept; if it belongs to this sign-in's account, clear it with `omo account retire-sync --account <id>`. Do not retire the pin of an account that is still signed in here, such as the desktop's.",
-        )
+        options.log(`memory sync: the account of this sign-in is unknown, so a sync pin was kept. ${guidance}`)
       return
     }
     try {

@@ -127,14 +127,17 @@ export function createSession(options: {
   const markerPath = signedOutMarkerPath(options.home ?? homedir(), credentialId(api))
   // Any approval dialog happens in prepare(), before the lock: no access dialog is ever open while it is held. Inside,
   // every section first converges an interrupted migration (#11262 design 3.2, 3.4); a nested section reuses the outer one.
-  async function locked<T>(action: (view: LockedStore<Credentials> | null) => Promise<T>): Promise<T> {
+  async function locked<T>(
+    action: (view: LockedStore<Credentials> | null) => Promise<T>,
+    keepMigrationSource = false,
+  ): Promise<T> {
     signal?.throwIfAborted()
     if (heldCredentialLease(api, options.home) === undefined) await store.prepare?.()
     return withCredentialLock(
       api,
       async (lease) => {
         signal?.throwIfAborted()
-        return action((await store.underLock?.(lease)) ?? null)
+        return action((await store.underLock?.(lease, keepMigrationSource)) ?? null)
       },
       options.home,
     )
@@ -357,7 +360,7 @@ export function createSession(options: {
     clearSignedOutMarker: () => clearSignedOutMarker(markerPath),
     async update<T>(
       action: (current: Credentials | null) => Promise<T>,
-      options: { readonly replaceInvalid?: boolean } = {},
+      options: { readonly replaceInvalid?: boolean; readonly removing?: boolean } = {},
     ): Promise<T> {
       return locked(async () => {
         let current: Credentials | null
@@ -369,7 +372,7 @@ export function createSession(options: {
           current = null
         }
         return action(current)
-      })
+      }, options.removing)
     },
     /** The hook for a principal a caller discards inside `update` (`omo account forget --device`, `adopt --replace`). */
     discard,
@@ -391,7 +394,7 @@ export function createSession(options: {
         }
         await store.clear()
         if (current !== null) await discard(current, "forget")
-      })
+      }, true)
       await deviceService?.forget()
     },
     accessSnapshot: snapshot,
@@ -438,7 +441,7 @@ export function createSession(options: {
                 ),
               )
           }
-        })
+        }, true)
       } finally {
         await deviceService?.forget()
       }

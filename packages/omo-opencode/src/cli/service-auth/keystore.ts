@@ -38,7 +38,7 @@ export type SealedStore<T> = {
   /** Before the session lock: settles any approval, so no access dialog is ever open while the lock is held. */
   readonly prepare?: () => Promise<void>
   /** The helper's view for this locked section (recovered first), or null when this store has no helper. */
-  readonly underLock?: (lease: HelperLease) => Promise<LockedStore<T> | null>
+  readonly underLock?: (lease: HelperLease, keepMigrationSource?: boolean) => Promise<LockedStore<T> | null>
   /** True while the last read came from an item the helper does not own yet: the token path then takes the lock once. */
   readonly migrationPending?: () => Promise<boolean>
   /** Where the last operation found or put the sign-in. */
@@ -92,10 +92,15 @@ const LOCKED = /-25308|errSecInteractionNotAllowed|interaction is not allowed|lo
 const UNLOCKED_REUSE_MS = 30_000
 // The stderr fallback notice is once per PROCESS: a command (or a host) may build several stores. The flag lives
 // in the printing notice so a quiet store (a host under a TUI) can never use up the person's one notice.
-let fallbackNoticed = false
-const stderrNoticeOncePerProcess = (message: string): void => {
-  if (fallbackNoticed) return
-  fallbackNoticed = true
+const reportedNotices = new Set<"probe" | "file" | "migration">()
+const stderrNoticeOncePerProcess = (
+  message: string,
+  purpose: "probe" | "file" | "migration" | "retained" = "probe",
+): void => {
+  if (purpose !== "retained") {
+    if (reportedNotices.has(purpose)) return
+    reportedNotices.add(purpose)
+  }
   process.stderr.write(`${message}\n`)
 }
 export const quietNotice = (_message: string): void => {}
@@ -180,11 +185,11 @@ export function createCredentialStore(
   )
   // One helper view per locked section, shared by every call in it and recovered once at its start (design 3.4, 3.6).
   const sections = new WeakMap<HelperLease, Promise<LockedStore<Credentials> | null>>()
-  const underLock = (lease: HelperLease): Promise<LockedStore<Credentials> | null> => {
+  const underLock = (lease: HelperLease, keepMigrationSource = false): Promise<LockedStore<Credentials> | null> => {
     const known = sections.get(lease)
     if (known !== undefined) return known
     const view = (async () => {
-      const opened = (await store.underLock?.(lease)) ?? null
+      const opened = (await store.underLock?.(lease, keepMigrationSource)) ?? null
       await opened?.recover()
       return opened
     })()
@@ -198,12 +203,13 @@ export function createCredentialStore(
   const locked = async (
     helper: (view: LockedStore<Credentials>) => Promise<void>,
     plain: () => Promise<void>,
+    keepMigrationSource = false,
   ): Promise<void> => {
     if (heldCredentialLease(api, options.home) === undefined) await store.prepare?.()
     await withCredentialLock(
       api,
       async (lease) => {
-        const view = await underLock(lease)
+        const view = await underLock(lease, keepMigrationSource)
         await (view === null ? plain() : helper(view))
       },
       options.home,
@@ -224,7 +230,7 @@ export function createCredentialStore(
         (view) => view.write(value, intent, beforeRetire),
         () => store.write(value),
       ),
-    clear: () => locked((view) => view.clear(), store.clear),
+    clear: () => locked((view) => view.clear(), store.clear, true),
     ...(store.prepare === undefined ? {} : { prepare: store.prepare }),
     underLock,
     ...(store.migrationPending === undefined ? {} : { migrationPending: store.migrationPending }),
@@ -239,7 +245,7 @@ export function createSealedStore<T>(
   secrets: SecretApi | null = typeof Bun === "undefined" ? null : Bun.secrets,
   platform: NodeJS.Platform = process.platform,
   lockProbe: SecretServiceLockProbe = probeSecretServiceLock,
-  notice: (message: string) => void = stderrNoticeOncePerProcess,
+  notice: typeof stderrNoticeOncePerProcess = stderrNoticeOncePerProcess,
   wait: CredentialReadWait = SESSION_READ_WAIT,
   amendWrite?: (previous: T | null, next: T) => T,
   keychainHelper?: KeychainHelperOptions,
@@ -338,7 +344,6 @@ export function createSealedStore<T>(
   }
   const forget = (api: SecretApi) => {
     readsOf(api).delete(slot)
-    readsOf(api).delete(`${slot}:relation`)
   }
   const sharedRead = (api: SecretApi, readSlot = slot): Promise<string | null> => {
     const reads = readsOf(api)
@@ -486,7 +491,10 @@ export function createSealedStore<T>(
     async relation(text) {
       let stored: string | null
       try {
-        stored = await answered(secrets, false, `${slot}:relation`)
+        const relationSlot = `${slot}:relation`
+        // A previous lease may still be waiting for native approval. Its result predates this lock.
+        if (readsOf(secrets).has(relationSlot)) await answered(secrets, false, relationSlot)
+        stored = await answered(secrets, false, relationSlot)
       } catch (error) {
         throw error instanceof CredentialStoreError ? error : unavailable(error)
       }

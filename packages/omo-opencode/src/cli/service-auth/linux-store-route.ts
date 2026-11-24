@@ -35,35 +35,36 @@ export function routeLinuxStore<T>(input: {
   /** Writes the stored text to the keyring and reads it back; throws, keeping the file, when either step fails. */
   readonly moveToKeyring: (text: string) => Promise<void>
   readonly writeKeyring: (value: T) => Promise<string>
-  readonly notice: (message: string) => void
+  readonly notice: (message: string, purpose?: "probe" | "file" | "migration" | "retained") => void
 }): SealedStore<T> {
   const { keyring, file, notice } = input
   let storage: CredentialStorage = "keyring"
   let libsecretNoticed = false
   let keptNoticed = false
   const underLock = (action: () => Promise<void>) => withCredentialLock(input.api, action, input.home ?? accountHome())
-  const migrate = () =>
+  const migrate = (keepSource: boolean) =>
     underLock(async () => {
       const text = await file.text()
       if (text === null) return
       const relation = await input.relation(text)
       if (relation === "empty" || relation === "older") {
         await input.moveToKeyring(text)
-        await file.clear()
+        if (!keepSource) await file.clear()
         return
       }
       if (keptNoticed) return
       keptNoticed = true
       notice(
         `omo: the keyring already holds ${relation === "newer" ? "a newer copy of this" : "another"} OmO sign-in, which stays in use; the private sign-in file in ${file.directory()} is left as it is.`,
+        "migration",
       )
     })
-  const choose = async (): Promise<CredentialStorage> => {
+  const choose = async (keepSource: boolean): Promise<CredentialStorage> => {
     const answer = await input.probe()
     if (answer === "absent") return "file"
     if (await file.present()) {
       if (answer === "unknown") return "file"
-      await migrate()
+      await migrate(keepSource)
       return "keyring"
     }
     if (answer === "unknown" && !libsecretNoticed) {
@@ -72,28 +73,34 @@ export function routeLinuxStore<T>(input: {
     }
     return "keyring"
   }
-  const target = async (): Promise<SealedStore<T>> => {
-    storage = await choose()
+  const target = async (keepSource = false): Promise<SealedStore<T>> => {
+    storage = await choose(keepSource)
     return storage === "file" ? file : keyring
   }
   const writeTo = async (store: SealedStore<T>, value: T) => {
     if (store === file)
       notice(
         `omo: An unlocked keyring could not be confirmed; OmO keeps this sign-in in a private file in ${file.directory()}, readable only by you. Start a keyring to keep it there instead.`,
+        "file",
       )
     return store === file ? file.writeReturningText(value) : input.writeKeyring(value)
   }
   const clearFrom = async (store: SealedStore<T>) => {
-    if (store === keyring) {
-      const text = await file.text()
-      if (text !== null) {
-        const relation = await input.relation(text)
-        if (relation === "older" || relation === "newer") await file.clear()
+    if (store !== keyring) return store.clear()
+    const candidate = await file.snapshot()
+    const relation = candidate === null ? null : await input.relation(candidate.text)
+    await keyring.clear()
+    if (candidate === null) return
+    if (relation === "older" || relation === "newer") {
+      try {
+        if ((await file.snapshot())?.version !== candidate.version) throw new Error("changed file")
+        await file.clear()
+      } catch {
+        throw new CredentialStoreError(
+          "The keyring sign-in was removed, but removal of the private sign-in file could not be confirmed.",
+        )
       }
-    }
-    await store.clear()
-    if (store === keyring && (await file.present()))
-      notice(`omo: the separate private sign-in file in ${file.directory()} was kept.`)
+    } else notice(`omo: the separate private sign-in file in ${file.directory()} was kept.`, "retained")
   }
   return {
     read: async () => (await target()).read(),
@@ -101,9 +108,9 @@ export function routeLinuxStore<T>(input: {
     write: async (value) => {
       await writeTo(await target(), value)
     },
-    clear: async () => clearFrom(await target()),
-    async underLock() {
-      const selected = await target()
+    clear: async () => clearFrom(await target(true)),
+    async underLock(_lease, keepMigrationSource) {
+      const selected = await target(keepMigrationSource)
       return lockedLinuxSelection({
         store: selected,
         parse: input.parse,

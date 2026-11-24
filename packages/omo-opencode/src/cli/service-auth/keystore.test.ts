@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { randomUUID } from "node:crypto"
 import { lstat, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
@@ -433,5 +433,60 @@ describe("Linux with no Secret Service keeps the shared sign-in in a private sta
     await expect(store.read()).rejects.toThrow()
     await expect(store.read()).rejects.toThrow()
     expect(reads).toBe(1)
+  })
+  stateFileTest("a parked read from a previous migration cannot replace an intervening sign-in", async () => {
+    const home = await temporaryHome()
+    await linuxStore(home, null, "absent").write(record)
+    const file = await readFile(stateFile(home), "utf8")
+    const mem = memorySecrets()
+    const pending = Promise.withResolvers<string | null>()
+    const joined = Promise.withResolvers<void>()
+    let reads = 0
+    const secrets = {
+      ...mem.api,
+      get: (key: Parameters<SecretApi["get"]>[0]) => (++reads === 1 ? pending.promise : mem.api.get(key)),
+    }
+    const opts = {
+      home,
+      platform: "linux" as const,
+      lockProbe: async () => "unlocked" as const,
+      secrets,
+      notice: () => {},
+    }
+    await expect(
+      createCredentialStore(api, { ...opts, wait: { kind: "bounded", deadlineMs: 10 } }).read(),
+    ).rejects.toThrow()
+    const replacement = JSON.stringify(otherRecord)
+    await mem.api.set({ service: "omo-cli", name: credentialId(api), value: replacement })
+    const retry = createCredentialStore(api, {
+      ...opts,
+      wait: { kind: "interactive", noticeAfterMs: 5, notice: () => joined.resolve() },
+    }).read()
+    await joined.promise
+    pending.resolve(null)
+    expect(await retry).toMatchObject(otherRecord)
+    expect([...mem.values.values()]).toEqual([replacement])
+    expect(await readFile(stateFile(home), "utf8")).toBe(file)
+  })
+  stateFileTest("production stderr reports the retained separate file at sign-out", async () => {
+    const home = await temporaryHome()
+    const mem = memorySecrets()
+    await linuxStore(home, null, "absent").write(otherRecord)
+    await linuxStore(await temporaryHome(), mem.api, "unlocked").write(record)
+    const stderr = spyOn(process.stderr, "write").mockReturnValue(true)
+    try {
+      const store = createCredentialStore(api, {
+        home,
+        platform: "linux",
+        secrets: mem.api,
+        lockProbe: async () => "unlocked",
+      })
+      await store.read()
+      stderr.mockClear()
+      await store.clear()
+      expect(stderr.mock.calls.flat().join("")).toContain("was kept")
+    } finally {
+      stderr.mockRestore()
+    }
   })
 })

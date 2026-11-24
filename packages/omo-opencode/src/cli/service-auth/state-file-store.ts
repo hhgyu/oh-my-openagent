@@ -214,7 +214,15 @@ export function createStateFileStore<T>(input: {
         throw failed("read", error)
       }
     },
-    present: async () => (await lstat(join(directory(), name)).catch(() => null)) !== null,
+    present: async () => {
+      try {
+        await lstat(join(directory(), name))
+        return true
+      } catch (error) {
+        if (errnoCode(error) === "ENOENT") return false
+        throw failed("inspect", error)
+      }
+    },
     writeReturningText,
     write: async (value) => {
       await writeReturningText(value)

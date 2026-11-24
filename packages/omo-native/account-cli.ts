@@ -162,18 +162,21 @@ async function runVerb(dependencies: AccountCommandDependencies, args: readonly 
         }
         try {
           let forgotten = false
-          const code = await session.update(async (current) => {
-            if (current !== null && current.device.id !== device) {
-              dependencies.error(
-                `omo account forget --device acts on this device only; sign out device ${device} with omo account devices revoke ${device}`,
-              )
-              return reply(dependencies, { forgotten: false, device: deviceOf(current) }, ACCOUNT_EXIT.conflict)
-            }
-            await dependencies.store.clear()
-            if (current !== null) await session.discard(current, "forget")
-            forgotten = true
-            return reply(dependencies, { forgotten: true })
-          })
+          const code = await session.update(
+            async (current) => {
+              if (current !== null && current.device.id !== device) {
+                dependencies.error(
+                  `omo account forget --device acts on this device only; sign out device ${device} with omo account devices revoke ${device}`,
+                )
+                return reply(dependencies, { forgotten: false, device: deviceOf(current) }, ACCOUNT_EXIT.conflict)
+              }
+              await dependencies.store.clear()
+              if (current !== null) await session.discard(current, "forget")
+              forgotten = true
+              return reply(dependencies, { forgotten: true })
+            },
+            { removing: true },
+          )
           if (forgotten) await dependencies.deviceService?.forget()
           return code
         } catch (error) {

@@ -246,6 +246,8 @@ describe("the credential write seam retires the sync pin (#12280)", () => {
     expect(s.current()).toBeNull()
     expect(await h.pins()).toEqual({ live: 1, retired: 0 })
     expect(h.logs).toHaveLength(1)
+    expect(h.logs[0]).toContain("omo account retire-sync --account <id>")
+    expect(h.logs[0]).toContain("still signed in")
   })
 
   // #13642 review (b088286) L1: the account lookup runs under the credential lock, so it gets the fix-up's short budget;
@@ -419,3 +421,35 @@ test("a refused deletion preserves the readable account's live pin", async () =>
   ).rejects.toThrow("delete refused")
   expect(await h.pins()).toEqual({ live: 1, retired: 0 })
 })
+
+for (const copy of ["identical", "newer"] as const)
+  test.skipIf(process.platform === "win32")(
+    `failed deletion of an ${copy} keyring copy retains both credentials and the live pin`,
+    async () => {
+      const h = await pinnedHome()
+      const api = "https://example.invalid"
+      const mem = memorySecrets()
+      const opts = { home: h.home, platform: "linux" as const, notice: () => {} }
+      const file = createCredentialStore(api, { ...opts, secrets: null })
+      await file.write(stored)
+      const before = await file.read()
+      const ring = JSON.stringify(
+        copy === "identical" ? before : { ...before, accessTokenExpiresAt: "2100-01-01T00:00:00Z" },
+      )
+      await mem.api.set({ service: "omo-cli", name: credentialId(api), value: ring })
+      const store = createCredentialStore(api, {
+        ...opts,
+        lockProbe: async () => "unlocked",
+        secrets: {
+          ...mem.api,
+          delete: async () => {
+            throw new Error("delete refused")
+          },
+        },
+      })
+      await expect(createSession({ api, home: h.home, store, beforeKeysDiscarded: h.hook }).forget()).rejects.toThrow()
+      expect(await file.read()).toEqual(before)
+      expect([...mem.values.values()]).toEqual([ring])
+      expect(await h.pins()).toEqual({ live: 1, retired: 0 })
+    },
+  )

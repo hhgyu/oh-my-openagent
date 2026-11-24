@@ -172,3 +172,15 @@ test.skipIf(process.platform === "win32")(
     expect(await target.store.read()).toEqual(secret)
   },
 )
+
+test.skipIf(process.platform === "win32")(
+  "present distinguishes a missing entry from a path it cannot inspect",
+  async () => {
+    const home = await temporaryHome()
+    const { store, dir } = await fileStore(home)
+    expect(await store.present()).toBe(false)
+    await mkdir(join(home, ".omo"), { recursive: true })
+    await writeFile(dir, "not a directory")
+    await expect(store.present()).rejects.toThrow()
+  },
+)
