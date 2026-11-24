@@ -3,6 +3,7 @@ import type { Worker } from "node:worker_threads"
 
 import type { GatewayStore } from "@oh-my-opencode/thread-core/gateway/store"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
+import { settled } from "./testing/settled"
 import { remainingTestTime } from "../../../../../../test-support/test-deadline"
 
 let harness: GatewayHarness | undefined
@@ -58,6 +59,36 @@ async function insertionOrder(store: GatewayStore): Promise<unknown> {
     params: [],
   })
 }
+
+test("#given an admitted call #when disposed during worker open #then the call succeeds before disposal and later calls are refused", async () => {
+  const h = (harness = createGatewayHarness())
+  const order: string[] = []
+  const store = h.store({
+    _test: {
+      onWorkerStarted: (w) => {
+        w.once("exit", () => order.push("exit"))
+      },
+    },
+  })
+  const call = store.stats().then((stats) => {
+    order.push("call")
+    return stats
+  })
+  const disposal = Promise.all(
+    ["first", "second"].map((label) =>
+      store.dispose().then(() => {
+        order.push(label)
+      }),
+    ),
+  )
+  try {
+    expect(await within(call, remainingTestTime(), "stats to settle")).toMatchObject({ writes: 0 })
+  } finally {
+    await within(disposal, remainingTestTime(), "dispose to close the database")
+  }
+  expect(order).toEqual(["call", "exit", "first", "second"])
+  expect((await settled(store.stats())).error?.message).toBe("the gateway store is disposed")
+})
 
 // Contract: an idle store holds no worker thread (the ~3 MB it retains), and the next call still works.
 test("#given a store with no call in flight #when the idle interval passes #then its worker exits and the next write lands on a fresh worker that keeps the registrations", async () => {

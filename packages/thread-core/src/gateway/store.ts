@@ -130,8 +130,10 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
   let opened: Promise<{ readonly self: ProcessIdentity; readonly legacy_migrated: number }> | undefined
   let nextId = 1
   let disposed = false
+  let disposal: Promise<void> | undefined
   /** Store calls between their entry and their settle, the worker's open included. */
   let callsInFlight = 0
+  let callsSettled: (() => void) | undefined
   let idleTimer: ReturnType<typeof setTimeout> | undefined
   /** The close-and-terminate of a retired worker, until it settles: `dispose` waits for it. */
   let retiring: Promise<void> | undefined
@@ -336,6 +338,7 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
       return await run()
     } finally {
       callsInFlight -= 1
+      if (callsInFlight === 0) callsSettled?.()
       armIdleRetire()
     }
   }
@@ -408,18 +411,27 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
       return () => listeners.delete(listener)
     },
     resume: (hook) => worker?.postMessage({ type: "resume", hook }),
-    dispose: async () => {
-      if (disposed) return
+    dispose: () => {
+      if (disposal) return disposal
       disposed = true
-      cancelIdleRetire()
-      // A worker retired just before still holds its database until its close settles; a caller that
-      // removes the agent directory after `dispose` must find it closed.
-      await retiring
-      const active = worker
-      if (active === undefined) return
-      await post("close", null).catch(() => undefined)
-      worker = undefined
-      await active.terminate()
+      disposal = (async () => {
+        // Closing during open would put the close ahead of an already admitted request.
+        if (callsInFlight > 0) {
+          await new Promise<void>((resolve) => {
+            callsSettled = resolve
+          })
+        }
+        cancelIdleRetire()
+        // A worker retired just before still holds its database until its close settles; a caller that
+        // removes the agent directory after `dispose` must find it closed.
+        await retiring
+        const active = worker
+        if (active === undefined) return
+        await post("close", null).catch(() => undefined)
+        worker = undefined
+        await active.terminate()
+      })()
+      return disposal
     },
   }
 }
