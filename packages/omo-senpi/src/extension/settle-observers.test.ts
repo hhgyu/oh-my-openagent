@@ -228,3 +228,60 @@ test("#given a pending settle #when its session retires #then the observer relea
   // The reaction to the real promise is the cleanup signal; no timing sleep.
   await release.promise.catch(() => undefined)
 })
+
+test("#given two unrelated registrations sharing the default label #when a newer settle starts #then it does not supersede the other registration's running handler", async () => {
+  const pi = new FakeExtensionAPI()
+  const gate = Promise.withResolvers<void>()
+  const blocked = Promise.withResolvers<SettleObserver | undefined>()
+  const supersedeLogs: unknown[] = []
+  let blockedRuns = 0
+  let slowObserver: SettleObserver | undefined
+  const abortedWhenQuickRan: Array<boolean | undefined> = []
+  await composeOmoSenpiExtension(
+    [
+      {
+        name: "quick",
+        register(api) {
+          api.on("agent_settled", () => {
+            if (blockedRuns > 0) abortedWhenQuickRan.push(slowObserver?.signal.aborted)
+          })
+        },
+      },
+      {
+        name: "slow",
+        register(api) {
+          api.on("agent_settled", (_payload, _ctx, observer) => {
+            if (blockedRuns++ === 0) {
+              slowObserver = observer
+              blocked.resolve(observer)
+              return gate.promise
+            }
+            return undefined
+          })
+        },
+      },
+    ],
+    {
+      logger: {
+        info() {},
+        error() {},
+        warn: (_message, details) => {
+          if ((details as { stage?: string } | undefined)?.stage === "superseded") supersedeLogs.push(details)
+        },
+      },
+    },
+  )(pi)
+  const ctx = { sessionManager: { getSessionId: () => "session" } }
+  const first = pi.dispatch("agent_settled", {}, ctx)
+  const observer = await blocked.promise
+  try {
+    await pi.dispatch("agent_settled", {}, ctx)
+    expect(abortedWhenQuickRan).toEqual([false])
+    expect(supersedeLogs).toHaveLength(1)
+    expect(observer?.signal.aborted).toBe(true)
+  } finally {
+    gate.resolve()
+    await first
+    await pi.dispatch("session_shutdown", {})
+  }
+})

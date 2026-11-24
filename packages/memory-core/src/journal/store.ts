@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer"
 import { randomUUID } from "node:crypto"
 import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from "../fs/resilient"
 import { join } from "node:path"
@@ -28,6 +27,8 @@ export type TranscriptJournalOptions = {
   readonly snapshotMaxBytes?: number
   /** Replaces the state rename, so a test can simulate a rename the platform refuses. */
   readonly renameFile?: (from: string, to: string) => Promise<void>
+  /** Replaces the transcript read, so a test can count full reloads. */
+  readonly readTranscript?: (path: string, encoding: "utf8") => Promise<string>
   readonly warn?: (message: string, fields: Readonly<Record<string, unknown>>) => void
 }
 
@@ -340,18 +341,13 @@ export class TranscriptJournal {
     }
     let allEntries: readonly TranscriptEntry[]
     if (fresh.length > 0) {
-      const before = this.transcriptCache?.identity
       const payload = `${fresh.map((entry) => JSON.stringify(entry)).join("\n")}\n`
       await appendFile(this.transcriptPath, payload, "utf8")
-      allEntries = [...existing, ...fresh]
-      const appended = fileIdentity(await stat(this.transcriptPath))
-      // Own append fast path: only when the file grew by exactly our bytes on the same inode.
-      // Anything else (a foreign writer interleaved) is reloaded in full by the next read.
-      const expectedSize = (before?.size ?? 0) + Buffer.byteLength(payload, "utf8")
-      const sameFile =
-        before === undefined ? existing.length === 0 : before.dev === appended.dev && before.ino === appended.ino
-      this.transcriptCache =
-        sameFile && appended.size === expectedSize ? { identity: appended, entries: allEntries } : undefined
+      // The cache is never assumed from our own append: a writer outside the lock can rewrite the
+      // file in place at an unchanged size, and the caller still owns the objects it passed in.
+      // The rows are reloaded from disk under a verified identity and cached from that copy.
+      this.transcriptCache = undefined
+      allEntries = await this.readEntriesUnlocked()
     } else {
       allEntries = existing
     }
@@ -406,7 +402,7 @@ export class TranscriptJournal {
     this.transcriptCache = undefined
     let raw: string
     try {
-      raw = await readFile(this.transcriptPath, "utf8")
+      raw = await (this.options.readTranscript ?? readFile)(this.transcriptPath, "utf8")
     } catch (error) {
       if (errorCode(error) !== "ENOENT") throw error
       return []

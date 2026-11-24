@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { Buffer } from "node:buffer"
 import { spawn } from "node:child_process"
-import { existsSync, realpathSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { appendFile, mkdtemp, readdir, readFile, rename, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -447,5 +447,65 @@ describe("transcript journal cache against the real filesystem", () => {
     const third = await journal.readEntries()
     expect(third).toHaveLength(1)
     expect((third[0] as { text: string }).text).toBe("original")
+  })
+
+  it("#given a caller that mutates the rows it appended #when the journal is read #then the stored rows are unchanged", async () => {
+    // given
+    const { journal } = await createJournal()
+    const appended = row("a", "original")
+
+    // when
+    await journal.append([appended])
+    ;(appended as { text: string }).text = "tampered"
+
+    // then
+    expect((await journal.readEntries())[0]).toMatchObject({ text: "original" })
+  })
+
+  it("#given a same-size in-place rewrite landing during an append #when the append completes #then reads return the disk rows", async () => {
+    // given
+    const { dir, journal } = await createJournal()
+    const path = join(dir, "transcript.jsonl")
+    await journal.append([row("a", "xx")])
+    const original = readFileSync(path, "utf8")
+    const racing = Object.assign(row("b"), {
+      toJSON() {
+        writeFileSync(path, original.replace('"xx"', '"yy"'), "utf8")
+        return { ...row("b") }
+      },
+    })
+
+    // when
+    await journal.append([racing])
+
+    // then
+    const rows = await journal.readEntries()
+    expect(rows.map((entry) => (entry as { text?: string }).text)).toEqual(["yy", "same-width-text"])
+  })
+
+  it("#given the journal's own appends #when it settles unchanged #then the transcript is not read again", async () => {
+    // given
+    const dir = realpathSync.native(await mkdtemp(join(tmpdir(), "memory-journal-")))
+    tempDirs.push(dir)
+    let reads = 0
+    const journal = new TranscriptJournal({
+      journalDir: dir,
+      now: () => new Date("2026-08-09T12:00:00.000Z"),
+      readTranscript: (path, encoding) => {
+        reads += 1
+        return readFile(path, encoding)
+      },
+    })
+    await journal.append([row("a")])
+    await journal.append([row("b")])
+    const readsBefore = reads
+    expect(readsBefore).toBeGreaterThan(0)
+
+    // when
+    await journal.append([row("a"), row("b")])
+    await journal.getState()
+
+    // then
+    expect(reads).toBe(readsBefore)
   })
 })
