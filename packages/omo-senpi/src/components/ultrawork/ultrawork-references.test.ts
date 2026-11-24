@@ -165,6 +165,9 @@ describe("reviewed prohibition boundaries", () => {
     "avoid using ulw or ultrawork the next 2 hours",
     "avoid using ulw or ultrawork the next four days",
     "avoid using ulw or ultrawork for the past 3 weeks",
+    "avoid using ulw or ultrawork all the time",
+    "avoid using ulw or ultrawork just for this task",
+    "avoid using ulw or ultrawork only for this PR",
   ])("prohibition that dev also suppresses: %s", (text) => {
     expect(classify(text).effective).toBe(false)
   })
@@ -188,6 +191,8 @@ describe("reviewed prohibition boundaries", () => {
     "avoid ulw-loop, ulw these 2 files",
     "avoid ulw-loop, ulw the 3 failing tests",
     "avoid ulw-loop, ulw 5 modules",
+    "avoid ulw-loop, ulw just the changed files",
+    "avoid ulw-loop, ulw only the tests",
   ])("affirmative clause that dev also arms: %s", (text) => {
     expect(classify(text).effective).toBe(true)
   })

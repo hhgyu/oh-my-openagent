@@ -37,22 +37,36 @@ const PERIOD_PHRASE =
   String.raw`(?:(?:for|during|in|over|until|through|throughout)[ \t]+)?(?:${DETERMINER}[ \t]+)?` +
   String.raw`(?:(?:entire|whole|full|remaining|${PERIOD_ORDER}|rest[ \t]+of(?:[ \t]+the)?)[ \t]+)*(?:${COUNT}[ \t]+)?${PERIOD_NOUN}`
 const TEMPORAL_ADVERB = String.raw`(?:for[ \t]+(?:now|today|a[ \t]+while)|today|tonight|now[ \t]+on|anymore|again|this[ \t]+once|at[ \t]+all)\b`
-const TEMPORAL_QUALIFIER = String.raw`(?:(?:just|only|even)[ \t]+)?(?:${TEMPORAL_ADVERB}|${PERIOD_PHRASE})`
 const DEMONSTRATIVE = String.raw`(?:this|that|these|those)\b`
 const NOUN_PHRASE = String.raw`(?:${DETERMINER}[ \t]+(?:${COUNT}[ \t]+)?|${COUNT}[ \t]+)[a-z]`
 const OBJECT = String.raw`(?:it|them|everything|all|something|anything|each|both|one|me|us|him|her|you)\b`
 const REQUEST_MARKER = String.raw`(?:instead|just|but|then|rather|now)\b`
-const AFFIRMATIVE_ITEM = String.raw`(?:ultrawork|ulw)\b[ \t]+(?!${TEMPORAL_QUALIFIER})(?:${REQUEST_MARKER}|${OBJECT}|${DEMONSTRATIVE}|${NOUN_PHRASE})`
-const NEGATED_INVOCATION = new RegExp(
-  String.raw`\b(?:do\s+not|don['\u2019]t|dont|never)\s+(?:load|use|run|invoke|start|trigger|arm|enable)\b[^.;:!?\n]*?` +
-    String.raw`(?=[.;:!?\n]|\s(?:but|then|instead|however)\b|\s[\u2014\u2013-]\s|,[ \t]*(?:${AFFIRMATIVE_ITEM}|${REQUEST_MARKER}[ \t]+(?:ulw|ultrawork)\b)|$)`,
-  "gi",
-)
+const KEYWORD_END = /(?:ultrawork|ulw)[ \t]+/iy
+const LEADING_ADVERBS = /(?:(?:just|only|even|simply|all|completely|entirely)\b[ \t]+)+/iy
+const SCOPE = /(?:for|during|in|on|within|at|until|through|throughout|over|from|before|after)\b/iy
+const TEMPORAL = new RegExp(`(?:${TEMPORAL_ADVERB}|${PERIOD_PHRASE})`, "iy")
+const REQUEST = new RegExp(`(?:${REQUEST_MARKER}|${OBJECT}|${DEMONSTRATIVE}|${NOUN_PHRASE})`, "iy")
+
+function affirmativeAt(text: string, start: number): boolean {
+  KEYWORD_END.lastIndex = start
+  if (!KEYWORD_END.test(text)) return false
+  LEADING_ADVERBS.lastIndex = KEYWORD_END.lastIndex
+  const complement = LEADING_ADVERBS.test(text) ? LEADING_ADVERBS.lastIndex : KEYWORD_END.lastIndex
+  SCOPE.lastIndex = TEMPORAL.lastIndex = REQUEST.lastIndex = complement
+  if (SCOPE.test(text) || TEMPORAL.test(text)) return false
+  return REQUEST.test(text)
+}
+
+const NEGATED_VERB = /\b(?:do\s+not|don['\u2019]t|dont|never)\s+(?:load|use|run|invoke|start|trigger|arm|enable)\b/gi
+const CLAUSE_EDGE = new RegExp(String.raw`[.;:!?\n]|\s(?:but|then|instead|however)\b|\s[\u2014\u2013-]\s|,[ \t]*(?=(?:${REQUEST_MARKER}[ \t]+)?(?:ulw|ultrawork)\b)`, "gi")
+const INTRODUCED_REQUEST = new RegExp(`${REQUEST_MARKER}[ \\t]+(?:ulw|ultrawork)\\b`, "iy")
 const PROHIBITED_KEYWORD = new RegExp(
   String.raw`\b(?:avoid(?:ing)?|skip(?:ping)?|without|no|never|do[ \t]+not|don['\u2019]t|dont)[ \t]+(?:(?:using|use[ \t]+of|the)[ \t]+)?` +
-    String.raw`${LIST_ITEM}(?:${LIST_SEPARATOR}(?!${AFFIRMATIVE_ITEM})${LIST_ITEM})*`,
+    LIST_ITEM,
   "gi",
 )
+const SEPARATOR = new RegExp(LIST_SEPARATOR, "iy")
+const ITEM = new RegExp(LIST_ITEM, "iy")
 
 // A keyword glued to a preceding identifier segment (`mass-ulw`, `senpi-ulw-loop`, `.omo/ulw/`, `v1.ulw`)
 // names something else; so does one that opens a path (`ulw-execute/ledger.jsonl`).
@@ -96,7 +110,36 @@ export function stripQuotedSpans(text: string, retainListItems = false): string 
 }
 
 export function maskNegatedInvocations(text: string): string {
-  return text.replace(NEGATED_INVOCATION, mask).replace(PROHIBITED_KEYWORD, mask)
+  const verbsMasked = maskMatches(text, NEGATED_VERB, (start) => {
+    CLAUSE_EDGE.lastIndex = start
+    for (let edge; (edge = CLAUSE_EDGE.exec(text)) !== null;) {
+      if (!edge[0].startsWith(",")) return edge.index
+      INTRODUCED_REQUEST.lastIndex = CLAUSE_EDGE.lastIndex
+      if (INTRODUCED_REQUEST.test(text) || affirmativeAt(text, CLAUSE_EDGE.lastIndex)) return edge.index
+    }
+    return text.length
+  })
+  return maskMatches(verbsMasked, PROHIBITED_KEYWORD, (end) => {
+    for (;;) {
+      SEPARATOR.lastIndex = end
+      if (!SEPARATOR.test(verbsMasked) || affirmativeAt(verbsMasked, SEPARATOR.lastIndex)) return end
+      ITEM.lastIndex = SEPARATOR.lastIndex
+      if (!ITEM.test(verbsMasked)) return end
+      end = ITEM.lastIndex
+    }
+  })
+}
+
+function maskMatches(text: string, prefix: RegExp, endOfMatch: (start: number) => number): string {
+  const parts: string[] = []
+  let cursor = 0
+  prefix.lastIndex = 0
+  for (let match; (match = prefix.exec(text)) !== null;) {
+    const end = endOfMatch(prefix.lastIndex)
+    parts.push(text.slice(cursor, match.index), mask(text.slice(match.index, end)))
+    cursor = prefix.lastIndex = end
+  }
+  return parts.length ? parts.join("") + text.slice(cursor) : text
 }
 
 export function stripQuotedRegions(text: string): string {
