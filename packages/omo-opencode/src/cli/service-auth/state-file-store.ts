@@ -128,13 +128,20 @@ async function mkdirPrivate(dir: string): Promise<void> {
     return mkdirPrivate(dir)
   }
   await chmod(dir, 0o700)
+  await syncDirectory(dirname(dir), true)
 }
 
 /**
  * Replaces the file atomically: a temp file created 0600 (never wider, whatever the umask) in the same private dir,
  * written and synced, then renamed over the old one, then the dir synced. A refused dir is never written to.
  */
-export async function writeStateFile(dir: string, name: string, contents: string, uid: number): Promise<void> {
+export async function writeStateFile(
+  dir: string,
+  name: string,
+  contents: string,
+  uid: number,
+  log: (line: string) => void = (line) => process.stderr.write(`${line}\n`),
+): Promise<void> {
   await mkdirPrivate(dir)
   await checkDir(dir, uid)
   await recoverRetiring(dir, name)
@@ -164,7 +171,13 @@ export async function writeStateFile(dir: string, name: string, contents: string
     throw error
   }
   // The rename is durable only once the directory entry is; a filesystem that cannot sync a directory still renamed.
-  await syncDirectory(dir)
+  try {
+    await syncDirectory(dir, true)
+  } catch (error) {
+    log(
+      `omo: the private sign-in file was written in ${dir}, but its durability could not be confirmed (${errnoCode(error) ?? "unknown"}).`,
+    )
+  }
 }
 
 async function syncDirectory(dir: string, required = false): Promise<void> {
@@ -344,7 +357,7 @@ export function createStateFileStore<T>(input: {
       const next = codec.amend === undefined ? value : codec.amend(await text(), value)
       const encoded = codec.serialize(next)
       try {
-        await writeStateFile(directory(), name, encoded, uid)
+        await writeStateFile(directory(), name, encoded, uid, log)
         return encoded
       } catch (error) {
         throw failed("write", error)

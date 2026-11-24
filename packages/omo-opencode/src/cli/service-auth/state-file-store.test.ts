@@ -72,6 +72,48 @@ describe.skipIf(process.platform === "win32")("the Linux sign-in state file (#71
     expect((await stat(file)).mode & 0o777).toBe(0o600)
   })
 
+  test("first write syncs each new directory entry in its parent", async () => {
+    const home = await temporaryHome(),
+      { dir } = await fileStore(home),
+      handle = await open(home, "r"),
+      proto: typeof handle = Object.getPrototypeOf(handle),
+      sync = proto.sync
+    const seen = new Set<number>()
+    const spy = spyOn(proto, "sync").mockImplementation(async function (this: typeof handle) {
+      const st = await this.stat()
+      if (st.isDirectory()) seen.add(st.ino)
+      await sync.call(this)
+    })
+    try {
+      await writeStateFile(dir, "item", "synthetic", uid)
+      for (const path of [home, join(home, ".omo"), dir]) expect(seen.has((await stat(path)).ino)).toBe(true)
+    } finally {
+      spy.mockRestore()
+      await handle.close()
+    }
+  })
+
+  test("a sync error after replacement reports applied but unconfirmed durability", async () => {
+    const { store, dir, lines } = await fileStore(await temporaryHome())
+    await store.write(secret)
+    const handle = await open(dir, "r"),
+      proto: typeof handle = Object.getPrototypeOf(handle),
+      sync = proto.sync,
+      inode = (await handle.stat()).ino
+    const spy = spyOn(proto, "sync").mockImplementation(async function (this: typeof handle) {
+      if ((await this.stat()).ino === inode) throw Object.assign(new Error("synthetic sync failure"), { code: "EIO" })
+      await sync.call(this)
+    })
+    try {
+      await store.write({ token: "replacement" })
+      expect(await store.read()).toEqual({ token: "replacement" })
+      expect(lines.join(" ")).toContain("durability could not be confirmed")
+    } finally {
+      spy.mockRestore()
+      await handle.close()
+    }
+  })
+
   test("#when a write replaces the file #then no temp file is left beside it", async () => {
     const home = await temporaryHome()
     const { store, dir } = await fileStore(home)
