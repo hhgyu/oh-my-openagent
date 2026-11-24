@@ -96,7 +96,9 @@ export function routeLinuxStore<T>(input: {
   return {
     read: async () => (await target()).read(),
     readAuthoritative: async () => (await target()).readAuthoritative(),
-    write: async (value) => { await writeTo(await target(), value) },
+    write: async (value) => {
+      await writeTo(await target(), value)
+    },
     clear: async () => clearFrom(await target()),
     async underLock() {
       const selected = await target()
