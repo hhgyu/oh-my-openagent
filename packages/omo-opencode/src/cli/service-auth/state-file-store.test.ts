@@ -1,6 +1,6 @@
 import { describe, expect, onTestFinished, spyOn, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { chmod, lstat, mkdir, open, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises"
+import { chmod, link, lstat, mkdir, open, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -109,9 +109,9 @@ describe.skipIf(process.platform === "win32")("the Linux sign-in state file (#71
     expect(await readFile(target, "utf8")).toBe(JSON.stringify(secret))
   })
 
-  test("clear syncs its directory after unlink", async () => {
+  test("clear syncs its directory after the last credential-bearing link is gone", async () => {
     const home = await temporaryHome(),
-      { store, dir, file } = await fileStore(home)
+      { store, dir } = await fileStore(home)
     await store.write(secret)
     const handle = await open(dir, "r"),
       proto: typeof handle = Object.getPrototypeOf(handle)
@@ -120,11 +120,7 @@ describe.skipIf(process.platform === "win32")("the Linux sign-in state file (#71
     const expected = await handle.stat()
     const spy = spyOn(proto, "sync").mockImplementation(async function (this: typeof handle) {
       const st = await this.stat()
-      if (st.dev === expected.dev && st.ino === expected.ino)
-        synced = await lstat(file).then(
-          () => false,
-          (err: NodeJS.ErrnoException) => err.code === "ENOENT",
-        )
+      if (st.dev === expected.dev && st.ino === expected.ino) synced = (await readdir(dir)).length === 0
       await sync.call(this)
     })
     try {
@@ -135,6 +131,25 @@ describe.skipIf(process.platform === "win32")("the Linux sign-in state file (#71
       await handle.close()
     }
   })
+
+  test.each(["completed", "aborted"] as const)(
+    "first access recovers a %s unlink without touching another slot",
+    async (state) => {
+      const home = await temporaryHome()
+      const { store, file, dir } = await fileStore(home)
+      await store.write(secret)
+      const backup = join(dir, ".omo-cli-test.json.0123456789abcdef.retiring")
+      const neighbor = join(dir, ".omo-cli-other.json.0123456789abcdef.retiring")
+      await link(file, backup)
+      await writeFile(neighbor, "synthetic-neighbor", { mode: 0o600 })
+      if (state === "completed") await rm(file)
+      const restarted = (await fileStore(home)).store
+      expect(await restarted.present()).toBe(state === "aborted")
+      expect(await readdir(dir)).not.toContain(".omo-cli-test.json.0123456789abcdef.retiring")
+      expect(await restarted.read()).toEqual(state === "aborted" ? secret : null)
+      expect(await readFile(neighbor, "utf8")).toBe("synthetic-neighbor")
+    },
+  )
 
   test("a directory sync failure after credential unlink restores the original sign-in", async () => {
     const { store, dir, file } = await fileStore(await temporaryHome())

@@ -105,6 +105,19 @@ async function removeTempLeftovers(dir: string, name: string): Promise<void> {
     if (entry.startsWith(`.${name}.`) && entry.endsWith(".tmp")) await rm(join(dir, entry), { force: true })
 }
 
+function isRetiring(entry: string, name: string): boolean {
+  const prefix = `.${name}.`
+  return entry.startsWith(prefix) && /^[a-f0-9]{16}\.retiring$/.test(entry.slice(prefix.length))
+}
+
+// The canonical name decides the outcome: present means keep it; absent means stay signed out.
+// A retiring link is never a source for startup restoration, even if the slot has since been reused.
+async function recoverRetiring(dir: string, name: string): Promise<void> {
+  const entries = (await readdir(dir)).filter((entry) => isRetiring(entry, name))
+  for (const entry of entries) await rm(join(dir, entry))
+  if (entries.length > 0) await syncDirectory(dir, true)
+}
+
 async function mkdirPrivate(dir: string): Promise<void> {
   try {
     await mkdir(dir, { mode: 0o700 })
@@ -124,6 +137,7 @@ async function mkdirPrivate(dir: string): Promise<void> {
 export async function writeStateFile(dir: string, name: string, contents: string, uid: number): Promise<void> {
   await mkdirPrivate(dir)
   await checkDir(dir, uid)
+  await recoverRetiring(dir, name)
   await removeTempLeftovers(dir, name)
   const temp = join(dir, `.${name}.${randomBytes(8).toString("hex")}.tmp`)
   try {
@@ -144,11 +158,11 @@ export async function writeStateFile(dir: string, name: string, contents: string
   await syncDirectory(dir)
 }
 
-async function syncDirectory(dir: string): Promise<void> {
+async function syncDirectory(dir: string, required = false): Promise<void> {
   const directory = await open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
   try {
     await directory.sync().catch((error: unknown) => {
-      if (!["EINVAL", "ENOTSUP", "EOPNOTSUPP"].includes(errnoCode(error) ?? "")) throw error
+      if (required || !["EINVAL", "ENOTSUP", "EOPNOTSUPP"].includes(errnoCode(error) ?? "")) throw error
     })
   } finally {
     await directory.close()
@@ -157,26 +171,29 @@ async function syncDirectory(dir: string): Promise<void> {
 
 /** A symlink in the file's place is unlinked itself, never followed to its target. */
 async function removeStateFile(dir: string, name: string): Promise<void> {
+  await recoverRetiring(dir, name)
   await removeTempLeftovers(dir, name)
   const entry = join(dir, name)
   const backup = join(dir, `.${name}.${randomBytes(8).toString("hex")}.retiring`)
   try {
     await link(entry, backup)
   } catch (error) {
-    if (errnoCode(error) === "ENOENT") return
+    if (errnoCode(error) === "ENOENT") return syncDirectory(dir, true)
     throw error
   }
   let removed = false
   try {
     await rm(entry)
     removed = true
-    await syncDirectory(dir)
+    await syncDirectory(dir, true)
   } catch (error) {
     if (removed) await link(backup, entry)
     await rm(backup)
+    await syncDirectory(dir, true)
     throw error
   }
   await rm(backup)
+  await syncDirectory(dir, true)
 }
 
 export type StateFileStore<T> = SealedStore<T> & {
@@ -213,8 +230,17 @@ export function createStateFileStore<T>(input: {
       : failure(
           `omo: cannot ${operation} the private sign-in file in ${directory()} (${errnoCode(error) ?? "unknown"}).`,
         )
+  const recoverOnAccess = async () => {
+    const dir = directory()
+    if ((await checkDir(dir, uid)) && (await readdir(dir)).some((entry) => isRetiring(entry, name))) {
+      await locked(async () => {
+        if (await checkDir(dir, uid)) await recoverRetiring(dir, name)
+      })
+    }
+  }
   const text = async (): Promise<string | null> => {
     try {
+      await recoverOnAccess()
       return (await readStateFile(directory(), name, uid))?.text ?? null
     } catch (error) {
       if (!(error instanceof StateFileRefused)) throw failed("read", error)
@@ -246,6 +272,7 @@ export function createStateFileStore<T>(input: {
     directory,
     snapshot: async (policy) => {
       try {
+        await recoverOnAccess()
         return await readStateFile(directory(), name, uid)
       } catch (error) {
         if (policy === "ignore-refused" && error instanceof StateFileRefused) return null
@@ -254,6 +281,9 @@ export function createStateFileStore<T>(input: {
     },
     present: async () => {
       try {
+        await recoverOnAccess().catch((error: unknown) => {
+          if (!(error instanceof StateFileRefused)) throw error
+        })
         await lstat(join(directory(), name))
         return true
       } catch (error) {
