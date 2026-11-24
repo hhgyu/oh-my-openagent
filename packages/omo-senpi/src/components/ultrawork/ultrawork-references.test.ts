@@ -158,6 +158,10 @@ describe("reviewed prohibition boundaries", () => {
     "avoid using ulw or ultrawork the whole time",
     "avoid using ulw or ultrawork all day",
     "avoid using ulw or ultrawork just for now",
+    "avoid using ulw or ultrawork this one time",
+    "avoid using ulw or ultrawork the first time",
+    "avoid using ulw or ultrawork the last two sessions",
+    "avoid using ulw or ultrawork for the next few days",
   ])("prohibition that dev also suppresses: %s", (text) => {
     expect(classify(text).effective).toBe(false)
   })
@@ -177,6 +181,7 @@ describe("reviewed prohibition boundaries", () => {
     "avoid ulw-loop, ulw now",
     "skip ulw, ultrawork the whole repo",
     "avoid ulw-loop, ulw all the files",
+    "avoid ulw-loop. ulw the release notes",
   ])("affirmative clause that dev also arms: %s", (text) => {
     expect(classify(text).effective).toBe(true)
   })
@@ -185,5 +190,10 @@ describe("reviewed prohibition boundaries", () => {
     "don't use ulw here, ulw them later",
   ])("explicit imperative after a negated verb that dev suppresses: %s", (text) => {
     expect(classify(text).effective).toBe(true)
+  })
+
+  // "release" is also a period noun; a sentence boundary disambiguates the request above.
+  it.each(["avoid ulw-loop, ulw the release notes"])("known limit: compound noun after a prohibition: %s", (text) => {
+    expect(classify(text).effective).toBe(false)
   })
 })
