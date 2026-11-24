@@ -32,7 +32,7 @@ import { pairLoopGuardMessage } from "../errors"
 import { readLegacyMailbox } from "./legacy-mailbox"
 import { gatewayInboxDirectory } from "./paths"
 import { isClaimantDead, sameProcess } from "./process-identity"
-import { deleteExpiredReceipt, sweepRetentionIfDue } from "./store-retention"
+import { deleteExpiredReceipt, expireQueued, sweepRetentionIfDue } from "./store-retention"
 import { resultFromRow } from "./result"
 import { isProvenance } from "./provenance-record"
 import { GATEWAY_MIGRATIONS, GATEWAY_TABLE_REBUILDS, GatewaySchemaVersionError } from "./schema"
@@ -226,12 +226,14 @@ function rollbackQuietly(ctx: StoreContext): void {
   }
 }
 
-export async function transaction<T>(ctx: StoreContext, op: string, body: () => T | Promise<T>): Promise<T> {
-  if (ctx.afterCommit !== undefined) return await body()
+export async function transaction<T>(ctx: StoreContext, op: string, body: (transactionCtx: StoreContext) => T | Promise<T>): Promise<T> {
+  if (ctx.afterCommit !== undefined) return await body(ctx)
   await beginImmediate(ctx, op, true)
   try {
-    const value = await body()
+    const afterCommit: (() => void)[] = []
+    const value = await body({ ...ctx, afterCommit })
     ctx.sql.exec("COMMIT")
+    for (const effect of afterCommit) effect()
     return value
   } catch (error) {
     rollbackQuietly(ctx)
@@ -671,10 +673,13 @@ export async function enqueue(
       rollbackQuietly(ctx)
       return binding
     }
+    const afterCommit = ctx.afterCommit ?? []
+    const retentionCtx = { ...ctx, afterCommit }
     const backlog = ctx.sql.one(
       ["n", "b"],
-      `SELECT COUNT(*) AS n, COALESCE(SUM(bytes), 0) AS b FROM deliveries WHERE target_durable_id = ? AND state IN ${OPEN_STATES}`,
-      [request.target_durable_id],
+      `SELECT COUNT(*) AS n, COALESCE(SUM(bytes), 0) AS b FROM deliveries WHERE target_durable_id = ? AND state IN ${OPEN_STATES}
+       AND NOT (state = 'queued' AND expires_at <= ?)`,
+      [request.target_durable_id, request.now],
     )
     const bytes = Buffer.byteLength(request.body)
     if (Number(backlog?.n ?? 0) >= TARGET_MAX_MESSAGES || Number(backlog?.b ?? 0) + bytes > TARGET_MAX_BYTES) {
@@ -694,6 +699,7 @@ export async function enqueue(
       rollbackQuietly(ctx)
       return budget
     }
+    expireQueued(retentionCtx, request.now, request.target_durable_id)
     if (placement.new_root) {
       write(ctx, "INSERT INTO causal_roots (root_id, origin_principal, created_at, expires_at) VALUES (?, ?, ?, ?)", [
         placement.root_id,
@@ -763,11 +769,14 @@ export async function enqueue(
       ],
     )
     marker = createMarker(ctx, row.target_durable_id, row.delivery_id, false)
-    sweepRetentionIfDue(ctx, request.now, cleared)
+    sweepRetentionIfDue(retentionCtx, request.now, cleared)
     if (ctx.afterCommit === undefined) await ctx.hook("beforeDbCommit")
     ctx.sql.exec(commitSql)
     committed = true
-    if (ctx.afterCommit === undefined) await ctx.hook("afterDbCommit")
+    if (ctx.afterCommit === undefined) {
+      for (const effect of afterCommit) effect()
+      await ctx.hook("afterDbCommit")
+    }
     return { kind: "inserted", row, queue_position: position }
   } catch (error) {
     if (!committed) {

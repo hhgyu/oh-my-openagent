@@ -16,12 +16,13 @@ import {
   RETENTION_SWEEP_INTERVAL_MS,
 } from "./constants"
 import type { Sql } from "./sql"
-import { OPEN_STATES, type StoreContext, write } from "./store-ops"
+import { OPEN_STATES, type StoreContext, unlinkMarker, write } from "./store-ops"
 
 /** Keyed by the connection: an extension call joins core operations through a derived context. */
 const nextSweepDue = new WeakMap<Sql, number>()
 
 export type RetentionSweep = {
+  readonly expired_queued: number
   readonly receipts: number
   readonly deliveries: number
   readonly causal_edges: number
@@ -64,8 +65,25 @@ export function sweepRetentionIfDue(ctx: StoreContext, now: number, receiptsDele
   return swept
 }
 
+/** Only the target can reconcile a ledger-backed intake against its transcript. */
+export function expireQueued(ctx: StoreContext, now: number, target?: string): number {
+  const rows = ctx.sql.all(
+    ["delivery_id", "target_durable_id"],
+    `SELECT delivery_id, target_durable_id FROM deliveries WHERE state = 'queued' AND ledger_id IS NULL
+     AND expires_at <= ? ${target === undefined ? "" : "AND target_durable_id = ?"} LIMIT ?`,
+    target === undefined ? [now, RETENTION_SWEEP_BATCH] : [now, target, RETENTION_SWEEP_BATCH],
+  )
+  for (const row of rows) {
+    const id = String(row.delivery_id)
+    write(ctx, "UPDATE deliveries SET state = 'refused', reason = 'expired', updated_at = ? WHERE delivery_id = ?", [now, id])
+    unlinkMarker(ctx, String(row.target_durable_id), id)
+  }
+  return rows.length
+}
+
 export function sweepRetention(ctx: StoreContext, now: number, receiptBatch = RETENTION_SWEEP_BATCH): RetentionSweep {
   const batch = RETENTION_SWEEP_BATCH
+  const expiredQueued = expireQueued(ctx, now)
   // A receipt check clears only an expired receipt under its own key; the backlog goes here, a batch at a time.
   const receipts = write(
     ctx,
@@ -123,6 +141,7 @@ export function sweepRetention(ctx: StoreContext, now: number, receiptBatch = RE
     [batch],
   )
   return {
+    expired_queued: expiredQueued,
     receipts,
     deliveries,
     causal_edges: causalEdges,
