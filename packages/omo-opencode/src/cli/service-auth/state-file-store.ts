@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto"
 import { constants, type Stats } from "node:fs"
-import { chmod, lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises"
+import { chmod, link, lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { accountHome } from "./account-home"
 import { withCredentialLock } from "./credential-lock"
@@ -158,8 +158,25 @@ async function syncDirectory(dir: string): Promise<void> {
 /** A symlink in the file's place is unlinked itself, never followed to its target. */
 async function removeStateFile(dir: string, name: string): Promise<void> {
   await removeTempLeftovers(dir, name)
-  await rm(join(dir, name), { force: true })
-  await syncDirectory(dir)
+  const entry = join(dir, name)
+  const backup = join(dir, `.${name}.${randomBytes(8).toString("hex")}.retiring`)
+  try {
+    await link(entry, backup)
+  } catch (error) {
+    if (errnoCode(error) === "ENOENT") return
+    throw error
+  }
+  let removed = false
+  try {
+    await rm(entry)
+    removed = true
+    await syncDirectory(dir)
+  } catch (error) {
+    if (removed) await link(backup, entry)
+    await rm(backup)
+    throw error
+  }
+  await rm(backup)
 }
 
 export type StateFileStore<T> = SealedStore<T> & {

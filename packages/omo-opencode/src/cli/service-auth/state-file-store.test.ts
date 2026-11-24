@@ -136,6 +136,28 @@ describe.skipIf(process.platform === "win32")("the Linux sign-in state file (#71
     }
   })
 
+  test("a directory sync failure after credential unlink restores the original sign-in", async () => {
+    const { store, dir, file } = await fileStore(await temporaryHome())
+    await store.write(secret)
+    const handle = await open(dir, "r"),
+      proto: typeof handle = Object.getPrototypeOf(handle)
+    const identity = await handle.stat(),
+      sync = proto.sync
+    const spy = spyOn(proto, "sync").mockImplementation(async function (this: typeof handle) {
+      const st = await this.stat()
+      if (st.ino === identity.ino && st.dev === identity.dev && !(await lstat(file).catch(() => null)))
+        throw Object.assign(new Error("synthetic sync failure"), { code: "EIO" })
+      await sync.call(this)
+    })
+    try {
+      await expect(store.clear()).rejects.toThrow()
+      expect(await store.read()).toEqual(secret)
+    } finally {
+      spy.mockRestore()
+      await handle.close()
+    }
+  })
+
   test.skipIf(!supportsFifo())("#given a FIFO in the file's place #then it is refused without blocking", async () => {
     const home = await temporaryHome()
     const { store, dir, file, lines } = await fileStore(home)

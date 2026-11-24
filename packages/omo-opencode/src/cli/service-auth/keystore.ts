@@ -368,7 +368,17 @@ export function createSealedStore<T>(
       ? `macOS Keychain is waiting for your approval: answer the "${basename(process.execPath)} wants to access key ${namespace}" dialog ("Always Allow" stops it asking again)`
       : `${platformName} has not answered; it may be waiting for your approval or an unlock in a system dialog`
   const helperWaiting = `macOS Keychain is waiting for your approval: answer the "OmO's keychain helper wants to access key ${namespace}" dialog`
+  const origin = api
   const answered = async (api: SecretApi, fresh = false, readSlot = slot): Promise<string | null> => {
+    if (nativeLinux && heldCredentialLease(origin, home)) {
+      try {
+        return await readUnlockedSecret(key)
+      } catch {
+        throw new CredentialStoreError(
+          "Cannot verify the Linux keyring item without prompting while the credential lock is held. The operation was stopped.",
+        )
+      }
+    }
     const waitingFor = helper.isHelperReader(api) ? helperWaiting : waiting
     const read = fresh ? Promise.resolve().then(() => api.get(key)) : sharedRead(api, readSlot)
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -498,7 +508,7 @@ export function createSealedStore<T>(
     async relation(text) {
       let stored: string | null
       try {
-        stored = nativeLinux ? await readUnlockedSecret(key) : await answered(secrets, true)
+        stored = await answered(secrets, true)
       } catch (error) {
         throw error instanceof CredentialStoreError ? error : unavailable(error)
       }
@@ -513,7 +523,7 @@ export function createSealedStore<T>(
     async moveToKeyring(text) {
       try {
         await secrets.set({ ...key, value: text })
-        if ((nativeLinux ? await readUnlockedSecret(key) : await answered(secrets, true)) !== text)
+        if ((await answered(secrets, true)) !== text)
           throw new CredentialStoreError(
             `${platformName} did not return the sign-in it was given; it stays in the private file until it does.`,
           )
