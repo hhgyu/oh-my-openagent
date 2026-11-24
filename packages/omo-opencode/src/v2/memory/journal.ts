@@ -38,6 +38,9 @@ export interface MemoryJournal {
   clear(): void
 }
 
+/** Each journal retains its transcript rows for no-reread settles; a long-lived host bounds how many sessions keep them. */
+const MAX_RETAINED_JOURNALS = 16
+
 /**
  * OpenCode 2 transcript journal (Senpi `journal-wiring.ts`). Senpi reconciles its persisted branch on
  * `session_start` and `agent_settled`; here the bind of a root session and `experimental.idle` read the
@@ -45,9 +48,6 @@ export interface MemoryJournal {
  * Rows are keyed by `source_line_id` in `TranscriptJournal`, so a repeated reconcile appends nothing.
  * Journals live at `<identity runtime>/transcripts/<sessionID>/`. Children never bind, so never journal.
  */
-/** Each journal retains its transcript rows for no-reread settles; a long-lived host bounds how many sessions keep them. */
-const MAX_RETAINED_JOURNALS = 16
-
 export function createMemoryJournal(deps: MemoryJournalDeps): MemoryJournal {
   const createJournal = deps.createJournal ?? ((journalDir: string) => new TranscriptJournal({ journalDir }))
   const journals = new Map<string, TranscriptJournal>()

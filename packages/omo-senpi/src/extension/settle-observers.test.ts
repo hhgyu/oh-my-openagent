@@ -303,7 +303,8 @@ test("#given a settle observer retired before its deferred start #when the micro
     { logger: { info() {}, warn() {}, error() {} } },
   )(pi)
   const registration = pi.handlers.find((candidate) => candidate.event === "agent_settled")
-  const settled = Promise.resolve(registration?.handler({}, undefined))
+  if (!registration) throw new Error("Expected an agent_settled handler")
+  const settled = Promise.resolve(registration.handler({}, undefined))
   for (const shutdown of pi.handlers.filter((candidate) => candidate.event === "session_shutdown")) {
     void shutdown.handler({}, undefined)
   }
