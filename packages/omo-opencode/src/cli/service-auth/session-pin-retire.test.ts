@@ -3,15 +3,15 @@
 
 import { describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { mkdir, readdir, writeFile } from "node:fs/promises"
+import { chmod, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import type { CredentialStore } from "./keystore"
-import { InvalidCredentialState } from "./keystore"
+import { createCredentialStore, credentialId, InvalidCredentialState } from "./keystore"
 import type { Credentials } from "./protocol"
 import { createSession } from "./session"
 import { retireSyncPinOnDiscard } from "./sync-pin-retire"
-import { fakeApi, grant, privateKeys, refusal, temporaryHome } from "./test-support"
+import { fakeApi, grant, memorySecrets, privateKeys, refusal, temporaryHome } from "./test-support"
 
 const ACCOUNT = "account-r-b7"
 
@@ -151,4 +151,408 @@ describe("the credential write seam retires the sync pin (#12280)", () => {
     expect(await h.pins()).toEqual({ live: 0, retired: 1 })
     expect(h.logs).toEqual([])
   })
+
+  // #12383: a refresh runs from 30 s before the access token expires, so a refused refresh may still hold a token the
+  // service accepts. The discard asks the service for the account of a legacy sign-in only with such a token: an expired
+  // one is never sent (no request inside the credential lock), and a refused or expired one keeps the pin.
+  const NOW = Date.parse("2030-01-01T00:00:00Z")
+  test.each([
+    {
+      token: "a still-valid",
+      expiresIn: 10_000,
+      me: "names the account",
+      calls: ["POST /v1/session/refresh", "GET /v1/me"],
+      live: 0,
+    },
+    {
+      token: "a still-valid",
+      expiresIn: 10_000,
+      me: "refuses",
+      calls: ["POST /v1/session/refresh", "GET /v1/me"],
+      live: 1,
+    },
+    { token: "an expired", expiresIn: -1_000, me: "names the account", calls: ["POST /v1/session/refresh"], live: 1 },
+  ])(
+    "#given a legacy sign-in with no account, a live pin and $token access token #when its refresh is refused device_revoked and /v1/me $me #then the requests are $calls and $live live pin(s) remain",
+    async ({ expiresIn, me, calls: expected, live }) => {
+      const h = await pinnedHome()
+      const calls: string[] = []
+      const api = fakeApi((request) => {
+        const path = new URL(request.url).pathname
+        calls.push(`${request.method} ${path}`)
+        if (path !== "/v1/me") return refusal("device_revoked", undefined, 401)
+        return me === "refuses"
+          ? refusal("unauthorized", undefined, 401)
+          : Response.json({ user: { id: "user-1" }, account: { id: ACCOUNT } })
+      })
+      const s = memoryStore({ ...grant, ...privateKeys, accessTokenExpiresAt: new Date(NOW + expiresIn).toISOString() })
+      const error = await createSession({
+        api,
+        store: s.store,
+        home: h.home,
+        now: () => NOW,
+        beforeKeysDiscarded: h.hook,
+      })
+        .accessToken()
+        .catch((e: unknown) => e)
+      expect(error).toMatchObject({ code: "device_revoked" })
+      expect(s.current()).toBeNull()
+      expect(calls).toEqual(expected)
+      expect(await h.pins()).toEqual({ live, retired: 1 - live })
+    },
+  )
+
+  // #12308: plain forget reads the account of a legacy sign-in the same way; `omo account forget` owns the stamped case.
+  test("#given a legacy sign-in with no account and a live pin #when it is forgotten #then the account is read from the service and its pin is retired", async () => {
+    const h = await pinnedHome()
+    const calls: string[] = []
+    const api = fakeApi((request) => {
+      calls.push(`${request.method} ${new URL(request.url).pathname}`)
+      return Response.json({ user: { id: "user-1" }, account: { id: ACCOUNT } })
+    })
+    const s = memoryStore({ ...grant, ...privateKeys })
+    await createSession({ api, store: s.store, home: h.home, beforeKeysDiscarded: h.hook }).forget()
+    expect(s.current()).toBeNull()
+    expect(calls).toEqual(["GET /v1/me"])
+    expect(await h.pins()).toEqual({ live: 0, retired: 1 })
+  })
+
+  // #13662: the kept pin is reported with the command that clears it (the token the CLI dispatches on).
+  test("#given a legacy sign-in with no account, a live pin and an expired access token #when it is forgotten #then no request is made, it is deleted, its pin is kept, and the retire-sync command is named", async () => {
+    const h = await pinnedHome()
+    const calls: string[] = []
+    const api = fakeApi((request) => {
+      calls.push(`${request.method} ${new URL(request.url).pathname}`)
+      return Response.json({ user: { id: "user-1" }, account: { id: ACCOUNT } })
+    })
+    const s = memoryStore({ ...grant, ...privateKeys, accessTokenExpiresAt: "2000-01-01T00:00:00Z" })
+    await createSession({ api, store: s.store, home: h.home, beforeKeysDiscarded: h.hook }).forget()
+    expect(s.current()).toBeNull()
+    expect(calls).toEqual([])
+    expect(await h.pins()).toEqual({ live: 1, retired: 0 })
+    expect(h.logs).toHaveLength(1)
+    expect(h.logs[0]).toContain("omo account retire-sync --account")
+  })
+
+  test("#given an unreadable stored item #when it is forgotten #then it is still deleted, its pin is kept, and one line is logged", async () => {
+    const h = await pinnedHome()
+    const s = memoryStore(stored, true)
+    await createSession({
+      api: "https://api.omo.dev",
+      store: s.store,
+      home: h.home,
+      beforeKeysDiscarded: h.hook,
+    }).forget()
+    expect(s.current()).toBeNull()
+    expect(await h.pins()).toEqual({ live: 1, retired: 0 })
+    expect(h.logs).toHaveLength(1)
+    expect(h.logs[0]).toContain("omo account retire-sync --account <id>")
+    expect(h.logs[0]).toContain("still signed in")
+  })
+
+  // #13642 review (b088286) L1: the account lookup runs under the credential lock, so it gets the fix-up's short budget;
+  // a stalled service keeps the pin (reported) instead of holding the sign-out for the 30 s request timeout.
+  test("#given a legacy sign-in with a live pin and a service that never answers /v1/me #when it is forgotten #then the lookup gives up within its budget, the item is deleted and the kept pin is reported", async () => {
+    const h = await pinnedHome()
+    const requests: string[] = []
+    const api = fakeApi((req) => {
+      requests.push(`${req.method} ${new URL(req.url).pathname}`)
+      return new Promise<Response>(() => undefined)
+    })
+    const s = memoryStore({ ...grant, ...privateKeys })
+    const started = performance.now()
+    await createSession({
+      api,
+      store: s.store,
+      home: h.home,
+      beforeKeysDiscarded: h.hook,
+      machine: { digest: async () => undefined, name: () => "test", budgetMs: 50 },
+    }).forget()
+    // The budget under test is 50 ms; the unbounded lookup waits for the request timeout (seconds).
+    expect(requests).toEqual(["GET /v1/me"])
+    expect(performance.now() - started).toBeLessThan(750)
+    expect(s.current()).toBeNull()
+    expect(await h.pins()).toEqual({ live: 1, retired: 0 })
+    expect(h.logs).toHaveLength(1)
+  })
+
+  // #13642 review L1: with no live pin there is nothing left in place, so nothing is reported.
+  test("#given an unreadable stored item and no live pin #when it is forgotten #then it is deleted and nothing is logged", async () => {
+    const home = await temporaryHome()
+    const logs: string[] = []
+    const hook = retireSyncPinOnDiscard({ pinDir: () => join(home, "sync-device"), log: (line) => logs.push(line) })
+    const s = memoryStore(stored, true)
+    await createSession({ api: "https://api.omo.dev", store: s.store, home, beforeKeysDiscarded: hook }).forget()
+    expect(s.current()).toBeNull()
+    expect(logs).toEqual([])
+  })
 })
+
+for (const operation of ["forget", "refresh"] as const) {
+  test.skipIf(process.platform === "win32")(
+    `#given distinct file and keyring accounts #when the keyring returns during ${operation} #then the keyring account is unchanged`,
+    async () => {
+      const h = await pinnedHome()
+      let available = false
+      const api = fakeApi((request) => {
+        if (new URL(request.url).pathname === "/v1/session/refresh") {
+          available = true
+          return Response.json({ ...grant, accessToken: "rotated-file-token" })
+        }
+        return new Response(null, { status: 404 })
+      })
+      const memory = memorySecrets()
+      const options = { home: h.home, platform: "linux" as const, secrets: memory.api, notice: () => {} }
+      const store = createCredentialStore(api, {
+        ...options,
+        lockProbe: async () => (available ? "unlocked" : "absent"),
+      })
+      const file = createCredentialStore(api, { ...options, lockProbe: async () => "absent" })
+      const ring = createCredentialStore(api, { ...options, lockProbe: async () => "unlocked" })
+      await ring.write({ ...anotherDevice, accountId: "ring-account" })
+      const original = [...memory.values.values()]
+      await file.write({ ...stored, accessTokenExpiresAt: new Date(0).toISOString() })
+      const session = createSession({
+        api,
+        home: h.home,
+        store: {
+          ...store,
+          clear: async () => {
+            available = true
+            await store.clear()
+          },
+        },
+        beforeKeysDiscarded: h.hook,
+      })
+      if (operation === "forget") {
+        await session.forget()
+        expect(await file.read()).toBeNull()
+        expect(await h.pins()).toEqual({ live: 0, retired: 1 })
+      } else {
+        expect(await session.accessToken()).toBe("rotated-file-token")
+        expect((await file.read())?.accessToken).toBe("rotated-file-token")
+      }
+      expect([...memory.values.values()]).toEqual(original)
+    },
+  )
+}
+
+for (const change of ["unchanged", "replacement", "unsafe"] as const) {
+  test.skipIf(process.platform === "win32")(
+    `#given a corrupt private sign-in and separate keyring account #when forget finds the file ${change} #then only unchanged private bytes may be removed`,
+    async () => {
+      const h = await pinnedHome()
+      const api = "https://example.invalid"
+      const ring = memorySecrets()
+      const options = { home: h.home, platform: "linux" as const, secrets: ring.api }
+      await createCredentialStore(api, { ...options, lockProbe: async () => "unlocked" }).write(anotherDevice)
+      const savedRing = [...ring.values.values()]
+      let available = false
+      const store = createCredentialStore(api, {
+        ...options,
+        lockProbe: async () => (available ? "unlocked" : "absent"),
+      })
+      const dir = join(h.home, ".omo", "account-state")
+      await mkdir(dir, { recursive: true, mode: 0o700 })
+      const file = join(dir, `omo-cli-${credentialId(api)}.json`)
+      await writeFile(file, "{", { mode: 0o600 })
+      const session = createSession({
+        api,
+        home: h.home,
+        beforeKeysDiscarded: h.hook,
+        store: {
+          ...store,
+          async readAuthoritative() {
+            try {
+              return await store.readAuthoritative()
+            } finally {
+              available = true
+              if (change === "replacement") {
+                await writeFile(file + ".new", "{", { mode: 0o600 })
+                await rename(file + ".new", file)
+              }
+              if (change === "unsafe") await chmod(file, 0o644)
+            }
+          },
+        },
+      })
+      if (change === "unchanged") {
+        await session.forget()
+        await expect(lstat(file)).rejects.toMatchObject({ code: "ENOENT" })
+      } else {
+        await expect(session.forget()).rejects.toThrow()
+        expect(await readFile(file, "utf8")).toBe("{")
+        expect(h.logs).toEqual([])
+      }
+      expect([...ring.values.values()]).toEqual(savedRing)
+      expect(await h.pins()).toEqual({ live: 1, retired: 0 })
+    },
+  )
+}
+
+test("a synchronous pin-directory failure cannot prevent forget", async () => {
+  const s = memoryStore({ ...grant, ...privateKeys })
+  const hook = retireSyncPinOnDiscard({
+    pinDir: () => {
+      throw new Error("missing root")
+    },
+    log: () => {},
+  })
+  await createSession({
+    api: "https://example.invalid",
+    store: s.store,
+    home: await temporaryHome(),
+    beforeKeysDiscarded: hook,
+  }).forget()
+  expect(s.current()).toBeNull()
+})
+
+test("a refused deletion preserves the readable account's live pin", async () => {
+  const h = await pinnedHome()
+  const s = memoryStore(stored)
+  const store = {
+    ...s.store,
+    clear: async () => {
+      throw new Error("delete refused")
+    },
+  }
+  await expect(
+    createSession({ api: "https://example.invalid", store, home: h.home, beforeKeysDiscarded: h.hook }).forget(),
+  ).rejects.toThrow("delete refused")
+  expect(await h.pins()).toEqual({ live: 1, retired: 0 })
+})
+
+for (const copy of ["identical", "newer"] as const)
+  test.skipIf(process.platform === "win32")(
+    `failed deletion of an ${copy} keyring copy retains both credentials and the live pin`,
+    async () => {
+      const h = await pinnedHome()
+      const api = "https://example.invalid"
+      const mem = memorySecrets()
+      const opts = { home: h.home, platform: "linux" as const, notice: () => {} }
+      const file = createCredentialStore(api, { ...opts, secrets: null })
+      await file.write(stored)
+      const before = await file.read()
+      const ring = JSON.stringify(
+        copy === "identical" ? before : { ...before, accessTokenExpiresAt: "2100-01-01T00:00:00Z" },
+      )
+      await mem.api.set({ service: "omo-cli", name: credentialId(api), value: ring })
+      const store = createCredentialStore(api, {
+        ...opts,
+        lockProbe: async () => "unlocked",
+        secrets: {
+          ...mem.api,
+          delete: async () => {
+            throw new Error("delete refused")
+          },
+        },
+      })
+      await expect(createSession({ api, home: h.home, store, beforeKeysDiscarded: h.hook }).forget()).rejects.toThrow()
+      expect(await file.read()).toEqual(before)
+      expect([...mem.values.values()]).toEqual([ring])
+      expect(await h.pins()).toEqual({ live: 1, retired: 0 })
+    },
+  )
+
+for (const scenario of ["empty", "identical", "replaced-before-delete", "replaced-after-delete"] as const) {
+  test.skipIf(process.platform === "win32")(`corrupt forget with unlocked keyring: ${scenario}`, async () => {
+    const h = await pinnedHome()
+    const api = "https://example.invalid"
+    const ring = memorySecrets()
+    const unrelated = {
+      service: "omo-cli",
+      name: credentialId("https://other.invalid"),
+      value: JSON.stringify(anotherDevice),
+    }
+    await ring.api.set(unrelated)
+    const key = { service: "omo-cli", name: credentialId(api) }
+    if (scenario !== "empty") await ring.api.set({ ...key, value: "{" })
+    const dir = join(h.home, ".omo", "account-state")
+    await mkdir(dir, { recursive: true, mode: 0o700 })
+    const file = join(dir, `omo-cli-${key.name}.json`)
+    await writeFile(file, "{", { mode: 0o600 })
+    const replace = async () => {
+      await writeFile(file + ".new", "{", { mode: 0o600 })
+      await rename(file + ".new", file)
+    }
+    const store = createCredentialStore(api, {
+      home: h.home,
+      platform: "linux",
+      lockProbe: async () => "unlocked",
+      notice: () => {},
+      secrets: {
+        ...ring.api,
+        delete: async (entry) => {
+          const removed = await ring.api.delete(entry)
+          if (scenario === "replaced-after-delete") await replace()
+          return removed
+        },
+      },
+    })
+    const session = createSession({
+      api,
+      home: h.home,
+      beforeKeysDiscarded: h.hook,
+      store: {
+        ...store,
+        readAuthoritative: async () => {
+          try {
+            return await store.readAuthoritative()
+          } finally {
+            if (scenario === "replaced-before-delete") await replace()
+          }
+        },
+      },
+    })
+    if (scenario === "replaced-after-delete") {
+      await expect(session.forget()).rejects.toThrow(
+        "The keyring sign-in was removed, but removal of the private sign-in file could not be confirmed.",
+      )
+      expect(await readFile(file, "utf8")).toBe("{")
+      expect(await ring.api.get(key)).toBeNull()
+    } else if (scenario === "replaced-before-delete") {
+      await expect(session.forget()).rejects.toThrow()
+      expect(await ring.api.get(key)).toBe("{")
+      expect(await readFile(file, "utf8")).toBe("{")
+    } else {
+      await session.forget()
+      await expect(lstat(file)).rejects.toMatchObject({ code: "ENOENT" })
+      expect(await ring.api.get(key)).toBeNull()
+    }
+    expect(await ring.api.get(unrelated)).toBe(unrelated.value)
+    expect(await h.pins()).toEqual({ live: 1, retired: 0 })
+  })
+}
+
+for (const state of ["already-removed", "unsafe-unrelated"] as const) {
+  test.skipIf(process.platform === "win32")(
+    `keyring forget retires its own pin when the neighboring file is ${state}`,
+    async () => {
+      const h = await pinnedHome()
+      const api = "https://example.invalid"
+      const mem = memorySecrets()
+      const file = join(h.home, ".omo", "account-state", `omo-cli-${credentialId(api)}.json`)
+      const opts = { home: h.home, platform: "linux" as const, notice: () => {} }
+      await createCredentialStore(api, { ...opts, secrets: null }).write(stored)
+      const bytes = await readFile(file, "utf8")
+      if (state === "unsafe-unrelated") await chmod(file, 0o644)
+      await mem.api.set({ service: "omo-cli", name: credentialId(api), value: bytes })
+      const store = createCredentialStore(api, {
+        ...opts,
+        lockProbe: async () => "unlocked",
+        secrets: {
+          ...mem.api,
+          delete: async (entry) => {
+            const removed = await mem.api.delete(entry)
+            if (state === "already-removed") await unlink(file)
+            return removed
+          },
+        },
+      })
+      await createSession({ api, home: h.home, store, beforeKeysDiscarded: h.hook }).forget()
+      expect(mem.values.size).toBe(0)
+      if (state === "unsafe-unrelated") expect(await readFile(file, "utf8")).toBe(bytes)
+      expect(await h.pins()).toEqual({ live: 0, retired: 1 })
+    },
+  )
+}

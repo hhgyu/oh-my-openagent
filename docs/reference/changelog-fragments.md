@@ -63,6 +63,20 @@ lets such a path through only when all of these hold:
 If any changelog path fails a check, the gate names it and gives the verdict it would give without the
 label. The pull request still adds its own `changes/unreleased/<pr-number>.md`, which is checked as usual.
 
+### Changelog baseline (fork only, once)
+
+The fork keeps its own history from the OpenCode 2 host onward ([D-048](../DECISIONS_V2.md)). A pull request
+with the `changelog-baseline` label (`CHANGELOG_BASELINE` in `script/changelog-gate.config.ts`) may replace
+`CHANGELOG.md` once, checked by `script/changelog-baseline.ts` instead of the shared rules:
+
+- the base branch's `CHANGELOG.md` exists and does not yet contain the line `<!-- changelog-baseline: v2 -->`;
+- the pull request adds no file, modifies `CHANGELOG.md` and otherwise only `changes.md` or
+  `packages/<name>/changes.md` (the logs the stamp writes), and deletes only `changes/unreleased/<number>.md`;
+- the new `CHANGELOG.md` contains the marker line and a `## [Unreleased]` heading.
+
+After it merges the base carries the marker, so the label no longer exempts anything. A later upstream-sync
+merge that conflicts on `CHANGELOG.md` keeps the fork's file; upstream's history stays in upstream's changelog.
+
 The rules live in `script/changelog-gate-rules.ts`, vendored byte-identical from
 `sisyphuslabs/common-infra` (`bun script/check-gate-sync.ts` compares them).
 

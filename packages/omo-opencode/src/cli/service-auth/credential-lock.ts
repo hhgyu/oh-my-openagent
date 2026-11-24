@@ -9,6 +9,7 @@ import {
   LockWaitTimeoutError,
   withLock,
 } from "@oh-my-opencode/team-core/team-state-store/locks"
+import { prepareLinuxLockDirectory } from "./credential-parent"
 import { accountHome, lockDirectoryIn } from "./account-home"
 import { serviceOrigin, SignInError } from "./protocol"
 
@@ -58,7 +59,8 @@ export async function withCredentialLock<T>(
   const owned = held.getStore()
   const outer = owned?.get(lock)
   if (outer !== undefined) return action(outer)
-  await mkdir(directory, { recursive: true, mode: 0o700 })
+  if (process.platform === "linux" && process.getuid) prepareLinuxLockDirectory(home, process.getuid())
+  else await mkdir(directory, { recursive: true, mode: 0o700 })
   try {
     return await withLock(lock, (lease) => held.run(new Map([...(owned ?? []), [lock, lease]]), () => action(lease)), {
       ownerTag,

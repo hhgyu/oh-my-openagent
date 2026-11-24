@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process"
 import { accessSync, constants, mkdirSync, readFileSync, statSync } from "node:fs"
+import { prepareLinuxLockDirectory, CredentialParentError } from "./credential-parent"
 import { homedir } from "node:os"
-import { join, posix, win32 } from "node:path"
+import { dirname, join, posix, win32 } from "node:path"
 
 /** What the OS says about the user running this process; tests pass their own (#12978). */
 export interface PlatformFacts {
@@ -101,6 +102,7 @@ export function chooseLockHome(facts: AccountFacts): string {
     facts.prepareLockDirectory(lockDirectoryIn(record))
     return record
   } catch (error) {
+    if (error instanceof CredentialParentError) throw error
     const reason = error instanceof Error && "code" in error ? String(error.code) : String(error)
     facts.warn(
       `omo: the account home ${record} cannot hold the credential lock (${reason}); using ${home}. A process started with another HOME may refresh the same sign-in at the same time (#12978).`,
@@ -128,7 +130,9 @@ export const systemAccountFacts: AccountFacts = {
   recordHome: () => userRecordHome(systemPlatformFacts),
   homedir,
   prepareLockDirectory: (directory) => {
-    mkdirSync(directory, { recursive: true, mode: 0o700 })
+    if (process.platform === "linux" && process.getuid)
+      prepareLinuxLockDirectory(dirname(dirname(directory)), process.getuid())
+    else mkdirSync(directory, { recursive: true, mode: 0o700 })
     accessSync(directory, constants.W_OK)
   },
   warn: (message) => process.stderr.write(`${message}\n`),

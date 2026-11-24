@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { execFileSync } from "node:child_process"
+import { changelogBaselineVerdict } from "./changelog-baseline.ts"
 import { checkPrChangelog, fetchBaseIfMissing, FRAGMENT_DIR, fragmentPath } from "./changelog-gate-rules.ts"
 import { GATE_CONFIG } from "./changelog-gate.config.ts"
 import { isUserFacingPath as isShippedPath, shippingPolicy } from "./changelog-shipping-policy.mjs"
@@ -123,32 +124,45 @@ function run(): number {
   const addedChangelogMode = addedChangelogPath
     ? (git("ls-tree", head, "--", addedChangelogPath).split(/\s/)[0] ?? "")
     : "100644"
-  const result = checkPrChangelog(
-    {
-      addedFiles,
-      modifiedFiles,
-      deletedFiles,
-      branch,
-      isReleaseWorkflow,
-      actor,
-      labels,
-      prNumber,
-      addedFragment,
-      addedChangelog,
-      addedChangelogMode,
-      baseHasChangelog,
-      baseFragments,
-      headFragments,
-    },
-    policy,
-  )
+  const showOrNull = (rev: string, path: string): string | null =>
+    existsAt(rev, path) ? git("show", `${rev}:${path}`) : null
+  const baseline = changelogBaselineVerdict({
+    labels,
+    addedFiles,
+    modifiedFiles,
+    deletedFiles,
+    baseChangelog: showOrNull(baseHead, "CHANGELOG.md"),
+    headChangelog: showOrNull(head, "CHANGELOG.md"),
+  })
+  const result =
+    baseline ??
+    checkPrChangelog(
+      {
+        addedFiles,
+        modifiedFiles,
+        deletedFiles,
+        branch,
+        isReleaseWorkflow,
+        actor,
+        labels,
+        prNumber,
+        addedFragment,
+        addedChangelog,
+        addedChangelogMode,
+        baseHasChangelog,
+        baseFragments,
+        headFragments,
+      },
+      policy,
+    )
   console.log(`changelog-gate: ${result.pass ? "PASS" : "FAIL"} - ${result.reason}`)
   const packageLogs = checkPackageLogs({
     addedFiles,
     modifiedFiles,
     deletedFiles,
     // The SAME release predicate as the shared gate (#10682 review HIGH): the release marker on a release branch.
-    isRelease: isReleaseWorkflow,
+    // A passing changelog baseline (D-048) stamps the logs the same way a release does.
+    isRelease: isReleaseWorkflow || baseline?.pass === true,
     fragment: addedFragment?.content ?? null,
     existsAtHead: (path) => existsAt(head, path),
   })
