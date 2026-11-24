@@ -1,3 +1,19 @@
+## 2026-11-17 - Resumed mid-turn children continue past senpi's session-lifecycle rows (#90)
+
+senpi 2026.11.12 appends `custom` entries with `customType: "session-lifecycle"` (its lifecycle ledger) after a quit. `manager/interrupted-turn.ts` stopped its tail walk at that unknown entry, so `sessionTailNeedsContinuation` answered false, the in-process respawn sent no continuation nudge, and the restored handle settled with "restored session has no assistant output". `session-lifecycle` is now skipped as bookkeeping like `senpi.hooks.stop-state`. Live `task-e2e` on Windows: 26/26 checks pass. References: https://github.com/hhgyu/oh-my-openagent/pull/90.
+
+## 2026-11-14 - A pinned target's refusal names every designated model (#55)
+
+`pinnedModelUnavailableText` accepts the whole designated list, and `categoryModelFailureText` / `agentModelFailureText` pass every pinned model in the resolver's order (category `models[]`, else `model` then `fallback_models`; agent `model`, else `models[]`). A single pin keeps its text. `./parent-link` is exported so the OpenCode 2 host follows a parent's approval mode with the same `ChildParentLink`.
+
+## 2026-11-13 - Separate finished-member release counts during team deletion (#39)
+
+DeleteTeamResult adds releasedTaskIds, surfaced as released_task_ids by the tool. Successfully disposed finished members are counted separately from cancelled tasks, while their completed status remains unchanged. Text and renderer output show both counts. References: https://github.com/hhgyu/oh-my-openagent/pull/39.
+
+## 2026-11-12 - Name invalid task and team argument fields (#34)
+
+Shared schema validation reports field names, expected fields and issue paths before host coercion. Task send, output, cancellation and lead/member team tools reject unknown properties, and task_send semantic field errors expose the same diagnostic shape.
+
 ## 2026-11-17 - resolvers report who chose the model (#14025)
 
 `resolveCategory` now sets `modelSelection.source` and `resolveAgent` sets `modelSource` (`"user" | "builtin"`); an agent's own-model source is read from the definition being resolved (a builtin still on its builtin model is `builtin`), and `firstCategoryDefaultModel` and the find-only selection share one walk that returns the model with its source: `user` when the selected model came from omo.json (`model`, `models`, `fallback_models`, an agent's own model or a user category it runs through, or a call-site pin), `builtin` for a builtin default, chain rung or system default. Selection itself is unchanged.

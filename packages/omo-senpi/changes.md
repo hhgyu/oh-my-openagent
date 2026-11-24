@@ -1,3 +1,55 @@
+## 2026-11-24 - Avoid redundant journal reconciliation (#104)
+
+Repeated settles no longer stack the same observer work or rewrite unchanged journal state.
+
+## 2026-11-18 - Telemetry reads prompt-free agent names, so omo.js sheds the builtin agent prompts (#92)
+
+The telemetry schemas (`event-schemas.ts`, `delegation-schema.ts`, `delegation-projection.ts`) need only the four curated agent names, but they imported `CURATED_READONLY_AGENT_NAMES` from the `@oh-my-opencode/senpi-task/agents-builtin` barrel. That pulled all seven builtin agent definitions (about 39 KB, mostly prompt text) into `omo.js`, although `omo-task.js` (`#omo-task-runtime`) already ships them for the task component. The names now come from `agents/builtin/names.ts` (plain literals: a spread between two constants was folded differently by the Linux and Windows bundle builds) through the new `@oh-my-opencode/senpi-task/agent-names` export. `builtin-agents.test.ts` pins that list to the definitions, and a metafile-input test in `build-extension.test.mjs` keeps the definitions out of the entry bundle.
+
+## 2026-11-17 - Lock owner probe on macOS no longer spawns /bin/ps for an exiting owner (#91)
+
+`readDarwinProcessStartSeconds` now passes a nonzero `arg` to `proc_pidinfo(PROC_PIDTBSDINFO)`, so xnu also finds a pid that has exited but has not been reaped (`findzomb`). With `0n` that pid read as null and `getProcessStartIdentity` fell back to `execFile("/bin/ps")`. On a macOS runner the `operation-boundary-lock` writer test took that fallback 4 times in 1500 runs, and 0 times with the fix. The bundled extensions change by one byte per copy (`0n` to `1n`). References: https://github.com/hhgyu/oh-my-openagent/pull/91.
+
+## 2026-11-17 - Quit-resume and task-id-race QA drivers work on senpi 2026.11.12 and Windows (#90)
+
+The resume scenarios ran their waits as direct `bash` tool calls, which senpi withholds while codemode's `eval` is registered (on every platform); they now run through an eval cell. The cancel, kill and LRU lanes use mid-turn witnesses (and a mid-turn kill target), because a resume eagerly revives only non-terminal children (#7550). `task-id-race-qa`'s GO gate (now `task-id-race-gate.mjs`) compared the watched filename against a `/`-split path, which never matched on Windows, and the race parents now get `USERPROFILE` so `os.homedir()` resolves the sandbox on win32. References: https://github.com/hhgyu/oh-my-openagent/pull/90.
+
+## 2026-11-17 - Fewer git processes per memory write (#87)
+
+The bundled memory engine reuses the pre-stage status listing inside `commitWrite`, screens staged blobs for secrets through one `git cat-file --batch`, names `main` at `git init`, reads an unborn HEAD from files, and the pre-commit hook lists staged names once. Live `memory-e2e` 18/18. References: https://github.com/hhgyu/oh-my-openagent/pull/87.
+
+## 2026-11-17 - No OmO wake during session shutdown; QA drivers never detach on Windows (#85)
+
+`extension/session-shutdown-gate.ts` is installed as the first omo `session_shutdown` handler and refuses `sendMessage({ triggerTurn: true })` and `sendUserMessage` until the next `session_start`; producers record the refusal as undelivered, so senpi-task redelivers through the session_start reconcile. The task event bridge also captures the parent at `agent_settled`, so a completion arriving after the run is flushed without the batch delay. Cause: a wake delivered after the 200 ms window landed while print mode was disposing, and senpi's handoff-hint re-armed its ref'd prompt-cache timer on that turn (upstream report drafted). All QA drivers under `scripts/qa` now use `senpiRunSpawnOptions` and the new `killSenpiRunTree`, guarded by a static audit. Live on Windows: task-e2e main flow exits in about 4 s (was killed at 70 s), 0 console windows. References: https://github.com/hhgyu/oh-my-openagent/pull/85.
+
+## 2026-11-16 - Hidden Windows QA senpi runs and memory-e2e on senpi 2026.11.12 (#83)
+
+`scripts/qa/senpi-run-spawn.mjs` keeps win32 driver runs attached and hidden (POSIX keeps the process group) and the tree kill uses `taskkill /T`. memory-core's console audit also scans `Bun.spawn`/`Bun.spawnSync`, which found the unhidden space-sync git spawn. `memory-e2e` follows senpi 2026.11.12: transient one-shot memory promoted by the sweep, mock provider registered as a sandbox extension for the reflection child, system prompt read from leading system messages, bun shebang. Verified on Windows with a window monitor: test:senpi 3 popups to 0, task-e2e 12 to 0, memory-e2e 18/18. The task-e2e main-flow hang reproduces on origin/v2/dev and is documented in the PR. References: https://github.com/hhgyu/oh-my-openagent/pull/83.
+
+## 2026-11-14 - extension bundle regenerated for boulder-state's host liveness option (#63)
+
+`plugin/extensions/omo.js` is regenerated for the shared `@oh-my-opencode/boulder-state` change (a new optional stale-reconcile liveness input and directive option that Senpi does not pass). Senpi's behavior and the ulw-execute directive bytes are unchanged. References: https://github.com/hhgyu/oh-my-openagent/pull/63.
+
+## 2026-11-14 - ulw-execute continuation consumes boulder-state's shared logic (#58)
+
+`components/ulw-execute-continuation` imports `findContinuableWork`, the cap, reminder, signature and directive from `@oh-my-opencode/boulder-state` (moved there unchanged; `boulder-eligibility.ts` keeps the `senpi:` key and the transcript-based stale reconcile). The unused `__testInternals` export is removed, `plugin/scripts/sync-skills.mjs` exports `stageNativeSharedSkill` (its own loop uses it), and `plugin/extensions/omo.js` is regenerated. Behavior is unchanged. References: https://github.com/hhgyu/oh-my-openagent/pull/58.
+
+## 2026-11-14 - ulw-loop consumes the shared session SDK (#54)
+
+`src/components/ulw-loop/sdk/*` moved to `packages/omo-codex/plugin/components/ulw-loop/src/session-sdk/`; `src/extension/agent-toolkit-sdk.ts` re-exports it, and `components/ulw-loop/index.ts`, `run-completion.ts` and `footer-status.ts` import the shared status classification, continuation policy and footer frames. Behavior is unchanged; `plugin/extensions/omo.js`, `plugin/runtime/agent-toolkit-sdk/sdk.js` and `bundle-inputs.json` are regenerated. References: https://github.com/hhgyu/oh-my-openagent/pull/54.
+
+## 2026-11-13 - Refresh shared team cleanup output (#39)
+
+The task bundle is regenerated for the shared cleanup result contract and rendering. A real process member was completed and resident before team_delete returned one released ID and zero cancelled IDs; its status stayed completed and its process was gone before parent teardown. References: https://github.com/hhgyu/oh-my-openagent/pull/39.
+
+## 2026-11-12 - Ship task field diagnostics (#34)
+
+Regenerate the main, task and member extensions with pre-execution argument diagnostics and register the shared validator in bundle inputs.
+
+## 2026-11-12 - Windows QA portability and feedback privacy (#32)
+
+QA drivers create directories and set file modes through Node APIs. Gateway tests use the current runtime for process lifetime fixtures and portable file URLs. Feedback persistence now protects Windows reports and delete-token ledgers with owner-only ACLs instead of relying on POSIX mode bits.
+
 ## 2026-11-17 - omo.modelRouting.resolve (#14025)
 
 `components/task/model-routing-rpc.ts` registers `omo.modelRouting.resolve` (no request data). It loads the session cwd's config with the task engine's own loader and answers `{ schemaVersion: 1, rows }` from `model-routing-rows.ts`: one row per builtin and configured category, then per task agent, each from `resolveCategory` / `resolveAgent` against the planner's own inputs: the register-time project cwd its live config reads, the agent table the engine composed (so a mid-session `agents` edit shows exactly what a spawn still picks), and the parent fast-tier step (`-fast` sibling unless `exclude_models` keeps it out). Retired agent aliases fold into their canonical row. The round-robin distributor is not consulted, so a read never advances a rotation, with `effective` (`provider/model` or null), `source` (`override` / `provider-fallback` / `unresolved`) and the thinking level as `variant`. A missing cwd, an unreadable config layer and a session without a model registry answer typed errors (`cwd_unavailable`, `config_invalid`, `registry_unavailable`). The consumer is the desktop app's model-routing settings.
