@@ -348,7 +348,8 @@ export class TranscriptJournal {
       // Own append fast path: only when the file grew by exactly our bytes on the same inode.
       // Anything else (a foreign writer interleaved) is reloaded in full by the next read.
       const expectedSize = (before?.size ?? 0) + Buffer.byteLength(payload, "utf8")
-      const sameFile = before === undefined ? existing.length === 0 : before.dev === appended.dev && before.ino === appended.ino
+      const sameFile =
+        before === undefined ? existing.length === 0 : before.dev === appended.dev && before.ino === appended.ino
       this.transcriptCache =
         sameFile && appended.size === expectedSize ? { identity: appended, entries: allEntries } : undefined
     } else {
