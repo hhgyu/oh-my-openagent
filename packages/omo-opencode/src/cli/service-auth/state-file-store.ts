@@ -145,7 +145,7 @@ async function removeStateFile(dir: string, name: string): Promise<void> {
 export type StateFileStore<T> = SealedStore<T> & {
   /** Returns the exact serialized credential written, for readback verification. Never log it. */
   readonly writeReturningText: (value: T) => Promise<string>
-  readonly snapshot: () => Promise<{ text: string; version: string } | null>
+  readonly snapshot: (policy?: "ignore-refused") => Promise<{ text: string; version: string } | null>
   /** Private stored text, or null for a missing or refused file. */
   readonly text: () => Promise<string | null>
   /** True while any entry sits at the file's path, refused or not. */
@@ -207,10 +207,11 @@ export function createStateFileStore<T>(input: {
     readAuthoritative: read,
     text,
     directory,
-    snapshot: async () => {
+    snapshot: async (policy) => {
       try {
         return await readStateFile(directory(), name, uid)
       } catch (error) {
+        if (policy === "ignore-refused" && error instanceof StateFileRefused) return null
         throw failed("read", error)
       }
     },

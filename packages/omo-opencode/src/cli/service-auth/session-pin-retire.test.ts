@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { chmod, lstat, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises"
+import { chmod, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import type { CredentialStore } from "./keystore"
@@ -453,3 +453,106 @@ for (const copy of ["identical", "newer"] as const)
       expect(await h.pins()).toEqual({ live: 1, retired: 0 })
     },
   )
+
+for (const scenario of ["empty", "identical", "replaced-before-delete", "replaced-after-delete"] as const) {
+  test.skipIf(process.platform === "win32")(`corrupt forget with unlocked keyring: ${scenario}`, async () => {
+    const h = await pinnedHome()
+    const api = "https://example.invalid"
+    const ring = memorySecrets()
+    const unrelated = {
+      service: "omo-cli",
+      name: credentialId("https://other.invalid"),
+      value: JSON.stringify(anotherDevice),
+    }
+    await ring.api.set(unrelated)
+    const key = { service: "omo-cli", name: credentialId(api) }
+    if (scenario !== "empty") await ring.api.set({ ...key, value: "{" })
+    const dir = join(h.home, ".omo", "account-state")
+    await mkdir(dir, { recursive: true, mode: 0o700 })
+    const file = join(dir, `omo-cli-${key.name}.json`)
+    await writeFile(file, "{", { mode: 0o600 })
+    const replace = async () => {
+      await writeFile(file + ".new", "{", { mode: 0o600 })
+      await rename(file + ".new", file)
+    }
+    const store = createCredentialStore(api, {
+      home: h.home,
+      platform: "linux",
+      lockProbe: async () => "unlocked",
+      notice: () => {},
+      secrets: {
+        ...ring.api,
+        delete: async (entry) => {
+          const removed = await ring.api.delete(entry)
+          if (scenario === "replaced-after-delete") await replace()
+          return removed
+        },
+      },
+    })
+    const session = createSession({
+      api,
+      home: h.home,
+      beforeKeysDiscarded: h.hook,
+      store: {
+        ...store,
+        readAuthoritative: async () => {
+          try {
+            return await store.readAuthoritative()
+          } finally {
+            if (scenario === "replaced-before-delete") await replace()
+          }
+        },
+      },
+    })
+    if (scenario === "replaced-after-delete") {
+      await expect(session.forget()).rejects.toThrow(
+        "The keyring sign-in was removed, but removal of the private sign-in file could not be confirmed.",
+      )
+      expect(await readFile(file, "utf8")).toBe("{")
+      expect(await ring.api.get(key)).toBeNull()
+    } else if (scenario === "replaced-before-delete") {
+      await expect(session.forget()).rejects.toThrow()
+      expect(await ring.api.get(key)).toBe("{")
+      expect(await readFile(file, "utf8")).toBe("{")
+    } else {
+      await session.forget()
+      await expect(lstat(file)).rejects.toMatchObject({ code: "ENOENT" })
+      expect(await ring.api.get(key)).toBeNull()
+    }
+    expect(await ring.api.get(unrelated)).toBe(unrelated.value)
+    expect(await h.pins()).toEqual({ live: 1, retired: 0 })
+  })
+}
+
+for (const state of ["already-removed", "unsafe-unrelated"] as const) {
+  test.skipIf(process.platform === "win32")(
+    `keyring forget retires its own pin when the neighboring file is ${state}`,
+    async () => {
+      const h = await pinnedHome()
+      const api = "https://example.invalid"
+      const mem = memorySecrets()
+      const file = join(h.home, ".omo", "account-state", `omo-cli-${credentialId(api)}.json`)
+      const opts = { home: h.home, platform: "linux" as const, notice: () => {} }
+      await createCredentialStore(api, { ...opts, secrets: null }).write(stored)
+      const bytes = await readFile(file, "utf8")
+      if (state === "unsafe-unrelated") await chmod(file, 0o644)
+      await mem.api.set({ service: "omo-cli", name: credentialId(api), value: bytes })
+      const store = createCredentialStore(api, {
+        ...opts,
+        lockProbe: async () => "unlocked",
+        secrets: {
+          ...mem.api,
+          delete: async (entry) => {
+            const removed = await mem.api.delete(entry)
+            if (state === "already-removed") await unlink(file)
+            return removed
+          },
+        },
+      })
+      await createSession({ api, home: h.home, store, beforeKeysDiscarded: h.hook }).forget()
+      expect(mem.values.size).toBe(0)
+      if (state === "unsafe-unrelated") expect(await readFile(file, "utf8")).toBe(bytes)
+      expect(await h.pins()).toEqual({ live: 0, retired: 1 })
+    },
+  )
+}

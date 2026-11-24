@@ -85,22 +85,34 @@ export function routeLinuxStore<T>(input: {
       )
     return store === file ? file.writeReturningText(value) : input.writeKeyring(value)
   }
-  const clearFrom = async (store: SealedStore<T>) => {
-    if (store !== keyring) return store.clear()
-    const candidate = await file.snapshot()
-    const relation = candidate === null ? null : await input.relation(candidate.text)
+  const clearKeyring = async (matchingVersion: string | undefined, retained: boolean) => {
+    const verifyFile = async () => {
+      const current = await file.snapshot()
+      if (current === null) return false
+      if (current.version !== matchingVersion)
+        throw new CredentialStoreError("The private sign-in file changed during this operation. Try again.")
+      return true
+    }
+    if (matchingVersion !== undefined) await verifyFile()
     await keyring.clear()
-    if (candidate === null) return
-    if (relation === "older" || relation === "newer") {
+    if (matchingVersion !== undefined) {
       try {
-        if ((await file.snapshot())?.version !== candidate.version) throw new Error("changed file")
-        await file.clear()
+        if (await verifyFile()) await file.clear()
       } catch {
         throw new CredentialStoreError(
           "The keyring sign-in was removed, but removal of the private sign-in file could not be confirmed.",
         )
       }
-    } else notice(`omo: the separate private sign-in file in ${file.directory()} was kept.`, "retained")
+    } else if (retained) notice(`omo: the separate private sign-in file in ${file.directory()} was kept.`, "retained")
+  }
+  const clearFrom = async (store: SealedStore<T>) => {
+    if (store !== keyring) return store.clear()
+    const candidate = await file.snapshot("ignore-refused")
+    const relation = candidate === null ? null : await input.relation(candidate.text)
+    return clearKeyring(
+      relation === "older" || relation === "newer" ? candidate?.version : undefined,
+      candidate !== null,
+    )
   }
   return {
     read: async () => (await target()).read(),
@@ -121,6 +133,12 @@ export function routeLinuxStore<T>(input: {
         },
         write: (value) => writeTo(selected, value),
         clear: () => clearFrom(selected),
+        prepareCorruptClear: async (text) => {
+          if (selected === file) return file.clear
+          const candidate = await file.snapshot()
+          const version = candidate?.text === text ? candidate.version : undefined
+          return () => clearKeyring(version, candidate !== null)
+        },
       })
     },
     storage: () => storage,
@@ -133,9 +151,10 @@ export function lockedLinuxSelection<T>(input: {
   snapshot: () => Promise<{ text: string; version: string } | null>
   write: (value: T) => Promise<string>
   clear: () => Promise<void>
+  prepareCorruptClear?: (text: string) => Promise<() => Promise<void>>
 }): LockedStore<T> {
   let expected: string | undefined
-  let corrupt: string | undefined
+  let corrupt: { version: string; clear: () => Promise<void> } | undefined
   let failed = false
   const changed = () => new CredentialStoreError("The selected sign-in could not be verified. Try again.")
   const read = async () => {
@@ -146,7 +165,8 @@ export function lockedLinuxSelection<T>(input: {
     try {
       value = item === null ? null : input.parse(item.text)
     } catch (error) {
-      if (expected === undefined && error instanceof InvalidCredentialState) corrupt = item?.version
+      if (expected === undefined && error instanceof InvalidCredentialState && item !== null)
+        corrupt = { version: item.version, clear: (await input.prepareCorruptClear?.(item.text)) ?? input.store.clear }
       throw error
     }
     const observed = JSON.stringify(value)
@@ -164,7 +184,7 @@ export function lockedLinuxSelection<T>(input: {
         await read()
       } catch (error) {
         if (!firstMutation || !(error instanceof InvalidCredentialState) || corrupt === undefined) throw error
-        const version = corrupt
+        const { version } = corrupt
         corrupt = undefined
         if ((await input.snapshot())?.version !== version) throw changed()
       }
@@ -177,10 +197,10 @@ export function lockedLinuxSelection<T>(input: {
     },
     async clear() {
       if (corrupt !== undefined) {
-        const version = corrupt
+        const { version, clear } = corrupt
         corrupt = undefined
         if ((await input.snapshot())?.version !== version) throw changed()
-        await input.store.clear()
+        await clear()
         return
       }
       await read()
