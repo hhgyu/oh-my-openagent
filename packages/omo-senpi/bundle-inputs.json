@@ -898,6 +898,7 @@
     "packages/omo-opencode/src/cli/service-auth/bun-gio-shim.ts",
     "packages/omo-opencode/src/cli/service-auth/credential-lock.ts",
     "packages/omo-opencode/src/cli/service-auth/credential-owner.ts",
+    "packages/omo-opencode/src/cli/service-auth/credential-parent.ts",
     "packages/omo-opencode/src/cli/service-auth/device-name.ts",
     "packages/omo-opencode/src/cli/service-auth/index.ts",
     "packages/omo-opencode/src/cli/service-auth/keychain-helper/access.ts",

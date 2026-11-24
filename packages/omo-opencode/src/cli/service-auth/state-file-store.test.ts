@@ -155,6 +155,26 @@ describe.skipIf(process.platform === "win32")("the Linux sign-in state file (#71
     expect(await readFile(file, "utf8")).toBe("synthetic replacement")
   })
 
+  test("a sticky owned writable parent protects the owned private directory", async () => {
+    const home = await temporaryHome()
+    const { store } = await fileStore(home)
+    const parent = join(home, ".omo")
+    await mkdir(parent)
+    await chmod(parent, 0o1777)
+    await store.write(secret)
+    expect(await store.read()).toEqual(secret)
+  })
+
+  test("a symlink at .omo is refused before reading or creating a state directory", async () => {
+    const home = await temporaryHome(),
+      target = await temporaryHome(),
+      { store, dir } = await fileStore(home)
+    await symlink(target, join(home, ".omo"))
+    await expect(writeStateFile(dir, "omo-cli-test.json", "synthetic", uid)).rejects.toThrow("symlink")
+    expect(await readdir(target)).toEqual([])
+    await expect(store.present()).rejects.toThrow("symlink")
+  })
+
   test("#given a symlink in the file's place #then its target is never read", async () => {
     const home = await temporaryHome()
     const { store, dir, file, lines } = await fileStore(home)

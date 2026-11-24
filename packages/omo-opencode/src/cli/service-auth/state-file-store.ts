@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto"
 import { constants, type Stats } from "node:fs"
 import { chmod, link, lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { checkCredentialDirectory, checkCredentialParents, CredentialParentError } from "./credential-parent"
 import { accountHome } from "./account-home"
 import { withCredentialLock } from "./credential-lock"
 import type { SealedStore } from "./keystore"
@@ -22,8 +23,11 @@ export type StateFileRefusal =
 
 /** The file or its directory is not private to this user: it is never used and never written to. */
 export class StateFileRefused extends Error {
-  constructor(readonly refusal: StateFileRefusal) {
-    super(`the private sign-in file was refused (${refusal})`)
+  constructor(
+    readonly refusal: StateFileRefusal,
+    detail?: string,
+  ) {
+    super(`the private sign-in file was refused (${refusal})${detail ? `: ${detail}` : ""}`)
   }
 }
 
@@ -55,13 +59,18 @@ export const fileRefusal = (stat: Stats, uid: number): StateFileRefusal | undefi
         : undefined
 
 async function checkDir(dir: string, uid: number): Promise<boolean> {
+  if (!checkCredentialParents(dirname(dirname(dir)), uid)) return false
   const stat = await lstat(dir).catch((error: unknown) => {
     if (errnoCode(error) === "ENOENT") return null
     throw error
   })
   if (stat === null) return false
   const refusal = dirRefusal(stat, uid)
-  if (refusal !== undefined) throw new StateFileRefused(refusal)
+  if (refusal !== undefined)
+    throw new StateFileRefused(
+      refusal,
+      `${dir} (mode ${(stat.mode & 0o7777).toString(8).padStart(4, "0")}, owner ${stat.uid}). Inspect the path; use a real directory owned by UID ${uid} with mode 0700`,
+    )
   return true
 }
 
@@ -123,9 +132,7 @@ async function mkdirPrivate(dir: string): Promise<void> {
     await mkdir(dir, { mode: 0o700 })
   } catch (error) {
     if (errnoCode(error) === "EEXIST") return
-    if (errnoCode(error) !== "ENOENT") throw error
-    await mkdirPrivate(dirname(dir))
-    return mkdirPrivate(dir)
+    throw error
   }
   await chmod(dir, 0o700)
   await syncDirectory(dirname(dir), true)
@@ -142,6 +149,12 @@ export async function writeStateFile(
   uid: number,
   log: (line: string) => void = (line) => process.stderr.write(`${line}\n`),
 ): Promise<void> {
+  const parent = dirname(dir),
+    home = dirname(parent)
+  if (!checkCredentialDirectory(home, uid))
+    throw new CredentialParentError(`Missing credential home ${home}; create a private directory owned by UID ${uid}.`)
+  await mkdirPrivate(parent)
+  checkCredentialDirectory(parent, uid)
   await mkdirPrivate(dir)
   await checkDir(dir, uid)
   await recoverRetiring(dir, name)
@@ -323,11 +336,13 @@ export function createStateFileStore<T>(input: {
   const uid = process.getuid?.() ?? -1
   const directory = () => stateFileDirectory(input.home ?? accountHome())
   const failed = (operation: string, error: unknown): Error =>
-    error instanceof StateFileRefused
-      ? failure(`omo: cannot ${operation} the private sign-in file in ${directory()}: ${error.message}.`)
-      : failure(
-          `omo: cannot ${operation} the private sign-in file in ${directory()} (${errnoCode(error) ?? "unknown"}).`,
-        )
+    error instanceof CredentialParentError
+      ? failure(error.message)
+      : error instanceof StateFileRefused
+        ? failure(`omo: cannot ${operation} the private sign-in file in ${directory()}: ${error.message}.`)
+        : failure(
+            `omo: cannot ${operation} the private sign-in file in ${directory()} (${errnoCode(error) ?? "unknown"}).`,
+          )
   const recoverOnAccess = async () => {
     const dir = directory()
     if ((await checkDir(dir, uid)) && (await readdir(dir)).some((entry) => isRetiring(entry, name))) {
@@ -381,6 +396,17 @@ export function createStateFileStore<T>(input: {
         }
         return await readStateFile(directory(), name, uid)
       } catch (error) {
+        if (
+          (error instanceof CredentialParentError ||
+            (error instanceof StateFileRefused && error.refusal.startsWith("dir-"))) &&
+          onRefused
+        ) {
+          const precise = failure(error.message)
+          onRefused(async () => {
+            throw precise
+          })
+          throw precise
+        }
         if (diagnosis) throw diagnosis
         if (policy === "ignore-refused" && error instanceof StateFileRefused) return null
         throw failed("read", error)
@@ -388,9 +414,7 @@ export function createStateFileStore<T>(input: {
     },
     present: async () => {
       try {
-        await recoverOnAccess().catch((error: unknown) => {
-          if (!(error instanceof StateFileRefused)) throw error
-        })
+        await recoverOnAccess()
         await lstat(join(directory(), name))
         return true
       } catch (error) {

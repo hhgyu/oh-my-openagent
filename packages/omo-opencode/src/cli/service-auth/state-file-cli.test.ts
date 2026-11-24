@@ -1,10 +1,11 @@
-import { beforeAll, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { mkdirSync } from "node:fs"
-import { chmod, chown, lstat, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
+import { chmod, chown, lstat, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { credentialId } from "./keystore"
 import { credentialSchema } from "./protocol"
-import { fakeApi, grant, minted, temporaryHome } from "./test-support"
+import { grant, minted } from "./test-support"
 
 // #7185b: on a Linux machine with no Secret Service, `omo login` keeps the shared sign-in in the private state file, a
 // second process uses the same device instead of registering a new one, and `omo logout` removes the file. Use the shipped launcher and bundle without rebuilding either.
@@ -27,22 +28,39 @@ type Observed = {
 // The four launcher processes are the slow shared setup, so they run in this hook (a hook may take as long as the
 // launcher needs on a loaded machine; a test may not raise its own timeout) and the test asserts what they observed.
 let observed: Observed | undefined
+let suiteHome: string | undefined
+let stopServer: (() => Promise<void>) | undefined
+afterAll(async () => {
+  try {
+    await stopServer?.()
+  } finally {
+    if (suiteHome) await rm(suiteHome, { recursive: true, force: true })
+  }
+})
 beforeAll(async () => {
   if (process.platform !== "linux") return
-  const home = await temporaryHome()
+  const home = (suiteHome = await mkdtemp(join(tmpdir(), "omo-state-cli-")))
   const runtimeDir = join(home, "xdg-run")
   mkdirSync(runtimeDir, { recursive: true })
   const requests: string[] = []
-  const api = fakeApi(async (request) => {
-    const path = new URL(request.url).pathname
-    requests.push(`${request.method} ${path}`)
-    if (path === "/v1/health") return Response.json({ ok: true })
-    if (path === "/v1/device/code")
-      return Response.json({ ...minted, intervalSeconds: 1, expiresAt: new Date(Date.now() + 60_000).toISOString() })
-    if (path === "/v1/device/token") return Response.json(grant)
-    if (path === "/v1/devices/device-1" && request.method === "DELETE") return new Response(null, { status: 204 })
-    return new Response(null, { status: 404 })
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (request) => {
+      const path = new URL(request.url).pathname
+      requests.push(`${request.method} ${path}`)
+      if (path === "/v1/health") return Response.json({ ok: true })
+      if (path === "/v1/device/code")
+        return Response.json({ ...minted, intervalSeconds: 1, expiresAt: new Date(Date.now() + 60_000).toISOString() })
+      if (path === "/v1/device/token") return Response.json(grant)
+      if (path === "/v1/devices/device-1" && request.method === "DELETE") return new Response(null, { status: 204 })
+      return new Response(null, { status: 404 })
+    },
   })
+  stopServer = async () => {
+    await server.stop(true)
+  }
+  const api = server.url.origin
   const runs: Run[] = []
   const run = async (args: readonly string[]): Promise<string> => {
     const child = Bun.spawn(
@@ -51,6 +69,7 @@ beforeAll(async () => {
         cwd: home,
         env: {
           PATH: process.env.PATH,
+          NO_PROXY: "127.0.0.1",
           HOME: home,
           USERPROFILE: home,
           XDG_RUNTIME_DIR: runtimeDir,
@@ -119,6 +138,21 @@ beforeAll(async () => {
     if (kind === "foreign") expect(await readFile(file, "utf8")).toBe("foreign synthetic")
     else expect((await lstat(file)).isSymbolicLink()).toBe(true)
     expect(await readFile(neighbor, "utf8")).toBe("synthetic neighbor")
+  }
+  await rm(file)
+  await writeFile(file, "synthetic preserved", { mode: 0o600 })
+  const parent = join(home, ".omo")
+  await chmod(parent, 0o777)
+  try {
+    await run(["account", "forget"])
+    const result = runs.at(-1)
+    expect(result?.code).not.toBe(0)
+    expect(result?.stderr).toContain(parent)
+    expect(result?.stderr).toContain("0777")
+    expect(result?.stderr).toContain("chmod")
+    expect(await readFile(file, "utf8")).toBe("synthetic preserved")
+  } finally {
+    await chmod(parent, 0o700)
   }
   observed = {
     runs: normalRuns,
