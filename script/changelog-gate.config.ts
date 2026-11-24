@@ -32,3 +32,10 @@ export const UPSTREAM_SYNC = {
   branch: "dev",
   ref: "refs/changelog-gate/upstream",
 } as const
+
+/** The fork's one-time changelog baseline (D-048). A PR labelled `label` may replace CHANGELOG.md and delete
+ * fragments while the base branch's CHANGELOG.md does not yet carry `marker` (changelog-baseline.ts). */
+export const CHANGELOG_BASELINE = {
+  label: "changelog-baseline",
+  marker: "<!-- changelog-baseline: v2 -->",
+} as const

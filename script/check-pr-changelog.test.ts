@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { UPSTREAM_SYNC } from "./changelog-gate.config.ts"
+import { CHANGELOG_BASELINE, UPSTREAM_SYNC } from "./changelog-gate.config.ts"
 
 const roots: string[] = []
 const runner = fileURLToPath(new URL("./check-pr-changelog.ts", import.meta.url))
@@ -365,6 +365,69 @@ describe("changelog gate upstream-sync label", () => {
       const unlabelled = runGate(root, { CHANGELOG_GATE_BASE: forkBase, CHANGELOG_GATE_PR: "7" })
       expect(verdicts(result.stdout)).toEqual(verdicts(unlabelled.stdout))
     }
+  })
+})
+
+describe("changelog gate baseline label", () => {
+  const fragment =
+    "### Fixed\n\n- A fork fix.\n\n<!-- changes-log: packages/fixture/changes.md -->\n## 2026-11-25 - Fork fix (#7)\n\nDetail.\n"
+  const rebased = `# Changelog\n\n${CHANGELOG_BASELINE.marker}\n\n## [Unreleased]\n\n## [v2-baseline] - 2026-11-25\n\n- A fork fix.\n`
+
+  function baselineFixture() {
+    const { root, git, write } = fixture()
+    write("packages/fixture/changes.md", "## 2026-10-01 - Earlier (#1)\n\nOlder.\n")
+    write("changes/unreleased/7.md", fragment)
+    git("add", ".")
+    git("commit", "-qm", "fork fragment")
+    const base = git("rev-parse", "HEAD")
+    return { root, git, write, base }
+  }
+
+  test.each([
+    {
+      name: "a labelled rebase that stamps a package log passes both checks",
+      extra: {},
+      labels: [CHANGELOG_BASELINE.label],
+      status: 0,
+      verdict: /changelog-gate: PASS - changelog-baseline:[\s\S]*package logs PASS/,
+    },
+    {
+      name: "the same rebase without the label keeps the shared refusal",
+      extra: {},
+      labels: [],
+      status: 1,
+      verdict: /changelog-gate: FAIL - only the release PR may edit the changelog/,
+    },
+    {
+      name: "a labelled rebase that also changes shipped code fails",
+      extra: { "packages/fixture/src/index.ts": "export const value = 2\n" },
+      labels: [CHANGELOG_BASELINE.label],
+      status: 1,
+      verdict: /FAIL - changelog-baseline: a baseline PR modifies only/,
+    },
+  ])("$name", ({ extra, labels, status, verdict }) => {
+    // given: a base with a fork fragment, and a head that stamps it into a marked CHANGELOG.md
+    const { root, git, write, base } = baselineFixture()
+    write("CHANGELOG.md", rebased)
+    write(
+      "packages/fixture/changes.md",
+      "## 2026-11-25 - Fork fix (#7)\n\nDetail.\n\n## 2026-10-01 - Earlier (#1)\n\nOlder.\n",
+    )
+    for (const [path, content] of Object.entries(extra)) write(path, content)
+    git("rm", "-q", "changes/unreleased/7.md")
+    git("add", ".")
+    git("commit", "-qm", "baseline")
+
+    // when: the workflow's real entry point evaluates it
+    const result = runGate(root, {
+      CHANGELOG_GATE_BASE: base,
+      CHANGELOG_GATE_PR: "9",
+      CHANGELOG_GATE_LABELS: JSON.stringify(labels),
+    })
+
+    // then: only the labelled, changelog-only rebase passes
+    expect(result.status, result.stdout + result.stderr).toBe(status)
+    expect(result.stdout).toMatch(verdict)
   })
 })
 
