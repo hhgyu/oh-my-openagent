@@ -61,7 +61,10 @@ function affirmativeAt(text: string, start: number): boolean {
 
 const NEGATED_VERB = /\b(?:do\s+not|don['\u2019]t|dont|never)\s+(?:load|use|run|invoke|start|trigger|arm|enable)\b/gi
 const CLAUSE_END = /[.;:!?\n]|\s(?:but|then|instead|however)\b|\s[\u2014\u2013-]\s/
-const CLAUSE_EDGE = new RegExp(String.raw`${CLAUSE_END.source}|,[ \t]*(?=(?:${REQUEST_MARKER}[ \t]+)?${CLAUSE_KEYWORD})`, "gi")
+const CLAUSE_EDGE = new RegExp(
+  String.raw`${CLAUSE_END.source}|,[ \t]*(?=(?:${REQUEST_MARKER}[ \t]+)?${CLAUSE_KEYWORD})`,
+  "gi",
+)
 const INTRODUCER = new RegExp(`${REQUEST_MARKER}[ \\t]+`, "iy")
 const KEYWORD_AFTER_MARKER = new RegExp(`[ \\t]+(?=${CLAUSE_KEYWORD})`, "iy")
 const PROHIBITED_KEYWORD = new RegExp(
@@ -124,7 +127,11 @@ export function maskNegatedInvocations(text: string): string {
         if (affirmativeAt(text, start)) return edge.index
       } else {
         KEYWORD_AFTER_MARKER.lastIndex = after
-        if (!/\w$/.test(edge[0]) || !KEYWORD_AFTER_MARKER.test(text) || affirmativeAt(text, KEYWORD_AFTER_MARKER.lastIndex))
+        if (
+          !/\w$/.test(edge[0]) ||
+          !KEYWORD_AFTER_MARKER.test(text) ||
+          affirmativeAt(text, KEYWORD_AFTER_MARKER.lastIndex)
+        )
           return edge.index
       }
     }

@@ -111,7 +111,13 @@ describe("registerUltrawork", () => {
         })
         await f.prompt("configured", "ulw fix it")
         expect(f.request("configured")).toHaveLength(count)
-        const event = { sessionID: "configured", status: "completed", tool: "todowrite", input: { todos: [{}] }, result: { content: "" } }
+        const event = {
+          sessionID: "configured",
+          status: "completed",
+          tool: "todowrite",
+          input: { todos: [{}] },
+          result: { content: "" },
+        }
         await f.hooks.get("tool:execute.after")?.(event)
         expect(Boolean(event.result.content)).toBe(count === 1)
         await fanout()

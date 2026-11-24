@@ -136,9 +136,9 @@ describe("reviewed prohibition boundaries", () => {
     "avoid ulw, ultrawork",
     "avoid ulw or ultrawork or ulw-loop",
     "No ulw-loop, ulw-plan, ultrawork",
-    "avoid using \"ulw\" or ultrawork",
+    'avoid using "ulw" or ultrawork',
     "avoid ulw, ultrawork please",
-    "avoid using \"ulw\" or ultrawork for this task",
+    'avoid using "ulw" or ultrawork for this task',
     "avoid ulw, ultrawork entirely",
     "avoid ulw, ultrawork today",
     "avoid ulw, ultrawork this week",
@@ -204,12 +204,12 @@ describe("reviewed prohibition boundaries", () => {
     expect(classify(text).effective).toBe(true)
   })
 
-  it.each([
-    "Do not use tmux, but ultrawork is prohibited",
-    "Do not use tmux but ultrawork is prohibited",
-  ])("a clause marker does not make a declaration a request: %s", (text) => {
-    expect(classify(text).effective).toBe(false)
-  })
+  it.each(["Do not use tmux, but ultrawork is prohibited", "Do not use tmux but ultrawork is prohibited"])(
+    "a clause marker does not make a declaration a request: %s",
+    (text) => {
+      expect(classify(text).effective).toBe(false)
+    },
+  )
 
   // "release" is also a period noun; a sentence boundary disambiguates the request above.
   it.each(["avoid ulw-loop, ulw the release notes"])("known limit: compound noun after a prohibition: %s", (text) => {

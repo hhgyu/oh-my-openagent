@@ -44,7 +44,10 @@ function carriesDirective(context: SessionContext): boolean {
 }
 
 /** Registers ultrawork keyword arming and directive injection; the cleanup disposes both hooks. */
-export async function registerUltrawork(host: Host, settings?: OmoKeywordDetectorSettings): Promise<() => Promise<void>> {
+export async function registerUltrawork(
+  host: Host,
+  settings?: OmoKeywordDetectorSettings,
+): Promise<() => Promise<void>> {
   if (isDisabled(host) || !isUltraworkKeywordEnabled(settings)) return async () => {}
   const arming = sharedPromptArmingLedger(host)
   const stop = new AbortController()
