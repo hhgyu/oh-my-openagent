@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:3274ddeadfb47a9374fc85ce02da414e8ad87604e5a1dc3c5f5713f111687b74:aa1ce3c5bb3d0d5a6d0d5fd4c6652bd326be6478e1fe00d14dc2fd7e392f4fce
+// omo-codex-install:dfb86641b955ca1493e0a34733e10aee50e32f19d9934360158a475df4529e14:8893233a388e00526e1dd00e6155865aaa51bdbc3bc3541eb0a11d7a4dc39995
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -19792,7 +19792,7 @@ var KeywordTypeSchema = _enum(["ultrawork", "team", "hyperplan", "hyperplan-ultr
 var OmoKeywordDetectorSettingsSchema = object({
   enabled_expansions: array(KeywordTypeSchema).optional(),
   disabled_keywords: array(KeywordTypeSchema).optional()
-});
+}).strict();
 
 // packages/omo-config-core/src/schema/harness.ts
 var HARNESS_IDS = ["codex", "opencode", "omo"];

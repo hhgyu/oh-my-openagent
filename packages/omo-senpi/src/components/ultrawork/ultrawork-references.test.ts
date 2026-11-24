@@ -199,8 +199,16 @@ describe("reviewed prohibition boundaries", () => {
   it.each([
     "don't use ulw here, ulw it later",
     "don't use ulw here, ulw them later",
+    "don't use ulw here, ulw-loop fix the bug",
   ])("explicit imperative after a negated verb that dev suppresses: %s", (text) => {
     expect(classify(text).effective).toBe(true)
+  })
+
+  it.each([
+    "Do not use tmux, but ultrawork is prohibited",
+    "Do not use tmux but ultrawork is prohibited",
+  ])("a clause marker does not make a declaration a request: %s", (text) => {
+    expect(classify(text).effective).toBe(false)
   })
 
   // "release" is also a period noun; a sentence boundary disambiguates the request above.

@@ -106,8 +106,15 @@ describe("registerUltrawork", () => {
       ] satisfies [OmoKeywordDetectorSettings, number][]) {
         const f = fixture()
         const cleanup = await registerUltrawork(f.host, settings)
+        const fanout = await registerTodoFanoutReminder(f.host as Parameters<typeof registerTodoFanoutReminder>[0], {
+          keywordDetector: settings,
+        })
         await f.prompt("configured", "ulw fix it")
         expect(f.request("configured")).toHaveLength(count)
+        const event = { sessionID: "configured", status: "completed", tool: "todowrite", input: { todos: [{}] }, result: { content: "" } }
+        await f.hooks.get("tool:execute.after")?.(event)
+        expect(Boolean(event.result.content)).toBe(count === 1)
+        await fanout()
         await cleanup()
       }
     })

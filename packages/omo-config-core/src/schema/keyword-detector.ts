@@ -11,6 +11,11 @@ export type KeywordType = z.infer<typeof KeywordTypeSchema>
 export const OmoKeywordDetectorSettingsSchema = z.object({
   enabled_expansions: z.array(KeywordTypeSchema).optional(),
   disabled_keywords: z.array(KeywordTypeSchema).optional(),
-})
+}).strict()
 
 export type OmoKeywordDetectorSettings = z.infer<typeof OmoKeywordDetectorSettingsSchema>
+
+export function isUltraworkKeywordEnabled(settings?: OmoKeywordDetectorSettings): boolean {
+  return !settings?.disabled_keywords?.includes("ultrawork") &&
+    (settings?.enabled_expansions === undefined || settings.enabled_expansions.includes("ultrawork"))
+}

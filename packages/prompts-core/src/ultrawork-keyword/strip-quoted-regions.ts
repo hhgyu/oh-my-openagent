@@ -41,11 +41,13 @@ const DEMONSTRATIVE = String.raw`(?:this|that|these|those)\b`
 const NOUN_PHRASE = String.raw`(?:${DETERMINER}[ \t]+(?:${COUNT}[ \t]+)?|${COUNT}[ \t]+)[a-z]`
 const OBJECT = String.raw`(?:it|them|everything|all|something|anything|each|both|one|me|us|him|her|you)\b`
 const REQUEST_MARKER = String.raw`(?:instead|just|but|then|rather|now)\b`
-const KEYWORD_END = /(?:ultrawork|ulw)[ \t]+/iy
+const CLAUSE_KEYWORD = String.raw`(?:ultrawork|ulw)(?:[-_](?:loop|plan|research|execute|mass))?\b`
+const KEYWORD_END = new RegExp(`${CLAUSE_KEYWORD}[ \\t]+`, "iy")
 const LEADING_ADVERBS = /(?:(?:just|only|even|simply|all|completely|entirely)\b[ \t]+)+/iy
 const SCOPE = /(?:for|during|in|on|within|at|until|through|throughout|over|from|before|after)\b/iy
 const TEMPORAL = new RegExp(`(?:${TEMPORAL_ADVERB}|${PERIOD_PHRASE})`, "iy")
-const REQUEST = new RegExp(`(?:${REQUEST_MARKER}|${OBJECT}|${DEMONSTRATIVE}|${NOUN_PHRASE})`, "iy")
+const ACTION = String.raw`(?:fix|build|implement|review|refactor|test|investigate|research|plan|execute|ship)\b`
+const REQUEST = new RegExp(`(?:${REQUEST_MARKER}|${OBJECT}|${DEMONSTRATIVE}|${NOUN_PHRASE}|${ACTION})`, "iy")
 
 function affirmativeAt(text: string, start: number): boolean {
   KEYWORD_END.lastIndex = start
@@ -59,8 +61,9 @@ function affirmativeAt(text: string, start: number): boolean {
 
 const NEGATED_VERB = /\b(?:do\s+not|don['\u2019]t|dont|never)\s+(?:load|use|run|invoke|start|trigger|arm|enable)\b/gi
 const CLAUSE_END = /[.;:!?\n]|\s(?:but|then|instead|however)\b|\s[\u2014\u2013-]\s/
-const CLAUSE_EDGE = new RegExp(String.raw`${CLAUSE_END.source}|,[ \t]*(?=(?:${REQUEST_MARKER}[ \t]+)?(?:ulw|ultrawork)\b)`, "gi")
-const INTRODUCED_REQUEST = new RegExp(`${REQUEST_MARKER}[ \\t]+(?:ulw|ultrawork)\\b`, "iy")
+const CLAUSE_EDGE = new RegExp(String.raw`${CLAUSE_END.source}|,[ \t]*(?=(?:${REQUEST_MARKER}[ \t]+)?${CLAUSE_KEYWORD})`, "gi")
+const INTRODUCER = new RegExp(`${REQUEST_MARKER}[ \\t]+`, "iy")
+const KEYWORD_AFTER_MARKER = new RegExp(`[ \\t]+(?=${CLAUSE_KEYWORD})`, "iy")
 const PROHIBITED_KEYWORD = new RegExp(
   String.raw`\b(?:avoid(?:ing)?|skip(?:ping)?|without|no|never|do[ \t]+not|don['\u2019]t|dont)[ \t]+(?:(?:using|use[ \t]+of|the)[ \t]+)?` +
     LIST_ITEM,
@@ -114,9 +117,16 @@ export function maskNegatedInvocations(text: string): string {
   const verbsMasked = maskMatches(text, NEGATED_VERB, (start) => {
     CLAUSE_EDGE.lastIndex = start
     for (let edge; (edge = CLAUSE_EDGE.exec(text)) !== null;) {
-      if (!edge[0].startsWith(",")) return edge.index
-      INTRODUCED_REQUEST.lastIndex = CLAUSE_EDGE.lastIndex
-      if (INTRODUCED_REQUEST.test(text) || affirmativeAt(text, CLAUSE_EDGE.lastIndex)) return edge.index
+      const after = CLAUSE_EDGE.lastIndex
+      if (edge[0].startsWith(",")) {
+        INTRODUCER.lastIndex = after
+        const start = INTRODUCER.test(text) ? INTRODUCER.lastIndex : after
+        if (affirmativeAt(text, start)) return edge.index
+      } else {
+        KEYWORD_AFTER_MARKER.lastIndex = after
+        if (!/\w$/.test(edge[0]) || !KEYWORD_AFTER_MARKER.test(text) || affirmativeAt(text, KEYWORD_AFTER_MARKER.lastIndex))
+          return edge.index
+      }
     }
     return text.length
   })

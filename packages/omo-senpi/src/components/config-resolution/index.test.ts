@@ -26,6 +26,13 @@ afterEach(() => {
 })
 
 describe("loadSenpiOmoConfig", () => {
+  test("reports unknown keyword settings while preserving a valid denylist", () => {
+    const { home, project } = fixture()
+    writeConfig(home, { keyword_detector: { disabled_keywords: ["ultrawork"], disabled_keyword: [] } })
+    const result = loadSenpiOmoConfig({ cwd: project, env: { HOME: home }, platform: "linux" })
+    expect(result.config.keyword_detector).toEqual({ disabled_keywords: ["ultrawork"] })
+    expect(result.diagnostics.length).toBeGreaterThan(0)
+  })
   test("#given the current top-level-only Senpi categories and agents config #when resolved #then it preserves the established configuration exactly", () => {
     // given
     const { home, project } = fixture()

@@ -1,10 +1,13 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, it } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import type { ComponentContext, ComponentLogger } from "../../extension/types"
-import { createSessionArming, type SessionArming } from "../ultrawork/index"
+import { createSessionArming, createUltraworkComponent, type SessionArming } from "../ultrawork/index"
 import { createTodoFanoutReminderComponent } from "./index"
 
 const DISABLED_FLAG = "omo-senpi-todo-fanout-reminder-disabled"
@@ -64,6 +67,25 @@ async function registerComponent(pi: FakeExtensionAPI, arming: SessionArming): P
 }
 
 describe("omo-senpi todo-fanout-reminder component", () => {
+  it("does not arm a disabled project or remind from an already armed ledger", async () => {
+    const root = mkdtempSync(join(tmpdir(), "keyword-ledger-"))
+    try {
+      mkdirSync(join(root, ".omo"))
+      writeFileSync(join(root, ".omo", "omo.json"), JSON.stringify({ keyword_detector: { enabled_expansions: [] } }))
+      const pi = new FakeExtensionAPI()
+      pi.cwd = root
+      const arming = createSessionArming()
+      await createUltraworkComponent(arming).register(pi, createTestContext(pi))
+      await registerComponent(pi, arming)
+      const ctx = sessionEventCtx("s")
+      await pi.dispatch("input", { type: "input", source: "interactive", text: "ulw fix it" }, ctx)
+      expect(arming.isArmed("s")).toBe(false)
+      arming.markArmed("s")
+      expect(await dispatchTodoResult(pi, todoResultPayload("init"), ctx)).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
   it("#given an ultrawork-armed session #when the first todo init result arrives #then exactly one system-reminder is appended with the fan-out decision and todo-freshness directives", async () => {
     // given
     const pi = new FakeExtensionAPI()

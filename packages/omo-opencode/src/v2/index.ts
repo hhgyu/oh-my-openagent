@@ -97,7 +97,7 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
     cleanups.push(await registerGitMasterReadHook(context))
     const snapshot = loadRuntimeConfig({ cwd: context.location.directory })
     cleanups.push(await registerUltrawork(context, snapshot.config.keyword_detector))
-    cleanups.push(await registerTodoFanoutReminder(context))
+    cleanups.push(await registerTodoFanoutReminder(context, { keywordDetector: snapshot.config.keyword_detector }))
     cleanups.push(await registerQuestionGates(context))
     cleanups.push(await registerCommentChecker(context))
     if (context.options?.["omo-memory-enabled"] !== false) {
