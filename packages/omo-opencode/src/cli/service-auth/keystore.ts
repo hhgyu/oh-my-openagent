@@ -269,10 +269,6 @@ export function createSealedStore<T>(
           ...(home === undefined ? {} : { home }),
         })
       : null
-  const matchesWrite = (stored: T, intended: T) =>
-    linux.relate === undefined
-      ? JSON.stringify(stored) === JSON.stringify(intended)
-      : linux.relate(stored, intended) !== "other"
   if (!secrets) {
     if (stateFile !== null)
       return {
@@ -283,8 +279,7 @@ export function createSealedStore<T>(
             store: stateFile,
             snapshot: stateFile.snapshot,
             parse: parseStored,
-            matchesWrite,
-            write: stateFile.write,
+            write: stateFile.writeReturningText,
             clear: stateFile.clear,
           }),
       }
@@ -417,6 +412,22 @@ export function createSealedStore<T>(
     if (mapped instanceof Error && mapped.name === "LockLeaseLostError") return mapped
     return unavailable(mapped)
   }
+  const writeKeyring = async (value: T): Promise<string> => {
+      // One OS-store replacement commits the rotating token and its access token together.
+      if ((await helper.backend()) !== null)
+        throw new Error("OmO's keychain helper writes only under the session lock.")
+      try {
+        // A parked/coalesced read may predate another process's write. Never use it to
+        // assign a generation, and never let it block an otherwise usable writer.
+        const next = amendWrite === undefined ? value : amendWrite(previousOf(await answered(secrets, true)), value)
+        const encoded = codec.serialize(next)
+        await secrets.set({ ...key, value: encoded })
+        forget(secrets)
+        return encoded
+      } catch (error) {
+        throw unavailable(error)
+      }
+  }
   const keyring: SealedStore<T> = {
     read: () => parsedRead(false),
     readAuthoritative: () => parsedRead(true),
@@ -430,20 +441,7 @@ export function createSealedStore<T>(
       return lockedStoreView(backend, lease, codec, lockedFailure, () => forget(helper.reader(backend)))
     },
     migrationPending: async () => (await helper.backend())?.migrationPending() ?? false,
-    async write(value) {
-      // One OS-store replacement commits the rotating token and its access token together.
-      if ((await helper.backend()) !== null)
-        throw new Error("OmO's keychain helper writes only under the session lock.")
-      try {
-        // A parked/coalesced read may predate another process's write. Never use it to
-        // assign a generation, and never let it block an otherwise usable writer.
-        const next = amendWrite === undefined ? value : amendWrite(previousOf(await answered(secrets, true)), value)
-        await secrets.set({ ...key, value: JSON.stringify(schema.parse(next)) })
-      } catch (error) {
-        throw unavailable(error)
-      }
-      forget(secrets)
-    },
+    write: async (value) => { await writeKeyring(value) },
     async clear() {
       if ((await helper.backend()) !== null)
         throw new Error("OmO's keychain helper deletes only under the session lock.")
@@ -464,10 +462,7 @@ export function createSealedStore<T>(
     probe: keyringState,
     keyringText: () => rawRead(true),
     parse: parseStored,
-    matchesWrite: (stored, intended) =>
-      linux.relate === undefined
-        ? JSON.stringify(stored) === JSON.stringify(intended)
-        : linux.relate(stored, intended) !== "other",
+    writeKeyring,
     notice,
     ...(home === undefined ? {} : { home }),
     async relation(text) {

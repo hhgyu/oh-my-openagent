@@ -34,7 +34,7 @@ export function routeLinuxStore<T>(input: {
   readonly relation: (text: string) => Promise<KeyringRelation>
   /** Writes the stored text to the keyring and reads it back; throws, keeping the file, when either step fails. */
   readonly moveToKeyring: (text: string) => Promise<void>
-  readonly matchesWrite: (stored: T, intended: T) => boolean
+  readonly writeKeyring: (value: T) => Promise<string>
   readonly notice: (message: string) => void
 }): SealedStore<T> {
   const { keyring, file, notice } = input
@@ -81,7 +81,7 @@ export function routeLinuxStore<T>(input: {
       notice(
         `omo: No keyring is running; OmO keeps this sign-in in a private file in ${file.directory()}, readable only by you. Start a keyring to keep it there instead.`,
       )
-    await store.write(value)
+    return store === file ? file.writeReturningText(value) : input.writeKeyring(value)
   }
   const clearFrom = async (store: SealedStore<T>) => {
     if (store === keyring) {
@@ -96,14 +96,13 @@ export function routeLinuxStore<T>(input: {
   return {
     read: async () => (await target()).read(),
     readAuthoritative: async () => (await target()).readAuthoritative(),
-    write: async (value) => writeTo(await target(), value),
+    write: async (value) => { await writeTo(await target(), value) },
     clear: async () => clearFrom(await target()),
     async underLock() {
       const selected = await target()
       return lockedLinuxSelection({
         store: selected,
         parse: input.parse,
-        matchesWrite: input.matchesWrite,
         snapshot: async () => {
           if (selected === file) return file.snapshot()
           const text = await input.keyringText()
@@ -120,9 +119,8 @@ export function routeLinuxStore<T>(input: {
 export function lockedLinuxSelection<T>(input: {
   store: SealedStore<T>
   parse: (text: string) => T
-  matchesWrite: (stored: T, intended: T) => boolean
   snapshot: () => Promise<{ text: string; version: string } | null>
-  write: (value: T) => Promise<void>
+  write: (value: T) => Promise<string>
   clear: () => Promise<void>
 }): LockedStore<T> {
   let expected: string | undefined
@@ -150,13 +148,20 @@ export function lockedLinuxSelection<T>(input: {
   return {
     read,
     async write(value) {
-      await read()
+      const firstMutation = expected === undefined && !failed
+      try {
+        await read()
+      } catch (error) {
+        if (!firstMutation || !(error instanceof InvalidCredentialState) || corrupt === undefined) throw error
+        const version = corrupt
+        corrupt = undefined
+        if ((await input.snapshot())?.version !== version) throw changed()
+      }
       failed = true
-      await input.write(value)
+      const encoded = await input.write(value)
       // Storage may have assigned a generation to the write. The lease excludes other OmO writers.
-      const written = await input.store.readAuthoritative()
-      if (written === null || !input.matchesWrite(written, value)) throw changed()
-      expected = JSON.stringify(written)
+      if ((await input.snapshot())?.text !== encoded) throw changed()
+      expected = JSON.stringify(input.parse(encoded))
       failed = false
     },
     async clear() {

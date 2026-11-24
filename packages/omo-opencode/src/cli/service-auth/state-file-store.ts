@@ -144,6 +144,7 @@ async function removeStateFile(dir: string, name: string): Promise<void> {
 
 export type StateFileStore<T> = SealedStore<T> & {
   /** The stored text as written, or null when there is none or it was refused (one line, never its content). */
+  readonly writeReturningText: (value: T) => Promise<string>
   readonly snapshot: () => Promise<{ text: string; version: string } | null>
   readonly text: () => Promise<string | null>
   /** True while any entry sits at the file's path, refused or not. */
@@ -187,8 +188,18 @@ export function createStateFileStore<T>(input: {
     const stored = await text()
     return stored === null ? null : codec.parse(stored)
   }
-  const locked = (action: () => Promise<void>): Promise<void> =>
+  const locked = <R>(action: () => Promise<R>): Promise<R> =>
     withCredentialLock(api, action, input.home ?? accountHome())
+  const writeReturningText = (value: T) => locked(async () => {
+    const next = codec.amend === undefined ? value : codec.amend(await text(), value)
+    const encoded = codec.serialize(next)
+    try {
+      await writeStateFile(directory(), name, encoded, uid)
+      return encoded
+    } catch (error) {
+      throw failed("write", error)
+    }
+  })
   return {
     read,
     readAuthoritative: read,
@@ -202,15 +213,8 @@ export function createStateFileStore<T>(input: {
       }
     },
     present: async () => (await lstat(join(directory(), name)).catch(() => null)) !== null,
-    write: (value) =>
-      locked(async () => {
-        const next = codec.amend === undefined ? value : codec.amend(await text(), value)
-        try {
-          await writeStateFile(directory(), name, codec.serialize(next), uid)
-        } catch (error) {
-          throw failed("write", error)
-        }
-      }),
+    writeReturningText,
+    write: async (value) => { await writeReturningText(value) },
     clear: () =>
       locked(async () => {
         try {
