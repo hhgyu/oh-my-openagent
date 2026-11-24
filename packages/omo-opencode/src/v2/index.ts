@@ -95,7 +95,8 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
   try {
     cleanups.push(await registerAgents(context.agent, { cwd: context.location.directory }))
     cleanups.push(await registerGitMasterReadHook(context))
-    cleanups.push(await registerUltrawork(context))
+    const snapshot = loadRuntimeConfig({ cwd: context.location.directory })
+    cleanups.push(await registerUltrawork(context, snapshot.config.keyword_detector))
     cleanups.push(await registerTodoFanoutReminder(context))
     cleanups.push(await registerQuestionGates(context))
     cleanups.push(await registerCommentChecker(context))
@@ -104,7 +105,6 @@ export async function setupV2Host(context: Plugin.Context, owners: V2HostOwners 
       cleanups.push(await registerMemoryComponent(context))
     }
     if (context.options?.["omo-senpi-lsp-tools-enabled"] !== false) {
-      const snapshot = loadRuntimeConfig({ cwd: context.location.directory })
       const runtime = createMutationRuntime({
         ...(snapshot.config.formatOnMutation ? { formatOnMutation: snapshot.config.formatOnMutation } : {}),
         diagnosticsEnabled: context.options?.["omo-senpi-lsp-post-edit-diagnostics-enabled"] !== false,
