@@ -75,7 +75,10 @@ export function expireQueued(ctx: StoreContext, now: number, target?: string): n
   )
   for (const row of rows) {
     const id = String(row.delivery_id)
-    write(ctx, "UPDATE deliveries SET state = 'refused', reason = 'expired', updated_at = ? WHERE delivery_id = ?", [now, id])
+    write(ctx, "UPDATE deliveries SET state = 'refused', reason = 'expired', updated_at = ? WHERE delivery_id = ?", [
+      now,
+      id,
+    ])
     unlinkMarker(ctx, String(row.target_durable_id), id)
   }
   return rows.length

@@ -226,7 +226,11 @@ function rollbackQuietly(ctx: StoreContext): void {
   }
 }
 
-export async function transaction<T>(ctx: StoreContext, op: string, body: (transactionCtx: StoreContext) => T | Promise<T>): Promise<T> {
+export async function transaction<T>(
+  ctx: StoreContext,
+  op: string,
+  body: (transactionCtx: StoreContext) => T | Promise<T>,
+): Promise<T> {
   if (ctx.afterCommit !== undefined) return await body(ctx)
   await beginImmediate(ctx, op, true)
   try {
@@ -678,7 +682,7 @@ export async function enqueue(
     const backlog = ctx.sql.one(
       ["n", "b"],
       `SELECT COUNT(*) AS n, COALESCE(SUM(bytes), 0) AS b FROM deliveries WHERE target_durable_id = ? AND state IN ${OPEN_STATES}
-       AND NOT (state = 'queued' AND expires_at <= ?)`,
+       AND NOT (state = 'queued' AND ledger_id IS NULL AND expires_at <= ?)`,
       [request.target_durable_id, request.now],
     )
     const bytes = Buffer.byteLength(request.body)
