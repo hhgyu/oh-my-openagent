@@ -249,7 +249,7 @@ async function relayMutation<T extends object>(
   key: ReceiptKey | null,
   body: () => RelayOutcome<T>,
 ): Promise<RelayOutcome<T>> {
-  return await transaction(ctx, op, () => {
+  return await transaction(ctx, op, (retentionCtx) => {
     expireDue(ctx, now)
     const cleared = key === null ? 0 : deleteExpiredReceipt(ctx, key, now)
     const prior = priorOutcome<T>(ctx, key)
@@ -257,7 +257,7 @@ async function relayMutation<T extends object>(
     const outcome = body()
     if (outcome.kind === "ok") recordOutcome(ctx, key, now, { ...outcome, deduplicated: false })
     // After the body, so what this call just wrote protects the rows it references.
-    sweepRetentionIfDue(ctx, now, cleared)
+    sweepRetentionIfDue(retentionCtx, now, cleared)
     return outcome.kind === "ok" ? ({ ...outcome, deduplicated: false } as RelayOutcome<T>) : outcome
   })
 }
@@ -280,11 +280,11 @@ export async function toolReceiptBegin(
   ctx: StoreContext,
   request: ReceiptKey & { readonly now: number },
 ): Promise<ToolReceiptBegin> {
-  return await transaction(ctx, "tool_receipt_begin", (): ToolReceiptBegin => {
+  return await transaction(ctx, "tool_receipt_begin", (retentionCtx): ToolReceiptBegin => {
     const cleared = deleteExpiredReceipt(ctx, request, request.now)
     const admission = admitToolReceipt(ctx, request)
     // After the admission, so the receipt this call just wrote or read is not what the sweep removes.
-    sweepRetentionIfDue(ctx, request.now, cleared)
+    sweepRetentionIfDue(retentionCtx, request.now, cleared)
     return admission
   })
 }
@@ -1053,7 +1053,7 @@ export async function readOutbox(
   }>
 > {
   const limit = Math.min(Math.max(request.limit ?? OUTBOX_PAGE_DEFAULT, 1), OUTBOX_PAGE_MAX)
-  return await transaction(ctx, "read_outbox", () => {
+  return await transaction(ctx, "read_outbox", (retentionCtx) => {
     expireDue(ctx, request.now)
     pruneOutbox(ctx, request.now)
     const binding = selectBinding(ctx, request.binding_id)
@@ -1069,7 +1069,7 @@ export async function readOutbox(
         "cursor",
       )
       .map((row) => outboxRowFrom(row, binding))
-    sweepRetentionIfDue(ctx, request.now)
+    sweepRetentionIfDue(retentionCtx, request.now)
     return {
       kind: "ok",
       binding_id: binding.binding_id,

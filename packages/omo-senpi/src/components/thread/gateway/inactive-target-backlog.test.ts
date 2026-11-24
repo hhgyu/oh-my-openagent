@@ -1,0 +1,140 @@
+import { Database } from "bun:sqlite"
+import { afterEach, describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
+import { join } from "node:path"
+
+import {
+  PAIR_BUCKET_REFILL_MS,
+  QUEUED_TTL_MS,
+  RETENTION_SWEEP_INTERVAL_MS,
+  TARGET_MAX_BYTES,
+  TARGET_MAX_MESSAGES,
+} from "@oh-my-opencode/thread-core/gateway/constants"
+import { gatewayDatabasePath, gatewayInboxDirectory } from "@oh-my-opencode/thread-core/gateway/paths"
+import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
+import type { GatewayDeliveryResult } from "@oh-my-opencode/thread-core/gateway/types"
+
+let harness: GatewayHarness | undefined
+
+afterEach(async () => {
+  await harness?.dispose()
+  harness = undefined
+})
+
+function open(): GatewayHarness {
+  harness = createGatewayHarness()
+  harness.session("A")
+  harness.session("T", { online: false })
+  return harness
+}
+
+function send(
+  h: GatewayHarness,
+  to: string,
+  text: string,
+  advance = PAIR_BUCKET_REFILL_MS,
+): Promise<GatewayDeliveryResult> {
+  h.clock.now += advance
+  return h
+    .get("A")
+    .engine.deliver({ sender: { kind: "session", durable_id: "A" }, target: to, text, mode: "follow_up" })
+}
+
+function summary(result: GatewayDeliveryResult): string {
+  return result.kind === "ok" ? result.delivery.kind : `error:${result.error.code}`
+}
+
+async function fill(h: GatewayHarness, to: string, count: number): Promise<string[]> {
+  const ids: string[] = []
+  for (let index = 0; index < count; index++) {
+    const result = await send(h, to, `line ${index}`)
+    if (result.kind !== "ok") throw new Error(`fill ${index}: ${JSON.stringify(result)}`)
+    ids.push(result.delivery_id)
+  }
+  return ids
+}
+
+async function rows(h: GatewayHarness, target: string) {
+  return await h.get("A").store.list({ target_durable_id: target })
+}
+
+function markIntake(h: GatewayHarness, deliveryId: string): void {
+  const db = new Database(gatewayDatabasePath(h.agentDir))
+  try {
+    db.run("UPDATE deliveries SET ledger_id = ? WHERE delivery_id = ?", [`ledger-${deliveryId}`, deliveryId])
+  } finally {
+    db.close()
+  }
+}
+
+describe("a target that is not running", () => {
+  test("#given a full backlog #when its oldest row passes the queued TTL #then that row is refused expired, one send is accepted, and the next is refused again", async () => {
+    const h = open()
+    const ids = await fill(h, "T", TARGET_MAX_MESSAGES)
+    const first = (await rows(h, "T")).find((row) => row.delivery_id === ids[0])
+    if (first === undefined) throw new Error("no first row")
+    h.clock.now = first.expires_at - PAIR_BUCKET_REFILL_MS
+
+    expect(summary(await send(h, "T", "after the first expired"))).toBe("queued_offline")
+    expect(summary(await send(h, "T", "while the rest are still live", 0))).toBe("error:queue_full")
+
+    const after = await rows(h, "T")
+    expect(after.find((row) => row.delivery_id === ids[0])).toMatchObject({ state: "refused", reason: "expired" })
+    expect(after.filter((row) => row.state === "queued")).toHaveLength(TARGET_MAX_MESSAGES)
+    expect(existsSync(join(gatewayInboxDirectory(h.agentDir, "T"), ids[0] as string))).toBe(false)
+  })
+
+  test("#given a full backlog whose only expired row is an intake row #when a send arrives #then unresolved intake still occupies a slot", async () => {
+    const h = open()
+    const ids = await fill(h, "T", TARGET_MAX_MESSAGES)
+    const intake = ids[0] as string
+    markIntake(h, intake)
+    const first = (await rows(h, "T")).find((row) => row.delivery_id === intake)
+    if (first === undefined) throw new Error("no intake row")
+    h.clock.now = first.expires_at - PAIR_BUCKET_REFILL_MS
+
+    expect(summary(await send(h, "T", "after the intake row expired"))).toBe("error:queue_full")
+
+    expect((await rows(h, "T")).find((row) => row.delivery_id === intake)).toMatchObject({ state: "queued" })
+    expect(existsSync(join(gatewayInboxDirectory(h.agentDir, "T"), intake))).toBe(true)
+  })
+
+  for (const intake of [false, true]) {
+    test(`#given a byte-full queue below the row limit #when its first ${intake ? "intake" : "ordinary"} row expires #then its bytes ${intake ? "remain charged" : "are released"}`, async () => {
+      const h = open()
+      const chunk = "x".repeat(16 * 1024)
+      for (let i = 0; i < TARGET_MAX_BYTES / chunk.length; i++) {
+        const result = await send(h, "T", chunk)
+        expect(summary(result)).toBe("queued_offline")
+        if (i === 0 && intake && result.kind === "ok") markIntake(h, result.delivery_id)
+      }
+      expect(summary(await send(h, "T", "x"))).toBe("error:queue_full")
+      const firstExpiry = Math.min(...(await rows(h, "T")).map((row) => row.expires_at))
+      h.clock.now = firstExpiry
+      expect(summary(await send(h, "T", chunk, 0))).toBe(intake ? "error:queue_full" : "queued_offline")
+    })
+  }
+
+  test("#given queued rows past their TTL and no further send to that target #when the retention sweep runs on another write #then they are refused expired and their inbox markers are gone", async () => {
+    const h = open()
+    h.session("X", { online: false })
+    const ids = await fill(h, "T", 3)
+    const [intake, ...ordinary] = ids
+    if (!intake) throw new Error("no intake row")
+    markIntake(h, intake)
+
+    h.clock.now += QUEUED_TTL_MS + RETENTION_SWEEP_INTERVAL_MS
+
+    expect(summary(await send(h, "X", "unrelated"))).toBe("queued_offline")
+    const after = await rows(h, "T")
+    expect(after.find((row) => row.delivery_id === intake)).toMatchObject({
+      state: "queued",
+      ledger_id: `ledger-${intake}`,
+    })
+    expect(existsSync(join(gatewayInboxDirectory(h.agentDir, "T"), intake))).toBe(true)
+    for (const id of ordinary) {
+      expect(after.find((row) => row.delivery_id === id)).toMatchObject({ state: "refused", reason: "expired" })
+      expect(existsSync(join(gatewayInboxDirectory(h.agentDir, "T"), id))).toBe(false)
+    }
+  })
+})
