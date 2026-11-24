@@ -16,12 +16,7 @@ const ADDITIONAL_SOURCE_GLOBS = [
   "packages/web/src/**/*.{ts,tsx,astro,md}",
 ] as const
 
-const USER_FACING_FILES = [
-  "postinstall.mjs",
-  "docs/guide/installation.md",
-  "README.md",
-  "README.ko.md",
-] as const
+const USER_FACING_FILES = ["postinstall.mjs", "docs/guide/installation.md", "README.md", "README.ko.md"] as const
 
 // Each pattern spells "the edition, named after its engine" in one of five
 // languages (English, Korean, Japanese, Russian, Chinese). No allowlist entry may excuse a match.
