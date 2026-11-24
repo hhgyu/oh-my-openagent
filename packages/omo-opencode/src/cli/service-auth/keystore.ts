@@ -445,6 +445,8 @@ export function createSealedStore<T>(
     keyring,
     file: stateFile,
     probe: keyringState,
+    matchesWrite: (stored, intended) =>
+      linux.relate === undefined ? JSON.stringify(stored) === JSON.stringify(intended) : linux.relate(stored, intended) !== "other",
     notice,
     ...(home === undefined ? {} : { home }),
     async relation(text) {

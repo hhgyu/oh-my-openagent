@@ -1,25 +1,14 @@
-import { afterAll, beforeAll, expect, test } from "bun:test"
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { beforeAll, expect, test } from "bun:test"
+import { mkdirSync } from "node:fs"
 import { lstat, readFile, stat } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { buildServiceAuth } from "../../../../../script/build-service-auth"
 import { credentialId } from "./keystore"
 import { credentialSchema } from "./protocol"
 import { fakeApi, grant, minted, temporaryHome } from "./test-support"
 
 // #7185b: on a Linux machine with no Secret Service, `omo login` keeps the shared sign-in in the private state file, a
-// second process uses the same device instead of registering a new one, and `omo logout` removes the file. The launcher
-// loads a service-auth bundle built from THIS source into a temp copy of the launcher tree (the tracked bundle is
-// regenerated only at the release-train top).
-const root = resolve(import.meta.dir, "../../../../..")
-const launcherTree = mkdtempSync(join(tmpdir(), "omo-state-file-launcher-"))
-cpSync(join(root, "packages", "omo-native", "bin"), launcherTree, { recursive: true })
-const launcher = join(launcherTree, "omo.js")
-beforeAll(async () => {
-  await buildServiceAuth(false, join(launcherTree, "lib", "service-auth.generated.js"))
-}, 120_000)
-afterAll(() => rmSync(launcherTree, { recursive: true, force: true }))
+// second process uses the same device instead of registering a new one, and `omo logout` removes the file. Use the shipped launcher and bundle without rebuilding either.
+const launcher = resolve(import.meta.dir, "../../../../../packages/omo-native/bin/omo.js")
 
 type Run = {
   readonly args: readonly string[]

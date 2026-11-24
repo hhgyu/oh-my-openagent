@@ -1,6 +1,6 @@
 import { accountHome } from "./account-home"
 import { withCredentialLock } from "./credential-lock"
-import type { CredentialStorage, SealedStore } from "./keystore"
+import { CredentialStoreError, type CredentialStorage, type SealedStore } from "./keystore"
 import type { StateFileStore } from "./state-file-store"
 
 export type OpenKeyringState = "unlocked" | "absent" | "unknown"
@@ -31,6 +31,7 @@ export function routeLinuxStore<T>(input: {
   readonly relation: (text: string) => Promise<KeyringRelation>
   /** Writes the stored text to the keyring and reads it back; throws, keeping the file, when either step fails. */
   readonly moveToKeyring: (text: string) => Promise<void>
+  readonly matchesWrite: (stored: T, intended: T) => boolean
   readonly notice: (message: string) => void
 }): SealedStore<T> {
   const { keyring, file, notice } = input
@@ -72,30 +73,64 @@ export function routeLinuxStore<T>(input: {
     storage = await choose()
     return storage === "file" ? file : keyring
   }
+  const writeTo = async (store: SealedStore<T>, value: T) => {
+    if (store === file)
+      notice(
+        `omo: No keyring is running; OmO keeps this sign-in in a private file in ${file.directory()}, readable only by you. Start a keyring to keep it there instead.`,
+      )
+    await store.write(value)
+  }
+  const clearFrom = async (store: SealedStore<T>) => {
+    if (store === keyring) {
+      const text = await file.text()
+      if (text !== null) {
+        const relation = await input.relation(text)
+        if (relation === "older" || relation === "newer") await file.clear()
+      }
+    }
+    await store.clear()
+  }
   return {
     read: async () => (await target()).read(),
     readAuthoritative: async () => (await target()).readAuthoritative(),
-    write: async (value, intent, beforeRetire) => {
-      const store = await target()
-      if (store === file)
-        notice(
-          `omo: No keyring is running; OmO keeps this sign-in in a private file in ${file.directory()}, readable only by you. Start a keyring to keep it there instead.`,
-        )
-      await store.write(value, intent, beforeRetire)
-    },
-    // A sign-out removes the sign-in this context uses. The file goes with a keyring item only when the keyring is empty
-    // or holds that same sign-in; another sign-in in the file is not this context's to remove.
-    clear: async () => {
-      const answer = await input.probe()
-      const present = await file.present()
-      storage = answer === "absent" || (answer === "unknown" && present) ? "file" : "keyring"
-      if (storage === "file") return file.clear()
-      if (present)
-        await underLock(async () => {
-          const text = await file.text()
-          if (text !== null && (await input.relation(text)) !== "other") await file.clear()
-        })
-      await keyring.clear()
+    write: async (value) => writeTo(await target(), value),
+    clear: async () => clearFrom(await target()),
+    async underLock() {
+      const selected = await target()
+      let expected: string | undefined
+      let failed = false
+      const changed = () => new CredentialStoreError("The selected sign-in could not be verified. Try again.")
+      const read = async () => {
+        if (failed) throw changed()
+        failed = true
+        const value = await selected.readAuthoritative()
+        const observed = JSON.stringify(value)
+        if (expected !== undefined && expected !== observed)
+          throw new CredentialStoreError("The selected sign-in changed during this operation. Try again.")
+        failed = false
+        expected = observed
+        return value
+      }
+      return {
+        read,
+        async write(value) {
+          await read()
+          failed = true
+          await writeTo(selected, value)
+          // Storage may have assigned a generation to the write. The lease excludes other OmO writers.
+          const written = await selected.readAuthoritative()
+          if (written === null || !input.matchesWrite(written, value)) throw changed()
+          expected = JSON.stringify(written)
+          failed = false
+        },
+        async clear() {
+          await read()
+          await clearFrom(selected)
+          expected = "null"
+        },
+        recover: async () => {},
+        settle: async () => {},
+      }
     },
     storage: () => storage,
   }

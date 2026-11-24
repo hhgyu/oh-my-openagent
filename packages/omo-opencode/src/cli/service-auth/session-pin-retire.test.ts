@@ -7,11 +7,11 @@ import { mkdir, readdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import type { CredentialStore } from "./keystore"
-import { InvalidCredentialState } from "./keystore"
+import { createCredentialStore, InvalidCredentialState } from "./keystore"
 import type { Credentials } from "./protocol"
 import { createSession } from "./session"
 import { retireSyncPinOnDiscard } from "./sync-pin-retire"
-import { fakeApi, grant, privateKeys, refusal, temporaryHome } from "./test-support"
+import { fakeApi, grant, memorySecrets, privateKeys, refusal, temporaryHome } from "./test-support"
 
 const ACCOUNT = "account-r-b7"
 
@@ -280,3 +280,41 @@ describe("the credential write seam retires the sync pin (#12280)", () => {
     expect(logs).toEqual([])
   })
 })
+
+for (const operation of ["forget", "refresh"] as const) {
+  test.skipIf(process.platform === "win32")(
+    `#given distinct file and keyring accounts #when the keyring returns during ${operation} #then the keyring account is unchanged`,
+    async () => {
+      const h = await pinnedHome()
+      let available = false
+      const api = fakeApi((request) => {
+        if (new URL(request.url).pathname === "/v1/session/refresh") {
+          available = true
+          return Response.json({ ...grant, accessToken: "rotated-file-token" })
+        }
+        return new Response(null, { status: 404 })
+      })
+      const memory = memorySecrets()
+      const options = { home: h.home, platform: "linux" as const, secrets: memory.api, notice: () => {} }
+      const store = createCredentialStore(api, { ...options, lockProbe: async () => available ? "unlocked" : "absent" })
+      const file = createCredentialStore(api, { ...options, lockProbe: async () => "absent" })
+      const ring = createCredentialStore(api, { ...options, lockProbe: async () => "unlocked" })
+      await ring.write({ ...anotherDevice, accountId: "ring-account" })
+      const original = [...memory.values.values()]
+      await file.write({ ...stored, accessTokenExpiresAt: new Date(0).toISOString() })
+      const session = createSession({ api, home: h.home, store, beforeKeysDiscarded: async (item) => {
+        available = true
+        await h.hook(item)
+      } })
+      if (operation === "forget") {
+        await session.forget()
+        expect(await file.read()).toBeNull()
+        expect(await h.pins()).toEqual({ live: 0, retired: 1 })
+      } else {
+        expect(await session.accessToken()).toBe("rotated-file-token")
+        expect((await file.read())?.accessToken).toBe("rotated-file-token")
+      }
+      expect([...memory.values.values()]).toEqual(original)
+    },
+  )
+}
