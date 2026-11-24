@@ -16,7 +16,7 @@ state = {"locked": mode not in ("unlocked", "lookup", "migration", "relock")}
 COLLECTION = "/org/freedesktop/secrets/aliases/default"
 xml = """<node><interface name="org.freedesktop.Secret.Collection"><property name="Locked" type="b" access="read"/></interface>
 <interface name="org.freedesktop.Secret.Service"><method name="Unlock"><arg name="objects" type="ao" direction="in"/><arg name="unlocked" type="ao" direction="out"/><arg name="prompt" type="o" direction="out"/></method></interface></node>"""
-xml = xml.replace('<method name="Unlock">','''<method name="SearchItems"><arg type="a{ss}" direction="in"/><arg type="ao" direction="out"/><arg type="ao" direction="out"/></method><method name="OpenSession"><arg type="s" direction="in"/><arg type="v" direction="in"/><arg type="v" direction="out"/><arg type="o" direction="out"/></method><method name="Unlock">''').replace('</node>', '''<interface name="org.freedesktop.Secret.Item"><method name="GetSecret"><arg type="o" direction="in"/><arg type="(oayays)" direction="out"/></method></interface></node>''')
+xml = xml.replace('<method name="Unlock">','''<method name="SearchItems"><arg type="a{ss}" direction="in"/><arg type="ao" direction="out"/><arg type="ao" direction="out"/></method><method name="OpenSession"><arg type="s" direction="in"/><arg type="v" direction="in"/><arg type="v" direction="out"/><arg type="o" direction="out"/></method><method name="Unlock">''').replace('</node>', '''<interface name="org.freedesktop.Secret.Item"><property name="Locked" type="b" access="read"/><method name="GetSecret"><arg type="o" direction="in"/><arg type="(oayays)" direction="out"/></method></interface></node>''')
 xml = xml.replace('</node>','<interface name="org.freedesktop.Secret.Session"><method name="Close"/></interface></node>')
 node = Gio.DBusNodeInfo.new_for_xml(xml)
 def get_property(conn, sender, path, iface, name):
@@ -61,9 +61,9 @@ def unlock(conn, sender, path, iface, method, params, invocation):
     invocation.return_value(GLib.Variant("(aoo)", (unlocked, prompt)))
 def on_bus(conn, name):
     conn.register_object("/session", node.interfaces[3], unlock, None, None)
-    conn.register_object("/item", node.interfaces[2], unlock, None, None)
+    conn.register_object("/item", node.interfaces[2], unlock, get_property, None)
     conn.register_object("/org/freedesktop/secrets", node.interfaces[1], unlock, None, None)
-    if mode != "no-default-collection":
+    if mode not in ("lookup", "no-default-collection"):
         conn.register_object(COLLECTION, node.interfaces[0], None, get_property, None)
 def on_name(conn, name):
     print("READY", flush=True)

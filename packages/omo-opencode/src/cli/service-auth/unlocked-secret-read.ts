@@ -75,25 +75,27 @@ export async function readUnlockedSecret(key: { service: string; name: string })
   }
   let session: string | undefined
   try {
-    const locked = own(
-      g.g_variant_get_variant(
-        child(
-          call(
-            root + "/aliases/default",
-            "org.freedesktop.DBus.Properties",
-            "Get",
-            "('org.freedesktop.Secret.Collection','Locked')",
-            "(v)",
+    const requireUnlocked = (path: string, kind: "Collection" | "Item") => {
+      const locked = own(
+        g.g_variant_get_variant(
+          child(
+            call(
+              path,
+              "org.freedesktop.DBus.Properties",
+              "Get",
+              "('org.freedesktop.Secret." + kind + "','Locked')",
+              "(v)",
+            ),
+            0,
           ),
-          0,
         ),
-      ),
-    )
-    const bool = g.g_variant_type_new(c("b"))
-    try {
-      if (!g.g_variant_is_of_type(locked, bool) || g.g_variant_get_boolean(locked)) throw failed()
-    } finally {
-      g.g_variant_type_free(bool)
+      )
+      const bool = g.g_variant_type_new(c("b"))
+      try {
+        if (!g.g_variant_is_of_type(locked, bool) || g.g_variant_get_boolean(locked)) throw failed()
+      } finally {
+        g.g_variant_type_free(bool)
+      }
     }
     const iface = "org.freedesktop.Secret."
     const items = call(
@@ -110,8 +112,12 @@ export async function readUnlockedSecret(key: { service: string; name: string })
     const unlocked = child(items, 0),
       count = Number(g.g_variant_n_children(unlocked))
     if (Number(g.g_variant_n_children(child(items, 1))) !== 0 || count > 1) throw failed()
-    if (count === 0) return null
+    if (count === 0) {
+      requireUnlocked(root + "/aliases/default", "Collection")
+      return null
+    }
     const item = pathOf(child(unlocked, 0))
+    requireUnlocked(item, "Item")
     session = pathOf(child(call(root, iface + "Service", "OpenSession", "('plain', <''>)", "(vo)"), 1))
     const secret = child(
       call(item, iface + "Item", "GetSecret", "(objectpath " + quote(session) + ",)", "((oayays))"),

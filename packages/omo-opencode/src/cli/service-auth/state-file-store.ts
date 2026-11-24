@@ -179,6 +179,12 @@ async function removeStateFile(dir: string, name: string): Promise<void> {
     await link(entry, backup)
   } catch (error) {
     if (errnoCode(error) === "ENOENT") return syncDirectory(dir, true)
+    if (errnoCode(error) === "EPERM" && (await lstat(entry)).uid !== process.getuid?.()) {
+      // Linux can forbid hard links to a foreign inode. This entry cannot be a usable state file.
+      await rm(entry)
+      await syncDirectory(dir, true)
+      return
+    }
     throw error
   }
   let removed = false
