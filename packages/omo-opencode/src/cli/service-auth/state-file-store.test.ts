@@ -96,6 +96,23 @@ describe.skipIf(process.platform === "win32")("the Linux sign-in state file (#71
     }
   })
 
+  test("a refused removal snapshot cannot clear a replacement with the same permissions", async () => {
+    const { store, file } = await fileStore(await temporaryHome())
+    await store.write(secret)
+    await chmod(file, 0o640)
+    let remove: (() => Promise<void>) | undefined
+    await expect(
+      store.snapshot(undefined, (action) => {
+        remove = action
+      }),
+    ).rejects.toThrow()
+    await rm(file)
+    await writeFile(file, "synthetic replacement", { mode: 0o640 })
+    if (!remove) throw new Error("missing refused snapshot")
+    await expect(remove()).rejects.toThrow("changed")
+    expect(await readFile(file, "utf8")).toBe("synthetic replacement")
+  })
+
   test("#given a symlink in the file's place #then its target is never read", async () => {
     const home = await temporaryHome()
     const { store, dir, file, lines } = await fileStore(home)

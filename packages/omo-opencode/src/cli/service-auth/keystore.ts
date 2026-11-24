@@ -297,10 +297,10 @@ export function createSealedStore<T>(
       return {
         ...stateFile,
         storage: () => "file",
-        underLock: async () =>
+        underLock: async (_lease, removing) =>
           lockedLinuxSelection({
             store: stateFile,
-            snapshot: stateFile.snapshot,
+            snapshot: (onRefused) => stateFile.snapshot(undefined, removing ? onRefused : undefined),
             parse: parseStored,
             write: stateFile.writeReturningText,
             clear: stateFile.clear,

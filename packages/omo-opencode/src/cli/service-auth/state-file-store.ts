@@ -179,16 +179,21 @@ async function syncDirectory(dir: string, required = false): Promise<void> {
 }
 
 /** A symlink in the file's place is unlinked itself, never followed to its target. */
-async function removeStateFile(dir: string, name: string): Promise<void> {
+async function removeStateFile(
+  dir: string,
+  name: string,
+  verify?: (path: string, linked: boolean) => Promise<void>,
+): Promise<void> {
   await recoverRetiring(dir, name)
   await removeTempLeftovers(dir, name)
   const entry = join(dir, name)
   const backup = join(dir, `.${name}.${randomBytes(8).toString("hex")}.retiring`)
+  await verify?.(entry, false)
   try {
     await link(entry, backup)
   } catch (error) {
-    if (errnoCode(error) === "ENOENT") return syncDirectory(dir, true)
-    if (errnoCode(error) === "EPERM" && (await lstat(entry)).uid !== process.getuid?.()) {
+    if (!verify && errnoCode(error) === "ENOENT") return syncDirectory(dir, true)
+    if (!verify && errnoCode(error) === "EPERM" && (await lstat(entry)).uid !== process.getuid?.()) {
       // Linux can forbid hard links to a foreign inode. This entry cannot be a usable state file.
       await rm(entry)
       await syncDirectory(dir, true)
@@ -198,6 +203,8 @@ async function removeStateFile(dir: string, name: string): Promise<void> {
   }
   let removed = false
   try {
+    await verify?.(backup, true)
+    await verify?.(entry, true)
     await rm(entry)
     removed = true
     await syncDirectory(dir, true)
@@ -211,10 +218,73 @@ async function removeStateFile(dir: string, name: string): Promise<void> {
   await syncDirectory(dir, true)
 }
 
+async function captureRefusedRemoval(
+  dir: string,
+  name: string,
+  uid: number,
+  failure: (message: string) => Error,
+  onRefused: (clear: () => Promise<void>) => void,
+): Promise<Error | undefined> {
+  const path = join(dir, name)
+  const first = await lstat(path, { bigint: true }).catch((error: unknown) => {
+    if (errnoCode(error) === "ENOENT") return null
+    throw error
+  })
+  if (first) {
+    const mode = Number(first.mode & 0o7777n)
+      .toString(8)
+      .padStart(4, "0")
+    const reason = first.isSymbolicLink()
+      ? "symlink"
+      : !first.isFile()
+        ? "not a regular file"
+        : first.uid !== BigInt(uid)
+          ? "foreign owner"
+          : (first.mode & 0o077n) !== 0n
+            ? "unsafe permissions"
+            : null
+    if (reason) {
+      const diagnosis = failure(
+        `Refused ${path} (${reason}, mode ${mode}, owner ${first.uid}). Inspect the entry and its ownership; use an owned regular file with mode 0600.`,
+      )
+      onRefused(async () => {
+        if (reason !== "unsafe permissions") throw diagnosis
+        try {
+          if (!(await checkDir(dir, uid))) throw diagnosis
+          await removeStateFile(dir, name, async (candidate, linked) => {
+            const now = await lstat(candidate, { bigint: true })
+            if (
+              !now.isFile() ||
+              now.uid !== first.uid ||
+              now.dev !== first.dev ||
+              now.ino !== first.ino ||
+              (!linked && now.ctimeNs !== first.ctimeNs) ||
+              now.mtimeNs !== first.mtimeNs ||
+              now.size !== first.size ||
+              now.mode !== first.mode
+            )
+              throw failure(
+                `The entry at ${path} changed since the refused snapshot (mode ${mode}); it was kept. Inspect it before attempting removal.`,
+              )
+          })
+        } catch (error) {
+          throw failure(
+            `${diagnosis.message} Removal could not be confirmed: ${error instanceof Error ? error.message : "unknown error"}`,
+          )
+        }
+      })
+      return diagnosis
+    }
+  }
+}
+
 export type StateFileStore<T> = SealedStore<T> & {
   /** Returns the exact serialized credential written, for readback verification. Never log it. */
   readonly writeReturningText: (value: T) => Promise<string>
-  readonly snapshot: (policy?: "ignore-refused") => Promise<{ text: string; version: string } | null>
+  readonly snapshot: (
+    policy?: "ignore-refused",
+    onRefused?: (clear: () => Promise<void>) => void,
+  ) => Promise<{ text: string; version: string } | null>
   /** Private stored text, or null for a missing or refused file. */
   readonly text: () => Promise<string | null>
   /** True while any entry sits at the file's path, refused or not. */
@@ -285,11 +355,20 @@ export function createStateFileStore<T>(input: {
     readAuthoritative: read,
     text,
     directory,
-    snapshot: async (policy) => {
+    snapshot: async (policy, onRefused) => {
+      let diagnosis: Error | undefined
       try {
         await recoverOnAccess()
+        if (onRefused && (await checkDir(directory(), uid))) {
+          const refusal = await captureRefusedRemoval(directory(), name, uid, failure, onRefused)
+          if (refusal) {
+            diagnosis = refusal
+            throw refusal
+          }
+        }
         return await readStateFile(directory(), name, uid)
       } catch (error) {
+        if (diagnosis) throw diagnosis
         if (policy === "ignore-refused" && error instanceof StateFileRefused) return null
         throw failed("read", error)
       }

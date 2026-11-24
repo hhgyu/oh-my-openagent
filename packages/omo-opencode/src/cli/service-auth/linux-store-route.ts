@@ -140,8 +140,8 @@ export function routeLinuxStore<T>(input: {
       return lockedLinuxSelection({
         store: selected,
         parse: input.parse,
-        snapshot: async () => {
-          if (selected === file) return file.snapshot()
+        snapshot: async (onRefused) => {
+          if (selected === file) return file.snapshot(undefined, keepMigrationSource ? onRefused : undefined)
           const text = await input.keyringText()
           return text === null ? null : { text, version: text }
         },
@@ -162,19 +162,26 @@ export function routeLinuxStore<T>(input: {
 export function lockedLinuxSelection<T>(input: {
   store: SealedStore<T>
   parse: (text: string) => T
-  snapshot: () => Promise<{ text: string; version: string } | null>
+  snapshot: (onRefused?: (clear: () => Promise<void>) => void) => Promise<{ text: string; version: string } | null>
   write: (value: T) => Promise<string>
   clear: () => Promise<void>
   prepareCorruptClear?: (text: string) => Promise<() => Promise<void>>
 }): LockedStore<T> {
   let expected: string | undefined
   let corrupt: { version: string; clear: () => Promise<void> } | undefined
+  let refusedClear: (() => Promise<void>) | undefined
   let failed = false
   const changed = () => new CredentialStoreError("The selected sign-in could not be verified. Try again.")
   const read = async () => {
     if (failed) throw changed()
     failed = true
-    const item = await input.snapshot()
+    const item = await input.snapshot(
+      expected === undefined
+        ? (clear) => {
+            refusedClear = clear
+          }
+        : undefined,
+    )
     let value: T | null
     try {
       value = item === null ? null : input.parse(item.text)
@@ -210,6 +217,12 @@ export function lockedLinuxSelection<T>(input: {
       failed = false
     },
     async clear() {
+      if (refusedClear) {
+        const remove = refusedClear
+        refusedClear = undefined
+        await remove()
+        return
+      }
       if (corrupt !== undefined) {
         const { version, clear } = corrupt
         corrupt = undefined

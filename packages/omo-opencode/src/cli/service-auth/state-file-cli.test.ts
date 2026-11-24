@@ -1,6 +1,6 @@
 import { beforeAll, expect, test } from "bun:test"
 import { mkdirSync } from "node:fs"
-import { lstat, readFile, stat, writeFile } from "node:fs/promises"
+import { chmod, chown, lstat, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { credentialId } from "./keystore"
 import { credentialSchema } from "./protocol"
@@ -14,6 +14,7 @@ type Run = {
   readonly args: readonly string[]
   readonly code: number
   readonly keystoreCalls: boolean
+  readonly stderr: string
   readonly stdout: string
 }
 type Observed = {
@@ -70,7 +71,7 @@ beforeAll(async () => {
         new Response(child.stderr).text(),
         child.exited,
       ])
-      runs.push({ args, code, keystoreCalls: stderr.includes("KEYSTORE_CALL"), stdout })
+      runs.push({ args, code, keystoreCalls: stderr.includes("KEYSTORE_CALL"), stdout, stderr })
       return stdout
     } finally {
       if (child.exitCode === null) child.kill()
@@ -89,8 +90,38 @@ beforeAll(async () => {
   await writeFile(file, "{", { mode: 0o600 })
   await run(["account", "forget"])
   await expect(lstat(file)).rejects.toMatchObject({ code: "ENOENT" })
+  const normalRuns = runs.slice()
+  await writeFile(file, "unsafe synthetic credential", { mode: 0o600 })
+  await chmod(file, 0o640)
+  await run(["account", "forget"])
+  expect(runs.at(-1)?.code).toBe(0)
+  await expect(lstat(file)).rejects.toMatchObject({ code: "ENOENT" })
+  await writeFile(file, "synthetic logout", { mode: 0o600 })
+  await chmod(file, 0o640)
+  await run(["logout"])
+  await expect(lstat(file)).rejects.toMatchObject({ code: "ENOENT" })
+  const neighbor = join(home, "neighbor.json")
+  await writeFile(neighbor, "synthetic neighbor")
+  await symlink(neighbor, file)
+  for (const kind of process.getuid?.() === 0 ? ["symlink", "foreign"] : ["symlink"]) {
+    if (kind === "foreign") {
+      await rm(file)
+      await writeFile(file, "foreign synthetic", { mode: 0o600 })
+      await chown(file, 65534, 65534)
+    }
+    await run(["account", "forget"])
+    const result = runs.at(-1)
+    expect(result?.code).not.toBe(0)
+    expect(result?.stderr).toContain(file)
+    expect(result?.stderr).toContain(kind === "foreign" ? "0600" : "0777")
+    expect(result?.stderr).toContain(kind === "foreign" ? "owner" : "symlink")
+    expect(result?.stderr).toContain("Inspect")
+    if (kind === "foreign") expect(await readFile(file, "utf8")).toBe("foreign synthetic")
+    else expect((await lstat(file)).isSymbolicLink()).toBe(true)
+    expect(await readFile(neighbor, "utf8")).toBe("synthetic neighbor")
+  }
   observed = {
-    runs,
+    runs: normalRuns,
     fileModeAfterLogin,
     fileDeviceAfterLogin,
     requests,
