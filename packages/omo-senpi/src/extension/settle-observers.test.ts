@@ -285,3 +285,28 @@ test("#given two unrelated registrations sharing the default label #when a newer
     await pi.dispatch("session_shutdown", {})
   }
 })
+
+test("#given a settle observer retired before its deferred start #when the microtask runs #then the handler never begins", async () => {
+  const pi = new FakeExtensionAPI()
+  let started = 0
+  await composeOmoSenpiExtension(
+    [
+      {
+        name: "fixture",
+        register(api) {
+          api.on("agent_settled", () => {
+            started += 1
+          })
+        },
+      },
+    ],
+    { logger: { info() {}, warn() {}, error() {} } },
+  )(pi)
+  const registration = pi.handlers.find((candidate) => candidate.event === "agent_settled")
+  const settled = Promise.resolve(registration?.handler({}, undefined))
+  for (const shutdown of pi.handlers.filter((candidate) => candidate.event === "session_shutdown")) {
+    void shutdown.handler({}, undefined)
+  }
+  await settled
+  expect(started).toBe(0)
+})

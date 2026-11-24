@@ -45,6 +45,9 @@ export interface MemoryJournal {
  * Rows are keyed by `source_line_id` in `TranscriptJournal`, so a repeated reconcile appends nothing.
  * Journals live at `<identity runtime>/transcripts/<sessionID>/`. Children never bind, so never journal.
  */
+/** Each journal retains its transcript rows for no-reread settles; a long-lived host bounds how many sessions keep them. */
+const MAX_RETAINED_JOURNALS = 16
+
 export function createMemoryJournal(deps: MemoryJournalDeps): MemoryJournal {
   const createJournal = deps.createJournal ?? ((journalDir: string) => new TranscriptJournal({ journalDir }))
   const journals = new Map<string, TranscriptJournal>()
@@ -52,10 +55,17 @@ export function createMemoryJournal(deps: MemoryJournalDeps): MemoryJournal {
 
   function journalFor(bound: BoundMemorySession): TranscriptJournal {
     const dir = join(bound.paths.transcripts, bound.sessionID)
-    let journal = journals.get(dir)
-    if (journal === undefined) {
-      journal = createJournal(dir)
-      journals.set(dir, journal)
+    const cached = journals.get(dir)
+    if (cached !== undefined) {
+      journals.delete(dir)
+      journals.set(dir, cached)
+      return cached
+    }
+    const journal = createJournal(dir)
+    journals.set(dir, journal)
+    for (const oldest of journals.keys()) {
+      if (journals.size <= MAX_RETAINED_JOURNALS) break
+      journals.delete(oldest)
     }
     return journal
   }

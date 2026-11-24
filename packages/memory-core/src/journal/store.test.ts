@@ -385,7 +385,24 @@ describe("transcript journal cache against the real filesystem", () => {
     expect(ids(await journal.readEntries())).toEqual(["a", "c", "d"])
   })
 
-  it("#given a cached journal #when the file is replaced by rename with a same-size or larger file #then the new rows are loaded", async () => {
+  it("#given a cached journal #when the file is replaced by rename with a file of exactly equal byte length #then the new rows are loaded", async () => {
+    // given
+    const { dir, journal } = await createJournal()
+    await journal.append([row("a")])
+    await journal.readEntries()
+    const original = await readFile(join(dir, "transcript.jsonl"), "utf8")
+
+    // when
+    const replacement = join(dir, "replacement.jsonl")
+    await writeFile(replacement, lines(row("b")), "utf8")
+    expect(Buffer.byteLength(lines(row("b")), "utf8")).toBe(Buffer.byteLength(original, "utf8"))
+    await rename(replacement, join(dir, "transcript.jsonl"))
+
+    // then
+    expect(ids(await journal.readEntries())).toEqual(["b"])
+  })
+
+  it("#given a cached journal #when the file is replaced by rename with a larger file #then the new rows are loaded", async () => {
     // given
     const { dir, journal } = await createJournal()
     await journal.append([row("a")])

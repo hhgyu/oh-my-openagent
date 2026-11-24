@@ -4,7 +4,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { rmSyncEfaultTolerant } from "./teardown.test-support"
 
-import { buildIdentityPaths, REDACTED_REASONING_TEXT, type MemoryIdentityPaths } from "@oh-my-opencode/memory-core"
+import {
+  buildIdentityPaths,
+  REDACTED_REASONING_TEXT,
+  TranscriptJournal,
+  type MemoryIdentityPaths,
+} from "@oh-my-opencode/memory-core"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { createMemoryJournalWiring } from "./journal-wiring"
@@ -414,5 +419,25 @@ describe("memory journal wiring", () => {
     expect(started).toEqual([{ appended: 0, skipped: 0 }])
     expect(settled).toEqual([{ appended: 0, skipped: 0 }])
     expect(existsSync(join(paths.transcripts, "control-session"))).toBe(false)
+  })
+
+  test("#given more sessions than the retention bound #when each is touched #then inactive journals are released and the active one is kept", () => {
+    const { paths } = fixture()
+    const created: string[] = []
+    const wiring = createMemoryJournalWiring({
+      identityPaths: paths,
+      createJournal: (dir) => {
+        created.push(dir)
+        return new TranscriptJournal({ journalDir: dir })
+      },
+    })
+    const active = wiring.journalFor("active")
+    for (let index = 0; index < 40; index += 1) {
+      wiring.journalFor(`idle-${index}`)
+      expect(wiring.journalFor("active")).toBe(active)
+    }
+    expect(wiring.journalFor("idle-0")).not.toBe(active)
+    expect(created.filter((dir) => dir.endsWith("active"))).toHaveLength(1)
+    expect(created.filter((dir) => dir.endsWith("idle-0"))).toHaveLength(2)
   })
 })

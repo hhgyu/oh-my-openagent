@@ -91,7 +91,12 @@ export function createSettleObservers(pi: SenpiExtensionAPI, logger: ComponentLo
         }, SETTLE_OBSERVER_BUDGET_MS)
         timer.unref()
         const work = Promise.resolve()
-          .then(() => handler(payload, ctx, observer))
+          .then(() => {
+            // Cancelled before the deferred start: the handler must not begin at all, or it would
+            // consume durable state (a pending reflection outcome) on behalf of a retired observer.
+            if (signal.aborted) return undefined
+            return handler(payload, ctx, observer)
+          })
           .catch((error: unknown) => {
             if (!signal.aborted && !(error instanceof DOMException && cancellations.has(error))) throw error
             return undefined
