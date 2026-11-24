@@ -11,8 +11,11 @@ import {
 } from "./keychain-helper/darwin-backend"
 import { HelperItemNotOwned, HelperOldSlotsFull, type WriteIntent } from "./keychain-helper/darwin-store"
 import { bindKeychainHelper, type LockedStore, lockedStoreView } from "./keychain-helper/store-binding"
+import { readUnlockedSecret } from "./unlocked-secret-read"
 import { probeSecretServiceLock, type SecretServiceLockProbe } from "./secret-service-lock"
 import { heldCredentialLease, withCredentialLock } from "./credential-lock"
+import { type KeyringRelation, type OpenKeyringState, lockedLinuxSelection, routeLinuxStore } from "./linux-store-route"
+import { createStateFileStore } from "./state-file-store"
 
 type SecretKey = { readonly service: string; readonly name: string }
 export type SecretApi = {
@@ -21,6 +24,8 @@ export type SecretApi = {
   readonly delete: (key: SecretKey) => Promise<boolean>
 }
 export type { LockedStore }
+/** Where the stored sign-in lives: the OS store, or the private state file on a Linux machine with no Secret Service. */
+export type CredentialStorage = "keyring" | "file"
 export type SealedStore<T> = {
   readonly read: () => Promise<T | null>
   /** A read started now that never joins a coalesced read begun earlier; credential transactions use it under the lock. */
@@ -34,9 +39,11 @@ export type SealedStore<T> = {
   /** Before the session lock: settles any approval, so no access dialog is ever open while the lock is held. */
   readonly prepare?: () => Promise<void>
   /** The helper's view for this locked section (recovered first), or null when this store has no helper. */
-  readonly underLock?: (lease: HelperLease) => Promise<LockedStore<T> | null>
+  readonly underLock?: (lease: HelperLease, keepMigrationSource?: boolean) => Promise<LockedStore<T> | null>
   /** True while the last read came from an item the helper does not own yet: the token path then takes the lock once. */
   readonly migrationPending?: () => Promise<boolean>
+  /** Where the last operation found or put the sign-in. */
+  readonly storage?: () => CredentialStorage
 }
 export type CredentialStore = SealedStore<Credentials>
 
@@ -86,16 +93,58 @@ const LOCKED = /-25308|errSecInteractionNotAllowed|interaction is not allowed|lo
 const UNLOCKED_REUSE_MS = 30_000
 // The stderr fallback notice is once per PROCESS: a command (or a host) may build several stores. The flag lives
 // in the printing notice so a quiet store (a host under a TUI) can never use up the person's one notice.
-let fallbackNoticed = false
-const stderrNoticeOncePerProcess = (message: string): void => {
-  if (fallbackNoticed) return
-  fallbackNoticed = true
+const reportedNotices = new Set<"probe" | "file" | "migration">()
+const stderrNoticeOncePerProcess = (
+  message: string,
+  purpose: "probe" | "file" | "migration" | "retained" = "probe",
+): void => {
+  if (purpose !== "retained") {
+    if (reportedNotices.has(purpose)) return
+    reportedNotices.add(purpose)
+  }
   process.stderr.write(`${message}\n`)
 }
 export const quietNotice = (_message: string): void => {}
 const isLocked = (error: unknown): boolean =>
   error instanceof Error &&
   (LOCKED.test(error.message) || LOCKED.test(String((error as { code?: unknown }).code ?? "")))
+
+/** One device and key pair (and account, when both name one): the same sign-in, whatever its tokens. */
+const sameCredentialIdentity = (current: Credentials, value: Credentials): boolean =>
+  current.device.id === value.device.id &&
+  current.signingPrivateKey === value.signingPrivateKey &&
+  current.sealingPrivateKey === value.sealingPrivateKey &&
+  (value.accountId === undefined || current.accountId === undefined || current.accountId === value.accountId)
+
+/**
+ * How the keyring's sign-in relates to the one in Linux's state file (#13640 review M1): the file may move over it only
+ * when it is the same sign-in at the same generation with a token at least as fresh.
+ */
+const relateCredentials = (keyring: Credentials, file: Credentials): KeyringRelation => {
+  if (
+    !sameCredentialIdentity(keyring, file) ||
+    (keyring.credentialGeneration !== undefined &&
+      file.credentialGeneration !== undefined &&
+      keyring.credentialGeneration !== file.credentialGeneration)
+  )
+    return "other"
+  const a = keyring.owner
+  const b = file.owner
+  if (a || b) {
+    if (
+      !a ||
+      !b ||
+      a.accountId !== b.accountId ||
+      a.deviceId !== b.deviceId ||
+      a.familyId !== b.familyId ||
+      a.ownerHandle !== b.ownerHandle
+    )
+      return "other"
+    if (a.generation !== b.generation) return a.generation < b.generation ? "older" : "newer"
+  }
+  if (keyring.refreshToken !== file.refreshToken) return "other"
+  return Date.parse(keyring.accessTokenExpiresAt) <= Date.parse(file.accessTokenExpiresAt) ? "older" : "newer"
+}
 
 export function credentialId(api: string): string {
   return createHash("sha256").update(serviceOrigin(api)).digest("hex")
@@ -123,12 +172,7 @@ export function createCredentialStore(
     options.notice,
     options.wait,
     (current, value) => {
-      const sameIdentity =
-        current !== null &&
-        current.device.id === value.device.id &&
-        current.signingPrivateKey === value.signingPrivateKey &&
-        current.sealingPrivateKey === value.sealingPrivateKey &&
-        (value.accountId === undefined || current.accountId === undefined || current.accountId === value.accountId)
+      const sameIdentity = current !== null && sameCredentialIdentity(current, value)
       const accountId = value.accountId ?? (sameIdentity ? current?.accountId : undefined)
       // An incoming snapshot cannot restore its old generation after A -> B -> A or clear.
       return {
@@ -138,14 +182,15 @@ export function createCredentialStore(
       }
     },
     options.keychainHelper,
+    { ...(options.home === undefined ? {} : { home: options.home }), relate: relateCredentials },
   )
   // One helper view per locked section, shared by every call in it and recovered once at its start (design 3.4, 3.6).
   const sections = new WeakMap<HelperLease, Promise<LockedStore<Credentials> | null>>()
-  const underLock = (lease: HelperLease): Promise<LockedStore<Credentials> | null> => {
+  const underLock = (lease: HelperLease, keepMigrationSource = false): Promise<LockedStore<Credentials> | null> => {
     const known = sections.get(lease)
     if (known !== undefined) return known
     const view = (async () => {
-      const opened = (await store.underLock?.(lease)) ?? null
+      const opened = (await store.underLock?.(lease, keepMigrationSource)) ?? null
       await opened?.recover()
       return opened
     })()
@@ -159,12 +204,13 @@ export function createCredentialStore(
   const locked = async (
     helper: (view: LockedStore<Credentials>) => Promise<void>,
     plain: () => Promise<void>,
+    keepMigrationSource = false,
   ): Promise<void> => {
     if (heldCredentialLease(api, options.home) === undefined) await store.prepare?.()
     await withCredentialLock(
       api,
       async (lease) => {
-        const view = await underLock(lease)
+        const view = await underLock(lease, keepMigrationSource)
         await (view === null ? plain() : helper(view))
       },
       options.home,
@@ -185,10 +231,11 @@ export function createCredentialStore(
         (view) => view.write(value, intent, beforeRetire),
         () => store.write(value),
       ),
-    clear: () => locked((view) => view.clear(), store.clear),
+    clear: () => locked((view) => view.clear(), store.clear, true),
     ...(store.prepare === undefined ? {} : { prepare: store.prepare }),
     underLock,
     ...(store.migrationPending === undefined ? {} : { migrationPending: store.migrationPending }),
+    ...(store.storage === undefined ? {} : { storage: store.storage }),
   }
 }
 
@@ -199,15 +246,73 @@ export function createSealedStore<T>(
   secrets: SecretApi | null = typeof Bun === "undefined" ? null : Bun.secrets,
   platform: NodeJS.Platform = process.platform,
   lockProbe: SecretServiceLockProbe = probeSecretServiceLock,
-  notice: (message: string) => void = stderrNoticeOncePerProcess,
+  notice: typeof stderrNoticeOncePerProcess = stderrNoticeOncePerProcess,
   wait: CredentialReadWait = SESSION_READ_WAIT,
   amendWrite?: (previous: T | null, next: T) => T,
   keychainHelper?: KeychainHelperOptions,
+  linux: {
+    readonly home?: string
+    /** Absent, only a byte-identical keyring item counts as the file's own sign-in. */
+    readonly relate?: (keyring: T, file: T) => KeyringRelation
+  } = {},
 ): SealedStore<T> {
-  if (!secrets)
+  const { home } = linux
+  const parseStored = (value: string): T => {
+    try {
+      return schema.parse(JSON.parse(value))
+    } catch {
+      throw new InvalidCredentialState(
+        signInRoute() === "cli"
+          ? "Stored sign-in data is invalid. Run omo account forget, then omo login."
+          : "The OmO sign-in saved on this computer can't be read. Run omo account forget to remove it, then sign in again from the OmO desktop app on this computer, or with omo login in a terminal.",
+      )
+    }
+  }
+  // The previous value a generation is assigned from; an invalid item is replaced, never a reason to refuse the write.
+  const previousOf = (raw: string | null): T | null => {
+    if (raw === null) return null
+    try {
+      return schema.parse(JSON.parse(raw))
+    } catch {
+      return null
+    }
+  }
+  const codec = {
+    parse: parseStored,
+    serialize: (value: T) => JSON.stringify(schema.parse(value)),
+    ...(amendWrite === undefined ? {} : { amend: (raw: string | null, next: T) => amendWrite(previousOf(raw), next) }),
+  }
+  const stateFile =
+    platform === "linux"
+      ? createStateFileStore({
+          api,
+          name: `${namespace}-${credentialId(api)}.json`,
+          codec,
+          failure: (message) => new CredentialStoreError(message),
+          ...(home === undefined ? {} : { home }),
+        })
+      : null
+  if (!secrets) {
+    if (stateFile !== null)
+      return {
+        ...stateFile,
+        storage: () => "file",
+        underLock: async (_lease, removing) =>
+          lockedLinuxSelection({
+            store: stateFile,
+            snapshot: (onRefused) => stateFile.snapshot(undefined, removing ? onRefused : undefined),
+            parse: parseStored,
+            write: stateFile.writeReturningText,
+            clear: stateFile.clear,
+          }),
+      }
     throw new SignInError(
       "OmO sign-in needs Bun 1.4 or newer with OS credential storage. No file fallback is available.",
     )
+  }
+  // Linux keeps the sign-in in the private state file when no Secret Service exists (#7185b); only the other
+  // platforms can promise that nothing is saved to a file.
+  const neverInAFile = platform === "linux" ? "" : " Credentials are never saved to a file."
   const platformName =
     platform === "darwin"
       ? "macOS Keychain"
@@ -230,6 +335,11 @@ export function createSealedStore<T>(
     pending: (message) => new KeychainApprovalPendingError(message),
     ...(keychainHelper === undefined ? {} : { options: keychainHelper }),
   })
+  const nativeLinux =
+    platform === "linux" &&
+    typeof Bun !== "undefined" &&
+    secrets === Bun.secrets &&
+    !(Symbol.for("omo.test.injectedSecrets") in secrets)
   secrets = helper.secrets
   const readsOf = (api: SecretApi): Map<string, Promise<string | null>> => {
     const known = processReads.get(api)
@@ -241,16 +351,16 @@ export function createSealedStore<T>(
   const forget = (api: SecretApi) => {
     readsOf(api).delete(slot)
   }
-  const sharedRead = (api: SecretApi): Promise<string | null> => {
+  const sharedRead = (api: SecretApi, readSlot = slot): Promise<string | null> => {
     const reads = readsOf(api)
-    const pending = reads.get(slot)
+    const pending = reads.get(readSlot)
     if (pending !== undefined) return pending
     const read = Promise.resolve().then(() => api.get(key))
     const done = () => {
-      if (reads.get(slot) === read) reads.delete(slot)
+      if (reads.get(readSlot) === read) reads.delete(readSlot)
     }
     read.then(done, done)
-    reads.set(slot, read)
+    reads.set(readSlot, read)
     return read
   }
   const waiting =
@@ -258,9 +368,19 @@ export function createSealedStore<T>(
       ? `macOS Keychain is waiting for your approval: answer the "${basename(process.execPath)} wants to access key ${namespace}" dialog ("Always Allow" stops it asking again)`
       : `${platformName} has not answered; it may be waiting for your approval or an unlock in a system dialog`
   const helperWaiting = `macOS Keychain is waiting for your approval: answer the "OmO's keychain helper wants to access key ${namespace}" dialog`
-  const answered = async (api: SecretApi, fresh = false): Promise<string | null> => {
+  const origin = api
+  const answered = async (api: SecretApi, fresh = false, readSlot = slot): Promise<string | null> => {
+    if (nativeLinux && heldCredentialLease(origin, home)) {
+      try {
+        return await readUnlockedSecret(key)
+      } catch {
+        throw new CredentialStoreError(
+          "Cannot verify the Linux keyring item without prompting while the credential lock is held. The operation was stopped.",
+        )
+      }
+    }
     const waitingFor = helper.isHelperReader(api) ? helperWaiting : waiting
-    const read = fresh ? Promise.resolve().then(() => api.get(key)) : sharedRead(api)
+    const read = fresh ? Promise.resolve().then(() => api.get(key)) : sharedRead(api, readSlot)
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       if (wait.kind === "interactive") {
@@ -269,10 +389,7 @@ export function createSealedStore<T>(
       }
       const expired = new Promise<never>((_, reject) => {
         timer = setTimeout(
-          () =>
-            reject(
-              new KeychainApprovalPendingError(`${waitingFor}, then try again. Credentials are never saved to a file.`),
-            ),
+          () => reject(new KeychainApprovalPendingError(`${waitingFor}, then try again.${neverInAFile}`)),
           wait.deadlineMs,
         )
       })
@@ -289,61 +406,27 @@ export function createSealedStore<T>(
       : ""
   const unavailable = (error: unknown) =>
     isLocked(error)
-      ? new KeychainLockedError(
-          `${platformName} is locked. Unlock it, then try again. Credentials are never saved to a file.${lockedHint}`,
-        )
+      ? new KeychainLockedError(`${platformName} is locked. Unlock it, then try again.${neverInAFile}${lockedHint}`)
       : new CredentialStoreError(
-          `Cannot access ${platformName}. Unlock or enable the OS credential store and try again. Credentials are never saved to a file.`,
+          `Cannot access ${platformName}. Unlock or enable the OS credential store and try again.${neverInAFile}`,
         )
   // libsecret answers a locked collection by asking the keyring to show its unlock prompt, so on Linux the
-  // Locked property is read over D-Bus BEFORE any secret call and a locked collection is never touched. When the
-  // probe cannot answer (no gdbus binary, no Secret Service name on the bus, a bus that did not reply) the store
-  // falls back to asking libsecret directly, exactly as before the probe existed: login must never depend on gdbus.
+  // Locked property is read over D-Bus BEFORE any secret call and a locked collection is never touched (it never falls
+  // back to the state file either: the keyring stays preferred whenever one exists). No Secret Service on the bus sends
+  // the sign-in to the private state file (#7185b); a probe that cannot answer (no gdbus binary, a bus that did not
+  // reply) asks libsecret directly, as before the probe existed: login must never depend on gdbus.
   // An unlocked answer is reused for a short while: one CLI command probes once, while a long-lived host (the
   // senpi memory session) still notices a keyring that auto-locked later. Trade-off: a keyring that auto-locks
   // inside that window can still reach libsecret, which may then show its unlock prompt once.
   let unlockedUntil = 0
-  let noticed = false
-  const assertUsable = async () => {
-    if (platform !== "linux" || Date.now() < unlockedUntil) return
+  const keyringState = async (): Promise<OpenKeyringState> => {
+    if (Date.now() < unlockedUntil) return "unlocked"
     const lock = await lockProbe()
-    if (lock === "locked")
-      throw new KeychainLockedError(
-        `${platformName} is locked. Unlock it, then try again. Credentials are never saved to a file.`,
-      )
-    if (lock === "unlocked") {
-      unlockedUntil = Date.now() + UNLOCKED_REUSE_MS
-      return
-    }
-    if (!noticed) {
-      noticed = true
-      notice(
-        "omo: could not check whether the keyring is locked (gdbus or the Secret Service did not answer); using libsecret directly.",
-      )
-    }
-  }
-  const parseStored = (value: string): T => {
-    try {
-      return schema.parse(JSON.parse(value))
-    } catch {
-      throw new InvalidCredentialState(
-        signInRoute() === "cli"
-          ? "Stored sign-in data is invalid. Run omo account forget, then omo login."
-          : "The OmO sign-in saved on this computer can't be read. Run omo account forget to remove it, then sign in again from the OmO desktop app on this computer, or with omo login in a terminal.",
-      )
-    }
-  }
-  // The previous value a generation is assigned from; an invalid item is replaced, never a reason to refuse the write.
-  const previousOf = (raw: string | null): T | null => {
-    if (raw === null) return null
-    try {
-      return schema.parse(JSON.parse(raw))
-    } catch {
-      return null
-    }
+    if (lock === "locked") throw new KeychainLockedError(`${platformName} is locked. Unlock it, then try again.`)
+    if (lock === "unlocked") unlockedUntil = Date.now() + UNLOCKED_REUSE_MS
+    return lock
   }
   const rawRead = async (fresh: boolean): Promise<string | null> => {
-    await assertUsable()
     const backend = await helper.backend()
     try {
       if (backend === null) await helper.guardHelperless()
@@ -367,7 +450,22 @@ export function createSealedStore<T>(
     if (mapped instanceof Error && mapped.name === "LockLeaseLostError") return mapped
     return unavailable(mapped)
   }
-  return {
+  const writeKeyring = async (value: T): Promise<string> => {
+    // One OS-store replacement commits the rotating token and its access token together.
+    if ((await helper.backend()) !== null) throw new Error("OmO's keychain helper writes only under the session lock.")
+    try {
+      // A parked/coalesced read may predate another process's write. Never use it to
+      // assign a generation, and never let it block an otherwise usable writer.
+      const next = amendWrite === undefined ? value : amendWrite(previousOf(await answered(secrets, true)), value)
+      const encoded = codec.serialize(next)
+      await secrets.set({ ...key, value: encoded })
+      forget(secrets)
+      return encoded
+    } catch (error) {
+      throw unavailable(error)
+    }
+  }
+  const keyring: SealedStore<T> = {
     read: () => parsedRead(false),
     readAuthoritative: () => parsedRead(true),
     // Only the approval matters here: an unreadable value is the locked section's to report or replace (forget, --replace).
@@ -377,33 +475,13 @@ export function createSealedStore<T>(
     async underLock(lease) {
       const backend = await helper.backend()
       if (backend === null) return null
-      const codec = {
-        parse: parseStored,
-        serialize: (value: T) => JSON.stringify(schema.parse(value)),
-        ...(amendWrite === undefined
-          ? {}
-          : { amend: (raw: string | null, next: T) => amendWrite(previousOf(raw), next) }),
-      }
       return lockedStoreView(backend, lease, codec, lockedFailure, () => forget(helper.reader(backend)))
     },
     migrationPending: async () => (await helper.backend())?.migrationPending() ?? false,
-    async write(value) {
-      // One OS-store replacement commits the rotating token and its access token together.
-      await assertUsable()
-      if ((await helper.backend()) !== null)
-        throw new Error("OmO's keychain helper writes only under the session lock.")
-      try {
-        // A parked/coalesced read may predate another process's write. Never use it to
-        // assign a generation, and never let it block an otherwise usable writer.
-        const next = amendWrite === undefined ? value : amendWrite(previousOf(await answered(secrets, true)), value)
-        await secrets.set({ ...key, value: JSON.stringify(schema.parse(next)) })
-      } catch (error) {
-        throw unavailable(error)
-      }
-      forget(secrets)
+    write: async (value) => {
+      await writeKeyring(value)
     },
     async clear() {
-      await assertUsable()
       if ((await helper.backend()) !== null)
         throw new Error("OmO's keychain helper deletes only under the session lock.")
       try {
@@ -413,5 +491,47 @@ export function createSealedStore<T>(
       }
       forget(secrets)
     },
+    storage: () => "keyring",
   }
+  if (stateFile === null) return keyring
+  return routeLinuxStore({
+    api,
+    keyring,
+    file: stateFile,
+    probe: keyringState,
+    keyringText: () => rawRead(true),
+    parse: parseStored,
+    writeKeyring,
+    notice,
+    ...(home === undefined ? {} : { home }),
+    readiness: () => answered(secrets, false, `${slot}:relation`).then(() => undefined),
+    async relation(text) {
+      let stored: string | null
+      try {
+        stored = await answered(secrets, true)
+      } catch (error) {
+        throw error instanceof CredentialStoreError ? error : unavailable(error)
+      }
+      if (stored === null) return "empty"
+      if (stored === text) return "older"
+      const inKeyring = previousOf(stored)
+      const inFile = previousOf(text)
+      if (inKeyring === null || inFile === null || linux.relate === undefined) return "other"
+      return linux.relate(inKeyring, inFile)
+    },
+    // The keyring must hand back exactly the text it was given before the file may go.
+    async moveToKeyring(text) {
+      try {
+        await secrets.set({ ...key, value: text })
+        if ((await answered(secrets, true)) !== text)
+          throw new CredentialStoreError(
+            `${platformName} did not return the sign-in it was given; it stays in the private file until it does.`,
+          )
+      } catch (error) {
+        throw error instanceof CredentialStoreError ? error : unavailable(error)
+      } finally {
+        forget(secrets)
+      }
+    },
+  })
 }

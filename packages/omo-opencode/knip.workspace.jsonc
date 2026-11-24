@@ -13,6 +13,7 @@
         "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.test-d.ts",
         "src/cli/service-auth/test-support.ts",
+        "src/cli/service-auth/state-file-cli.fixture.ts",
         "src/features/team-mode/team-tasklist/test-support.ts",
         "src/hooks/runtime-fallback/test-timeout-clock.test-support.ts",
         "src/tools/skill/zauc-mocks-skill-tools/test-support.ts",

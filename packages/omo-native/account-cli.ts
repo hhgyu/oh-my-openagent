@@ -20,7 +20,6 @@ import {
   type BeforeKeysDiscarded,
   createSession,
   type DeviceServiceHandoff,
-  discardedOf,
   type Session,
 } from "../omo-opencode/src/cli/service-auth/session"
 import { retireSyncPinOnDiscard } from "../omo-opencode/src/cli/service-auth/sync-pin-retire"
@@ -101,12 +100,15 @@ async function adopt(dependencies: AccountCommandDependencies, replace: boolean)
         current.device.id === incoming.device.id &&
         current.refreshState !== "uncertain" &&
         Date.parse(current.accessTokenExpiresAt) > Date.parse(incoming.accessTokenExpiresAt)
-      if (current !== null && current.device.id !== incoming.device.id)
-        await retireHook(dependencies)(discardedOf(current, "replaced"))
+      if (current !== null && current.device.id !== incoming.device.id) await session.discard(current, "replaced")
       if (!keepCurrent) await dependencies.store.write(incoming)
       await session.clearSignedOutMarker()
       adopted = keepCurrent ? current : incoming
-      return reply(dependencies, { adopted: true, device: deviceOf(incoming) })
+      return reply(dependencies, {
+        adopted: true,
+        device: deviceOf(incoming),
+        ...(dependencies.store.storage === undefined ? {} : { storage: dependencies.store.storage() }),
+      })
     },
     { replaceInvalid: replace },
   )
@@ -160,18 +162,21 @@ async function runVerb(dependencies: AccountCommandDependencies, args: readonly 
         }
         try {
           let forgotten = false
-          const code = await session.update(async (current) => {
-            if (current !== null && current.device.id !== device) {
-              dependencies.error(
-                `omo account forget --device acts on this device only; sign out device ${device} with omo account devices revoke ${device}`,
-              )
-              return reply(dependencies, { forgotten: false, device: deviceOf(current) }, ACCOUNT_EXIT.conflict)
-            }
-            if (current !== null) await retireHook(dependencies)(discardedOf(current, "forget"))
-            await dependencies.store.clear()
-            forgotten = true
-            return reply(dependencies, { forgotten: true })
-          })
+          const code = await session.update(
+            async (current) => {
+              if (current !== null && current.device.id !== device) {
+                dependencies.error(
+                  `omo account forget --device acts on this device only; sign out device ${device} with omo account devices revoke ${device}`,
+                )
+                return reply(dependencies, { forgotten: false, device: deviceOf(current) }, ACCOUNT_EXIT.conflict)
+              }
+              await dependencies.store.clear()
+              if (current !== null) await session.discard(current, "forget")
+              forgotten = true
+              return reply(dependencies, { forgotten: true })
+            },
+            { removing: true },
+          )
           if (forgotten) await dependencies.deviceService?.forget()
           return code
         } catch (error) {
