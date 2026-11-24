@@ -28,11 +28,11 @@ const PROHIBITED_ITEM = String.raw`(?:mass[- \t]?)?(?:ultrawork|ulw)(?:[-_](?:lo
 const QUOTED_ITEM = new RegExp(`^${PROHIBITED_ITEM}$`, "i")
 const LIST_ITEM = `(?:${PROHIBITED_ITEM}|\\x01+)`
 const LIST_SEPARATOR = String.raw`(?:[ \t]*,[ \t]*(?:(?:or|and|nor)[ \t]+)?|[ \t]+(?:or|and|nor)[ \t]+|[ \t]*\/[ \t]*)`
-// A subsequent item must stand alone. "here" can close the prohibition ("skip ... and ultrawork here").
-const LIST_ITEM_END = String.raw`(?=[ \t]*(?:[,/;:.!?\r\n]|$|(?:and|or|nor)\b|here[ \t]*(?:[;:.!?\r\n]|$)))`
+// "ulw the fix" starts a request; "ultrawork for this task" still names the prohibited mode.
+const AFFIRMATIVE_ITEM = String.raw`${PROHIBITED_ITEM}[ \t]+(?:this|that|it|the|these|those|my|our|your|their|a|an)\b`
 const PROHIBITED_KEYWORD = new RegExp(
   String.raw`\b(?:avoid(?:ing)?|skip(?:ping)?|without|no|never|do[ \t]+not|don['\u2019]t|dont)[ \t]+(?:(?:using|use[ \t]+of|the)[ \t]+)?` +
-    String.raw`${LIST_ITEM}(?:${LIST_SEPARATOR}${LIST_ITEM}${LIST_ITEM_END})*`,
+    String.raw`${LIST_ITEM}(?:${LIST_SEPARATOR}(?!${AFFIRMATIVE_ITEM})${LIST_ITEM})*`,
   "gi",
 )
 

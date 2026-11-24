@@ -48,6 +48,13 @@ describe("omo-senpi ultrawork references do not arm", () => {
       "avoid ulw or ultrawork or ulw-loop",
       "No ulw-loop, ulw-plan, ultrawork",
       'avoid using "ulw" or ultrawork',
+      "avoid ulw, ultrawork please",
+      'avoid using "ulw" or ultrawork for this task',
+      "avoid ulw, ultrawork entirely",
+      "avoid ulw, ultrawork or ulw-loop for now",
+      "skip ulw and ultrawork completely",
+      "avoid ulw or ultrawork at all",
+      "avoid ulw, ultrawork today",
     ]) {
       expect({ text, effective: classify(text).effective }).toEqual({ text, effective: false })
       expect(classify(text).suppressionReason).toBe("negated_mention")
