@@ -46,23 +46,26 @@ export function matchModel(
     providerFilter === undefined
       ? catalog
       : catalog.filter((choice) => choice.provider.toLowerCase() === providerFilter)
-  const find = (pattern: string) => {
+  const exact = (pattern: string) => {
     const byReference = available.filter((choice) => `${choice.provider}/${choice.id}`.toLowerCase() === pattern)
     if (byReference.length > 0) return byReference
     const byId = available.filter((choice) => choice.id.toLowerCase() === pattern)
-    if (byId.length > 0) return byId
-    return available.filter(
+    return byId
+  }
+  const fragments = (pattern: string) =>
+    available.filter(
       (choice) => choice.id.toLowerCase().includes(pattern) || choice.name?.toLowerCase().includes(pattern),
     )
-  }
-  const literal = find(reference.toLowerCase())
+  const literal = exact(reference.toLowerCase())
   const decorators = literal.length === 0 ? splitModelDecorators(reference, { thinkingOnly: true }) : undefined
-  const matches = decorators?.thinkingLevel === undefined ? literal : find(decorators.base.toLowerCase())
+  const pattern = (decorators?.base ?? reference).toLowerCase()
+  const exactMatches = decorators?.thinkingLevel === undefined ? literal : exact(pattern)
+  const matches = exactMatches.length ? exactMatches : fragments(pattern)
   const [first, ...rest] = matches
   if (first === undefined) {
     const availableModels = catalog.slice(0, 20).map((choice) => `${choice.provider}/${choice.id}`)
     const slash = reference.indexOf("/")
-    const requestedProvider = slash > 0 ? reference.slice(0, slash) : provider?.trim()
+    const requestedProvider = provider?.trim() || (slash > 0 ? reference.slice(0, slash) : undefined)
     if (
       requestedProvider &&
       !catalog.some((choice) => choice.provider.toLowerCase() === requestedProvider.toLowerCase())

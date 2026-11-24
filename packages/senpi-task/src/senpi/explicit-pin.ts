@@ -1,7 +1,11 @@
 import type { CreateAgentSessionOptions } from "@code-yeongyu/senpi"
 
 import { senpiBarrel } from "../lazy/senpi-barrel"
-import { MODEL_SERVICE_TIERS, MODEL_THINKING_LEVELS, splitModelDecorators } from "@oh-my-opencode/utils/model-decorators"
+import {
+  MODEL_SERVICE_TIERS,
+  MODEL_THINKING_LEVELS,
+  splitModelDecorators,
+} from "@oh-my-opencode/utils/model-decorators"
 
 export { splitModelDecorators } from "@oh-my-opencode/utils/model-decorators"
 

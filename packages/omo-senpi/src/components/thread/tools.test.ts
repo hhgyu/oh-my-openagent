@@ -430,10 +430,11 @@ describe("thread session controls", () => {
   test.each([
     ["openai/gpt-x", "gpt-x", undefined],
     ["openai/gpt-x:max", "gpt-x", "max"],
+    ["gpt-x:max", "gpt-x", "max"],
     ["openai/gpt-other:max", "gpt-other:max", undefined],
   ])("#14445: set_model resolves %s on the one-provider target", async (model, id, level) => {
     const f = fixture()
-    f.models.splice(1, 1, { provider: "openai", id: "gpt-other:max" })
+    f.models.splice(1, 1, { provider: "openai", id: "gpt-other:max" }, { provider: "openai", id: "gpt-x:max-chat" })
 
     expect(await runner(f)("thread_set_model", { thread: "peer", model })).toEqual({
       kind: "ok",
