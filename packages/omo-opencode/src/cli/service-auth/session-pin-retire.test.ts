@@ -3,11 +3,11 @@
 
 import { describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { mkdir, readdir, writeFile } from "node:fs/promises"
+import { chmod, lstat, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import type { CredentialStore } from "./keystore"
-import { createCredentialStore, InvalidCredentialState } from "./keystore"
+import { createCredentialStore, credentialId, InvalidCredentialState } from "./keystore"
 import type { Credentials } from "./protocol"
 import { createSession } from "./session"
 import { retireSyncPinOnDiscard } from "./sync-pin-retire"
@@ -296,16 +296,24 @@ for (const operation of ["forget", "refresh"] as const) {
       })
       const memory = memorySecrets()
       const options = { home: h.home, platform: "linux" as const, secrets: memory.api, notice: () => {} }
-      const store = createCredentialStore(api, { ...options, lockProbe: async () => available ? "unlocked" : "absent" })
+      const store = createCredentialStore(api, {
+        ...options,
+        lockProbe: async () => (available ? "unlocked" : "absent"),
+      })
       const file = createCredentialStore(api, { ...options, lockProbe: async () => "absent" })
       const ring = createCredentialStore(api, { ...options, lockProbe: async () => "unlocked" })
       await ring.write({ ...anotherDevice, accountId: "ring-account" })
       const original = [...memory.values.values()]
       await file.write({ ...stored, accessTokenExpiresAt: new Date(0).toISOString() })
-      const session = createSession({ api, home: h.home, store, beforeKeysDiscarded: async (item) => {
-        available = true
-        await h.hook(item)
-      } })
+      const session = createSession({
+        api,
+        home: h.home,
+        store,
+        beforeKeysDiscarded: async (item) => {
+          available = true
+          await h.hook(item)
+        },
+      })
       if (operation === "forget") {
         await session.forget()
         expect(await file.read()).toBeNull()
@@ -315,6 +323,59 @@ for (const operation of ["forget", "refresh"] as const) {
         expect((await file.read())?.accessToken).toBe("rotated-file-token")
       }
       expect([...memory.values.values()]).toEqual(original)
+    },
+  )
+}
+
+for (const change of ["unchanged", "replacement", "unsafe"] as const) {
+  test.skipIf(process.platform === "win32")(
+    `#given a corrupt private sign-in and separate keyring account #when forget finds the file ${change} #then only unchanged private bytes may be removed`,
+    async () => {
+      const h = await pinnedHome()
+      const api = "https://example.invalid"
+      const ring = memorySecrets()
+      const options = { home: h.home, platform: "linux" as const, secrets: ring.api }
+      await createCredentialStore(api, { ...options, lockProbe: async () => "unlocked" }).write(anotherDevice)
+      const savedRing = [...ring.values.values()]
+      let available = false
+      const store = createCredentialStore(api, {
+        ...options,
+        lockProbe: async () => (available ? "unlocked" : "absent"),
+      })
+      const dir = join(h.home, ".omo", "account-state")
+      await mkdir(dir, { recursive: true, mode: 0o700 })
+      const file = join(dir, `omo-cli-${credentialId(api)}.json`)
+      await writeFile(file, "{", { mode: 0o600 })
+      const session = createSession({
+        api,
+        home: h.home,
+        beforeKeysDiscarded: h.hook,
+        store: {
+          ...store,
+          async readAuthoritative() {
+            try {
+              return await store.readAuthoritative()
+            } finally {
+              available = true
+              if (change === "replacement") {
+                await writeFile(file + ".new", "{", { mode: 0o600 })
+                await rename(file + ".new", file)
+              }
+              if (change === "unsafe") await chmod(file, 0o644)
+            }
+          },
+        },
+      })
+      if (change === "unchanged") {
+        await session.forget()
+        await expect(lstat(file)).rejects.toMatchObject({ code: "ENOENT" })
+      } else {
+        await expect(session.forget()).rejects.toThrow()
+        expect(await readFile(file, "utf8")).toBe("{")
+        expect(h.logs).toEqual([])
+      }
+      expect([...ring.values.values()]).toEqual(savedRing)
+      expect(await h.pins()).toEqual({ live: 1, retired: 0 })
     },
   )
 }

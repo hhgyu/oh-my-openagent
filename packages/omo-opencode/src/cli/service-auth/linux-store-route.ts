@@ -1,6 +1,7 @@
+import type { LockedStore } from "./keychain-helper/store-binding"
 import { accountHome } from "./account-home"
 import { withCredentialLock } from "./credential-lock"
-import { CredentialStoreError, type CredentialStorage, type SealedStore } from "./keystore"
+import { CredentialStoreError, InvalidCredentialState, type CredentialStorage, type SealedStore } from "./keystore"
 import type { StateFileStore } from "./state-file-store"
 
 export type OpenKeyringState = "unlocked" | "absent" | "unknown"
@@ -28,6 +29,8 @@ export function routeLinuxStore<T>(input: {
   readonly file: StateFileStore<T>
   /** Throws for a locked keyring, which never falls back to the file. */
   readonly probe: () => Promise<OpenKeyringState>
+  readonly keyringText: () => Promise<string | null>
+  readonly parse: (text: string) => T
   readonly relation: (text: string) => Promise<KeyringRelation>
   /** Writes the stored text to the keyring and reads it back; throws, keeping the file, when either step fails. */
   readonly moveToKeyring: (text: string) => Promise<void>
@@ -97,41 +100,78 @@ export function routeLinuxStore<T>(input: {
     clear: async () => clearFrom(await target()),
     async underLock() {
       const selected = await target()
-      let expected: string | undefined
-      let failed = false
-      const changed = () => new CredentialStoreError("The selected sign-in could not be verified. Try again.")
-      const read = async () => {
-        if (failed) throw changed()
-        failed = true
-        const value = await selected.readAuthoritative()
-        const observed = JSON.stringify(value)
-        if (expected !== undefined && expected !== observed)
-          throw new CredentialStoreError("The selected sign-in changed during this operation. Try again.")
-        failed = false
-        expected = observed
-        return value
-      }
-      return {
-        read,
-        async write(value) {
-          await read()
-          failed = true
-          await writeTo(selected, value)
-          // Storage may have assigned a generation to the write. The lease excludes other OmO writers.
-          const written = await selected.readAuthoritative()
-          if (written === null || !input.matchesWrite(written, value)) throw changed()
-          expected = JSON.stringify(written)
-          failed = false
+      return lockedLinuxSelection({
+        store: selected,
+        parse: input.parse,
+        matchesWrite: input.matchesWrite,
+        snapshot: async () => {
+          if (selected === file) return file.snapshot()
+          const text = await input.keyringText()
+          return text === null ? null : { text, version: text }
         },
-        async clear() {
-          await read()
-          await clearFrom(selected)
-          expected = "null"
-        },
-        recover: async () => {},
-        settle: async () => {},
-      }
+        write: (value) => writeTo(selected, value),
+        clear: () => clearFrom(selected),
+      })
     },
     storage: () => storage,
+  }
+}
+
+export function lockedLinuxSelection<T>(input: {
+  store: SealedStore<T>
+  parse: (text: string) => T
+  matchesWrite: (stored: T, intended: T) => boolean
+  snapshot: () => Promise<{ text: string; version: string } | null>
+  write: (value: T) => Promise<void>
+  clear: () => Promise<void>
+}): LockedStore<T> {
+  let expected: string | undefined
+  let corrupt: string | undefined
+  let failed = false
+  const changed = () => new CredentialStoreError("The selected sign-in could not be verified. Try again.")
+  const read = async () => {
+    if (failed) throw changed()
+    failed = true
+    const item = await input.snapshot()
+    let value: T | null
+    try {
+      value = item === null ? null : input.parse(item.text)
+    } catch (error) {
+      if (expected === undefined && error instanceof InvalidCredentialState) corrupt = item?.version
+      throw error
+    }
+    const observed = JSON.stringify(value)
+    if (expected !== undefined && expected !== observed)
+      throw new CredentialStoreError("The selected sign-in changed during this operation. Try again.")
+    failed = false
+    expected = observed
+    return value
+  }
+  return {
+    read,
+    async write(value) {
+      await read()
+      failed = true
+      await input.write(value)
+      // Storage may have assigned a generation to the write. The lease excludes other OmO writers.
+      const written = await input.store.readAuthoritative()
+      if (written === null || !input.matchesWrite(written, value)) throw changed()
+      expected = JSON.stringify(written)
+      failed = false
+    },
+    async clear() {
+      if (corrupt !== undefined) {
+        const version = corrupt
+        corrupt = undefined
+        if ((await input.snapshot())?.version !== version) throw changed()
+        await input.store.clear()
+        return
+      }
+      await read()
+      await input.clear()
+      expected = "null"
+    },
+    recover: async () => {},
+    settle: async () => {},
   }
 }

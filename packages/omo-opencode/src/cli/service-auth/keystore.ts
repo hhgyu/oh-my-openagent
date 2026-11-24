@@ -13,7 +13,7 @@ import { HelperItemNotOwned, HelperOldSlotsFull, type WriteIntent } from "./keyc
 import { bindKeychainHelper, type LockedStore, lockedStoreView } from "./keychain-helper/store-binding"
 import { probeSecretServiceLock, type SecretServiceLockProbe } from "./secret-service-lock"
 import { heldCredentialLease, withCredentialLock } from "./credential-lock"
-import { type KeyringRelation, type OpenKeyringState, routeLinuxStore } from "./linux-store-route"
+import { type KeyringRelation, type OpenKeyringState, lockedLinuxSelection, routeLinuxStore } from "./linux-store-route"
 import { createStateFileStore } from "./state-file-store"
 
 type SecretKey = { readonly service: string; readonly name: string }
@@ -269,8 +269,25 @@ export function createSealedStore<T>(
           ...(home === undefined ? {} : { home }),
         })
       : null
+  const matchesWrite = (stored: T, intended: T) =>
+    linux.relate === undefined
+      ? JSON.stringify(stored) === JSON.stringify(intended)
+      : linux.relate(stored, intended) !== "other"
   if (!secrets) {
-    if (stateFile !== null) return { ...stateFile, storage: () => "file" }
+    if (stateFile !== null)
+      return {
+        ...stateFile,
+        storage: () => "file",
+        underLock: async () =>
+          lockedLinuxSelection({
+            store: stateFile,
+            snapshot: stateFile.snapshot,
+            parse: parseStored,
+            matchesWrite,
+            write: stateFile.write,
+            clear: stateFile.clear,
+          }),
+      }
     throw new SignInError(
       "OmO sign-in needs Bun 1.4 or newer with OS credential storage. No file fallback is available.",
     )
@@ -445,8 +462,12 @@ export function createSealedStore<T>(
     keyring,
     file: stateFile,
     probe: keyringState,
+    keyringText: () => rawRead(true),
+    parse: parseStored,
     matchesWrite: (stored, intended) =>
-      linux.relate === undefined ? JSON.stringify(stored) === JSON.stringify(intended) : linux.relate(stored, intended) !== "other",
+      linux.relate === undefined
+        ? JSON.stringify(stored) === JSON.stringify(intended)
+        : linux.relate(stored, intended) !== "other",
     notice,
     ...(home === undefined ? {} : { home }),
     async relation(text) {

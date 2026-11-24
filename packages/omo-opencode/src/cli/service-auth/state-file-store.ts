@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import { constants, type Stats } from "node:fs"
 import { lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises"
 import { join } from "node:path"
@@ -69,7 +69,11 @@ async function checkDir(dir: string, uid: number): Promise<boolean> {
  * The file's text, null when there is none. It is opened without following a symlink and judged on the open
  * descriptor, so it cannot be swapped between the check and the read; O_NONBLOCK keeps a FIFO from hanging the open.
  */
-async function readStateFile(dir: string, name: string, uid: number): Promise<string | null> {
+async function readStateFile(
+  dir: string,
+  name: string,
+  uid: number,
+): Promise<{ text: string; version: string } | null> {
   if (!(await checkDir(dir, uid))) return null
   const handle = await open(join(dir, name), O_RDONLY | O_NOFOLLOW | O_NONBLOCK).catch((error: unknown) => {
     const code = errnoCode(error)
@@ -79,9 +83,12 @@ async function readStateFile(dir: string, name: string, uid: number): Promise<st
   })
   if (handle === null) return null
   try {
-    const refusal = fileRefusal(await handle.stat(), uid)
+    const stat = await handle.stat()
+    const refusal = fileRefusal(stat, uid)
     if (refusal !== undefined) throw new StateFileRefused(refusal)
-    return await handle.readFile("utf8")
+    const bytes = await handle.readFile()
+    const digest = createHash("sha256").update(bytes).digest("hex")
+    return { text: bytes.toString("utf8"), version: [stat.dev, stat.ino, stat.ctimeMs, digest].join(":") }
   } finally {
     await handle.close()
   }
@@ -137,6 +144,7 @@ async function removeStateFile(dir: string, name: string): Promise<void> {
 
 export type StateFileStore<T> = SealedStore<T> & {
   /** The stored text as written, or null when there is none or it was refused (one line, never its content). */
+  readonly snapshot: () => Promise<{ text: string; version: string } | null>
   readonly text: () => Promise<string | null>
   /** True while any entry sits at the file's path, refused or not. */
   readonly present: () => Promise<boolean>
@@ -168,7 +176,7 @@ export function createStateFileStore<T>(input: {
         )
   const text = async (): Promise<string | null> => {
     try {
-      return await readStateFile(directory(), name, uid)
+      return (await readStateFile(directory(), name, uid))?.text ?? null
     } catch (error) {
       if (!(error instanceof StateFileRefused)) throw failed("read", error)
       log(`omo: ${error.message} in ${directory()} and is not used; this computer reads as signed out.`)
@@ -186,6 +194,13 @@ export function createStateFileStore<T>(input: {
     readAuthoritative: read,
     text,
     directory,
+    snapshot: async () => {
+      try {
+        return await readStateFile(directory(), name, uid)
+      } catch (error) {
+        throw failed("read", error)
+      }
+    },
     present: async () => (await lstat(join(directory(), name)).catch(() => null)) !== null,
     write: (value) =>
       locked(async () => {

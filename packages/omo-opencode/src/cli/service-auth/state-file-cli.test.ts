@@ -1,6 +1,6 @@
 import { beforeAll, expect, test } from "bun:test"
 import { mkdirSync } from "node:fs"
-import { lstat, readFile, stat } from "node:fs/promises"
+import { lstat, readFile, stat, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { credentialId } from "./keystore"
 import { credentialSchema } from "./protocol"
@@ -86,11 +86,15 @@ beforeAll(async () => {
   await run(["whoami"])
   await run(["account", "show"])
   await run(["logout"])
+  const fileAfterLogout = await lstat(file).catch(() => null)
+  await writeFile(file, "{", { mode: 0o600 })
+  await run(["account", "forget"])
+  await expect(lstat(file)).rejects.toMatchObject({ code: "ENOENT" })
   observed = {
     runs,
     fileModeAfterLogin,
     fileDeviceAfterLogin,
-    fileAfterLogout: await lstat(file).catch(() => null),
+    fileAfterLogout,
     requests,
   }
 }, 120_000)
@@ -101,11 +105,13 @@ test.skipIf(process.platform !== "linux")(
     if (observed === undefined) throw new Error("the launcher runs in beforeAll did not complete")
     const { runs, requests } = observed
     expect(runs.map(({ args, code, keystoreCalls }) => ({ args, code, keystoreCalls }))).toEqual(
-      [["login", "--device", "--no-browser"], ["whoami"], ["account", "show"], ["logout"]].map((args) => ({
-        args,
-        code: 0,
-        keystoreCalls: false,
-      })),
+      [["login", "--device", "--no-browser"], ["whoami"], ["account", "show"], ["logout"], ["account", "forget"]].map(
+        (args) => ({
+          args,
+          code: 0,
+          keystoreCalls: false,
+        }),
+      ),
     )
     const [login, whoami, show] = runs
     expect(login?.stdout).toContain(minted.userCode)
