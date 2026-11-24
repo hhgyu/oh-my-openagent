@@ -137,6 +137,7 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
   let idleTimer: ReturnType<typeof setTimeout> | undefined
   /** The close-and-terminate of a retired worker, until it settles: `dispose` waits for it. */
   let retiring: Promise<void> | undefined
+  const failedOpenExits = new Set<Promise<void>>()
   const idleRetireMs = options._test?.idleRetireMs ?? GATEWAY_STORE_IDLE_RETIRE_MS
   const resolveTarget = options.resolveTarget
   /** The registrations the current worker holds, restored on the next worker after one exits. */
@@ -281,7 +282,11 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
       if (opened !== attempt) return
       opened = undefined
       if (worker === spawned) worker = undefined
-      void spawned.terminate()
+      const exited = new Promise<void>((resolve) => spawned.once("exit", () => resolve()))
+      failedOpenExits.add(exited)
+      void exited.then(() => failedOpenExits.delete(exited))
+      // Only an exit confirms release of the database, even if termination reports an error.
+      void spawned.terminate().catch(() => undefined)
     })
     return attempt
   }
@@ -424,7 +429,7 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
         cancelIdleRetire()
         // A worker retired just before still holds its database until its close settles; a caller that
         // removes the agent directory after `dispose` must find it closed.
-        await retiring
+        await Promise.all([retiring, ...failedOpenExits])
         const active = worker
         if (active === undefined) return
         await post("close", null).catch(() => undefined)
