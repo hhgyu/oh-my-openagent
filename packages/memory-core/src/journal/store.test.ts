@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { Buffer } from "node:buffer"
 import { spawn } from "node:child_process"
 import { existsSync, realpathSync } from "node:fs"
-import { mkdtemp, readdir, readFile, utimes, writeFile } from "node:fs/promises"
+import { appendFile, mkdtemp, readdir, readFile, rename, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import type { TranscriptEntry } from "./entries"
 import { TranscriptJournal, withLocalJournalLock } from "./store"
 import { removeTree } from "../../../../test-support/remove-tree"
 
@@ -340,5 +341,111 @@ describe("transcript journal with nothing to record (#9737)", () => {
     expect(result).toEqual({ appended: 1, skipped: 0 })
     expect((await readFile(join(dir, "transcript.jsonl"), "utf8")).trim().split("\n")).toHaveLength(1)
     expect(existsSync(join(dir, "state.json"))).toBe(true)
+  })
+})
+
+describe("transcript journal cache against the real filesystem", () => {
+  function row(id: string, text = "same-width-text"): TranscriptEntry {
+    return {
+      kind: "user",
+      captured_at: "2026-08-09T12:00:00.000Z",
+      source_line_id: `${id}:user`,
+      source_message_id: id,
+      text,
+    }
+  }
+  const lines = (...rows: TranscriptEntry[]): string => rows.map((entry) => JSON.stringify(entry)).join("\n") + "\n"
+  const ids = (entries: readonly TranscriptEntry[]): string[] => entries.map((entry) => entry.source_message_id)
+
+  it("#given cached [A] #when the file is rewritten in place to the larger [B,C] #then the read returns [B,C], not [A,C]", async () => {
+    // given
+    const { dir, journal } = await createJournal()
+    await journal.append([row("a")])
+    expect(ids(await journal.readEntries())).toEqual(["a"])
+
+    // when
+    await writeFile(join(dir, "transcript.jsonl"), lines(row("b"), row("c")), "utf8")
+
+    // then
+    expect(ids(await journal.readEntries())).toEqual(["b", "c"])
+  })
+
+  it("#given a cached journal #when a foreign process appends a row #then the next read and append see it", async () => {
+    // given
+    const { dir, journal } = await createJournal()
+    await journal.append([row("a")])
+    await journal.readEntries()
+
+    // when
+    await appendFile(join(dir, "transcript.jsonl"), lines(row("c")), "utf8")
+
+    // then
+    expect(ids(await journal.readEntries())).toEqual(["a", "c"])
+    expect(await journal.append([row("c"), row("d")])).toEqual({ appended: 1, skipped: 1 })
+    expect(ids(await journal.readEntries())).toEqual(["a", "c", "d"])
+  })
+
+  it("#given a cached journal #when the file is replaced by rename with a same-size or larger file #then the new rows are loaded", async () => {
+    // given
+    const { dir, journal } = await createJournal()
+    await journal.append([row("a")])
+    await journal.readEntries()
+
+    // when
+    const replacement = join(dir, "replacement.jsonl")
+    await writeFile(replacement, lines(row("b"), row("c")), "utf8")
+    await rename(replacement, join(dir, "transcript.jsonl"))
+
+    // then
+    expect(ids(await journal.readEntries())).toEqual(["b", "c"])
+  })
+
+  it("#given a pruned transcript #when it is rebuilt larger than the cached journal #then reads return only the rebuilt rows", async () => {
+    // given
+    const { dir, journal } = await createJournal()
+    await journal.append([row("a"), row("b")])
+    await journal.readEntries()
+
+    // when
+    await rm(join(dir, "transcript.jsonl"))
+    expect(await journal.readEntries()).toEqual([])
+    await writeFile(join(dir, "transcript.jsonl"), lines(row("x"), row("y"), row("z")), "utf8")
+
+    // then
+    expect(ids(await journal.readEntries())).toEqual(["x", "y", "z"])
+  })
+
+  it("#given the journal's own appends #when it settles again unchanged #then it serves the cache without re-reading the file", async () => {
+    // given
+    const { dir, journal } = await createJournal()
+    await journal.append([row("a")])
+    await journal.append([row("b")])
+    const path = join(dir, "transcript.jsonl")
+    const before = await readFile(path, "utf8")
+
+    // when
+    const result = await journal.append([row("a"), row("b")])
+
+    // then
+    expect(result).toEqual({ appended: 0, skipped: 2 })
+    expect(await readFile(path, "utf8")).toBe(before)
+    expect(ids(await journal.readEntries())).toEqual(["a", "b"])
+  })
+
+  it("#given a caller that mutates what it read #when the journal is read again #then the cache is unaffected", async () => {
+    // given
+    const { journal } = await createJournal()
+    await journal.append([row("a", "original")])
+
+    // when
+    const first = await journal.readEntries()
+    first.length = 0
+    const again = await journal.readEntries()
+    ;(again[0] as { text: string }).text = "tampered"
+
+    // then
+    const third = await journal.readEntries()
+    expect(third).toHaveLength(1)
+    expect((third[0] as { text: string }).text).toBe("original")
   })
 })
