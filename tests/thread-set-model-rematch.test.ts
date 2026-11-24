@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { answered, setModelOn } from "./operations"
-import { refuse, type SessionControl, type SessionModelState } from "./port"
+import { answered, setModelOn } from "@oh-my-opencode/thread-core/control/operations"
+import { refuse, type SessionControl, type SessionModelState } from "@oh-my-opencode/thread-core/control/port"
 
 function unused(name: string): () => never {
   return () => {
