@@ -23,8 +23,17 @@ test("#given a newer core schema #when an older supported version opens it #then
   db.exec(`PRAGMA user_version = ${futureVersion}; INSERT INTO gateway_meta VALUES ('future-fixture', 'keep')`)
   db.close()
   const exits: Promise<unknown>[] = []
+  const firstTermination = Promise.withResolvers<void>()
   const store = h.store({
-    _test: { onWorkerStarted: (worker) => exits.push(new Promise((resolve) => worker.once("exit", resolve))) },
+    _test: {
+      onWorkerStarted: (worker) => {
+        if (exits.length === 0) {
+          const terminate = worker.terminate.bind(worker)
+          worker.terminate = () => firstTermination.promise.then(() => terminate())
+        }
+        exits.push(new Promise((resolve) => worker.once("exit", resolve)))
+      },
+    },
   })
   expect(
     await store.registerStoreExtension({
@@ -42,11 +51,16 @@ test("#given a newer core schema #when an older supported version opens it #then
     value: undefined,
     error: { code: "gateway_schema_too_new" },
   })
-  // Every refused open terminates its worker. Once they have all exited, the last connection has
-  // removed the WAL sidecars a read-only connection would need; a plain connection that only
-  // reads writes nothing.
-  await Promise.all(exits)
-  expect(exits).toHaveLength(3)
+  try {
+    expect(exits).toHaveLength(3)
+    await Promise.all(exits.slice(1))
+    const disposed = store.dispose().then(() => "disposed")
+    expect(await Promise.race([disposed, new Promise((resolve) => setImmediate(resolve, "pending"))])).toBe("pending")
+  } finally {
+    firstTermination.resolve()
+    await Promise.all(exits)
+  }
+  await store.dispose()
   const check = new Database(path)
   try {
     expect(check.query("PRAGMA user_version").get()).toEqual({ user_version: futureVersion })

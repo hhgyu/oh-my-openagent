@@ -130,11 +130,14 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
   let opened: Promise<{ readonly self: ProcessIdentity; readonly legacy_migrated: number }> | undefined
   let nextId = 1
   let disposed = false
+  let disposal: Promise<void> | undefined
   /** Store calls between their entry and their settle, the worker's open included. */
   let callsInFlight = 0
+  let callsSettled: (() => void) | undefined
   let idleTimer: ReturnType<typeof setTimeout> | undefined
   /** The close-and-terminate of a retired worker, until it settles: `dispose` waits for it. */
   let retiring: Promise<void> | undefined
+  const failedOpenExits = new Set<Promise<void>>()
   const idleRetireMs = options._test?.idleRetireMs ?? GATEWAY_STORE_IDLE_RETIRE_MS
   const resolveTarget = options.resolveTarget
   /** The registrations the current worker holds, restored on the next worker after one exits. */
@@ -279,7 +282,11 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
       if (opened !== attempt) return
       opened = undefined
       if (worker === spawned) worker = undefined
-      void spawned.terminate()
+      const exited = new Promise<void>((resolve) => spawned.once("exit", () => resolve()))
+      failedOpenExits.add(exited)
+      void exited.then(() => failedOpenExits.delete(exited))
+      // Only an exit confirms release of the database, even if termination reports an error.
+      void spawned.terminate().catch(() => undefined)
     })
     return attempt
   }
@@ -336,6 +343,7 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
       return await run()
     } finally {
       callsInFlight -= 1
+      if (callsInFlight === 0) callsSettled?.()
       armIdleRetire()
     }
   }
@@ -408,18 +416,27 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
       return () => listeners.delete(listener)
     },
     resume: (hook) => worker?.postMessage({ type: "resume", hook }),
-    dispose: async () => {
-      if (disposed) return
+    dispose: () => {
+      if (disposal) return disposal
       disposed = true
-      cancelIdleRetire()
-      // A worker retired just before still holds its database until its close settles; a caller that
-      // removes the agent directory after `dispose` must find it closed.
-      await retiring
-      const active = worker
-      if (active === undefined) return
-      await post("close", null).catch(() => undefined)
-      worker = undefined
-      await active.terminate()
+      disposal = (async () => {
+        // Closing during open would put the close ahead of an already admitted request.
+        if (callsInFlight > 0) {
+          await new Promise<void>((resolve) => {
+            callsSettled = resolve
+          })
+        }
+        cancelIdleRetire()
+        // A worker retired just before still holds its database until its close settles; a caller that
+        // removes the agent directory after `dispose` must find it closed.
+        await Promise.all([retiring, ...failedOpenExits])
+        const active = worker
+        if (active === undefined) return
+        await post("close", null).catch(() => undefined)
+        worker = undefined
+        await active.terminate()
+      })()
+      return disposal
     },
   }
 }
