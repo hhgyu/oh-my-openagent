@@ -1,121 +1,82 @@
-[English](README.md) | [简体中文](README.zh-cn.md) | [日本語](README.ja.md) | [Русский](README.ru.md) | [한국어](README.ko.md) | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Português (Brasil)](README.pt-br.md) | [Italiano](README.it.md)
-
-> [!NOTE]
-> **OmO 베타: OmO ❤️ Pi**
-> `curl -fsSL https://get.omo.dev/install.sh | bash`로 설치하세요. 메모리 시스템, CodeMode, Anthropic 구독까지 전부 지원됩니다.
-> [![OmO Herdr DAG - live OmO workflow DAGs in a Herdr side pane](./.github/assets/omo-herdr-dag.png)](https://github.com/jc01rho/omo-herdr-dag)
-> *프롬프트에 "mass ulw" 한 줄이면 끝. 당신도 그래프 엔지니어링의 마스터가 됩니다. 멀티 모델 ultracode, 더 나은 메모리 시스템과 함께. (우측의 패널은 [omo-herdr-dag](https://github.com/jc01rho/omo-herdr-dag) 입니다)*
-
-
-> **Sponsors**
-> 아래는 저희의 스폰서입니다. 개인 사이드 프로젝트를 지속하는 데 도움을 주고 있습니다.
-> | [<img alt="OpenGateway" src="./.github/assets/opengateway-logo.svg" width="156px" />](https://opengateway.ai/) | **[OpenGateway](https://opengateway.ai/)**가 OmO를 후원하고 있습니다. 여러 모델 제공사를 하나의 API로 쓸 수 있는 OpenAI 호환 게이트웨이입니다. 오픈소스를 응원해주셔서 감사합니다. |
-> | :-----| :----- |
-
-> [!TIP]
-> 함께해요!
->
-> | [<img alt="Discord link" src="https://img.shields.io/discord/1452487457085063218?color=5865F2&label=discord&labelColor=black&logo=discord&logoColor=white&style=flat-square" width="156px" />](https://discord.gg/PUwSMR9XNk) | 기여자와 OmO 사용자들을 만나려면 [Discord 커뮤니티](https://discord.gg/PUwSMR9XNk)로 오세요. |
-> | :-----| :----- |
-> | [<img alt="X link" src="https://img.shields.io/badge/Follow-%40justsisyphus-00CED1?style=flat-square&logo=x&labelColor=black" width="156px" />](https://x.com/justsisyphus) | 원래 제 X 계정에서 OmO 업데이트를 올렸는데, 계정이 실수로 정지되어 지금은 [@justsisyphus](https://x.com/justsisyphus)에서 대신 업데이트가 올라옵니다. |
-> | [<img alt="GitHub Follow" src="https://img.shields.io/github/followers/code-yeongyu?style=flat-square&logo=github&labelColor=black&color=24292f" width="156px" />](https://github.com/code-yeongyu) | 다른 프로젝트도 궁금하다면 GitHub에서 [@code-yeongyu](https://github.com/code-yeongyu)를 팔로우하세요. |
-
-<!-- <CENTERED SECTION FOR GITHUB DISPLAY> -->
+[English](README.md) | [한국어](README.ko.md)
 
 <div align="center">
 
-<a href="https://omo.dev"><img src="./.github/assets/omo-icon-light.svg" alt="OmO" width="200" /></a>
+<img src="./.github/assets/omo-icon-light.svg" alt="OmO" width="160" />
 
-# OmO
+# oh-my-openagent v2
 
-**Your tool for real work. But it's an agent.**
+**OpenCode 2를 위한 OmO.**
 
-[![GitHub Release](https://img.shields.io/github/v/release/code-yeongyu/oh-my-openagent?color=369eff&labelColor=black&logo=github&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/releases)
-[![downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fomo.dev%2Fapi%2Fdownloads&style=flat-square)](https://omo.dev)
-[![GitHub Contributors](https://img.shields.io/github/contributors/code-yeongyu/oh-my-openagent?color=c4f042&labelColor=black&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/graphs/contributors)
-[![GitHub Stars](https://img.shields.io/github/stars/code-yeongyu/oh-my-openagent?color=ffcb47&labelColor=black&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/stargazers)
-[![License](https://img.shields.io/badge/license-SUL--1.0-white?labelColor=black&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/blob/dev/LICENSE.md)
-[![Docs](https://img.shields.io/badge/docs-omo.dev-369eff?labelColor=black&logo=readthedocs&logoColor=white&style=flat-square)](https://omo.dev/docs)
-
+[![License](https://img.shields.io/badge/license-SUL--1.0-white?labelColor=black&style=flat-square)](LICENSE.md)
+[![OpenCode](https://img.shields.io/badge/OpenCode-%3E%3D2.2.6-369eff?labelColor=black&style=flat-square)](https://opencode.ai)
 
 </div>
 
-<!-- </CENTERED SECTION FOR GITHUB DISPLAY> -->
+이 저장소는 [code-yeongyu/oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent)의 다운스트림 포크입니다. OmO Native 런타임을 OpenCode 2로 옮긴 네이티브 **OpenCode 2 호스트**(`packages/omo-opencode/src/v2/`)를 더했습니다. 에이전트, `ultrawork`, 백그라운드 태스크, 워크플로 DAG, 팀, 스레드, Code Mode, Kibitzer가 포함된 메모리, 공유 스킬을 OpenCode 2에서 쓸 수 있습니다.
 
-OmO는 토큰을 끝난 일로 바꿔 주는 `omo` 명령 하나입니다. 만 개가 넘는 소스를 훑는 리서치, 한 번에 이해되는 발표자료, 백엔드, 프론트엔드, 코드까지 맡겨 보세요.
+업스트림은 전체 포팅을 받지 않기로 하고 자체 `omo` 앱으로 방향을 바꿨기 때문에 두 프로젝트는 갈라졌습니다([D-018](docs/DECISIONS_V2.md#d-018-upstream-divergence)). 이 저장소의 통합 브랜치는 `v2/dev`이고, 업스트림 변경은 필요한 것만 골라 리뷰를 거친 PR로 포팅합니다.
 
-엔진은 [pi](https://github.com/badlogic/pi-mono)를 포크한 senpi이고, 아래 기능은 전부 기본으로 들어 있어요.
+> [!IMPORTANT]
+> `curl -fsSL https://get.omo.dev/install.sh | bash`, npm의 `omo-ai`와 `oh-my-openagent@latest`는 모두 이 포크가 아니라 **업스트림** OmO를 설치합니다. 이 포크는 npm에 배포하지 않으므로 아래처럼 소스에서 설치하세요.
+
+## 요구 사항
+
+- [OpenCode](https://opencode.ai) 2.2.6 이상 (정식 릴리스만, 시작할 때 확인합니다. [D-041](docs/DECISIONS_V2.md#d-041-runtime-host-versions-have-a-semantic-minimum-not-an-exact-pin-2026-11-16) 참고)
+- [Bun](https://bun.sh) 1.4.4, git
 
 ## 설치
 
 ```bash
-curl -fsSL https://get.omo.dev/install.sh | bash
-omo
+git clone https://github.com/hhgyu/oh-my-openagent.git
+cd oh-my-openagent
+bun install
+bun run build
 ```
 
-Windows는 PowerShell에서 `irm https://get.omo.dev/install.ps1 | iex`를 실행하세요. OS와 CPU에 맞는 네이티브 `omo`를 `~/.local/bin`에 설치하고 릴리스 체크섬으로 검증합니다. 패키지 매니저가 편하면 `bun add -g omo-ai`(또는 `npm i -g omo-ai`)로 같은 OmO를 설치할 수 있어요. 패키지 이름은 `omo-ai`예요. npm의 `omo` 패키지는 다른 사람이 만든 전혀 다른 물건입니다. Windows CMD, `PATH` 문제 해결, 업데이트와 삭제는 [omo.dev/docs/install](https://omo.dev/docs/install)에서 다룹니다.
+그다음 `~/.config/opencode/opencode.json`의 `plugin` 배열에 체크아웃의 절대 경로를 추가합니다.
 
-프로젝트를 열고 `omo`를 실행한 다음, 할 일을 말하세요. 설정은 그게 끝.
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["/path/to/oh-my-openagent"]
+}
+```
 
-세션 안에서 `/thinking <level>`로 모델이 얼마나 깊이 생각할지 정해요. `/thinking`만 치면 고르는 창이 뜨고, `Shift+Tab`은 레벨을 차례로 바꾸고, `/efforts <level>`은 강도 단계가 있는 모델에서 추론 강도를 바로 정합니다. 이전 작업을 이어 가려면 `/resume`(또는 `/sessions`)으로 지난 세션을 열면 돼요. 셸에서는 `omo -c`가 마지막 세션을 이어 가고 `omo -r`이 세션 목록을 엽니다. 나머지 명령은 `/help`에 다 있어요.
+Windows에서는 `"D:/Git/oh-my-openagent"`처럼 슬래시 경로를 쓰세요. 추가한 뒤 OpenCode를 다시 시작합니다. 패키지 루트와 `./v2` export는 같은 OpenCode 2 호스트를 띄웁니다. `packages/omo-opencode/src/`의 OpenCode 1 호스트는 바뀌지 않았고 계속 OpenCode 1을 지원합니다.
 
-OpenCode 에디션이나 LazyCodex에서 넘어오셨다면 `omo setup`을 한 번 실행하세요. 프로바이더 키, 커스텀 프로바이더, MCP 서버, 스킬, 모델 선택까지 그대로 옮겨 옵니다.
+**업데이트:** `git pull` 후 `bun install`, `bun run build`를 실행하고 OpenCode를 다시 시작합니다.
+**제거:** `plugin` 배열에서 경로를 지우면 됩니다. OpenCode 설정의 다른 부분은 건드리지 않습니다.
 
-그다음 `omo doctor`가 지금 연결된 프로바이더로 어떤 작업 카테고리를 돌릴 수 있는지, 이전 설치가 무엇을 남겼는지 보여 줘요. 자세한 과정은 [OpenCode에서 옮겨 오기](docs/guide/migrating-from-opencode.md)에 있습니다.
+## OpenCode 2에서 쓸 수 있는 것
 
-업데이트는 `omo update`, 제거는 `bun remove -g omo-ai`(npm으로 깔았다면 `npm uninstall -g omo-ai`)입니다.
-
-## 왜 OmO인가
-
-**ultrawork.** 따로 공부할 필요는 없어요. 어려운 일이다 싶으면 프롬프트에 `ultrawork`(또는 `ulw`)를 붙이세요. 에이전트가 코드를 고치기 전에 코드베이스부터 읽고, 계획을 세우고, 단계마다 검증하고, 실제 화면에서 결과를 확인한 다음 멈춥니다.
-
-**수백 개의 에이전트, 키워드 하나로.** `mass ulw`를 입력하면 일 전체가 에이전트 그래프가 됩니다. 수천 개 소스를 훑는 딥 리서치, 머신러닝 파이프라인, 아무도 하기 싫은 마이그레이션까지요. 조각마다 맞는 모델이 동시에 돌고, 확인을 거친 뒤에야 끝났다고 말합니다.
-
-**Kibitzer. 당신의 에이전트가 당신과 당신의 일을 잊지 않습니다.** 기억은 마크다운 파일로 된 git 저장소에 쌓여요. 작고 싼 모델이 비싼 메인 에이전트 옆에서 당신이 해 온 일을 다시 읽고, 같은 실수를 하기 전에 한마디 넣어 줍니다. 같은 설명을 두 번 할 일이 없죠.
-
-**고민 없는 멀티모델.** 좋아하는 프론티어 모델과 싼 모델을 섞어 쓰세요. `/login` 하나면 Claude, ChatGPT, Kimi, GLM 구독이 붙습니다. 모델마다 손본 시스템 프롬프트가 딸려 있어서 잘못 고를 일도 없어요.
-
-**고품질 스킬, 꼭 필요한 것만.** 모델은 똑똑해도 현실의 문제를 푸는 요령은 아직 모르는 게 많습니다. OmO는 그 빈자리를 브라우저 사용까지 포함한 스킬로 채우고, 지금 일에 필요한 것만 불러와요.
-
-**나머지도 전부 손봤습니다.** 서로 기다릴 필요 없는 툴 호출은 작은 프로그램 하나로 묶어 한 번에 돌려서, 파일 스무 개를 읽어도 왕복은 한 번이에요. 잘못 만든 툴 인자는 실행 전에 고쳐집니다.
-
-빌드나 배포를 기다릴 때는 계속 들여다보지 않고 알림을 받습니다. 긴 작업은 무엇을 확인했는지 기록해 두니까 세션이 다시 떠도 멈춘 곳부터 이어가요. 설정, 스킬, 프롬프트는 바꾸는 즉시 반영됩니다.
+- **에이전트.** Sisyphus, Hephaestus, Prometheus, Atlas, Oracle, Librarian, Explore, Sisyphus-Junior가 각자의 프롬프트와 모델 체인으로 OpenCode 에이전트에 등록됩니다.
+- **ultrawork.** 프롬프트에 `ultrawork`(또는 `ulw`)를 넣으면 에이전트가 코드베이스를 먼저 읽고, 계획하고, 실제 환경에서 단계마다 검증한 뒤 일이 끝나면 멈춥니다. 오래 걸리는 작업은 `ulw-loop`와 `ulw-execute`가 체크포인트를 남기며 진행합니다.
+- **태스크, 워크플로, 팀.** `task`, `task_output`, `task_send`, `task_cancel`로 자식 에이전트를 돌리고, `workflow`로 의존성 그래프를 실행하고, 리드 팀 도구로 팀을 조율합니다. 자식 세션은 OpenCode의 서브에이전트 화면에 그대로 보입니다.
+- **스레드.** `thread_*` 도구로 같은 머신의 다른 OpenCode 프로세스에 있는 세션까지 목록 보기, 읽기, 메시지 보내기, 조종이 가능합니다.
+- **Code Mode.** 서로 독립적인 도구 호출을 작은 JavaScript 프로그램 하나로 묶어 실행합니다. 파일 스무 개를 읽어도 왕복은 한 번입니다.
+- **메모리와 Kibitzer.** 메모리는 마크다운 파일로 된 git 저장소에 저장됩니다. 저렴한 모델이 세션을 지켜보다가 메인 에이전트가 같은 실수를 반복하기 전에 알려줍니다.
+- **공유 스킬.** OmO 스킬 18개(frontend, debugging, review-work, ulw-plan, ulw-research 등)를 필요할 때만 불러옵니다. 이름이 같은 호스트, 사용자, 프로젝트 스킬이 있으면 항상 그쪽이 우선입니다([D-047](docs/DECISIONS_V2.md#d-047-the-shared-skills-register-through-one-skilltransform-and-never-replace-a-host-user-or-project-skill-2026-11-20)).
+- **명령어.** OmO의 슬래시 명령어는 모두 `/omo:<이름>` 형태입니다. 예: `/omo:goal`, `/omo:memory`, `/omo:remember`, `/omo:doctor`. OpenCode 명령어와 겹치지 않습니다([D-039](docs/DECISIONS_V2.md#d-039-every-omo-command-on-opencode-2-is-omonative-name-2026-11-14)).
+- **컴퓨터 사용**(실험 기능). `/omo:computer`로 로컬 앱 창을 조작합니다.
 
 ## 설정
 
-기본값에는 분명한 취향이 들어 있지만, 원하면 바꿀 수 있어요. 개인 설정은 `~/.omo/omo.jsonc`, 프로젝트 설정은 그 프로젝트의 `.omo/omo.jsonc`에 두고, 가까운 파일이 이깁니다.
+설정은 `~/.omo/omo.jsonc`에 두고, 프로젝트마다 `.omo/omo.jsonc`를 따로 둘 수 있습니다. 가장 가까운 파일이 우선합니다. OpenCode 2 호스트는 공통 키와 `[opencode]` 블록을 읽습니다. 전체 키는 [`omo.json` 레퍼런스](docs/reference/omo-json.md)와 [설정 레퍼런스](docs/reference/configuration.md)에 있습니다.
 
-모든 키는 [설정 레퍼런스](docs/reference/configuration.md)에 있습니다.
+## OmO Native와 다른 점
 
-## 문서
+모든 기능이 똑같이 옮겨지지는 않습니다. [OpenCode 2 패리티 레지스터](docs/reference/opencode-v2-parity.md)에 Native 런타임과 다른 점이 전부 정리돼 있습니다. 포팅하지 않은 것, OpenCode 2가 아직 지원하지 않는 것, 동작이 다른 것을 항목별로 적고, 각 항목을 고정하는 테스트도 함께 적었습니다. 설계 결정은 [`docs/DECISIONS_V2.md`](docs/DECISIONS_V2.md)에 기록합니다.
 
-- [omo.dev/docs](https://omo.dev/docs)
-- [OpenCode에서 옮겨 오기](docs/guide/migrating-from-opencode.md)
-- [설정 레퍼런스](docs/reference/configuration.md)
-- [기능](docs/reference/features.md)
-- [컴퓨터 사용](docs/guide/computer-use.md) (실험적 기능)
-- [Ultrawork 선언문](docs/manifesto.md)
+`docs/` 아래 다른 문서는 대부분 업스트림에서 온 것이라 업스트림 OmO를 설명합니다. 패리티 레지스터와 내용이 다르면 이 포크에서는 레지스터가 맞습니다.
 
-## 리뷰
+## 기여
 
-> "It made me cancel my Cursor subscription. Unbelievable things are happening in the open source community." - [Arthur Guiot](https://x.com/arthur_guiot/status/2008736347092382053?s=20)
+- PR은 업스트림이 아니라 이 저장소의 `v2/dev`로 보내 주세요. 머지는 머지 커밋으로 합니다.
+- 작업은 별도 git 워크트리에서 합니다. OpenCode에 닿는 변경은 `opencode-qa` 스킬로 실제 호스트 QA를 하고, 증거는 `.omo/evidence/`에 남깁니다(커밋하지 않습니다).
+- Native와 동작이 달라지는 변경은 같은 PR에서 패리티 레지스터 항목을 추가하거나 고칩니다.
+- 에이전트와 사람 모두를 위한 저장소 규칙은 [`AGENTS.md`](AGENTS.md)와 [`CONTRIBUTING.md`](CONTRIBUTING.md)에 있습니다.
 
-> "If Claude Code does in 7 days what a human does in 3 months, OmO does it in 1 hour." <br/>- B, Quant Researcher
+## 라이선스와 크레딧
 
-> "You guys should pull this into core and recruit him. Seriously. It's really, really, really good." <br/>- Henning Kilset
-
-## 제작자의 말
-
-에이전트한테서 운전대를 다시 뺏어 와야 한다면 그건 협업이 아니에요. 시스템이 실패한 거죠. OmO는 그 생각에서 출발했습니다.
-
-당신은 원하는 걸 말하면 됩니다. 조사하고, 계획하고, 시니어 엔지니어가 쓴 것과 구별이 안 되는 코드를 쓰고, 검증하고, 끝날 때까지 가는 건 에이전트 몫이에요. 토큰은 속도가 확실히 붙을 때 쓰고, 쉬운 일은 싼 모델에게 넘깁니다.
-
-저는 이 프로젝트를 제일 집요하게 쓰는 사용자예요. 어느 모델이 논리가 제일 날카로운지, 누가 글을 제일 잘 쓰는지, 이번 주에 다들 뭘 내놨는지. 그 답이 모이는 곳이 OmO입니다. 더 나은 방법이 있으면 PR 주세요.
-
-목표는 있는 줄도 모르게 되는 에이전트. 스위치를 켜면 불이 들어오듯이요. 긴 버전은 [Ultrawork 선언문](docs/manifesto.md)에 있습니다.
-
-여기 나온 어떤 프로젝트나 모델과도 제휴 관계는 없습니다. Ultragoal과 UltraQA 아이디어는 [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex)에서 가져와 OmO에 맞게 새로 구현했어요.
-
-## 이런 곳의 전문가들이 씁니다
-
-[Indent](https://indentcorp.com), makers of Spray (influencer marketing solution), vovushop (cross-border commerce platform) and vreview (AI commerce review marketing solution). [Google](https://google.com). [Microsoft](https://microsoft.com). [Vercel](https://vercel.com). [ELESTYLE](https://elestyle.jp), makers of elepay (multi-mobile payment gateway) and OneQR (mobile application SaaS for cashless solutions). [Deepgram](https://deepgram.com).
+라이선스는 업스트림과 같은 [SUL-1.0](LICENSE.md)입니다. OmO는 [@code-yeongyu](https://github.com/code-yeongyu)와 업스트림 기여자들이 만들었고, 이 포크는 OpenCode 2 호스트와 그 후속 작업만 더합니다. OpenCode나 모델 제공사와는 관계가 없습니다.

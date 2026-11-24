@@ -1,117 +1,82 @@
-[English](README.md) | [简体中文](README.zh-cn.md) | [日本語](README.ja.md) | [Русский](README.ru.md) | [한국어](README.ko.md) | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Português (Brasil)](README.pt-br.md) | [Italiano](README.it.md)
-
-> [!NOTE]
-> **OmO 5.0: OmO ❤️ Pi**
-> Install it with `curl -fsSL https://get.omo.dev/install.sh | bash`. Memory system, CodeMode, Anthropic subscriptions, all covered.
-> [![OmO Herdr DAG - live OmO workflow DAGs in a Herdr side pane](./.github/assets/omo-herdr-dag.png)](https://github.com/jc01rho/omo-herdr-dag)
-> *Just type "mass ulw" with your prompt - now you are the master of graph engineering. Multi-model ultracode, together with a better memory system. (The right panel is [omo-herdr-dag](https://github.com/jc01rho/omo-herdr-dag).)*
-
-> **Sponsors**
-> These are our sponsors. They help keep OmO going as a personal side project.
-> | [<img alt="OpenGateway" src="./.github/assets/opengateway-logo.svg" width="156px" />](https://opengateway.ai/) | **[OpenGateway](https://opengateway.ai/)** sponsors OmO. An OpenAI-compatible gateway that puts many model providers behind one API. Thank you for backing open source. |
-> | :-----| :----- |
-
-
-> [!TIP]
-> Be with us!
->
-> | [<img alt="Discord link" src="https://img.shields.io/discord/1452487457085063218?color=5865F2&label=discord&labelColor=black&logo=discord&logoColor=white&style=flat-square" width="156px" />](https://discord.gg/PUwSMR9XNk) | Join our [Discord community](https://discord.gg/PUwSMR9XNk) to connect with contributors and fellow OmO users. |
-> | :-----| :----- |
-> | [<img alt="X link" src="https://img.shields.io/badge/Follow-%40justsisyphus-00CED1?style=flat-square&logo=x&labelColor=black" width="156px" />](https://x.com/justsisyphus) | Updates for OmO used to be posted on my X account. <br /> Since it was mistakenly suspended, [@justsisyphus](https://x.com/justsisyphus) now posts updates on my behalf. |
-> | [<img alt="GitHub Follow" src="https://img.shields.io/github/followers/code-yeongyu?style=flat-square&logo=github&labelColor=black&color=24292f" width="156px" />](https://github.com/code-yeongyu) | Follow [@code-yeongyu](https://github.com/code-yeongyu) on GitHub for more projects. |
-
-<!-- <CENTERED SECTION FOR GITHUB DISPLAY> -->
+[English](README.md) | [한국어](README.ko.md)
 
 <div align="center">
 
-<a href="https://omo.dev"><img src="./.github/assets/omo-icon-light.svg" alt="OmO" width="200" /></a>
+<img src="./.github/assets/omo-icon-light.svg" alt="OmO" width="160" />
 
-# OmO
+# oh-my-openagent v2
 
-**Your tool for real work. But it's an agent.**
+**OmO for OpenCode 2.**
 
-[![GitHub Release](https://img.shields.io/github/v/release/code-yeongyu/oh-my-openagent?color=369eff&labelColor=black&logo=github&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/releases)
-[![downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fomo.dev%2Fapi%2Fdownloads&style=flat-square)](https://omo.dev)
-[![GitHub Contributors](https://img.shields.io/github/contributors/code-yeongyu/oh-my-openagent?color=c4f042&labelColor=black&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/graphs/contributors)
-[![GitHub Stars](https://img.shields.io/github/stars/code-yeongyu/oh-my-openagent?color=ffcb47&labelColor=black&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/stargazers)
-[![License](https://img.shields.io/badge/license-SUL--1.0-white?labelColor=black&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/blob/dev/LICENSE.md)
-[![Docs](https://img.shields.io/badge/docs-omo.dev-369eff?labelColor=black&logo=readthedocs&logoColor=white&style=flat-square)](https://omo.dev/docs)
-
+[![License](https://img.shields.io/badge/license-SUL--1.0-white?labelColor=black&style=flat-square)](LICENSE.md)
+[![OpenCode](https://img.shields.io/badge/OpenCode-%3E%3D2.2.6-369eff?labelColor=black&style=flat-square)](https://opencode.ai)
 
 </div>
 
-<!-- </CENTERED SECTION FOR GITHUB DISPLAY> -->
+This repository is a downstream fork of [code-yeongyu/oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent). It adds a native **OpenCode 2 host** (`packages/omo-opencode/src/v2/`) that brings the OmO Native runtime to OpenCode 2: agents, `ultrawork`, background tasks, the workflow DAG, teams, threads, Code Mode, memory with Kibitzer, and the shared skills.
 
-OmO is one `omo` command that turns your tokens into finished work: research across ten thousand sources, a deck people actually get, backends, frontends, code. It runs on senpi, our fork of [pi](https://github.com/badlogic/pi-mono), with everything below built in.
+Upstream declined the full port and moved on to its own `omo` app, so the two projects have diverged ([D-018](docs/DECISIONS_V2.md#d-018-upstream-divergence)). The integration branch here is `v2/dev`. Upstream changes are ported into it selectively, in reviewed PRs.
+
+> [!IMPORTANT]
+> `curl -fsSL https://get.omo.dev/install.sh | bash`, `omo-ai` and `oh-my-openagent@latest` on npm all install **upstream** OmO, not this fork. This fork is not published to npm. Install it from source as shown below.
+
+## Requirements
+
+- [OpenCode](https://opencode.ai) 2.2.6 or newer (stable releases; checked at startup, see [D-041](docs/DECISIONS_V2.md#d-041-runtime-host-versions-have-a-semantic-minimum-not-an-exact-pin-2026-11-16))
+- [Bun](https://bun.sh) 1.4.4 and git
 
 ## Install
 
 ```bash
-curl -fsSL https://get.omo.dev/install.sh | bash
-omo
+git clone https://github.com/hhgyu/oh-my-openagent.git
+cd oh-my-openagent
+bun install
+bun run build
 ```
 
-On Windows, in PowerShell: `irm https://get.omo.dev/install.ps1 | iex`. The script installs the native `omo` binary for your OS and CPU into `~/.local/bin`, checks it against the release checksums, and falls back to GitHub Releases when the mirror is unreachable. Add `-s -- beta` (or a version such as `-s -- 5.1.1`) after `bash` to pick another channel. Windows CMD, fixing your `PATH`, updating and uninstalling are covered at [omo.dev/docs/install](https://omo.dev/docs/install).
+Then add the absolute path of the checkout to the `plugin` array in `~/.config/opencode/opencode.json`:
 
-Prefer a package manager? `bun add -g omo-ai` (or `npm i -g omo-ai`) installs the same OmO. The package is `omo-ai`; the unrelated `omo` package on npm is someone else's.
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["/path/to/oh-my-openagent"]
+}
+```
 
-Open your project, run `omo`, describe the job. That's the whole setup.
+On Windows use a forward-slash path such as `"D:/Git/oh-my-openagent"`. Restart OpenCode. The package root and the `./v2` export both start the same OpenCode 2 host; the OpenCode 1 host in `packages/omo-opencode/src/` is unchanged and keeps serving OpenCode 1.
 
-In a session, `/thinking <level>` sets how hard the model thinks (`/thinking` alone opens a picker), `Shift+Tab` cycles through the levels, and `/efforts <level>` sets the reasoning effort directly on models with effort grades. To pick up earlier work, `/resume` (or `/sessions`) opens your past sessions; from the shell, `omo -c` continues the last one and `omo -r` opens the picker. `/help` lists everything else.
+**Update:** `git pull`, then `bun install` and `bun run build`, then restart OpenCode.
+**Remove:** delete the path from the `plugin` array. Nothing else in your OpenCode config is rewritten.
 
-Coming from the OpenCode edition or LazyCodex? Run `omo setup` once. It carries your provider keys, custom providers, MCP servers, skills and model picks across. `omo doctor` then shows which task categories your providers can run and what the old install left behind, and `omo doctor --models` shows which model each category and agent runs and in what order (keep one out everywhere with [`exclude_models`](docs/reference/omo-json.md#exclude_models-native-harness)). The full walkthrough is [Migrating from OpenCode](docs/guide/migrating-from-opencode.md).
+## What you get on OpenCode 2
 
-To update, run the install line again (a package-manager install updates with `omo update`). `rm ~/.local/bin/omo` removes the binary install; `bun remove -g omo-ai` (or `npm uninstall -g omo-ai`) removes the package install.
-
-## Why OmO
-
-**ultrawork.** Skip the study. If a task feels hard, add `ultrawork` (or `ulw`) to your prompt. The agent reads the codebase before touching a line, plans, proves each step before moving on, checks the result on the real surface, and stops when it's done.
-
-**Hundreds of agents, one keyword.** Type `mass ulw` and the whole job becomes a graph of agents: deep research over thousands of sources, a full machine-learning pipeline, a migration nobody wants to do. Each part runs on the model that fits it, in parallel, and gets checked before anything is called done.
-
-**Kibitzer. Your agent doesn't forget you, or your work.** Memory lives in a git repository of markdown files. A small, cheap model sits beside the expensive main agent, reads what you've done before, and nudges the main agent before it repeats a mistake. You stop re-explaining yourself.
-
-**Mix models without thinking about it.** Use the frontier models you love together with the cheap ones. Just sign in: `/login` covers Claude, ChatGPT, Kimi and GLM subscriptions. Every model ships with a system prompt tuned for it, so you never pick the wrong one.
-
-**High-quality skills, only the ones you need.** Your model is smart, but it still doesn't know a lot about solving real-world problems. OmO ships the missing knowledge as skills, browser use included, and loads only what the task needs.
-
-**Everything else is crafted.** Independent tool calls run together in one small program, so twenty reads are one round trip. Malformed tool arguments are repaired before they run. Waiting on a build or a deploy is a subscription, not polling. Long work keeps a record of what was checked, so a restarted session picks up where it stopped. Config, skills and prompts reload live.
+- **Agents.** Sisyphus, Hephaestus, Prometheus, Atlas, Oracle, Librarian, Explore and Sisyphus-Junior, registered as OpenCode agents with their tuned prompts and model chains.
+- **ultrawork.** Add `ultrawork` (or `ulw`) to a prompt and the agent explores, plans, verifies each step on the real surface, and stops when the work is done. `ulw-loop` and `ulw-execute` run long, checkpointed work.
+- **Tasks, workflows and teams.** `task`, `task_output`, `task_send` and `task_cancel` run child agents; `workflow` runs a dependency graph of them; the lead team tools coordinate a team. Children show in OpenCode's own subagent display.
+- **Threads.** `thread_*` tools list, read, message and steer other sessions, across OpenCode processes on the same machine.
+- **Code Mode.** Independent tool calls run together in one small JavaScript program, so twenty reads are one round trip.
+- **Memory and Kibitzer.** Memory lives in a git repository of markdown files. A cheap model watches the session and nudges the main agent before it repeats a mistake.
+- **Shared skills.** 18 OmO skills (frontend, debugging, review-work, ulw-plan, ulw-research and more) load on demand. A host, user or project skill with the same name always wins ([D-047](docs/DECISIONS_V2.md#d-047-the-shared-skills-register-through-one-skilltransform-and-never-replace-a-host-user-or-project-skill-2026-11-20)).
+- **Commands.** Every OmO slash command is namespaced as `/omo:<name>`, for example `/omo:goal`, `/omo:memory`, `/omo:remember` and `/omo:doctor`, so none collides with an OpenCode command ([D-039](docs/DECISIONS_V2.md#d-039-every-omo-command-on-opencode-2-is-omonative-name-2026-11-14)).
+- **Computer use** (experimental). `/omo:computer` drives local app windows.
 
 ## Configuration
 
-Opinionated defaults, adjustable if you insist. Your settings live in `~/.omo/omo.jsonc`, and a project can add its own `.omo/omo.jsonc`; the closest file wins. Every key is in the [configuration reference](docs/reference/configuration.md).
+Settings live in `~/.omo/omo.jsonc`, and a project can add its own `.omo/omo.jsonc`; the closest file wins. The OpenCode 2 host reads the shared keys plus the `[opencode]` block. Keys are listed in the [`omo.json` reference](docs/reference/omo-json.md) and the [configuration reference](docs/reference/configuration.md).
 
-## Docs
+## Differences from OmO Native
 
-- [omo.dev/docs](https://omo.dev/docs)
-- [Migrating from OpenCode](docs/guide/migrating-from-opencode.md)
-- [Configuration reference](docs/reference/configuration.md)
-- [Features](docs/reference/features.md)
-- [Computer use](docs/guide/computer-use.md) (experimental)
-- [Ultrawork Manifesto](docs/manifesto.md)
+Not everything ports one to one. The [OpenCode 2 parity register](docs/reference/opencode-v2-parity.md) lists every known difference from the Native runtime: what is not ported, what OpenCode 2 cannot do yet, and what behaves differently, each with the test that pins it. Design decisions are recorded in [`docs/DECISIONS_V2.md`](docs/DECISIONS_V2.md).
 
-## Reporting a bug
+Most other pages under `docs/` come from upstream and describe upstream OmO. Where they disagree with the parity register, the register is correct for this fork.
 
-The fastest way to report a bug is `/bug` inside a session (available in the omo app). It lists what it includes and lets you see the exact report before you send it, then sends it to the OmO team: the recent engine log, your environment and config with secrets blanked, the session transcript, and identity lines - your device name and, when telemetry is on, an install id and a session hash, plus your account details (email, name, account, user and device ids, plan, device name) when you report from the desktop app, so we can reply. Everything but the identity lines goes through the upload redactor. GitHub issues stay open for anyone who cannot use the in-app report.
+## Contributing
 
-## Reviews
+- Open PRs against `v2/dev` in this repository, not against upstream. PRs are merged with merge commits.
+- Work in a separate git worktree. Changes that reach OpenCode need real-host QA with the `opencode-qa` skill, with evidence kept under `.omo/evidence/` (never committed).
+- A change that differs from Native behavior adds or updates a row in the parity register in the same PR.
+- Repository conventions for agents and humans are in [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-> "It made me cancel my Cursor subscription. Unbelievable things are happening in the open source community." - [Arthur Guiot](https://x.com/arthur_guiot/status/2008736347092382053?s=20)
+## License and credits
 
-> "If Claude Code does in 7 days what a human does in 3 months, OmO does it in 1 hour." <br/>- B, Quant Researcher
-
-> "You guys should pull this into core and recruit him. Seriously. It's really, really, really good." <br/>- Henning Kilset
-
-## Author's Note
-
-When I have to take the wheel back from an agent, that isn't teamwork. The system failed. OmO is built on that idea. You say what you want; the agent researches, plans, writes code you couldn't tell from a senior engineer's, verifies it, and keeps going until it's finished. It spends tokens when they buy real speed and routes the easy parts to cheap models.
-
-I'm this project's most obsessive user. Which model has the sharpest logic? Who writes the best prose? What did everyone else ship this week? OmO is where those answers land. Have a better way? PRs welcome.
-
-The goal is an agent you stop noticing. You flip the switch, the light turns on. The long version is the [Ultrawork Manifesto](docs/manifesto.md).
-
-No affiliation with any project or model mentioned. The Ultragoal and UltraQA ideas come from [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex), reimplemented from concept for OmO.
-
-## Loved by professionals at
-
-[Indent](https://indentcorp.com), makers of Spray (influencer marketing solution), vovushop (cross-border commerce platform) and vreview (AI commerce review marketing solution). [Google](https://google.com). [Microsoft](https://microsoft.com). [Vercel](https://vercel.com). [ELESTYLE](https://elestyle.jp), makers of elepay (multi-mobile payment gateway) and OneQR (mobile application SaaS for cashless solutions). [Deepgram](https://deepgram.com).
+[SUL-1.0](LICENSE.md), the same license as upstream. OmO is created by [@code-yeongyu](https://github.com/code-yeongyu) and the upstream contributors; this fork only adds the OpenCode 2 host and its follow-ups. It is not affiliated with OpenCode or any model provider.
