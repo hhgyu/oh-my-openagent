@@ -24,13 +24,15 @@ const NEGATED_INVOCATION =
 // "don't ulw this", a pasted rule list) is not a request either (#14389). Only the keyword list the prohibition
 // names is masked: "ulw or mass-ulw", "ulw, ulw-loop and ultrawork". A comma that is not part of such a list ends it,
 // so "No ulw-loop, just ulw this" and "avoid regressions, ulw the fix" still arm.
-const PROHIBITED_ITEM = String.raw`(?:mass[-\s]?)?(?:ultrawork|ulw)(?:[-_](?:loop|plan|research|execute|mass))?\b`
+const PROHIBITED_ITEM = String.raw`(?:mass[- \t]?)?(?:ultrawork|ulw)(?:[-_](?:loop|plan|research|execute|mass))?\b`
 const QUOTED_ITEM = new RegExp(`^${PROHIBITED_ITEM}$`, "i")
 const LIST_ITEM = `(?:${PROHIBITED_ITEM}|\\x01+)`
-const LIST_SEPARATOR = String.raw`(?:\s*,\s*(?:(?:or|and|nor)\s+)?|\s+(?:or|and|nor)\s+|\s*\/\s*)`
+const LIST_SEPARATOR = String.raw`(?:[ \t]*,[ \t]*(?:(?:or|and|nor)[ \t]+)?|[ \t]+(?:or|and|nor)[ \t]+|[ \t]*\/[ \t]*)`
+// A subsequent item must stand alone. "here" can close the prohibition ("skip ... and ultrawork here").
+const LIST_ITEM_END = String.raw`(?=[ \t]*(?:[,/;:.!?\r\n]|$|(?:and|or|nor)\b|here[ \t]*(?:[;:.!?\r\n]|$)))`
 const PROHIBITED_KEYWORD = new RegExp(
-  String.raw`\b(?:avoid(?:ing)?|skip(?:ping)?|without|no|never|do\s+not|don['\u2019]t|dont)\s+(?:(?:using|use\s+of|the)\s+)?` +
-    String.raw`${LIST_ITEM}(?:${LIST_SEPARATOR}${LIST_ITEM})*`,
+  String.raw`\b(?:avoid(?:ing)?|skip(?:ping)?|without|no|never|do[ \t]+not|don['\u2019]t|dont)[ \t]+(?:(?:using|use[ \t]+of|the)[ \t]+)?` +
+    String.raw`${LIST_ITEM}(?:${LIST_SEPARATOR}${LIST_ITEM}${LIST_ITEM_END})*`,
   "gi",
 )
 
