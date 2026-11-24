@@ -12,6 +12,7 @@ import { replyData } from "../remote/remote-ops"
 import type { ModelChoice } from "@oh-my-opencode/thread-core/control/model-match"
 import { REMOTE_GRACEFUL_MAX_WAIT_MS } from "@oh-my-opencode/thread-core/contracts/fields"
 import { closeLadder, SESSION_GONE, type RecordAnswer } from "./close-ladder"
+import { sessionModelState } from "./session-model-state"
 import { interruptOver } from "@oh-my-opencode/thread-core/control/interrupt"
 import {
   ControlRefusal,
@@ -122,6 +123,7 @@ export function createRelayControl(
       const outcome = await commandOutcome({ type: "get_available_models" }, options)
       return { models: modelsOf(replyData(outcome.response)["models"]), held: outcome.local === true }
     },
+    getModelState: async () => sessionModelState(await command({ type: "get_state" }, { fresh: true })),
     setModel: async (provider, id) => {
       // `scope: "session"` switches only this session; without it the engine persists the device's default model.
       const reply = await command({ type: "set_model", provider, modelId: id, scope: "session" })
