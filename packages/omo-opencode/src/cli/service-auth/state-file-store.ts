@@ -143,9 +143,10 @@ async function removeStateFile(dir: string, name: string): Promise<void> {
 }
 
 export type StateFileStore<T> = SealedStore<T> & {
-  /** The stored text as written, or null when there is none or it was refused (one line, never its content). */
+  /** Returns the exact serialized credential written, for readback verification. Never log it. */
   readonly writeReturningText: (value: T) => Promise<string>
   readonly snapshot: () => Promise<{ text: string; version: string } | null>
+  /** Private stored text, or null for a missing or refused file. */
   readonly text: () => Promise<string | null>
   /** True while any entry sits at the file's path, refused or not. */
   readonly present: () => Promise<boolean>
@@ -221,7 +222,7 @@ export function createStateFileStore<T>(input: {
     clear: () =>
       locked(async () => {
         try {
-          await removeStateFile(directory(), name)
+          if (await checkDir(directory(), uid)) await removeStateFile(directory(), name)
         } catch (error) {
           throw failed("remove", error)
         }

@@ -20,7 +20,6 @@ type Observed = {
   readonly runs: readonly Run[]
   readonly fileModeAfterLogin: number
   readonly fileDeviceAfterLogin: string
-  readonly fileAfterLogout: unknown
   readonly requests: readonly string[]
 }
 
@@ -86,7 +85,7 @@ beforeAll(async () => {
   await run(["whoami"])
   await run(["account", "show"])
   await run(["logout"])
-  const fileAfterLogout = await lstat(file).catch(() => null)
+  await expect(lstat(file)).rejects.toMatchObject({ code: "ENOENT" })
   await writeFile(file, "{", { mode: 0o600 })
   await run(["account", "forget"])
   await expect(lstat(file)).rejects.toMatchObject({ code: "ENOENT" })
@@ -94,7 +93,6 @@ beforeAll(async () => {
     runs,
     fileModeAfterLogin,
     fileDeviceAfterLogin,
-    fileAfterLogout,
     requests,
   }
 }, 120_000)
@@ -126,7 +124,6 @@ test.skipIf(process.platform !== "linux")(
     })
     expect(requests.filter((line) => line === "POST /v1/device/code")).toHaveLength(1)
 
-    expect(observed.fileAfterLogout).toBeNull()
     expect(requests).toContain("DELETE /v1/devices/device-1")
   },
 )

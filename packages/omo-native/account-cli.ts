@@ -169,8 +169,8 @@ async function runVerb(dependencies: AccountCommandDependencies, args: readonly 
               )
               return reply(dependencies, { forgotten: false, device: deviceOf(current) }, ACCOUNT_EXIT.conflict)
             }
-            if (current !== null) await session.discard(current, "forget")
             await dependencies.store.clear()
+            if (current !== null) await session.discard(current, "forget")
             forgotten = true
             return reply(dependencies, { forgotten: true })
           })

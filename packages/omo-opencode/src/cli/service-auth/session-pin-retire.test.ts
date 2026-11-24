@@ -252,7 +252,11 @@ describe("the credential write seam retires the sync pin (#12280)", () => {
   // a stalled service keeps the pin (reported) instead of holding the sign-out for the 30 s request timeout.
   test("#given a legacy sign-in with a live pin and a service that never answers /v1/me #when it is forgotten #then the lookup gives up within its budget, the item is deleted and the kept pin is reported", async () => {
     const h = await pinnedHome()
-    const api = fakeApi(() => new Promise<Response>(() => undefined))
+    const requests: string[] = []
+    const api = fakeApi((req) => {
+      requests.push(`${req.method} ${new URL(req.url).pathname}`)
+      return new Promise<Response>(() => undefined)
+    })
     const s = memoryStore({ ...grant, ...privateKeys })
     const started = performance.now()
     await createSession({
@@ -263,7 +267,8 @@ describe("the credential write seam retires the sync pin (#12280)", () => {
       machine: { digest: async () => undefined, name: () => "test", budgetMs: 50 },
     }).forget()
     // The budget under test is 50 ms; the unbounded lookup waits for the request timeout (seconds).
-    expect(performance.now() - started).toBeLessThan(3_000)
+    expect(requests).toEqual(["GET /v1/me"])
+    expect(performance.now() - started).toBeLessThan(750)
     expect(s.current()).toBeNull()
     expect(await h.pins()).toEqual({ live: 1, retired: 0 })
     expect(h.logs).toHaveLength(1)
@@ -308,11 +313,14 @@ for (const operation of ["forget", "refresh"] as const) {
       const session = createSession({
         api,
         home: h.home,
-        store,
-        beforeKeysDiscarded: async (item) => {
-          available = true
-          await h.hook(item)
+        store: {
+          ...store,
+          clear: async () => {
+            available = true
+            await store.clear()
+          },
         },
+        beforeKeysDiscarded: h.hook,
       })
       if (operation === "forget") {
         await session.forget()
@@ -379,3 +387,35 @@ for (const change of ["unchanged", "replacement", "unsafe"] as const) {
     },
   )
 }
+
+test("a synchronous pin-directory failure cannot prevent forget", async () => {
+  const s = memoryStore({ ...grant, ...privateKeys })
+  const hook = retireSyncPinOnDiscard({
+    pinDir: () => {
+      throw new Error("missing root")
+    },
+    log: () => {},
+  })
+  await createSession({
+    api: "https://example.invalid",
+    store: s.store,
+    home: await temporaryHome(),
+    beforeKeysDiscarded: hook,
+  }).forget()
+  expect(s.current()).toBeNull()
+})
+
+test("a refused deletion preserves the readable account's live pin", async () => {
+  const h = await pinnedHome()
+  const s = memoryStore(stored)
+  const store = {
+    ...s.store,
+    clear: async () => {
+      throw new Error("delete refused")
+    },
+  }
+  await expect(
+    createSession({ api: "https://example.invalid", store, home: h.home, beforeKeysDiscarded: h.hook }).forget(),
+  ).rejects.toThrow("delete refused")
+  expect(await h.pins()).toEqual({ live: 1, retired: 0 })
+})

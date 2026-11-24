@@ -211,8 +211,8 @@ export function createSession(options: {
         error.status < 500 &&
         ["unauthorized", "account_deleted", "reauth_required", "invalid_grant", "device_revoked"].includes(error.code)
       ) {
-        await discard(current, "refused")
         await store.clear()
+        await discard(current, "refused")
         await deviceService?.forget()
         throw new SessionEnded(
           error.code === "reauth_required"
@@ -389,8 +389,8 @@ export function createSession(options: {
           await beforeKeysDiscarded({ kind: "unreadable" })
           return
         }
-        if (current !== null) await discard(current, "forget")
         await store.clear()
+        if (current !== null) await discard(current, "forget")
       })
       await deviceService?.forget()
     },
@@ -429,6 +429,7 @@ export function createSession(options: {
             await writeSignedOutMarker(markerPath, current?.device.id ?? null)
             // A refresh refusal inside this logout already cleared the store (and retired the pin).
             const stored = current === null ? null : await store.read().catch(() => current)
+            await store.clear()
             if (stored !== null)
               await beforeKeysDiscarded(
                 discardedOf(
@@ -436,7 +437,6 @@ export function createSession(options: {
                   "logout",
                 ),
               )
-            await store.clear()
           }
         })
       } finally {

@@ -267,10 +267,13 @@ describe("Linux with no Secret Service keeps the shared sign-in in a private sta
       const home = await temporaryHome()
       await linuxStore(home, null, "absent").write(record)
       const secrets = watched()
-      const kept = linuxStore(home, secrets.api, "unknown")
+      const notices: string[] = []
+      const kept = linuxStore(home, secrets.api, "unknown", notices)
       expect(await kept.read()).toMatchObject(record)
       expect(kept.storage?.()).toBe("file")
       expect(secrets.calls).toEqual([])
+      await kept.write(record)
+      expect(notices.at(-1)).toContain("could not be confirmed")
       await kept.clear()
       const fresh = linuxStore(home, secrets.api, "unknown")
       await fresh.write(record)
@@ -361,7 +364,9 @@ describe("Linux with no Secret Service keeps the shared sign-in in a private sta
       await linuxStore(home, null, "absent").write(otherRecord)
       const memory = memorySecrets()
       await linuxStore(await temporaryHome(), memory.api, "unlocked").write(record)
-      await linuxStore(home, memory.api, "unlocked").clear()
+      const notices: string[] = []
+      await linuxStore(home, memory.api, "unlocked", notices).clear()
+      expect(notices.at(-1)).toContain("was kept")
       expect(memory.values.size).toBe(0)
       expect(await missing(stateFile(home))).toBe(false)
 
@@ -374,4 +379,59 @@ describe("Linux with no Secret Service keeps the shared sign-in in a private sta
       expect(keyringValue(kept)).toMatchObject({ device: record.device })
     },
   )
+  stateFileTest("a rotated refresh token is ordered only by its matching service owner generation", async () => {
+    for (const [fileGen, ringGen, move] of [
+      [1, 2, false],
+      [2, 1, true],
+      [1, 1, false],
+      [undefined, undefined, false],
+    ] as const) {
+      const owner = (generation: number) => ({
+        accountId: "a",
+        deviceId: record.device.id,
+        familyId: "f",
+        ownerHandle: "h",
+        generation,
+      })
+      const home = await temporaryHome()
+      await linuxStore(home, null, "absent").write({
+        ...record,
+        ...(fileGen === undefined ? {} : { owner: owner(fileGen) }),
+      })
+      const file = await readFile(stateFile(home), "utf8")
+      const mem = memorySecrets()
+      const ring = JSON.stringify({
+        ...JSON.parse(file),
+        owner: ringGen === undefined ? undefined : owner(ringGen),
+        refreshToken: "other-refresh",
+        accessTokenExpiresAt: "2098-01-01T00:00:00Z",
+      })
+      await mem.api.set({ service: "omo-cli", name: credentialId(api), value: ring })
+      await linuxStore(home, mem.api, "unlocked").read()
+      expect([...mem.values.values()]).toEqual([move ? file : ring])
+      expect(await missing(stateFile(home))).toBe(move)
+    }
+  })
+  stateFileTest("repeated migration checks share one parked native request", async () => {
+    const home = await temporaryHome()
+    await linuxStore(home, null, "absent").write(record)
+    let reads = 0
+    const store = createCredentialStore(api, {
+      home,
+      platform: "linux",
+      lockProbe: async () => "unlocked",
+      wait: { kind: "bounded", deadlineMs: 10 },
+      secrets: {
+        get: () => {
+          reads++
+          return new Promise<string | null>(() => {})
+        },
+        set: async () => {},
+        delete: async () => true,
+      },
+    })
+    await expect(store.read()).rejects.toThrow()
+    await expect(store.read()).rejects.toThrow()
+    expect(reads).toBe(1)
+  })
 })

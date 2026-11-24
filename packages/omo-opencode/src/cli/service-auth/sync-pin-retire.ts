@@ -17,7 +17,13 @@ export function retireSyncPinOnDiscard(options: {
   /** The caller's own logger; one line per pin it could not retire. */
   readonly log: (line: string) => void
 }): BeforeKeysDiscarded {
-  const livePin = () => hasLiveTrustAnchor(options.pinDir()).catch(() => false)
+  const livePin = async () => {
+    try {
+      return await hasLiveTrustAnchor(options.pinDir())
+    } catch {
+      return false
+    }
+  }
   const hook = async (discarded: DiscardedCredential) => {
     if (discarded.kind === "unreadable") {
       // Nothing is left in place when this machine holds no live pin, so nothing is reported.

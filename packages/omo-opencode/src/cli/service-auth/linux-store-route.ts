@@ -79,7 +79,7 @@ export function routeLinuxStore<T>(input: {
   const writeTo = async (store: SealedStore<T>, value: T) => {
     if (store === file)
       notice(
-        `omo: No keyring is running; OmO keeps this sign-in in a private file in ${file.directory()}, readable only by you. Start a keyring to keep it there instead.`,
+        `omo: An unlocked keyring could not be confirmed; OmO keeps this sign-in in a private file in ${file.directory()}, readable only by you. Start a keyring to keep it there instead.`,
       )
     return store === file ? file.writeReturningText(value) : input.writeKeyring(value)
   }
@@ -92,6 +92,8 @@ export function routeLinuxStore<T>(input: {
       }
     }
     await store.clear()
+    if (store === keyring && (await file.present()))
+      notice(`omo: the separate private sign-in file in ${file.directory()} was kept.`)
   }
   return {
     read: async () => (await target()).read(),

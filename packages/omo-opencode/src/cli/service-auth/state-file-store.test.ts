@@ -158,3 +158,17 @@ describe.skipIf(process.platform === "win32")("the Linux sign-in state file (#71
     expect(await readdir(dir)).toEqual([])
   })
 })
+
+test.skipIf(process.platform === "win32")(
+  "clear refuses a redirected state directory and retains its target",
+  async () => {
+    const target = await fileStore(await temporaryHome())
+    await target.store.write(secret)
+    const home = await temporaryHome()
+    const local = await fileStore(home)
+    await mkdir(join(home, ".omo"), { recursive: true })
+    await symlink(target.dir, local.dir)
+    await expect(local.store.clear()).rejects.toThrow()
+    expect(await target.store.read()).toEqual(secret)
+  },
+)

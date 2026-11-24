@@ -114,15 +114,31 @@ const sameCredentialIdentity = (current: Credentials, value: Credentials): boole
  * How the keyring's sign-in relates to the one in Linux's state file (#13640 review M1): the file may move over it only
  * when it is the same sign-in at the same generation with a token at least as fresh.
  */
-const relateCredentials = (keyring: Credentials, file: Credentials): KeyringRelation =>
-  !sameCredentialIdentity(keyring, file) ||
-  (keyring.credentialGeneration !== undefined &&
-    file.credentialGeneration !== undefined &&
-    keyring.credentialGeneration !== file.credentialGeneration)
-    ? "other"
-    : Date.parse(keyring.accessTokenExpiresAt) <= Date.parse(file.accessTokenExpiresAt)
-      ? "older"
-      : "newer"
+const relateCredentials = (keyring: Credentials, file: Credentials): KeyringRelation => {
+  if (
+    !sameCredentialIdentity(keyring, file) ||
+    (keyring.credentialGeneration !== undefined &&
+      file.credentialGeneration !== undefined &&
+      keyring.credentialGeneration !== file.credentialGeneration)
+  )
+    return "other"
+  const a = keyring.owner
+  const b = file.owner
+  if (a || b) {
+    if (
+      !a ||
+      !b ||
+      a.accountId !== b.accountId ||
+      a.deviceId !== b.deviceId ||
+      a.familyId !== b.familyId ||
+      a.ownerHandle !== b.ownerHandle
+    )
+      return "other"
+    if (a.generation !== b.generation) return a.generation < b.generation ? "older" : "newer"
+  }
+  if (keyring.refreshToken !== file.refreshToken) return "other"
+  return Date.parse(keyring.accessTokenExpiresAt) <= Date.parse(file.accessTokenExpiresAt) ? "older" : "newer"
+}
 
 export function credentialId(api: string): string {
   return createHash("sha256").update(serviceOrigin(api)).digest("hex")
@@ -322,17 +338,18 @@ export function createSealedStore<T>(
   }
   const forget = (api: SecretApi) => {
     readsOf(api).delete(slot)
+    readsOf(api).delete(`${slot}:relation`)
   }
-  const sharedRead = (api: SecretApi): Promise<string | null> => {
+  const sharedRead = (api: SecretApi, readSlot = slot): Promise<string | null> => {
     const reads = readsOf(api)
-    const pending = reads.get(slot)
+    const pending = reads.get(readSlot)
     if (pending !== undefined) return pending
     const read = Promise.resolve().then(() => api.get(key))
     const done = () => {
-      if (reads.get(slot) === read) reads.delete(slot)
+      if (reads.get(readSlot) === read) reads.delete(readSlot)
     }
     read.then(done, done)
-    reads.set(slot, read)
+    reads.set(readSlot, read)
     return read
   }
   const waiting =
@@ -340,9 +357,9 @@ export function createSealedStore<T>(
       ? `macOS Keychain is waiting for your approval: answer the "${basename(process.execPath)} wants to access key ${namespace}" dialog ("Always Allow" stops it asking again)`
       : `${platformName} has not answered; it may be waiting for your approval or an unlock in a system dialog`
   const helperWaiting = `macOS Keychain is waiting for your approval: answer the "OmO's keychain helper wants to access key ${namespace}" dialog`
-  const answered = async (api: SecretApi, fresh = false): Promise<string | null> => {
+  const answered = async (api: SecretApi, fresh = false, readSlot = slot): Promise<string | null> => {
     const waitingFor = helper.isHelperReader(api) ? helperWaiting : waiting
-    const read = fresh ? Promise.resolve().then(() => api.get(key)) : sharedRead(api)
+    const read = fresh ? Promise.resolve().then(() => api.get(key)) : sharedRead(api, readSlot)
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       if (wait.kind === "interactive") {
@@ -469,11 +486,9 @@ export function createSealedStore<T>(
     async relation(text) {
       let stored: string | null
       try {
-        stored = await answered(secrets, true)
+        stored = await answered(secrets, false, `${slot}:relation`)
       } catch (error) {
         throw error instanceof CredentialStoreError ? error : unavailable(error)
-      } finally {
-        forget(secrets)
       }
       if (stored === null) return "empty"
       if (stored === text) return "older"

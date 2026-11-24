@@ -49,12 +49,14 @@ function memoryStore(initial: Credentials | null) {
   return { store, current: () => value }
 }
 
+const fixtureHomes = new WeakMap<CredentialStore, string>()
+
 function run(
   store: CredentialStore,
   args: string[],
   options: { stdin?: string; api?: string; pinDir?: string; beforeKeysDiscarded?: BeforeKeysDiscarded } = {},
 ) {
-  const home = mkdtempSync(join(tmpdir(), "omo-account-cli-"))
+  const home = fixtureHomes.get(store) ?? mkdtempSync(join(tmpdir(), "omo-account-cli-"))
   homes.push(home)
   const pinDir = options.pinDir ?? join(home, "sync-device")
   const out: string[] = []
@@ -427,7 +429,9 @@ describe("omo account on a locked OS credential store (desktop#3509)", () => {
     })
     const pinLog: string[] = []
     const result = await run(store, ["forget"], {
-      beforeKeysDiscarded: retireSyncPinOnDiscard({ pinDir: () => "unused", log: (line) => pinLog.push(line) }),
+      beforeKeysDiscarded: async (item) => {
+        pinLog.push(item.kind)
+      },
     })
     expect({ code: result.code, out: result.out, pinLog }).toEqual({
       code: ACCOUNT_EXIT.keychainLocked,
@@ -605,16 +609,20 @@ describe("omo account on Linux, where a locked Secret Service read looks empty (
     lock: "locked" | "unlocked" | "absent" | "unknown",
     secrets: SecretApi = empty,
     notices: string[] = [],
-  ) =>
-    createCredentialStore("http://127.0.0.1:1", {
+  ) => {
+    const home = storeHome()
+    const store = createCredentialStore("http://127.0.0.1:1", {
       secrets,
       platform: "linux",
       lockProbe: async () => lock,
-      home: storeHome(),
+      home,
       notice: (message) => {
         notices.push(message)
       },
     })
+    fixtureHomes.set(store, home)
+    return store
+  }
   const memorySecretApi = () => {
     const values = new Map<string, string>()
     return {
