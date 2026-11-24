@@ -58,7 +58,8 @@ function affirmativeAt(text: string, start: number): boolean {
 }
 
 const NEGATED_VERB = /\b(?:do\s+not|don['\u2019]t|dont|never)\s+(?:load|use|run|invoke|start|trigger|arm|enable)\b/gi
-const CLAUSE_EDGE = new RegExp(String.raw`[.;:!?\n]|\s(?:but|then|instead|however)\b|\s[\u2014\u2013-]\s|,[ \t]*(?=(?:${REQUEST_MARKER}[ \t]+)?(?:ulw|ultrawork)\b)`, "gi")
+const CLAUSE_END = /[.;:!?\n]|\s(?:but|then|instead|however)\b|\s[\u2014\u2013-]\s/
+const CLAUSE_EDGE = new RegExp(String.raw`${CLAUSE_END.source}|,[ \t]*(?=(?:${REQUEST_MARKER}[ \t]+)?(?:ulw|ultrawork)\b)`, "gi")
 const INTRODUCED_REQUEST = new RegExp(`${REQUEST_MARKER}[ \\t]+(?:ulw|ultrawork)\\b`, "iy")
 const PROHIBITED_KEYWORD = new RegExp(
   String.raw`\b(?:avoid(?:ing)?|skip(?:ping)?|without|no|never|do[ \t]+not|don['\u2019]t|dont)[ \t]+(?:(?:using|use[ \t]+of|the)[ \t]+)?` +
