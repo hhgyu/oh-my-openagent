@@ -4,6 +4,7 @@ import { threadRow } from "../tools/thread-row"
 import { threadState } from "../tools/thread-state"
 import type { ThreadHostSession, ThreadToolSurfaceOptions } from "../tools/ports"
 import type { ThreadSummary } from "@oh-my-opencode/thread-core/contracts"
+import { sessionModelState } from "./session-model-state"
 import { interruptOver } from "@oh-my-opencode/thread-core/control/interrupt"
 import { refuse, SESSION_ONLY_THINKING_SCOPE, type SessionControl } from "@oh-my-opencode/thread-core/control/port"
 import { waitForTurnEnd } from "./wait-settled"
@@ -47,6 +48,7 @@ export function createLocalControl(
     },
     setName: (name) => port.setSessionName(routing, name, threadId),
     getAvailableModels: async () => ({ models: await port.getAvailableModels(routing), held: false }),
+    getModelState: async () => sessionModelState(await port.getState(routing, threadId)),
     setModel: async (provider, id) => {
       const selected = await port.setModel(routing, provider, id, threadId)
       return { provider: selected.provider, id: selected.id }
