@@ -27,12 +27,16 @@ const QUOTED_ITEM = new RegExp(`^${PROHIBITED_ITEM}$`, "i")
 const LIST_ITEM = `(?:${PROHIBITED_ITEM}|\\x01+)`
 const LIST_SEPARATOR = String.raw`(?:[ \t]*,[ \t]*(?:(?:or|and|nor)[ \t]+)?|[ \t]+(?:or|and|nor)[ \t]+|[ \t]*\/[ \t]*)`
 // "ulw the fix" starts a request; "ultrawork for this task" still names the prohibited mode.
-const TIME_UNIT = String.raw`(?:time|day|week|month|year|morning|afternoon|evening|night|weekend|quarter)s?\b`
-const REQUEST_OBJECT = String.raw`(?:(?:this|that|these|those)\b(?![ \t]+${TIME_UNIT})|(?:it|the|my|our|your|their|a|an)\b)`
-const AFFIRMATIVE_ITEM = String.raw`(?:ultrawork|ulw)\b[ \t]+${REQUEST_OBJECT}`
+const PERIOD_NOUN = String.raw`(?:today|tonight|(?:time|moment|second|minute|hour|day|week|weekend|month|quarter|year|sprint|session|round|turn|run|iteration|cycle|phase|release|morning|afternoon|evening|night)s?)\b`
+const PERIOD_COMPLEMENT = String.raw`[ \t]+(?:next[ \t]+)?${PERIOD_NOUN}`
+const DEMONSTRATIVE = String.raw`(?:this|that|these|those)\b(?!${PERIOD_COMPLEMENT})`
+const NOUN_PHRASE = String.raw`(?:the|a|an|my|our|your|their|next|every)\b(?!${PERIOD_COMPLEMENT})[ \t]+[a-z]`
+const OBJECT = String.raw`(?:it|them|everything|all|something|anything|each|both|one|me|us|him|her|you)\b`
+const REQUEST_MARKER = String.raw`(?:instead|just|but|then|rather|now)\b`
+const AFFIRMATIVE_ITEM = String.raw`(?:ultrawork|ulw)\b[ \t]+(?:${REQUEST_MARKER}|${OBJECT}|${DEMONSTRATIVE}|${NOUN_PHRASE})`
 const NEGATED_INVOCATION = new RegExp(
   String.raw`\b(?:do\s+not|don['\u2019]t|dont|never)\s+(?:load|use|run|invoke|start|trigger|arm|enable)\b[^.;:!?\n]*?` +
-    String.raw`(?=[.;:!?\n]|\s(?:but|then|instead|however)\b|\s[\u2014\u2013-]\s|,[ \t]*${AFFIRMATIVE_ITEM}|$)`,
+    String.raw`(?=[.;:!?\n]|\s(?:but|then|instead|however)\b|\s[\u2014\u2013-]\s|,[ \t]*(?:${AFFIRMATIVE_ITEM}|${REQUEST_MARKER}[ \t]+(?:ulw|ultrawork)\b)|$)`,
   "gi",
 )
 const PROHIBITED_KEYWORD = new RegExp(

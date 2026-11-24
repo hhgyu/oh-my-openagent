@@ -142,6 +142,11 @@ describe("reviewed prohibition boundaries", () => {
     "avoid ulw, ultrawork entirely",
     "avoid ulw, ultrawork today",
     "avoid ulw, ultrawork this week",
+    "avoid ulw, ultrawork this sprint",
+    "avoid ulw, ultrawork this session",
+    "avoid ulw, ultrawork this month",
+    "avoid ulw, ultrawork the next iteration",
+    "avoid ulw, ultrawork every cycle",
   ])("list or qualifier that dev arms: %s", (text) => {
     expect(classify(text).effective).toBe(false)
   })
@@ -161,11 +166,17 @@ describe("reviewed prohibition boundaries", () => {
     `avoid ${Array(100).fill("ulw").join(", ")}, ulw the fix instead`,
     "avoid ulw-loop or ulw-plan, then ulw this",
     "avoid ulw, ultrawork and ulw-loop; ulw the fix",
+    "avoid ulw-loop, ulw them instead",
+    "avoid ulw-loop, ulw everything after this",
+    "avoid ulw-loop, ulw those files",
+    "avoid ulw-loop, ulw the rest instead",
+    "avoid ulw-loop, ulw now",
   ])("affirmative clause that dev also arms: %s", (text) => {
     expect(classify(text).effective).toBe(true)
   })
   it.each([
     "don't use ulw here, ulw it later",
+    "don't use ulw here, ulw them later",
   ])("explicit imperative after a negated verb that dev suppresses: %s", (text) => {
     expect(classify(text).effective).toBe(true)
   })
