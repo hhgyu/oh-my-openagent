@@ -15,8 +15,12 @@ afterEach(() => {
 function gitEnv(root: string, path = process.env.PATH ?? ""): Record<string, string> {
   const globalConfig = join(root, "global.gitconfig")
   if (!existsSync(globalConfig)) writeFileSync(globalConfig, "")
+  // Windows exposes the variable as `Path`; keeping it next to `PATH` leaves the child an unfiltered copy.
+  const inherited = Object.fromEntries(
+    Object.entries(process.env as Record<string, string>).filter(([key]) => key.toUpperCase() !== "PATH"),
+  )
   return {
-    ...(process.env as Record<string, string>),
+    ...inherited,
     PATH: path,
     GIT_CONFIG_GLOBAL: globalConfig,
     GIT_CONFIG_NOSYSTEM: "1",
