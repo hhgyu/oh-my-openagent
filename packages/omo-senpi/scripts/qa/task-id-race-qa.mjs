@@ -1,20 +1,11 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process"
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  watch,
-  writeFileSync,
-} from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { basename, delimiter, dirname, join, resolve } from "node:path"
+import { delimiter, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isolatedChildEnv, sandboxStateDir } from "./sandbox-child-env.mjs"
+import { waitForFile } from "./task-id-race-gate.mjs"
 import { withTelemetryOptOut } from "./telemetry-opt-out-env.mjs"
 import { killSenpiRunTree, senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
 
@@ -282,28 +273,6 @@ function killProcessGroup(pid) {
     if (isMissingProcess(error)) return false
     throw error
   }
-}
-
-function waitForFile(path, timeoutMs) {
-  if (existsSync(path)) return Promise.resolve()
-  return new Promise((resolvePromise, reject) => {
-    let settled = false
-    const finish = (error) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      watcher.close()
-      if (error === undefined) resolvePromise()
-      else reject(error)
-    }
-    const watcher = watch(dirname(path), (_event, filename) => {
-      if (filename === null || filename.toString() === basename(path)) {
-        if (existsSync(path)) finish()
-      }
-    })
-    const timer = setTimeout(() => finish(new Error(`timed out after ${timeoutMs}ms waiting for ${path}`)), timeoutMs)
-    if (existsSync(path)) finish()
-  })
 }
 
 async function cleanupRuns(runs, root, timeoutMs, artifactDir) {

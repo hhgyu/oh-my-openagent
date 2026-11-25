@@ -12,7 +12,8 @@ import {
   StateFileRefused,
   writeStateFile,
 } from "./state-file-store"
-import { temporaryHome } from "./test-support"
+import { createCredentialStore } from "./keystore"
+import { grant, privateKeys, temporaryHome } from "./test-support"
 
 const uid = process.getuid?.() ?? 0
 const codec = {
@@ -352,3 +353,44 @@ test.skipIf(process.platform === "win32")(
     await expect(store.present()).rejects.toThrow()
   },
 )
+
+describe("the Linux store family judges credential parents through the state file (#7185b)", () => {
+  const record = { ...grant, ...privateKeys }
+  // The sign-in is seeded by a store with no uid to compare, since a Windows host reports every directory as mode
+  // 0666; the store under test then judges the same files with the host's reported owner as its uid.
+  const ownerOf = async (path: string) => (await lstat(path)).uid
+  const linuxFileStore = (home: string, getuid: () => number | undefined) =>
+    createCredentialStore("https://api.omo.dev", { secrets: null, platform: "linux", home, getuid })
+
+  test("#given a stored sign-in #when .omo belongs to another uid #then reads and writes are refused as a foreign owner", async () => {
+    const home = await temporaryHome()
+    const owner = await ownerOf(home)
+    await linuxFileStore(home, () => undefined).write(record)
+    const foreign = linuxFileStore(home, () => owner + 1)
+    await expect(foreign.read()).rejects.toThrow("foreign owner")
+    await expect(foreign.write(record)).rejects.toThrow("foreign owner")
+  })
+
+  test("#given a stored sign-in #when .omo is writable by other users #then reads and writes are refused", async () => {
+    const home = await temporaryHome()
+    const owner = await ownerOf(home)
+    const store = linuxFileStore(home, () => owner)
+    await linuxFileStore(home, () => undefined).write(record)
+    await chmod(join(home, ".omo"), 0o777)
+    expect((await lstat(join(home, ".omo"))).mode & 0o022).not.toBe(0)
+    await expect(store.read()).rejects.toThrow("writable by other users")
+    await expect(store.write(record)).rejects.toThrow("writable by other users")
+  })
+
+  test("#given a host with no uid to compare #then the sign-in round-trips and a non-directory .omo is still refused", async () => {
+    const home = await temporaryHome()
+    const store = linuxFileStore(home, () => undefined)
+    await store.write(record)
+    expect(await store.read()).toMatchObject(record)
+    await store.clear()
+    expect(await store.read()).toBeNull()
+    const other = await temporaryHome()
+    await writeFile(join(other, ".omo"), "synthetic")
+    await expect(linuxFileStore(other, () => undefined).read()).rejects.toThrow("not a directory")
+  })
+})

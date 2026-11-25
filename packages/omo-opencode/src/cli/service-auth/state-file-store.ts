@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import { constants, type Stats } from "node:fs"
 import { chmod, link, lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises"
+import { type as osType } from "node:os"
 import { dirname, join } from "node:path"
 import { checkCredentialDirectory, checkCredentialParents, CredentialParentError } from "./credential-parent"
 import { accountHome } from "./account-home"
@@ -38,27 +39,37 @@ const errnoCode = (error: unknown): string | undefined =>
     ? error.code
     : undefined
 
+/**
+ * The owner every entry must have, or undefined on a host with no POSIX owner to compare (no process.getuid, as on
+ * Windows): there an entry must still be a real directory or regular file, but owner and mode bits are not judged.
+ */
+type Owner = number | undefined
+
 /** The directory's own entry (never followed): a real directory of this user nobody else can enter. */
-export const dirRefusal = (stat: Stats, uid: number): StateFileRefusal | undefined =>
+export const dirRefusal = (stat: Stats, uid: Owner): StateFileRefusal | undefined =>
   !stat.isDirectory()
     ? "dir-not-a-directory"
-    : stat.uid !== uid
-      ? "dir-other-owner"
-      : (stat.mode & GROUP_OR_WORLD) !== 0
-        ? "dir-open"
-        : undefined
+    : uid === undefined
+      ? undefined
+      : stat.uid !== uid
+        ? "dir-other-owner"
+        : (stat.mode & GROUP_OR_WORLD) !== 0
+          ? "dir-open"
+          : undefined
 
 /** The opened file itself: a regular file of this user nobody else can read or write. */
-export const fileRefusal = (stat: Stats, uid: number): StateFileRefusal | undefined =>
+export const fileRefusal = (stat: Stats, uid: Owner): StateFileRefusal | undefined =>
   !stat.isFile()
     ? "not-a-file"
-    : stat.uid !== uid
-      ? "other-owner"
-      : (stat.mode & GROUP_OR_WORLD) !== 0
-        ? "open"
-        : undefined
+    : uid === undefined
+      ? undefined
+      : stat.uid !== uid
+        ? "other-owner"
+        : (stat.mode & GROUP_OR_WORLD) !== 0
+          ? "open"
+          : undefined
 
-async function checkDir(dir: string, uid: number): Promise<boolean> {
+async function checkDir(dir: string, uid: Owner): Promise<boolean> {
   if (!checkCredentialParents(dirname(dirname(dir)), uid)) return false
   const stat = await lstat(dir).catch((error: unknown) => {
     if (errnoCode(error) === "ENOENT") return null
@@ -78,11 +89,7 @@ async function checkDir(dir: string, uid: number): Promise<boolean> {
  * The file's text, null when there is none. It is opened without following a symlink and judged on the open
  * descriptor, so it cannot be swapped between the check and the read; O_NONBLOCK keeps a FIFO from hanging the open.
  */
-async function readStateFile(
-  dir: string,
-  name: string,
-  uid: number,
-): Promise<{ text: string; version: string } | null> {
+async function readStateFile(dir: string, name: string, uid: Owner): Promise<{ text: string; version: string } | null> {
   if (!(await checkDir(dir, uid))) return null
   const handle = await open(join(dir, name), O_RDONLY | O_NOFOLLOW | O_NONBLOCK).catch((error: unknown) => {
     const code = errnoCode(error)
@@ -146,7 +153,7 @@ export async function writeStateFile(
   dir: string,
   name: string,
   contents: string,
-  uid: number,
+  uid: Owner,
   log: (line: string) => void = (line) => process.stderr.write(`${line}\n`),
 ): Promise<void> {
   const parent = dirname(dir),
@@ -193,10 +200,14 @@ export async function writeStateFile(
   }
 }
 
+// Windows refuses to flush a directory handle (EPERM) on every filesystem; NTFS journals the rename itself.
+const hostCannotSyncDirectories = (error: unknown): boolean => osType() === "Windows_NT" && errnoCode(error) === "EPERM"
+
 async function syncDirectory(dir: string, required = false): Promise<void> {
   const directory = await open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
   try {
     await directory.sync().catch((error: unknown) => {
+      if (hostCannotSyncDirectories(error)) return
       if (required || !["EINVAL", "ENOTSUP", "EOPNOTSUPP"].includes(errnoCode(error) ?? "")) throw error
     })
   } finally {
@@ -208,6 +219,7 @@ async function syncDirectory(dir: string, required = false): Promise<void> {
 async function removeStateFile(
   dir: string,
   name: string,
+  uid: Owner,
   verify?: (path: string, linked: boolean) => Promise<void>,
 ): Promise<void> {
   await recoverRetiring(dir, name)
@@ -219,7 +231,7 @@ async function removeStateFile(
     await link(entry, backup)
   } catch (error) {
     if (!verify && errnoCode(error) === "ENOENT") return syncDirectory(dir, true)
-    if (!verify && errnoCode(error) === "EPERM" && (await lstat(entry)).uid !== process.getuid?.()) {
+    if (!verify && errnoCode(error) === "EPERM" && (await lstat(entry)).uid !== uid) {
       // Linux can forbid hard links to a foreign inode. This entry cannot be a usable state file.
       await rm(entry)
       await syncDirectory(dir, true)
@@ -247,7 +259,7 @@ async function removeStateFile(
 async function captureRefusedRemoval(
   dir: string,
   name: string,
-  uid: number,
+  uid: Owner,
   failure: (message: string) => Error,
   onRefused: (clear: () => Promise<void>) => void,
 ): Promise<Error | undefined> {
@@ -264,11 +276,13 @@ async function captureRefusedRemoval(
       ? "symlink"
       : !first.isFile()
         ? "not a regular file"
-        : first.uid !== BigInt(uid)
-          ? "foreign owner"
-          : (first.mode & 0o077n) !== 0n
-            ? "unsafe permissions"
-            : null
+        : uid === undefined
+          ? null
+          : first.uid !== BigInt(uid)
+            ? "foreign owner"
+            : (first.mode & 0o077n) !== 0n
+              ? "unsafe permissions"
+              : null
     if (reason) {
       const diagnosis = failure(
         `Refused ${path} (${reason}, mode ${mode}, owner ${first.uid}). Inspect the entry and its ownership; use an owned regular file with mode 0600.`,
@@ -277,7 +291,7 @@ async function captureRefusedRemoval(
         if (reason !== "unsafe permissions") throw diagnosis
         try {
           if (!(await checkDir(dir, uid))) throw diagnosis
-          await removeStateFile(dir, name, async (candidate, linked) => {
+          await removeStateFile(dir, name, uid, async (candidate, linked) => {
             const now = await lstat(candidate, { bigint: true })
             if (
               !now.isFile() ||
@@ -330,10 +344,12 @@ export function createStateFileStore<T>(input: {
   }
   readonly failure: (message: string) => Error
   readonly log?: (line: string) => void
+  /** The owning uid; undefined when the host has none to compare. Defaults to process.getuid. */
+  readonly getuid?: () => number | undefined
 }): StateFileStore<T> {
   const { api, name, codec, failure } = input
   const log = input.log ?? ((line: string) => process.stderr.write(`${line}\n`))
-  const uid = process.getuid?.() ?? -1
+  const uid = (input.getuid ?? (() => process.getuid?.()))()
   const directory = () => stateFileDirectory(input.home ?? accountHome())
   const failed = (operation: string, error: unknown): Error =>
     error instanceof CredentialParentError
@@ -429,7 +445,7 @@ export function createStateFileStore<T>(input: {
     clear: () =>
       locked(async () => {
         try {
-          if (await checkDir(directory(), uid)) await removeStateFile(directory(), name)
+          if (await checkDir(directory(), uid)) await removeStateFile(directory(), name, uid)
         } catch (error) {
           throw failed("remove", error)
         }
