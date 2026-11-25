@@ -43,6 +43,33 @@ describe("owned process cancellation", () => {
   )
 
   it(
+    "#given a child that exited and left a descendant holding its pipes #when aborted #then the descendant is removed before it settles, within the bound",
+    async () => {
+      // given
+      const { command, args, pids: started } = trees.orphaningTree()
+      const controller = new AbortController()
+      const settled = runOwnedProcess(command, args, { signal: controller.signal }).then(
+        () => "resolved",
+        (error: unknown) => (error instanceof Error ? error.name : String(error)),
+      )
+      const pids = await started()
+      expect(await aliveAfter([pids.child], 5_000)).toEqual([])
+      expect(await aliveAfter([pids.descendant], 0)).toEqual([pids.descendant])
+
+      // when
+      const abortedAt = Date.now()
+      controller.abort()
+      const outcome = await settled
+
+      // then
+      expect(outcome).toBe("AbortError")
+      expect(Date.now() - abortedAt).toBeLessThan(OWNED_PROCESS_STOP_BOUND_MS)
+      expect(await aliveAfter([pids.descendant], 0)).toEqual([])
+    },
+    { timeout: 60_000 },
+  )
+
+  it(
     "#given a sweep whose termination runs a wedged owned tree #when the sweep is aborted #then it settles within the bound, writes no stamp and leaves no owned process",
     async () => {
       // given

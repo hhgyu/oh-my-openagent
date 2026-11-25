@@ -18,6 +18,19 @@ require("node:fs").writeFileSync(process.argv[2], JSON.stringify({ child: proces
 setInterval(() => {}, 1e9)
 `
 
+// A child that exits at once and leaves a descendant holding the stdio pipes it inherited, so the child's
+// `close` never fires on its own. Windows: `cmd /c start /b`; POSIX: a detached-free spawn with inherited stdio.
+const POSIX_ORPHANING_CHILD = `
+const { spawn } = require("node:child_process")
+const { writeFileSync } = require("node:fs")
+const descendant = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1e9)"], { stdio: "inherit" })
+descendant.once("spawn", () => {
+  writeFileSync(process.argv[2], JSON.stringify({ child: process.pid, descendant: descendant.pid }))
+  descendant.unref()
+  process.exit(0)
+})
+`
+
 export interface WedgedTree {
   readonly command: string
   readonly args: readonly string[]
@@ -33,28 +46,44 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
-export function createWedgedTrees(): { readonly tree: () => WedgedTree; readonly dispose: () => void } {
+export function createWedgedTrees(): {
+  readonly tree: () => WedgedTree
+  readonly orphaningTree: () => WedgedTree
+  readonly dispose: () => void
+} {
   const roots: string[] = []
   const started: number[] = []
+  const windows = process.platform === "win32"
+  const fixture = (posixChild: string, windowsArgs: (script: string, pidFile: string) => string[]): WedgedTree => {
+    const root = mkdtempSync(join(tmpdir(), "wedged-tree-"))
+    roots.push(root)
+    const pidFile = join(root, "pids.json")
+    const script = join(root, "wedged.cjs")
+    writeFileSync(script, windows ? WINDOWS_WEDGED_DESCENDANT : posixChild)
+    return {
+      command: windows ? "cmd.exe" : process.execPath,
+      args: windows ? windowsArgs(script, pidFile) : [script, pidFile],
+      async pids() {
+        while (!existsSync(pidFile)) await Bun.sleep(20)
+        const pids = JSON.parse(readFileSync(pidFile, "utf8")) as { child: number; descendant: number }
+        started.push(pids.child, pids.descendant)
+        return pids
+      },
+    }
+  }
   return {
-    tree() {
-      const root = mkdtempSync(join(tmpdir(), "wedged-tree-"))
-      roots.push(root)
-      const pidFile = join(root, "pids.json")
-      const script = join(root, "wedged.cjs")
-      const windows = process.platform === "win32"
-      writeFileSync(script, windows ? WINDOWS_WEDGED_DESCENDANT : POSIX_WEDGED_CHILD)
-      return {
-        command: windows ? "cmd.exe" : process.execPath,
-        args: windows ? ["/d", "/c", process.execPath, script, pidFile] : [script, pidFile],
-        async pids() {
-          while (!existsSync(pidFile)) await Bun.sleep(20)
-          const pids = JSON.parse(readFileSync(pidFile, "utf8")) as { child: number; descendant: number }
-          started.push(pids.child, pids.descendant)
-          return pids
-        },
-      }
-    },
+    tree: () => fixture(POSIX_WEDGED_CHILD, (script, pidFile) => ["/d", "/c", process.execPath, script, pidFile]),
+    orphaningTree: () =>
+      fixture(POSIX_ORPHANING_CHILD, (script, pidFile) => [
+        "/d",
+        "/c",
+        "start",
+        '""',
+        "/b",
+        process.execPath,
+        script,
+        pidFile,
+      ]),
     dispose() {
       for (const pid of started.splice(0)) if (isProcessAlive(pid)) process.kill(pid, "SIGKILL")
       for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
