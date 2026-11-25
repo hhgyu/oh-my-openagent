@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { EventEmitter } from "node:events"
 import * as fs from "node:fs"
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
@@ -13,6 +13,7 @@ const roots = []
 const spies = []
 
 afterEach(() => {
+  jest.useRealTimers()
   for (const spy of spies.splice(0)) spy.mockRestore()
   for (const name of GATE_ENV) {
     if (savedEnv[name] === undefined) delete process.env[name]
@@ -79,5 +80,40 @@ describe("task-id race mock provider gate", () => {
 
     // then
     await expect(wait).resolves.toBeUndefined()
+  })
+
+  test("#given a file created after the last check #when the deadline fires #then waitForFile resolves", async () => {
+    // given - checks land every 20 ms, so with a 1990 ms deadline the last check runs at 1980 ms
+    const { readyFile } = gatePaths()
+    fs.mkdirSync(dirname(readyFile), { recursive: true })
+    jest.useFakeTimers()
+    const wait = waitForFile(readyFile, 1990)
+    jest.advanceTimersByTime(1985)
+    writeFileSync(readyFile, "ready\n", { flag: "wx" })
+
+    // when
+    jest.advanceTimersByTime(5)
+
+    // then
+    await expect(wait).resolves.toBeUndefined()
+  })
+
+  test("#given a file that never appears #when the deadline fires #then waitForFile rejects at the deadline", async () => {
+    // given
+    const { readyFile } = gatePaths()
+    jest.useFakeTimers()
+    let settled = false
+    const wait = waitForFile(readyFile, 1990).finally(() => {
+      settled = true
+    })
+    jest.advanceTimersByTime(1989)
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    // when
+    jest.advanceTimersByTime(1)
+
+    // then
+    await expect(wait).rejects.toThrow(`timed out after 1990ms waiting for ${readyFile}`)
   })
 })

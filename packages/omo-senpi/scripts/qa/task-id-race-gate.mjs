@@ -30,7 +30,8 @@ export function waitForFile(path, timeoutMs, timeoutMessage = "timed out") {
     }, FILE_CHECK_INTERVAL_MS)
     const timer = setTimeout(() => {
       clearInterval(check)
-      reject(new Error(`${timeoutMessage} after ${timeoutMs}ms waiting for ${path}`))
+      if (existsSync(path)) resolve()
+      else reject(new Error(`${timeoutMessage} after ${timeoutMs}ms waiting for ${path}`))
     }, timeoutMs)
   })
 }
