@@ -179,13 +179,15 @@ describe("orphaned lsp-daemon proxy sweep", () => {
     const homeDir = mkdtempSync(join(tmpdir(), "omo-lsp-proxy-abort-"))
     const controller = new AbortController()
     const children: childProcess.ChildProcess[] = []
-    const execFile = childProcess.execFile
-    const execFileSpy = spyOn(childProcess, "execFile").mockImplementation(((...args: Parameters<typeof execFile>) => {
-      const child = Reflect.apply(execFile, childProcess, args) as childProcess.ChildProcess
-      children.push(child)
-      child.once("spawn", () => controller.abort())
+    const spawn = childProcess.spawn
+    const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(((...args: Parameters<typeof spawn>) => {
+      const child = Reflect.apply(spawn, childProcess, args) as childProcess.ChildProcess
+      if (/^(ps|powershell\.exe)$/.test(String(args[0]))) {
+        children.push(child)
+        child.once("spawn", () => controller.abort())
+      }
       return child
-    }) as typeof execFile)
+    }) as typeof spawn)
     try {
       // when
       const result = await sweepOrphanedLspDaemonProxies({
@@ -201,7 +203,7 @@ describe("orphaned lsp-daemon proxy sweep", () => {
       expect(children[0]?.exitCode !== null || children[0]?.signalCode !== null).toBe(true)
       expect(existsSync(result.stampFile)).toBe(false)
     } finally {
-      execFileSpy.mockRestore()
+      spawnSpy.mockRestore()
       rmSync(homeDir, { force: true, recursive: true })
     }
   })

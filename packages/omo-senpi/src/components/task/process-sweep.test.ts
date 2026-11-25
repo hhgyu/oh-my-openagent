@@ -1,9 +1,13 @@
-import { describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { sweepStaleLspDaemonVersions } from "@oh-my-opencode/utils/process-sweep"
+import {
+  OWNED_PROCESS_STOP_BOUND_MS,
+  runOwnedProcess,
+  sweepStaleLspDaemonVersions,
+} from "@oh-my-opencode/utils/process-sweep"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { resolveSenpiDaemonRuntime } from "../lsp/daemon-runtime"
@@ -11,6 +15,10 @@ import type { ComponentContext, ComponentLogger } from "../../extension/types"
 import { OMO_SENPI_TASK_RPC_CHILD } from "@oh-my-opencode/senpi-task"
 import { wireSessionStartProcessSweep } from "./process-sweep"
 import { remainingTestTime } from "../../../../../test-support/test-deadline"
+import { aliveAfter, createWedgedTrees } from "../../../../utils/src/process-sweep/wedged-tree.test-support"
+
+const trees = createWedgedTrees()
+afterEach(() => trees.dispose())
 
 interface RecordedLog {
   level: "info" | "warn" | "error"
@@ -275,6 +283,54 @@ describe("wireSessionStartProcessSweep()", () => {
 
     // then
     expect(events).toEqual(["sweep settled", "shutdown settled"])
+  })
+
+  it(
+    "#given a sweep running a wedged owned process tree #when session_shutdown fires #then shutdown completes within the bound and no owned process survives",
+    async () => {
+      // given
+      const pi = new FakeExtensionAPI()
+      const logger = createLogger()
+      const fixture = trees.tree()
+      wireSessionStartProcessSweep(pi, ctxFor(logger), {
+        env: {},
+        sweep: (signal) => runOwnedProcess(fixture.command, fixture.args, { signal }),
+      })
+      await pi.dispatch("session_start", {})
+      const pids = await fixture.pids()
+
+      // when
+      const startedAt = Date.now()
+      await pi.dispatch("session_shutdown", { reason: "quit" })
+
+      // then
+      expect(Date.now() - startedAt).toBeLessThan(OWNED_PROCESS_STOP_BOUND_MS)
+      expect(await aliveAfter([pids.child, pids.descendant], 2_000)).toEqual([])
+    },
+    { timeout: 30_000 },
+  )
+
+  it("#given a sweep that ignores the abort #when session_shutdown fires #then shutdown still completes within its bound and says so", async () => {
+    // given
+    const pi = new FakeExtensionAPI()
+    const logger = createLogger()
+    wireSessionStartProcessSweep(pi, ctxFor(logger), {
+      env: {},
+      shutdownBoundMs: 100,
+      sweep: () => new Promise<void>(() => {}),
+    })
+    await pi.dispatch("session_start", {})
+
+    // when
+    const startedAt = Date.now()
+    await pi.dispatch("session_shutdown", { reason: "quit" })
+
+    // then
+    expect(Date.now() - startedAt).toBeLessThan(2_000)
+    expect(logger.entries).toContainEqual({
+      level: "warn",
+      message: "omo-senpi process sweep did not stop within its shutdown bound",
+    })
   })
 
   it("#given a sweep that already settled #when session_shutdown fires #then shutdown does not wait", async () => {

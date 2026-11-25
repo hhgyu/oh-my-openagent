@@ -1,5 +1,10 @@
 import { readSessionRole } from "@oh-my-opencode/senpi-task"
-import { sweepOrphanedLspDaemonProxies, sweepStaleLspDaemonVersions } from "@oh-my-opencode/utils/process-sweep"
+import {
+  OWNED_PROCESS_STOP_BOUND_MS,
+  settleWithinAbortBound,
+  sweepOrphanedLspDaemonProxies,
+  sweepStaleLspDaemonVersions,
+} from "@oh-my-opencode/utils/process-sweep"
 
 import type { ComponentContext, SenpiExtensionAPI } from "../../extension/types"
 import { resolveSenpiDaemonRuntime } from "../lsp/daemon-runtime"
@@ -35,6 +40,7 @@ export interface SessionStartProcessSweepOptions {
   readonly sweep?: OmoFamilySweep
   readonly resolveDaemonVersion?: (env: Record<string, string | undefined>) => string
   readonly familySweeps?: OmoFamilySweeps
+  readonly shutdownBoundMs?: number
 }
 
 export function wireSessionStartProcessSweep(
@@ -67,11 +73,22 @@ export function wireSessionStartProcessSweep(
     return undefined
   })
   // The sweep spawns process enumerations (PowerShell on win32) that inherit this process's env. A
-  // shutdown stops them and waits until they exited, so none outlives the extension it belonged to.
+  // shutdown stops them and waits until they exited, so none outlives the extension it belonged to. Each
+  // default step reaps its children within OWNED_PROCESS_STOP_BOUND_MS of the abort; the same bound caps the
+  // wait here, so an injected sweep that ignores the abort cannot hold shutdown.
   pi.on("session_shutdown", async () => {
     const pending = [...running]
+    if (pending.length === 0) return
+    const stop = new AbortController()
+    stop.abort()
     for (const { controller } of pending) controller.abort()
-    await Promise.all(pending.map(({ settled }) => settled))
+    await settleWithinAbortBound(
+      Promise.all(pending.map(({ settled }) => settled)),
+      stop.signal,
+      options.shutdownBoundMs ?? OWNED_PROCESS_STOP_BOUND_MS,
+    ).catch(() => {
+      ctx.logger.warn("omo-senpi process sweep did not stop within its shutdown bound")
+    })
   })
 }
 
