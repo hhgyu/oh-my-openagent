@@ -11,6 +11,9 @@ import {
   receiptIdentity,
   type MemoryKillPoint,
 } from "@oh-my-opencode/memory-core"
+import { getProcessStartIdentity } from "@oh-my-opencode/memory-core/process-identity"
+
+import { holdProcess, terminateExactProcess } from "../../../../../utils/src/process-sweep/win32-process-handle"
 
 // Every case runs a launcher, a supervisor, a bootstrap and a model child, then an out-of-process
 // reconciliation. Synchronisation is on process exit events and durable files, never on time.
@@ -43,16 +46,56 @@ const EVIDENCE = [
 ]
 
 const roots: string[] = []
-const pids: Array<{ readonly pid: number; readonly role: string }> = []
+interface TrackedProcess {
+  readonly pid: number
+  readonly role: string
+  readonly processStart: string | null
+}
+const pids: TrackedProcess[] = []
 
 afterEach(async () => {
-  const survivors = pids.splice(0).filter(({ pid }) => isAlive(pid))
-  for (const { pid } of survivors) process.kill(pid, "SIGKILL")
-  expect(survivors).toEqual([])
+  const survivors = await findSurvivors(pids.splice(0))
+  for (const survivor of survivors) await terminateSurvivor(survivor)
+  expect(survivors.map(({ pid, role }) => ({ pid, role }))).toEqual([])
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })),
   )
 })
+
+async function findSurvivors(tracked: readonly TrackedProcess[]): Promise<TrackedProcess[]> {
+  const matches = await Promise.all(tracked.map(isTrackedProcessAlive))
+  return tracked.filter((_, index) => matches[index])
+}
+
+async function isTrackedProcessAlive({ pid, processStart }: TrackedProcess): Promise<boolean> {
+  if (processStart === null) return false
+  if (process.platform !== "win32") return isAlive(pid) && (await getProcessStartIdentity(pid)) === processStart
+
+  // Read both creation and exit times from a handle to the same Windows process.
+  const processHandle = await holdProcess(pid)
+  if (processHandle === null) return false
+  try {
+    return (
+      processStart === `win32-creation-filetime:${processHandle.creationTicks}` && processHandle.exitTicks() === null
+    )
+  } finally {
+    processHandle.release()
+  }
+}
+
+async function terminateSurvivor(survivor: TrackedProcess): Promise<void> {
+  if (process.platform === "win32") {
+    // Re-check creation time on the handle used to terminate; a bare PID could be reused after the probe.
+    const creation = /^win32-creation-filetime:(\d+)$/.exec(survivor.processStart ?? "")?.[1]
+    if (creation !== undefined) await terminateExactProcess(survivor.pid, BigInt(creation), 0n)
+  } else if (await isTrackedProcessAlive(survivor)) {
+    try {
+      process.kill(survivor.pid, "SIGKILL")
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error
+    }
+  }
+}
 
 function isAlive(pid: number): boolean {
   try {
@@ -62,6 +105,27 @@ function isAlive(pid: number): boolean {
     return false
   }
 }
+
+test("survivor detection distinguishes the original process from a replacement at the same PID", async () => {
+  // given
+  const child = Bun.spawn([process.execPath, "-e", "process.stdin.resume()"], {
+    stdin: "pipe",
+    stdout: "ignore",
+    stderr: "ignore",
+  })
+  try {
+    const start = await getProcessStartIdentity(child.pid)
+    if (start === null) throw new Error("could not read the live test child's start identity")
+    const original = { pid: child.pid, role: "identity fixture", processStart: start }
+    const reused = { ...original, processStart: `${start}0` }
+
+    // when / then
+    expect(await findSurvivors([original, reused])).toEqual([original])
+  } finally {
+    child.stdin.end()
+    await child.exited
+  }
+})
 
 interface Hermetic {
   readonly root: string
@@ -110,8 +174,8 @@ async function drive(item: Hermetic, args: readonly string[], killPoint?: Memory
     env,
     stdio: ["ignore", "pipe", "pipe"],
   })
-  if (child.pid === undefined) throw new Error("driver did not start")
-  pids.push({ pid: child.pid, role: `driver ${args.join(" ")}` })
+  const pid = child.pid
+  if (pid === undefined) throw new Error("driver did not start")
   let stdout = ""
   let stderr = ""
   child.stdout.on("data", (chunk) => {
@@ -120,7 +184,7 @@ async function drive(item: Hermetic, args: readonly string[], killPoint?: Memory
   child.stderr.on("data", (chunk) => {
     stderr += String(chunk)
   })
-  return await new Promise<Exit>((resolve, reject) => {
+  const completion = new Promise<Exit>((resolve, reject) => {
     const bound = setTimeout(() => {
       child.kill("SIGKILL")
       reject(new Error(`driver ${args.join(" ")} did not exit\n${stdout}\n${stderr}`))
@@ -128,9 +192,14 @@ async function drive(item: Hermetic, args: readonly string[], killPoint?: Memory
     child.on("error", reject)
     child.on("close", (code, signal) => {
       clearTimeout(bound)
-      resolve({ pid: child.pid ?? -1, code, signal, stdout, stderr })
+      resolve({ pid, code, signal, stdout, stderr })
     })
   })
+  const record = getProcessStartIdentity(pid).then((processStart) => {
+    pids.push({ pid, role: `driver ${args.join(" ")}`, processStart })
+  })
+  const [exit] = await Promise.all([completion, record])
+  return exit
 }
 
 function expectKilled(exit: Exit): void {
@@ -197,8 +266,20 @@ async function recordProcesses(item: Hermetic): Promise<void> {
   const ledgerPath = join(runDir(item), "ledger.json")
   if (!existsSync(ledgerPath)) return
   const ledger = await json(ledgerPath)
-  if (typeof ledger.pid === "number") pids.push({ pid: ledger.pid, role: "ledger supervisor" })
-  if (typeof ledger.childPid === "number") pids.push({ pid: ledger.childPid, role: "ledger child" })
+  if (typeof ledger.pid === "number") {
+    pids.push({
+      pid: ledger.pid,
+      role: "ledger supervisor",
+      processStart: typeof ledger.processStart === "string" ? ledger.processStart : null,
+    })
+  }
+  if (typeof ledger.childPid === "number") {
+    pids.push({
+      pid: ledger.childPid,
+      role: "ledger child",
+      processStart: typeof ledger.childProcessStart === "string" ? ledger.childProcessStart : null,
+    })
+  }
 }
 
 async function expectEvidencePreserved(item: Hermetic, before: Map<string, string>): Promise<void> {
