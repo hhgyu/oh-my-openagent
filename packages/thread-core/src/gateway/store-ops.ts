@@ -385,18 +385,29 @@ export async function migrate(ctx: StoreContext): Promise<void> {
   // flush per version: tens of seconds on a loaded Windows disk. In WAL mode NORMAL keeps every step atomic; a crash can
   // only drop the newest steps, and the next open re-applies them from user_version. The prior level is restored before
   // any non-migration write, whose first FULL commit flushes the whole WAL, migration frames included.
-  const priorSynchronous = Number(
-    ctx.sql.one(["synchronous"], "SELECT synchronous FROM pragma_synchronous")?.synchronous ?? 2,
-  )
+  const from = schemaVersion(ctx)
+  const priorSynchronous = synchronousLevel(ctx)
+  const stepSynchronous: number[] = []
   ctx.sql.exec("PRAGMA synchronous = NORMAL")
   try {
-    await migrateSteps(ctx)
+    await migrateSteps(ctx, stepSynchronous)
   } finally {
     ctx.sql.exec(`PRAGMA synchronous = ${Math.trunc(priorSynchronous)}`)
+    ctx.emit({
+      kind: "schema_migrated",
+      from,
+      to: schemaVersion(ctx),
+      step_synchronous: stepSynchronous,
+      synchronous: synchronousLevel(ctx),
+    })
   }
 }
 
-async function migrateSteps(ctx: StoreContext): Promise<void> {
+function synchronousLevel(ctx: StoreContext): number {
+  return Number(ctx.sql.one(["synchronous"], "SELECT synchronous FROM pragma_synchronous")?.synchronous ?? 2)
+}
+
+async function migrateSteps(ctx: StoreContext, stepSynchronous: number[]): Promise<void> {
   for (;;) {
     const version = schemaVersion(ctx)
     if (version >= GATEWAY_MIGRATIONS.length) return
@@ -426,6 +437,7 @@ async function migrateSteps(ctx: StoreContext): Promise<void> {
           }
         }
         ctx.sql.exec(`PRAGMA user_version = ${current + 1}`)
+        stepSynchronous.push(synchronousLevel(ctx))
       })
     } finally {
       if (needsForeignKeysOff) ctx.sql.exec(`PRAGMA foreign_keys = ${priorForeignKeys === 0 ? "OFF" : "ON"}`)
