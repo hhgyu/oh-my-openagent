@@ -11,7 +11,11 @@ import {
   receiptIdentity,
   type MemoryKillPoint,
 } from "@oh-my-opencode/memory-core"
-import { getProcessStartIdentity } from "@oh-my-opencode/memory-core/process-identity"
+import {
+  getPidLiveness,
+  getProcessStartIdentity,
+  startIdentitiesComparable,
+} from "@oh-my-opencode/memory-core/process-identity"
 
 import { holdProcess, terminateExactProcess } from "../../../../../utils/src/process-sweep/win32-process-handle"
 
@@ -53,42 +57,94 @@ interface TrackedProcess {
 }
 const pids: TrackedProcess[] = []
 
+type ProcessVerdict =
+  { readonly kind: "same" } | { readonly kind: "gone" } | { readonly kind: "unknown"; readonly reason: string }
+type Survivor = TrackedProcess & Exclude<ProcessVerdict, { readonly kind: "gone" }>
+type ProcessProbe = { readonly kind: "dead" } | { readonly kind: "live"; readonly start: string } | null
+
 afterEach(async () => {
   const survivors = await findSurvivors(pids.splice(0))
-  for (const survivor of survivors) await terminateSurvivor(survivor)
-  expect(survivors.map(({ pid, role }) => ({ pid, role }))).toEqual([])
+  for (const survivor of survivors) {
+    if (survivor.kind === "same") await terminateSurvivor(survivor)
+  }
+  expect(
+    survivors.map((survivor) => {
+      const { pid, role } = survivor
+      return survivor.kind === "unknown" ? { pid, role, reason: survivor.reason } : { pid, role }
+    }),
+  ).toEqual([])
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })),
   )
 })
 
-async function findSurvivors(tracked: readonly TrackedProcess[]): Promise<TrackedProcess[]> {
-  const matches = await Promise.all(tracked.map(isTrackedProcessAlive))
-  return tracked.filter((_, index) => matches[index])
+async function findSurvivors(
+  tracked: readonly TrackedProcess[],
+  observeStart = observeProcessStart,
+): Promise<Survivor[]> {
+  const results = await Promise.all(
+    tracked.map(async (item) => ({ ...item, ...(await classifyProcess(item, observeStart)) })),
+  )
+  return results.filter((result): result is Survivor => result.kind !== "gone")
 }
 
-async function isTrackedProcessAlive({ pid, processStart }: TrackedProcess): Promise<boolean> {
-  if (processStart === null) return false
-  if (process.platform !== "win32") return isAlive(pid) && (await getProcessStartIdentity(pid)) === processStart
+async function classifyProcess(
+  { pid, processStart }: TrackedProcess,
+  observeStart = observeProcessStart,
+): Promise<ProcessVerdict> {
+  if (getPidLiveness(pid) === "dead") return { kind: "gone" }
+  const current = await observeStart(pid)
+  if (current?.kind === "dead") return { kind: "gone" }
+  if (current === null && getPidLiveness(pid) === "dead") return { kind: "gone" }
+  if (processStart === null) return { kind: "unknown", reason: "missing recorded start identity" }
+  if (current === null) return { kind: "unknown", reason: "could not read current start identity" }
 
+  if (processStart.startsWith("win32-creation-") || current.start.startsWith("win32-creation-")) {
+    const recorded = windowsCreationTicks(processStart)
+    const actual = windowsCreationTicks(current.start)
+    if (recorded !== null && actual !== null) return { kind: recorded === actual ? "same" : "gone" }
+  } else if (startIdentitiesComparable(processStart, current.start)) {
+    return { kind: processStart === current.start ? "same" : "gone" }
+  }
+  return { kind: "unknown", reason: "incomparable start identities" }
+}
+
+async function observeProcessStart(pid: number): Promise<ProcessProbe> {
+  if (process.platform !== "win32") {
+    const start = await getProcessStartIdentity(pid)
+    return start === null ? null : { kind: "live", start }
+  }
   // Read both creation and exit times from a handle to the same Windows process.
   const processHandle = await holdProcess(pid)
-  if (processHandle === null) return false
+  if (processHandle === null) return null
   try {
-    return (
-      processStart === `win32-creation-filetime:${processHandle.creationTicks}` && processHandle.exitTicks() === null
-    )
+    return processHandle.exitTicks() === null
+      ? { kind: "live", start: `win32-creation-filetime:${processHandle.creationTicks}` }
+      : { kind: "dead" }
   } finally {
     processHandle.release()
   }
 }
 
-async function terminateSurvivor(survivor: TrackedProcess): Promise<void> {
+function windowsCreationTicks(identity: string): bigint | null {
+  const filetime = /^win32-creation-filetime:(\d+)$/.exec(identity)?.[1]
+  if (filetime !== undefined) return BigInt(filetime)
+  // The PowerShell fallback writes UTC DateTime.ToString("o") with seven fractional digits.
+  const date = /^win32-creation-date:(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d{7})(?:Z|\+00:00)$/.exec(identity)
+  const [, seconds, fraction] = date ?? []
+  if (seconds === undefined || fraction === undefined) return null
+  const wholeSecondsMs = Date.parse(`${seconds}Z`)
+  return Number.isFinite(wholeSecondsMs)
+    ? BigInt(wholeSecondsMs) * 10_000n + BigInt(fraction) + 116_444_736_000_000_000n
+    : null
+}
+
+async function terminateSurvivor(survivor: TrackedProcess & { readonly kind: "same" }): Promise<void> {
   if (process.platform === "win32") {
     // Re-check creation time on the handle used to terminate; a bare PID could be reused after the probe.
-    const creation = /^win32-creation-filetime:(\d+)$/.exec(survivor.processStart ?? "")?.[1]
-    if (creation !== undefined) await terminateExactProcess(survivor.pid, BigInt(creation), 0n)
-  } else if (await isTrackedProcessAlive(survivor)) {
+    const creation = windowsCreationTicks(survivor.processStart ?? "")
+    if (creation !== null) await terminateExactProcess(survivor.pid, creation, 0n)
+  } else if ((await classifyProcess(survivor)).kind === "same") {
     try {
       process.kill(survivor.pid, "SIGKILL")
     } catch (error) {
@@ -97,16 +153,7 @@ async function terminateSurvivor(survivor: TrackedProcess): Promise<void> {
   }
 }
 
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-test("survivor detection distinguishes the original process from a replacement at the same PID", async () => {
+test("survivor detection distinguishes matching, reused, and unverifiable process identities", async () => {
   // given
   const child = Bun.spawn([process.execPath, "-e", "process.stdin.resume()"], {
     stdin: "pipe",
@@ -118,9 +165,27 @@ test("survivor detection distinguishes the original process from a replacement a
     if (start === null) throw new Error("could not read the live test child's start identity")
     const original = { pid: child.pid, role: "identity fixture", processStart: start }
     const reused = { ...original, processStart: `${start}0` }
+    const missing = { ...original, processStart: null }
+    const incomparable = { ...original, processStart: "unknown-scheme:1" }
 
     // when / then
-    expect(await findSurvivors([original, reused])).toEqual([original])
+    expect(await findSurvivors([original, reused])).toEqual([{ ...original, kind: "same" }])
+    expect({
+      missing: await findSurvivors([missing]),
+      unreadable: await findSurvivors([original], async () => null),
+      incomparable: await findSurvivors([incomparable]),
+    }).toMatchObject({
+      missing: [{ pid: child.pid, kind: "unknown", reason: "missing recorded start identity" }],
+      unreadable: [{ pid: child.pid, kind: "unknown", reason: "could not read current start identity" }],
+      incomparable: [{ pid: child.pid, kind: "unknown", reason: "incomparable start identities" }],
+    })
+    const windowsDate = { ...original, processStart: "win32-creation-date:1970-01-01T00:00:00.1234567Z" }
+    expect(
+      await findSurvivors([windowsDate], async () => ({
+        kind: "live",
+        start: "win32-creation-filetime:116444736001234567",
+      })),
+    ).toEqual([{ ...windowsDate, kind: "same" }])
   } finally {
     child.stdin.end()
     await child.exited
