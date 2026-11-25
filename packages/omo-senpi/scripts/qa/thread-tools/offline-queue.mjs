@@ -7,6 +7,14 @@
  * The sender is a second pty TUI that listed the target while it was alive (its `thread_send` tool
  * keeps the address). The target's process is SIGKILLed: it is gone, its session file stays.
  *
+ * Two send paths reach the dead target, and they answer differently by contract
+ * (`packages/thread-core/src/contracts/results.ts`, `ThreadDeliveryResult`):
+ * - a fresh `omo thread send` process runs no wake carrier, so it answers `queued_offline` with no endpoint;
+ * - the sender TUI runs this agent dir's same-device wake carrier (`session_wake.same_device`, set on
+ *   explicitly in the fixture), so its `thread_send` requests a wake and answers `queued` waiting on
+ *   `{kind: "wake"}` (`gateway/same-device-wake.ts`). The restart below takes the session before the
+ *   carrier opens it; both rows must still be applied once by the restarted terminal.
+ *
  * Two more documented behaviors (`docs/reference/omo-thread.md`, "Sending"), once PD-2 and PD-1:
  * - a fresh `omo thread send <durable id>`, from a process that never saw the target alive, is
  *   `queued_offline` too: the target is found from its session file, since the engine's status row
@@ -14,6 +22,9 @@
  * - with NO endpoint of the agent dir alive, `omo thread send` is `queued_offline`, never
  *   `host_unavailable`, and the session's next start applies it once.
  */
+import { writeFileSync } from "node:fs"
+import { join } from "node:path"
+
 import {
   assistantTexts,
   awaitToolResult,
@@ -30,6 +41,9 @@ import {
 const TOKEN = "QA-TOKEN-offline"
 
 await runScenario("offline-queue", async ({ report, fake, scratch, install, startTui }) => {
+  const wakeFixture = `${JSON.stringify({ task: { host_shard_prewarm: "off" }, session_wake: { same_device: true } }, null, 2)}\n`
+  writeFileSync(join(scratch.agentDir, "omo.json"), wakeFixture)
+  writeFileSync(join(scratch.home, ".omo", "omo.json"), wakeFixture)
   const first = await startTui("tui-target")
   const endpoint = await awaitTuiEndpoint(scratch, first)
   await first.submit("first turn QA-TOKEN-before")
@@ -41,11 +55,11 @@ await runScenario("offline-queue", async ({ report, fake, scratch, install, star
   let mark = fake.requests.length
   await sender.submit(callDirective("thread_list", {}))
   const listed = await awaitToolResult(fake, "thread_list", mark)
+  const targetRow = listed?.kind === "ok" ? listed.threads.filter((thread) => thread.thread === endpoint.durableId) : []
   report.assert(
     "sender-sees-target-live",
-    listed?.kind === "ok" &&
-      listed.threads.some((thread) => thread.thread === endpoint.durableId && thread.alive === true),
-    `threads=${listed?.threads?.length}`,
+    targetRow.length === 1 && targetRow[0].status === "live",
+    `threads=${listed?.threads?.length} target=${endpoint.durableId} rows=${targetRow.length} status=${targetRow[0]?.status}`,
   )
 
   process.kill(first.pid, "SIGKILL")
@@ -55,7 +69,10 @@ await runScenario("offline-queue", async ({ report, fake, scratch, install, star
   const fresh = await cliSend(scratch, install, endpoint.durableId, "QA-TOKEN-offline-cli from a fresh process")
   report.assert(
     "fresh-cli-send-queued-offline",
-    fresh.json?.kind === "ok" && fresh.json.delivery?.kind === "queued_offline" && fresh.json.endpoint_kind === null,
+    fresh.json?.kind === "ok" &&
+      fresh.json.thread === endpoint.durableId &&
+      fresh.json.delivery?.kind === "queued_offline" &&
+      fresh.json.endpoint_kind === null,
     `exit=${fresh.code} ${fresh.stdout.trim().slice(0, 300)}`,
   )
   const deliveries = [{ id: fresh.json?.delivery_id, token: "QA-TOKEN-offline-cli" }]
@@ -66,8 +83,11 @@ await runScenario("offline-queue", async ({ report, fake, scratch, install, star
   )
   const sent = await awaitToolResult(fake, "thread_send", mark)
   report.assert(
-    "send-queued-offline",
-    sent?.kind === "ok" && sent.delivery?.kind === "queued_offline" && sent.endpoint === null,
+    "send-queued-waiting-on-wake",
+    sent?.kind === "ok" &&
+      sent.thread === endpoint.durableId &&
+      sent.delivery?.kind === "queued" &&
+      sent.delivery.waiting_on?.kind === "wake",
     JSON.stringify(sent).slice(0, 300),
   )
   deliveries.push({ id: sent?.delivery_id, token: TOKEN })
