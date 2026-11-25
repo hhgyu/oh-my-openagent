@@ -13,6 +13,8 @@
 *.yaml text eol=lf
 *.py text eol=lf
 *.sh text eol=lf
+# Git runs these through sh; a CRLF checkout (core.autocrlf=true) would break the shebang line.
+.githooks/* text eol=lf
 *.tmpl text eol=lf
 *.go text eol=lf
 # programming's go scaffolder copies these templates byte for byte into a project whose .editorconfig says end_of_line = lf.
