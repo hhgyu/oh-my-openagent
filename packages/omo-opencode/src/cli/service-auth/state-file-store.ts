@@ -58,8 +58,11 @@ export const fileRefusal = (stat: Stats, uid: number): StateFileRefusal | undefi
         ? "open"
         : undefined
 
+// A negative uid is the store's stand-in for a host without process.getuid; no POSIX account has one.
+const parentOwner = (uid: number): number | undefined => (uid < 0 ? undefined : uid)
+
 async function checkDir(dir: string, uid: number): Promise<boolean> {
-  if (!checkCredentialParents(dirname(dirname(dir)), uid)) return false
+  if (!checkCredentialParents(dirname(dirname(dir)), parentOwner(uid))) return false
   const stat = await lstat(dir).catch((error: unknown) => {
     if (errnoCode(error) === "ENOENT") return null
     throw error
@@ -151,10 +154,10 @@ export async function writeStateFile(
 ): Promise<void> {
   const parent = dirname(dir),
     home = dirname(parent)
-  if (!checkCredentialDirectory(home, uid))
+  if (!checkCredentialDirectory(home, parentOwner(uid)))
     throw new CredentialParentError(`Missing credential home ${home}; create a private directory owned by UID ${uid}.`)
   await mkdirPrivate(parent)
-  checkCredentialDirectory(parent, uid)
+  checkCredentialDirectory(parent, parentOwner(uid))
   await mkdirPrivate(dir)
   await checkDir(dir, uid)
   await recoverRetiring(dir, name)
