@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 
@@ -14,7 +14,9 @@ afterEach(() => {
 
 function gitEnv(root: string, path = process.env.PATH ?? ""): Record<string, string> {
   const globalConfig = join(root, "global.gitconfig")
-  if (!existsSync(globalConfig)) writeFileSync(globalConfig, "")
+  // A commit otherwise starts `git maintenance run --auto`, detached since git 2.47, which can write into the repo
+  // after afterEach removed it and leave the temp root behind.
+  if (!existsSync(globalConfig)) writeFileSync(globalConfig, "[maintenance]\n\tauto = false\n")
   // Windows exposes the variable as `Path`; keeping it next to `PATH` leaves the child an unfiltered copy.
   const inherited = Object.fromEntries(
     Object.entries(process.env as Record<string, string>).filter(([key]) => key.toUpperCase() !== "PATH"),
@@ -131,6 +133,33 @@ describe("pre-commit format hook", () => {
     // then
     expect(result.exitCode, result.stderr).toBe(0)
     expect(result.stderr).toContain("bun not found")
+  })
+})
+
+describe("hermetic git environment", () => {
+  test("#given a temp repo #when a commit runs #then git starts no auto maintenance that could outlive the test", () => {
+    // given
+    const { repo, root, git } = tempRepo()
+    writeFileSync(join(repo, "a.txt"), "a\n")
+    git("add", "a.txt")
+    const trace = join(root, "trace2.json")
+
+    // when
+    const result = Bun.spawnSync({
+      cmd: ["git", "commit", "-q", "-m", "change"],
+      cwd: repo,
+      env: { ...gitEnv(root), GIT_TRACE2_EVENT: trace },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    // then
+    expect(result.exitCode, result.stderr.toString()).toBe(0)
+    const children = readFileSync(trace, "utf8")
+      .split("\n")
+      .filter((line) => line.includes('"child_start"'))
+      .map((line) => (JSON.parse(line) as { readonly argv: readonly string[] }).argv.join(" "))
+    expect(children.filter((argv) => argv.includes("maintenance") || argv.includes(" gc"))).toEqual([])
   })
 })
 
