@@ -37,7 +37,7 @@ export interface WedgedTree {
   readonly pids: () => Promise<{ readonly child: number; readonly descendant: number }>
 }
 
-export function isProcessAlive(pid: number): boolean {
+function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
     return true
