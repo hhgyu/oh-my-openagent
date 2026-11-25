@@ -246,7 +246,7 @@ describe("omo-senpi task component wiring", () => {
     ])
     // exactly the task event handlers (session lifecycle + transition-buffer edges), the
     // skill-invocation tracker subscriptions feeding the plan-gated agent gate, plus the
-    // unconditional T16 hygiene sweep handler, which registers its own session_start listener,
+    // unconditional T16 hygiene sweep handlers (session_start starts it, session_shutdown reaps it),
     // plus the workpool aggregate attach-recovery listener (registerWorkpoolTool session_start
     // → workpools.attach, which rolls back accepted-without-ack and flushes on boot), plus the
     // host pre-warm's session_start (revival) plus its default `first-turn` edges (input, before_agent_start);
@@ -262,6 +262,7 @@ describe("omo-senpi task component wiring", () => {
         "session_start",
         "session_shutdown",
         "session_start",
+        "session_shutdown",
         ...prewarmEvents,
         ...parentModeWakeEvents,
       ].sort(),
@@ -368,7 +369,7 @@ describe("omo-senpi task component wiring", () => {
 
     // then
     expect(pi.tools).toEqual([])
-    expect(pi.handlers.map((handler) => handler.event)).toEqual(["session_start"])
+    expect(pi.handlers.map((handler) => handler.event)).toEqual(["session_start", "session_shutdown"])
     expect(pi.messageRenderers).toEqual([])
     expect(logger.entries).toContainEqual({ level: "info", message: "omo-senpi task component disabled by flag" })
   })
@@ -643,9 +644,9 @@ describe("omo-senpi task component wiring", () => {
       ctxFor(pi, logger),
     )
 
-    // then no tools wired; only the unconditional hygiene sweep handler remains
+    // then no tools wired; only the unconditional hygiene sweep handlers remain
     expect(pi.tools).toEqual([])
-    expect(pi.handlers.map((handler) => handler.event)).toEqual(["session_start"])
+    expect(pi.handlers.map((handler) => handler.event)).toEqual(["session_start", "session_shutdown"])
     const skipWarnings = logger.entries.filter(
       (entry) => entry.level === "warn" && entry.message.includes("missing ExtensionAPI capabilities"),
     )
