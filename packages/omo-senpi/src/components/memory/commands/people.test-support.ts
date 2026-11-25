@@ -1,14 +1,5 @@
-import { afterEach } from "bun:test"
-import { rm } from "node:fs/promises"
-
 import { seededRepo, tempIdentity } from "./commands.test-support"
 import type { MemoryCommandIdentity } from "./types"
-
-export const tempDirs: string[] = []
-
-afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
-})
 
 export const LIMITS = { maxEntries: 40, maxEntryChars: 200 } as const
 
@@ -68,8 +59,7 @@ function observationsFile(count: number): string {
 }
 
 export async function peopleFixture(observationCount = 0): Promise<MemoryCommandIdentity> {
-  const { root, identity } = await tempIdentity()
-  tempDirs.push(root)
+  const { identity } = await tempIdentity()
   await seededRepo(identity, [
     { relativePath: "system/human.md", content: HUMAN_CARD },
     { relativePath: "people/jane-doe/card.md", content: JANE_CARD },

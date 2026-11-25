@@ -143,8 +143,8 @@ export function lockHoldersStillRunning(): number[] {
     .map((child) => child.pid ?? -1)
 }
 
-/** Spawns a live process that holds `lockPath` until killed; resolves once it is held. */
-export async function holdLock(lockPath: string): Promise<void> {
+/** Spawns a live process that holds `lockPath` until killed; resolves with its pid once it is held. */
+export async function holdLock(lockPath: string): Promise<number> {
   const { children } = testResources()
   const child = spawn(process.execPath, [holdLockFixture, lockPath], { stdio: ["pipe", "pipe", "pipe"] })
   spawnedHolders.push(child)
@@ -165,6 +165,8 @@ export async function holdLock(lockPath: string): Promise<void> {
       reject(new Error(`lock holder exited early: ${code}`))
     })
   })
+  if (child.pid === undefined) throw new Error("lock holder has no pid")
+  return child.pid
 }
 
 export function runName(runDir: string): string {

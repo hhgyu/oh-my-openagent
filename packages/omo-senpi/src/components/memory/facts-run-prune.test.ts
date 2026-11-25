@@ -31,6 +31,47 @@ afterAll(() => {
   expect(lockHoldersStillRunning()).toEqual([])
 })
 
+function osProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Each test here hands its holder pid to the next one, which runs only after the previous test's cleanup
+// settled; the OS is asked directly, so a holder reaped only when bun exits fails the next test.
+describe("lock holders end with the test that spawned them", () => {
+  let passingHolder: number | undefined
+  let failingHolder: number | undefined
+
+  test("#given a test that holds a lock #when it passes #then its holder is recorded for the next test", async () => {
+    const { locksDir } = await fixture()
+    passingHolder = await holdLock(factsRunsLockPath(locksDir))
+    expect(osProcessAlive(passingHolder)).toBe(true)
+  })
+
+  test("#given the previous test passed holding a lock #when this test starts #then that holder is gone", () => {
+    if (passingHolder === undefined) throw new Error("the previous test recorded no holder")
+    expect(osProcessAlive(passingHolder)).toBe(false)
+  })
+
+  test.failing(
+    "#given a test that holds a lock #when its body throws #then the failure is the test's own",
+    async () => {
+      const { locksDir } = await fixture()
+      failingHolder = await holdLock(factsRunsLockPath(locksDir))
+      throw new Error("controlled failure while the lock is held")
+    },
+  )
+
+  test("#given the previous test failed holding a lock #when this test starts #then that holder is gone", () => {
+    if (failingHolder === undefined) throw new Error("the failing test recorded no holder")
+    expect(osProcessAlive(failingHolder)).toBe(false)
+  })
+})
+
 describe("terminal facts run pruning", () => {
   test("#given 25 terminal runs #when pruning keeps the last 20 #then the newest 20 survive deterministically", async () => {
     // #given
