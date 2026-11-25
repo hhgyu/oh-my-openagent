@@ -3,28 +3,36 @@ import { join } from "node:path"
 
 export class CredentialParentError extends Error {}
 
-export function checkCredentialDirectory(path: string, uid: number): boolean {
+/**
+ * A host with no POSIX owner to compare (no process.getuid, as on Windows) is `undefined`: the directory must still be
+ * a real directory, but owner and mode are not judged, since that host cannot answer them.
+ */
+export function checkCredentialDirectory(path: string, uid: number | undefined): boolean {
   const st = lstatSync(path, { throwIfNoEntry: false })
   if (!st) return false
   const reason = st.isSymbolicLink()
     ? "symlink"
     : !st.isDirectory()
       ? "not a directory"
-      : st.uid !== uid
-        ? "foreign owner"
-        : (st.mode & 0o022) !== 0 && (st.mode & 0o1000) === 0
-          ? "writable by other users"
-          : null
+      : uid === undefined
+        ? null
+        : st.uid !== uid
+          ? "foreign owner"
+          : (st.mode & 0o022) !== 0 && (st.mode & 0o1000) === 0
+            ? "writable by other users"
+            : null
   if (reason) {
     const mode = (st.mode & 0o7777).toString(8).padStart(4, "0")
     throw new CredentialParentError(
-      `Refused credential directory ${path} (${reason}, mode ${mode}, owner ${st.uid}). Inspect the path; use a real directory owned by UID ${uid}, and remove group/other write permission with chmod go-w on that directory.`,
+      uid === undefined
+        ? `Refused credential directory ${path} (${reason}). Inspect the path; use a real directory.`
+        : `Refused credential directory ${path} (${reason}, mode ${mode}, owner ${st.uid}). Inspect the path; use a real directory owned by UID ${uid}, and remove group/other write permission with chmod go-w on that directory.`,
     )
   }
   return true
 }
 
-export function checkCredentialParents(home: string, uid: number): boolean {
+export function checkCredentialParents(home: string, uid: number | undefined): boolean {
   return checkCredentialDirectory(home, uid) && checkCredentialDirectory(join(home, ".omo"), uid)
 }
 
