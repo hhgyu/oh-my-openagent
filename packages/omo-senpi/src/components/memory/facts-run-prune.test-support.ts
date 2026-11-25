@@ -137,10 +137,20 @@ export function instant(index: number): string {
 
 const spawnedHolders: ChildProcessWithoutNullStreams[] = []
 
+function osProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Every holder spawned so far whose process the OS still reports, whatever its ChildProcess object says. */
 export function lockHoldersStillRunning(): number[] {
   return spawnedHolders
-    .filter((child) => child.exitCode === null && child.signalCode === null)
-    .map((child) => child.pid ?? -1)
+    .map((child) => child.pid)
+    .filter((pid): pid is number => pid !== undefined && osProcessAlive(pid))
 }
 
 /** Spawns a live process that holds `lockPath` until killed; resolves with its pid once it is held. */

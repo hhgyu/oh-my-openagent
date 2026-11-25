@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
@@ -27,17 +27,16 @@ import { useTestTimeout } from "../../../../../test-support/test-deadline"
 
 // Every lock holder a test here spawned has exited by the end of that test, whichever file loaded the
 // fixtures first: a module-level hook binds only to the first importer, which left them running until bun exited.
+beforeEach(() => {
+  expect(lockHoldersStillRunning()).toEqual([])
+})
+
 afterAll(() => {
   expect(lockHoldersStillRunning()).toEqual([])
 })
 
 function osProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
+  return lockHoldersStillRunning().includes(pid)
 }
 
 // Each test here hands its holder pid to the next one, which runs only after the previous test's cleanup
