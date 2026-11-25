@@ -160,6 +160,7 @@ export function createCredentialStore(
     readonly wait?: CredentialReadWait
     readonly home?: string
     readonly keychainHelper?: KeychainHelperOptions
+    readonly getuid?: () => number | undefined
   } = {},
 ): CredentialStore {
   const store = createSealedStore(
@@ -182,7 +183,11 @@ export function createCredentialStore(
       }
     },
     options.keychainHelper,
-    { ...(options.home === undefined ? {} : { home: options.home }), relate: relateCredentials },
+    {
+      ...(options.home === undefined ? {} : { home: options.home }),
+      ...(options.getuid === undefined ? {} : { getuid: options.getuid }),
+      relate: relateCredentials,
+    },
   )
   // One helper view per locked section, shared by every call in it and recovered once at its start (design 3.4, 3.6).
   const sections = new WeakMap<HelperLease, Promise<LockedStore<Credentials> | null>>()
@@ -252,11 +257,12 @@ export function createSealedStore<T>(
   keychainHelper?: KeychainHelperOptions,
   linux: {
     readonly home?: string
+    readonly getuid?: () => number | undefined
     /** Absent, only a byte-identical keyring item counts as the file's own sign-in. */
     readonly relate?: (keyring: T, file: T) => KeyringRelation
   } = {},
 ): SealedStore<T> {
-  const { home } = linux
+  const { home, getuid } = linux
   const parseStored = (value: string): T => {
     try {
       return schema.parse(JSON.parse(value))
@@ -290,6 +296,7 @@ export function createSealedStore<T>(
           codec,
           failure: (message) => new CredentialStoreError(message),
           ...(home === undefined ? {} : { home }),
+          ...(getuid === undefined ? {} : { getuid }),
         })
       : null
   if (!secrets) {
