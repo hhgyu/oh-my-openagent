@@ -67,6 +67,9 @@ git submodule update --init --recursive || log "WARN: submodule init skipped (of
 log "materializing frontend references from submodules (non-fatal)"
 node packages/shared-skills/scripts/materialize-frontend-refs.mjs || log "WARN: frontend refs not materialized (submodules missing?)"
 
+log "installing git hooks (non-fatal)"
+bash "$REPO_ROOT/script/agent/install-git-hooks.sh" || log "WARN: git hooks not installed; run script/agent/install-git-hooks.sh"
+
 if [ ! -f "$REPO_ROOT/dist/index.js" ] || [ "${OMO_AGENT_FORCE_BUILD:-0}" = "1" ]; then
   log "building plugin (dist/index.js missing or OMO_AGENT_FORCE_BUILD=1)"
   bun run build

@@ -24,6 +24,9 @@ export const GATE_CONFIG = {
   ],
 } as const
 
+/** Where this repository's pull requests live: the release links each changelog entry to `<url>/<pr-number>`. */
+export const CHANGELOG_PULL_URL = "https://github.com/hhgyu/oh-my-openagent/pull"
+
 /** The upstream this fork merges. A PR labelled `label` that merges new upstream commits may carry upstream's own
  * changelog and log edits, but only byte-for-byte as upstream wrote them (check-pr-changelog.ts). */
 export const UPSTREAM_SYNC = {

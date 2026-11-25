@@ -2,10 +2,11 @@ import { describe, expect, test } from "bun:test"
 import { assembleRelease } from "./changelog-release-assembly.ts"
 import { scanFences } from "./changelog-notes-markdown.ts"
 import { checkPackageLogs } from "./package-log-gate.ts"
+import { CHANGELOG_PULL_URL } from "./changelog-gate.config.ts"
 
 // Release contract (#10477 review rounds 2-3): every entry names the PR that made it unless it already links that
 // exact PR of this repository, and code fences are never split, rewritten or linked. One table, one owner.
-const PULL = "https://github.com/code-yeongyu/oh-my-openagent/pull"
+const PULL = CHANGELOG_PULL_URL
 const link = (pr: number) => `([#${pr}](${PULL}/${pr}))`
 const FENCE3 = "```"
 

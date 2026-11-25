@@ -1,0 +1,15 @@
+#!/bin/sh
+# Format check for the staged content. `bun fmt --check --staged` reads the staged blobs, so a file fixed
+# on disk but not re-added still fails, and unstaged edits never block a commit. Nothing is rewritten.
+# Installed by script/agent/install-git-hooks.sh (core.hooksPath=.githooks).
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "pre-commit: bun not found on PATH; skipping the format check (CI still runs it)" >&2
+  exit 0
+fi
+
+if ! bun fmt --no-script --check --staged; then
+  echo "pre-commit: the staged files listed above are not formatted." >&2
+  echo "pre-commit: run 'bun run fmt' (or 'bun fmt --no-script <file>'), 'git add' them again, then commit." >&2
+  exit 1
+fi

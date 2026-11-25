@@ -121,7 +121,44 @@ describe("the opening gate", () => {
     expect(await drain.drain({ reason: "command" })).toEqual({
       admitted: [{ delivery_id: expect.any(String), kind: "held_draft" }],
     })
+    drain.stop()
     expect(runtime.enqueueCalls).toEqual([])
+  })
+
+  test("#given a pass held by the opening gate #when the opening row ends with no further wake edge #then the drain looks again by itself and admits each queued row once", async () => {
+    const h = (harness = createGatewayHarness())
+    const store = h.store()
+    await store.intake(intake(h, "d-1", "dev-a"))
+    await store.intake(intake(h, "d-2", "dev-a"))
+    await store.woken.request({ durable_id: "t", session_file: "/sessions/t.jsonl" })
+    const started = await store.woken.start({ durable_id: "t" })
+    if (started.kind !== "started") throw new Error(`woken row not started: ${started.kind}`)
+    const runtime = new FakeSessionRuntime(join(h.agentDir, "sessions", "t.jsonl"), "t", h.agentDir)
+    const admittedIds: string[] = []
+    const { promise: bothAdmitted, resolve } = Promise.withResolvers<void>()
+    const drain = createInboxDrain({
+      store,
+      runtime,
+      durableId: "t",
+      sessionPath: () => runtime.sessionPath,
+      now: () => h.clock.now,
+      admitIntake: async () => "admitted",
+      wakeGated: () => store.woken.gated({ durable_id: "t" }),
+      gateRetryMs: 5,
+      onAdmitted: (deliveryId) => {
+        admittedIds.push(deliveryId)
+        if (admittedIds.length === 2) resolve()
+      },
+    })
+    await drain.drain({ reason: "start" })
+    expect(runtime.enqueueCalls).toEqual([])
+
+    await store.woken.end({ durable_id: "t", generation: started.row.generation })
+    await bothAdmitted
+    await drain.drain({ reason: "start" })
+    drain.stop()
+
+    expect(runtime.enqueueCalls.map((call) => call.delivery_id)).toEqual(["device:dev-a/d-1", "device:dev-a/d-2"])
   })
 
   test("#given the opening row's lease ran out #when the drain runs with the store's gate #then it admits as usual", async () => {
