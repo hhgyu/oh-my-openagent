@@ -2735,6 +2735,7 @@
     "packages/utils/src/process-sweep/process-table.ts",
     "packages/utils/src/process-sweep/roots.ts",
     "packages/utils/src/process-sweep/sweeper.ts",
+    "packages/utils/src/process-sweep/windows-owned-tree.ts",
     "packages/utils/src/process-tree.ts",
     "packages/utils/src/prompt-async-gate.ts",
     "packages/utils/src/prompt-async-gate/message-inspection-error.ts",
