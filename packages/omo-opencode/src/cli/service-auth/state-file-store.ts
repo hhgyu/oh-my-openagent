@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import { constants, type Stats } from "node:fs"
 import { chmod, link, lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises"
+import { type as osType } from "node:os"
 import { dirname, join } from "node:path"
 import { checkCredentialDirectory, checkCredentialParents, CredentialParentError } from "./credential-parent"
 import { accountHome } from "./account-home"
@@ -200,8 +201,7 @@ export async function writeStateFile(
 }
 
 // Windows refuses to flush a directory handle (EPERM) on every filesystem; NTFS journals the rename itself.
-const hostCannotSyncDirectories = (error: unknown): boolean =>
-  process.platform === "win32" && errnoCode(error) === "EPERM"
+const hostCannotSyncDirectories = (error: unknown): boolean => osType() === "Windows_NT" && errnoCode(error) === "EPERM"
 
 async function syncDirectory(dir: string, required = false): Promise<void> {
   const directory = await open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
