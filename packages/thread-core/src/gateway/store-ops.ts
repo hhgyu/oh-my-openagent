@@ -422,9 +422,10 @@ async function migrateSteps(ctx: StoreContext, stepSynchronous: number[]): Promi
       : 1
     if (needsForeignKeysOff) ctx.sql.exec("PRAGMA foreign_keys = OFF")
     try {
-      await transaction(ctx, "migrate", () => {
+      // The level is sampled inside the step but recorded only once its COMMIT succeeded.
+      const committedAt = await transaction(ctx, "migrate", (): number | undefined => {
         const current = schemaVersion(ctx)
-        if (current !== version) return
+        if (current !== version) return undefined
         for (const statement of GATEWAY_MIGRATIONS[current]) ctx.sql.exec(statement)
         if (rebuilt !== undefined) {
           const violations = ctx.sql.all(["parent"], "SELECT parent FROM pragma_foreign_key_check")
@@ -437,8 +438,9 @@ async function migrateSteps(ctx: StoreContext, stepSynchronous: number[]): Promi
           }
         }
         ctx.sql.exec(`PRAGMA user_version = ${current + 1}`)
-        stepSynchronous.push(synchronousLevel(ctx))
+        return synchronousLevel(ctx)
       })
+      if (committedAt !== undefined) stepSynchronous.push(committedAt)
     } finally {
       if (needsForeignKeysOff) ctx.sql.exec(`PRAGMA foreign_keys = ${priorForeignKeys === 0 ? "OFF" : "ON"}`)
     }
