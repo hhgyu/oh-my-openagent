@@ -132,7 +132,6 @@ describe("Windows held-root diagnostic", () => {
         rmSync(root, { recursive: true, force: true })
       }
     },
-    60_000,
   )
 
   test("#given a holder without an image or parent lookup #when decoded #then its pid survives with an unknown image", () => {

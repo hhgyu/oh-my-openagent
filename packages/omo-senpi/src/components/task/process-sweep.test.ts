@@ -285,30 +285,26 @@ describe("wireSessionStartProcessSweep()", () => {
     expect(events).toEqual(["sweep settled", "shutdown settled"])
   })
 
-  it(
-    "#given a sweep running a wedged owned process tree #when session_shutdown fires #then shutdown completes within the bound and no owned process survives",
-    async () => {
-      // given
-      const pi = new FakeExtensionAPI()
-      const logger = createLogger()
-      const fixture = trees.tree()
-      wireSessionStartProcessSweep(pi, ctxFor(logger), {
-        env: {},
-        sweep: (signal) => runOwnedProcess(fixture.command, fixture.args, { signal }),
-      })
-      await pi.dispatch("session_start", {})
-      const pids = await fixture.pids()
+  it("#given a sweep running a wedged owned process tree #when session_shutdown fires #then shutdown completes within the bound and no owned process survives", async () => {
+    // given
+    const pi = new FakeExtensionAPI()
+    const logger = createLogger()
+    const fixture = trees.tree()
+    wireSessionStartProcessSweep(pi, ctxFor(logger), {
+      env: {},
+      sweep: (signal) => runOwnedProcess(fixture.command, fixture.args, { signal }),
+    })
+    await pi.dispatch("session_start", {})
+    const pids = await fixture.pids()
 
-      // when
-      const startedAt = Date.now()
-      await pi.dispatch("session_shutdown", { reason: "quit" })
+    // when
+    const startedAt = Date.now()
+    await pi.dispatch("session_shutdown", { reason: "quit" })
 
-      // then
-      expect(Date.now() - startedAt).toBeLessThan(OWNED_PROCESS_STOP_BOUND_MS)
-      expect(await aliveAfter([pids.child, pids.descendant], 2_000)).toEqual([])
-    },
-    { timeout: 30_000 },
-  )
+    // then
+    expect(Date.now() - startedAt).toBeLessThan(OWNED_PROCESS_STOP_BOUND_MS)
+    expect(await aliveAfter([pids.child, pids.descendant], 2_000)).toEqual([])
+  })
 
   it("#given a sweep that ignores the abort #when session_shutdown fires #then shutdown still completes within its bound and says so", async () => {
     // given
