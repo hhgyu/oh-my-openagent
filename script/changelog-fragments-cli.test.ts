@@ -5,12 +5,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { markerLine, splitFragment } from "./package-log-blocks.ts"
 import { removeTempRoot } from "./remove-temp-root.ts"
+import { CHANGELOG_PULL_URL } from "./changelog-gate.config.ts"
 
 // The migration (#10841) and the bundle train both run this CLI on real branches, so every case drives a real git
 // repository and then the real PR gate, the way CI judges the converted or folded branch.
 const SCRIPT_DIR = import.meta.dir
 const LOG = "packages/omo-senpi/changes.md"
-const PULL = "https://github.com/code-yeongyu/oh-my-openagent/pull"
+const PULL = CHANGELOG_PULL_URL
 const ENV = {
   ...process.env,
   GIT_AUTHOR_NAME: "t",

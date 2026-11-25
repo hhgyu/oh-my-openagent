@@ -7,9 +7,9 @@
  * own PR gets one, so a grouped entry still names the PR that made it.
  */
 import { assembleUnreleasedBody } from "./changelog-gate-rules.ts"
+import { CHANGELOG_PULL_URL as PULL_URL } from "./changelog-gate.config.ts"
 import { entriesOf, linkEntry, linkScanned, scanFences } from "./changelog-notes-markdown.ts"
 
-const PULL_URL = "https://github.com/code-yeongyu/oh-my-openagent/pull"
 const OWN_PULL_LINK = new RegExp(`${PULL_URL.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}/(\\d+)\\)`, "g")
 const FENCE_LINE = /^(`{3,}|~{3,})/
 const SECTION = /^### (.+?)\s*$/

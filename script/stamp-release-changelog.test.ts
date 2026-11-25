@@ -15,6 +15,7 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { extractReleaseNotes } from "./changelog-release-notes"
 import { unreleasedBody } from "./changelog-fragments"
+import { CHANGELOG_PULL_URL } from "./changelog-gate.config.ts"
 
 const roots: string[] = []
 const published = "## [5.1.44] - 2026-10-23\n\nPublished payload.\n"
@@ -32,7 +33,7 @@ const scriptFiles = [
   "changelog-release-assembly.ts",
   "changelog-notes-markdown.ts",
 ]
-const PULL = "https://github.com/code-yeongyu/oh-my-openagent/pull"
+const PULL = CHANGELOG_PULL_URL
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
