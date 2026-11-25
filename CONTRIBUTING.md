@@ -126,6 +126,7 @@ After making changes, you can test your local build in OpenCode:
 The cross-harness one-command bootstrap is the single source of truth for all development environments.
 
 - **`script/agent/setup.sh`** verifies Bun, Node, and git, warns if tmux is missing, runs `bun install`, initializes the frontend provenance submodules and materializes their references (both non-fatal so an offline checkout still builds), and builds when `dist/index.js` is missing or `OMO_AGENT_FORCE_BUILD=1` is set.
+- **`script/agent/install-git-hooks.sh`** (run by `setup.sh`, or on its own) sets `core.hooksPath=.githooks`, so `.githooks/pre-commit` checks the formatting of the staged content with `bun fmt --no-script --check --staged` and refuses the commit until you run `bun run fmt` and re-add the files. It leaves an existing `core.hooksPath`, or a `.git/hooks` directory that already holds your own hooks, alone and prints how to call the check yourself. The hook skips with a warning when `bun` is not on `PATH`; CI still runs `bun run lint`.
 - **`script/agent/cleanup.sh`** removes regenerable transients by default. Pass `--deep` to also drop `dist/` and `node_modules/`; it leaves the `packages/shared-skills/upstreams/` submodules in place.
 - **`script/agent/cleanup-hook.sh`** launches cleanup from Claude Code `SessionEnd` without blocking shutdown.
 
@@ -140,7 +141,7 @@ All harnesses delegate to these scripts:
 | Codex App (local environments) | `.codex/setup.sh` runs at project root on worktree creation |
 | OpenCode (this plugin's own harness) | reads `AGENTS.md` + `CLAUDE.md` (a symlink); run `script/agent/setup.sh` directly |
 
-The single source of truth is the `script/agent/` dev-environment contract: `setup.sh`, `cleanup.sh`, and harness launchers such as `cleanup-hook.sh`. Maintenance means keeping those scripts, harness wiring files, and pinned Dockerfile versions in sync.
+The single source of truth is the `script/agent/` dev-environment contract: `setup.sh`, `install-git-hooks.sh`, `cleanup.sh`, and harness launchers such as `cleanup-hook.sh`. Maintenance means keeping those scripts, harness wiring files, and pinned Dockerfile versions in sync.
 
 ## Credentials & Isolation
 
