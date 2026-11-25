@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
@@ -15,6 +15,7 @@ import {
   fixture,
   holdLock,
   instant,
+  lockHoldersStillRunning,
   reserveRun,
   runName,
   runNames,
@@ -23,6 +24,12 @@ import {
 } from "./facts-run-prune.test-support"
 import { writeRunJsonAtomic } from "./worker/run-artifacts"
 import { useTestTimeout } from "../../../../../test-support/test-deadline"
+
+// Every lock holder a test here spawned has exited by the end of that test, whichever file loaded the
+// fixtures first: a module-level hook binds only to the first importer, which left them running until bun exited.
+afterAll(() => {
+  expect(lockHoldersStillRunning()).toEqual([])
+})
 
 describe("terminal facts run pruning", () => {
   test("#given 25 terminal runs #when pruning keeps the last 20 #then the newest 20 survive deterministically", async () => {
