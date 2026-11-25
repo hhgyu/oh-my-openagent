@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, statSync, utimesSync, writeFileSync } from "node
 import { dirname } from "node:path"
 
 import { createDefaultProcessKiller, type ProcessKiller } from "./exec"
+import { OWNED_PROCESS_STOP_BOUND_MS, settleWithinAbortBound } from "./owned-process"
 
 export type ProcessSweepAction = "failed" | "swept" | "throttled"
 
@@ -13,6 +14,8 @@ export interface ProcessFamilySweepOptions {
   readonly log?: (message: string) => void
   readonly nowMs?: number
   readonly platform?: NodeJS.Platform
+  readonly signal?: AbortSignal
+  readonly stopBoundMs?: number
   readonly throttleMs?: number
 }
 
@@ -39,6 +42,8 @@ interface KillContext {
   readonly familyLabel: string
   readonly killer: ProcessKiller
   readonly log: ((message: string) => void) | undefined
+  readonly signal: AbortSignal | undefined
+  readonly stopBoundMs: number | undefined
 }
 
 export interface FamilySweepConfig<TTarget extends { readonly pid: number }, TSpared extends TTarget = TTarget> {
@@ -74,8 +79,9 @@ export async function runProcessFamilySweep<
   }
 
   try {
-    const plan = await config.collect()
+    const plan = await bounded(config.collect(), options)
     const { failed, killed } = dryRun ? { failed: [], killed: [] } : await killTargets(plan.killList, options, config)
+    options.signal?.throwIfAborted()
     if (!dryRun) writeSweepStamp(config.stampFile, nowMs)
     return {
       action: "swept",
@@ -104,17 +110,21 @@ async function killTargets<TTarget extends { readonly pid: number }>(
     familyLabel: config.familyLabel,
     killer: options.killer ?? createDefaultProcessKiller(options.platform),
     log: options.log,
+    signal: options.signal,
+    stopBoundMs: options.stopBoundMs,
   }
   for (const target of targets) {
-    if (!(await passesSignalAttestation(target, config.attestBeforeSignal, options.log, "SIGTERM"))) continue
+    options.signal?.throwIfAborted()
+    if (!(await passesSignalAttestation(target, config.attestBeforeSignal, context, "SIGTERM"))) continue
     const terminated = await safelyTerminate(target.pid, context)
     if (!terminated) continue
-    await delay(options.graceMs ?? DEFAULT_GRACE_MS)
-    if (!(await context.killer.isAlive(target.pid))) {
+    await delay(options.graceMs ?? DEFAULT_GRACE_MS, options.signal)
+    options.signal?.throwIfAborted()
+    if (!(await bounded(Promise.resolve(context.killer.isAlive(target.pid)), context))) {
       killed.push(target)
       continue
     }
-    if (!(await passesSignalAttestation(target, config.attestBeforeSignal, options.log, "SIGKILL"))) continue
+    if (!(await passesSignalAttestation(target, config.attestBeforeSignal, context, "SIGKILL"))) continue
     if (await safelyKill(target.pid, context)) killed.push(target)
   }
   return { failed, killed }
@@ -123,12 +133,13 @@ async function killTargets<TTarget extends { readonly pid: number }>(
 async function passesSignalAttestation<TTarget extends { readonly pid: number }>(
   target: TTarget,
   attest: ((target: TTarget) => Promise<boolean>) | undefined,
-  log: ((message: string) => void) | undefined,
+  context: KillContext,
   signal: "SIGKILL" | "SIGTERM",
 ): Promise<boolean> {
   if (attest === undefined) return true
+  const log = context.log
   try {
-    const attested = await attest(target)
+    const attested = await bounded(attest(target), context)
     if (!attested) log?.(`process sweep sparing pid ${target.pid}: identity changed before ${signal}`)
     return attested
   } catch (error) {
@@ -139,7 +150,7 @@ async function passesSignalAttestation<TTarget extends { readonly pid: number }>
 
 async function safelyTerminate(pid: number, context: KillContext): Promise<boolean> {
   try {
-    await context.killer.terminate(pid)
+    await bounded(context.killer.terminate(pid, context.signal), context)
     return true
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -151,7 +162,7 @@ async function safelyTerminate(pid: number, context: KillContext): Promise<boole
 
 async function safelyKill(pid: number, context: KillContext): Promise<boolean> {
   try {
-    await context.killer.kill(pid)
+    await bounded(context.killer.kill(pid, context.signal), context)
     return true
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -159,6 +170,15 @@ async function safelyKill(pid: number, context: KillContext): Promise<boolean> {
     context.log?.(`${context.familyLabel} failed to kill pid ${pid}: ${message}`)
     return false
   }
+}
+
+// After an abort every step gets the owned-process stop bound: default killers and enumerations stop their own
+// children within it; an injected step that ignores the abort is no longer waited for.
+function bounded<T>(
+  work: Promise<T>,
+  scope: { readonly signal?: AbortSignal | undefined; readonly stopBoundMs?: number | undefined },
+): Promise<T> {
+  return settleWithinAbortBound(work, scope.signal, scope.stopBoundMs ?? OWNED_PROCESS_STOP_BOUND_MS)
 }
 
 function isSweepThrottled(stampFile: string, nowMs: number, throttleMs: number): boolean {
@@ -173,9 +193,15 @@ function writeSweepStamp(stampFile: string, nowMs: number): void {
   utimesSync(stampFile, stampDate, stampDate)
 }
 
-function delay(ms: number): Promise<void> {
-  if (ms <= 0) return Promise.resolve()
+function delay(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (ms <= 0 || signal?.aborted === true) return Promise.resolve()
   return new Promise((resolvePromise) => {
-    setTimeout(resolvePromise, ms)
+    const done = (): void => {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", done)
+      resolvePromise()
+    }
+    const timer = setTimeout(done, ms)
+    signal?.addEventListener("abort", done, { once: true })
   })
 }

@@ -29,6 +29,12 @@ export {
   type LspDaemonProxyProcess,
   type SelectOrphanedLspDaemonProxiesOptions,
 } from "./lsp-proxy-family"
+export {
+  OWNED_PROCESS_STOP_BOUND_MS,
+  runOwnedProcess,
+  settleWithinAbortBound,
+  type OwnedProcessOptions,
+} from "./owned-process"
 export { isOrphaned, parsePosixProcessTable, parseWindowsProcessTable, type ProcessInfo } from "./process-table"
 export { discoverOmoOwnedRoots, type OmoOwnedRootsOptions } from "./roots"
 export {

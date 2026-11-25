@@ -324,6 +324,17 @@ export type GatewayStoreEvent =
       readonly directory: string
       readonly items: readonly LegacyMailboxSkip[]
     }
+  /**
+   * A schema migration ran on open, from user_version `from` to `to` (lower than the target when a step failed).
+   * `step_synchronous` is the synchronous level each committed step ran at; `synchronous` is the level restored after.
+   */
+  | {
+      readonly kind: "schema_migrated"
+      readonly from: number
+      readonly to: number
+      readonly step_synchronous: readonly number[]
+      readonly synchronous: number
+    }
   /** The worker closed the database after a failed open (a migration that rolled back); it exits next. */
   | { readonly kind: "store_closed" }
 

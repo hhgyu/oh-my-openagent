@@ -14,7 +14,7 @@ public static class HeldRootRestartManager {
   [StructLayout(LayoutKind.Sequential)]
   public struct UniqueProcess {
     public uint pid;
-    public FILETIME started;
+    public System.Runtime.InteropServices.ComTypes.FILETIME started;
   }
   [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
   public struct ProcessInfo {

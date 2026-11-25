@@ -43,11 +43,11 @@ const EVIDENCE = [
 ]
 
 const roots: string[] = []
-const pids: number[] = []
+const pids: Array<{ readonly pid: number; readonly role: string }> = []
 
 afterEach(async () => {
-  const survivors = pids.splice(0).filter(isAlive)
-  for (const pid of survivors) process.kill(pid, "SIGKILL")
+  const survivors = pids.splice(0).filter(({ pid }) => isAlive(pid))
+  for (const { pid } of survivors) process.kill(pid, "SIGKILL")
   expect(survivors).toEqual([])
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })),
@@ -111,7 +111,7 @@ async function drive(item: Hermetic, args: readonly string[], killPoint?: Memory
     stdio: ["ignore", "pipe", "pipe"],
   })
   if (child.pid === undefined) throw new Error("driver did not start")
-  pids.push(child.pid)
+  pids.push({ pid: child.pid, role: `driver ${args.join(" ")}` })
   let stdout = ""
   let stderr = ""
   child.stdout.on("data", (chunk) => {
@@ -134,6 +134,9 @@ async function drive(item: Hermetic, args: readonly string[], killPoint?: Memory
 }
 
 function expectKilled(exit: Exit): void {
+  // A driver that finishes instead of dying never reached its kill point; its report says which path it took.
+  if (exit.code === 0 && exit.signal === null)
+    throw new Error(`the driver exited 0 instead of being killed\n${exit.stdout}\n${exit.stderr.slice(-4000)}`)
   if (process.platform === "win32") {
     expect(exit.signal).toBeNull()
     expect(exit.code).not.toBe(0)
@@ -194,7 +197,8 @@ async function recordProcesses(item: Hermetic): Promise<void> {
   const ledgerPath = join(runDir(item), "ledger.json")
   if (!existsSync(ledgerPath)) return
   const ledger = await json(ledgerPath)
-  for (const pid of [ledger.pid, ledger.childPid]) if (typeof pid === "number") pids.push(pid)
+  if (typeof ledger.pid === "number") pids.push({ pid: ledger.pid, role: "ledger supervisor" })
+  if (typeof ledger.childPid === "number") pids.push({ pid: ledger.childPid, role: "ledger child" })
 }
 
 async function expectEvidencePreserved(item: Hermetic, before: Map<string, string>): Promise<void> {

@@ -45,7 +45,7 @@ export async function sweepOrphanedLspDaemonProxies(
       familyLabel: "lsp-daemon proxy sweep",
       stampFile,
       collect: async () => {
-        const provider = options.processProvider ?? (() => enumerateProcesses(options.platform))
+        const provider = options.processProvider ?? (() => enumerateProcesses(options.platform, options.signal))
         const candidates = selectOrphanedLspDaemonProxies(await provider(), {
           ownedRoots,
           ...(options.platform === undefined ? {} : { platform: options.platform }),

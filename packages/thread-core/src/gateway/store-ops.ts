@@ -381,6 +381,33 @@ export class GatewayMigrationError extends Error {
 
 export async function migrate(ctx: StoreContext): Promise<void> {
   if (schemaVersion(ctx) >= GATEWAY_MIGRATIONS.length) return
+  // One schema step per transaction, each flushed to disk under synchronous=FULL, made a fresh store's open cost one
+  // flush per version: tens of seconds on a loaded Windows disk. In WAL mode NORMAL keeps every step atomic; a crash can
+  // only drop the newest steps, and the next open re-applies them from user_version. The prior level is restored before
+  // any non-migration write, whose first FULL commit flushes the whole WAL, migration frames included.
+  const from = schemaVersion(ctx)
+  const priorSynchronous = synchronousLevel(ctx)
+  const stepSynchronous: number[] = []
+  ctx.sql.exec("PRAGMA synchronous = NORMAL")
+  try {
+    await migrateSteps(ctx, stepSynchronous)
+  } finally {
+    ctx.sql.exec(`PRAGMA synchronous = ${Math.trunc(priorSynchronous)}`)
+    ctx.emit({
+      kind: "schema_migrated",
+      from,
+      to: schemaVersion(ctx),
+      step_synchronous: stepSynchronous,
+      synchronous: synchronousLevel(ctx),
+    })
+  }
+}
+
+function synchronousLevel(ctx: StoreContext): number {
+  return Number(ctx.sql.one(["synchronous"], "SELECT synchronous FROM pragma_synchronous")?.synchronous ?? 2)
+}
+
+async function migrateSteps(ctx: StoreContext, stepSynchronous: number[]): Promise<void> {
   for (;;) {
     const version = schemaVersion(ctx)
     if (version >= GATEWAY_MIGRATIONS.length) return
@@ -395,9 +422,10 @@ export async function migrate(ctx: StoreContext): Promise<void> {
       : 1
     if (needsForeignKeysOff) ctx.sql.exec("PRAGMA foreign_keys = OFF")
     try {
-      await transaction(ctx, "migrate", () => {
+      // The level is sampled inside the step but recorded only once its COMMIT succeeded.
+      const committedAt = await transaction(ctx, "migrate", (): number | undefined => {
         const current = schemaVersion(ctx)
-        if (current !== version) return
+        if (current !== version) return undefined
         for (const statement of GATEWAY_MIGRATIONS[current]) ctx.sql.exec(statement)
         if (rebuilt !== undefined) {
           const violations = ctx.sql.all(["parent"], "SELECT parent FROM pragma_foreign_key_check")
@@ -410,7 +438,9 @@ export async function migrate(ctx: StoreContext): Promise<void> {
           }
         }
         ctx.sql.exec(`PRAGMA user_version = ${current + 1}`)
+        return synchronousLevel(ctx)
       })
+      if (committedAt !== undefined) stepSynchronous.push(committedAt)
     } finally {
       if (needsForeignKeysOff) ctx.sql.exec(`PRAGMA foreign_keys = ${priorForeignKeys === 0 ? "OFF" : "ON"}`)
     }
