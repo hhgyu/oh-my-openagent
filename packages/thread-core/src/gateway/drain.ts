@@ -1,4 +1,5 @@
 import type { DrainWakeEvent, ExternalAdmission, GatewayAdmissionKind, SessionRuntimePort, WakeReason } from "./adapter"
+import { WAKE_GATE_RETRY_MS } from "./constants"
 import { decideDelivery, effectiveLaneOf } from "./decision"
 import { intakeAdmissionPass, type IntakeAdmission } from "./intake-admission"
 import { isLockWaitExceeded } from "./lock-wait"
@@ -27,6 +28,8 @@ export type InboxDrainOptions = {
   readonly admitIntake?: (device: string) => Promise<IntakeAdmission>
   /** True while a woken session's row is opening under a live lease (A3.1.5): the pass admits nothing. */
   readonly wakeGated?: () => Promise<boolean>
+  /** How long a pass held by the opening gate waits before it looks at the gate again; default `WAKE_GATE_RETRY_MS`. */
+  readonly gateRetryMs?: number
   /** Test seams: act as another process, or stop between the two phases of an admission. */
   readonly _test?: {
     readonly identity?: ProcessIdentity
@@ -91,6 +94,7 @@ export function createInboxDrain(options: InboxDrainOptions): InboxDrain {
     for (const id of held.keys()) if (!reconciled.queued.some((row) => row.delivery_id === id)) held.delete(id)
     if ((await options.wakeGated?.()) === true) {
       for (const row of reconciled.queued) admitted.push({ delivery_id: row.delivery_id, kind: "held_draft" })
+      if (reconciled.queued.length > 0) armGateRetry(event)
       return { admitted }
     }
     const admission = intakeAdmissionPass(options.admitIntake)
@@ -211,6 +215,27 @@ export function createInboxDrain(options: InboxDrainOptions): InboxDrain {
   let retry: ReturnType<typeof setTimeout> | undefined
   let stopped = false
 
+  // The opening gate lifts without an edge of this session: the carrier ends its row (the open was refused because
+  // this runtime holds the session) or its lease runs out. A held pass looks at the gate again until it lifts, then
+  // runs the same wake once, so rows queued while the session was offline are not left waiting for the next edge.
+  let gateRetry: ReturnType<typeof setTimeout> | undefined
+  function armGateRetry(event: DrainWakeEvent): void {
+    if (stopped || gateRetry !== undefined) return
+    gateRetry = setTimeout(() => {
+      void (async () => {
+        if (stopped) return
+        if ((await options.wakeGated?.().catch(() => true)) === true) {
+          gateRetry = undefined
+          armGateRetry(event)
+          return
+        }
+        gateRetry = undefined
+        if (!stopped) await run(event).catch(() => undefined)
+      })()
+    }, options.gateRetryMs ?? WAKE_GATE_RETRY_MS)
+    gateRetry.unref?.()
+  }
+
   function run(event: DrainWakeEvent): Promise<InboxDrainResult> {
     const next = chain.then(() => pass(event))
     chain = next.catch(() => undefined)
@@ -242,6 +267,8 @@ export function createInboxDrain(options: InboxDrainOptions): InboxDrain {
       stopped = true
       clearTimeout(retry)
       retry = undefined
+      clearTimeout(gateRetry)
+      gateRetry = undefined
     },
   }
 }
