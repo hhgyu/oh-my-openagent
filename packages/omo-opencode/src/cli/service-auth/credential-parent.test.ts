@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdir, writeFile } from "node:fs/promises"
+import { lstat, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { checkCredentialDirectory, checkCredentialParents, CredentialParentError } from "./credential-parent"
 import { temporaryHome } from "./test-support"
@@ -23,12 +23,9 @@ describe("credential parent directories", () => {
     expect(() => checkCredentialParents(home, undefined)).toThrow("not a directory")
   })
 
-  test.skipIf(process.getuid === undefined)(
-    "#given a POSIX host #when the home belongs to another uid #then it is refused as a foreign owner",
-    async () => {
-      const home = await temporaryHome()
-      const other = (process.getuid?.() ?? 0) + 1
-      expect(() => checkCredentialDirectory(home, other)).toThrow("foreign owner")
-    },
-  )
+  test("#given a uid to compare #when the home belongs to another uid #then it is refused as a foreign owner", async () => {
+    const home = await temporaryHome()
+    const other = (await lstat(home)).uid + 1
+    expect(() => checkCredentialDirectory(home, other)).toThrow("foreign owner")
+  })
 })
