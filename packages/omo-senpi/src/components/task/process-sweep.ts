@@ -11,13 +11,17 @@ import { resolveSenpiDaemonRuntime } from "../lsp/daemon-runtime"
 // functions. Mirrors the codex best-effort process-sweep pattern
 // (packages/omo-codex/plugin/components/ — codex hook-sweep.ts).
 
-export type OmoFamilySweep = () => Promise<unknown>
+export type OmoFamilySweep = (signal: AbortSignal) => Promise<unknown>
 
 interface OmoFamilySweeps {
-  readonly sweepLspProxies: (options: { readonly log?: (message: string) => void }) => Promise<unknown>
+  readonly sweepLspProxies: (options: {
+    readonly log?: (message: string) => void
+    readonly signal?: AbortSignal
+  }) => Promise<unknown>
   readonly sweepStaleLspDaemons: (options: {
     readonly currentVersion: string
     readonly log?: (message: string) => void
+    readonly signal?: AbortSignal
   }) => Promise<unknown>
 }
 
@@ -43,9 +47,10 @@ export function wireSessionStartProcessSweep(
     options.resolveDaemonVersion ?? ((runtimeEnv) => resolveSenpiDaemonRuntime(runtimeEnv).version)
   const sweep =
     options.sweep ??
-    (() => {
-      return sweepOmoFamiliesBestEffort(ctx, () => resolveDaemonVersion(env), options.familySweeps)
+    ((signal: AbortSignal) => {
+      return sweepOmoFamiliesBestEffort(ctx, () => resolveDaemonVersion(env), signal, options.familySweeps)
     })
+  const running = new Set<{ readonly controller: AbortController; readonly settled: Promise<void> }>()
 
   pi.on("session_start", () => {
     // Machine hygiene belongs to the process the USER launched. A task child - its own process, or
@@ -55,41 +60,56 @@ export function wireSessionStartProcessSweep(
       ctx.logger.info("omo-senpi process sweep skipped: running as a senpi-task child session", { role })
       return undefined
     }
-    runSweepBestEffort(sweep, ctx)
+    const controller = new AbortController()
+    const entry = { controller, settled: runSweepBestEffort(sweep, controller.signal, ctx) }
+    running.add(entry)
+    void entry.settled.then(() => running.delete(entry))
     return undefined
+  })
+  // The sweep spawns process enumerations (PowerShell on win32) that inherit this process's env. A
+  // shutdown stops them and waits until they exited, so none outlives the extension it belonged to.
+  pi.on("session_shutdown", async () => {
+    const pending = [...running]
+    for (const { controller } of pending) controller.abort()
+    await Promise.all(pending.map(({ settled }) => settled))
   })
 }
 
-/** Fire-and-forget: never blocks the session-start chain, never throws. */
-function runSweepBestEffort(sweep: OmoFamilySweep, ctx: ComponentContext): void {
+/** Never blocks the session-start chain and never rejects; settles once the sweep and its children are done. */
+function runSweepBestEffort(sweep: OmoFamilySweep, signal: AbortSignal, ctx: ComponentContext): Promise<void> {
   try {
-    void Promise.resolve()
-      .then(() => sweep())
-      .catch((error: unknown) => {
-        ctx.logger.warn("omo-senpi process sweep failed", {
-          error: error instanceof Error ? error.message : String(error),
-        })
-      })
+    return Promise.resolve()
+      .then(() => sweep(signal))
+      .then(
+        () => undefined,
+        (error: unknown) => {
+          ctx.logger.warn("omo-senpi process sweep failed", {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        },
+      )
   } catch (error) {
     ctx.logger.warn("omo-senpi process sweep failed to start", {
       error: error instanceof Error ? error.message : String(error),
     })
+    return Promise.resolve()
   }
 }
 
 async function sweepOmoFamiliesBestEffort(
   ctx: ComponentContext,
   resolveLspDaemonVersion: () => string,
+  signal: AbortSignal,
   sweeps: OmoFamilySweeps = DEFAULT_FAMILY_SWEEPS,
 ): Promise<void> {
   const log = (message: string): void => {
     ctx.logger.warn(message)
   }
   await Promise.all([
-    bestEffort("lsp-daemon proxy sweep", log, () => sweeps.sweepLspProxies({ log })),
+    bestEffort("lsp-daemon proxy sweep", log, () => sweeps.sweepLspProxies({ log, signal })),
     bestEffort("lsp-daemon stale-version sweep", log, () => {
       const currentVersion = resolveLspDaemonVersion()
-      return sweeps.sweepStaleLspDaemons({ currentVersion, log })
+      return sweeps.sweepStaleLspDaemons({ currentVersion, log, signal })
     }),
   ])
 }

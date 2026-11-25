@@ -1,4 +1,5 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, spyOn } from "bun:test"
+import * as childProcess from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -169,6 +170,38 @@ describe("orphaned lsp-daemon proxy sweep", () => {
       // then
       expect(result.action).toBe("throttled")
     } finally {
+      rmSync(homeDir, { force: true, recursive: true })
+    }
+  })
+
+  it("#given the real process enumeration is running #when the sweep is aborted #then it settles only after that child exited and writes no stamp", async () => {
+    // given
+    const homeDir = mkdtempSync(join(tmpdir(), "omo-lsp-proxy-abort-"))
+    const controller = new AbortController()
+    const children: childProcess.ChildProcess[] = []
+    const execFile = childProcess.execFile
+    const execFileSpy = spyOn(childProcess, "execFile").mockImplementation(((...args: Parameters<typeof execFile>) => {
+      const child = Reflect.apply(execFile, childProcess, args) as childProcess.ChildProcess
+      children.push(child)
+      child.once("spawn", () => controller.abort())
+      return child
+    }) as typeof execFile)
+    try {
+      // when
+      const result = await sweepOrphanedLspDaemonProxies({
+        force: true,
+        homeDir,
+        ownedRoots: ["/tmp/omo-plugin"],
+        signal: controller.signal,
+      })
+
+      // then
+      expect(result.action).toBe("failed")
+      expect(children).toHaveLength(1)
+      expect(children[0]?.exitCode !== null || children[0]?.signalCode !== null).toBe(true)
+      expect(existsSync(result.stampFile)).toBe(false)
+    } finally {
+      execFileSpy.mockRestore()
       rmSync(homeDir, { force: true, recursive: true })
     }
   })

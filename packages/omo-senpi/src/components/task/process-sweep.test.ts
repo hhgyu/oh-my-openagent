@@ -249,6 +249,57 @@ describe("wireSessionStartProcessSweep()", () => {
     expect(results).toBeDefined()
   })
 
+  it("#given a sweep still running #when session_shutdown fires #then the sweep is aborted and shutdown settles after it", async () => {
+    // given a sweep that only settles once it is aborted, like a process enumeration whose child is killed
+    const pi = new FakeExtensionAPI()
+    const logger = createLogger()
+    const events: string[] = []
+    wireSessionStartProcessSweep(pi, ctxFor(logger), {
+      env: {},
+      sweep: (signal) =>
+        new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => {
+            setTimeout(() => {
+              events.push("sweep settled")
+              resolve()
+            }, 20)
+          })
+        }),
+    })
+    await pi.dispatch("session_start", {})
+    await flushMicrotasks()
+
+    // when
+    await pi.dispatch("session_shutdown", { reason: "quit" })
+    events.push("shutdown settled")
+
+    // then
+    expect(events).toEqual(["sweep settled", "shutdown settled"])
+  })
+
+  it("#given a sweep that already settled #when session_shutdown fires #then shutdown does not wait", async () => {
+    // given
+    const pi = new FakeExtensionAPI()
+    const logger = createLogger()
+    let aborted = false
+    wireSessionStartProcessSweep(pi, ctxFor(logger), {
+      env: {},
+      sweep: async (signal) => {
+        signal.addEventListener("abort", () => {
+          aborted = true
+        })
+      },
+    })
+    await pi.dispatch("session_start", {})
+    await flushMicrotasks()
+
+    // when
+    await pi.dispatch("session_shutdown", { reason: "quit" })
+
+    // then
+    expect(aborted).toBe(false)
+  })
+
   it("#given a failing sweep #when session_start fires #then the failure is logged and cannot propagate", async () => {
     // given
     const pi = new FakeExtensionAPI()

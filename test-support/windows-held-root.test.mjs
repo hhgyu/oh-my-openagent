@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
+import { closeSync, mkdtempSync, openSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { diagnoseHeldTestRoot } from "./windows-held-root.mjs"
 import { removeTestRootBestEffort, skippedTestRoots } from "./held-test-root.mjs"
 
@@ -114,6 +117,23 @@ describe("Windows held-root diagnostic", () => {
       skippedTestRoots.delete(root)
     }
   })
+
+  test.if(process.platform === "win32")(
+    "#given a file under the root held open by this process #when diagnosed by the real query #then Restart Manager reports this pid",
+    () => {
+      const root = mkdtempSync(join(tmpdir(), "held-root-real-"))
+      const fd = openSync(join(root, "held.txt"), "w")
+      try {
+        const result = diagnoseHeldTestRoot(root)
+        expect(result.diagnosticErrors.filter((error) => error.startsWith("Restart Manager"))).toEqual([])
+        expect(result.holders.map((holder) => holder.pid)).toContain(process.pid)
+      } finally {
+        closeSync(fd)
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
+    60_000,
+  )
 
   test("#given a holder without an image or parent lookup #when decoded #then its pid survives with an unknown image", () => {
     const diagnosticErrors = ["parent lookup failed"]

@@ -8,8 +8,11 @@ export interface ProcessKiller {
   readonly terminate: (pid: number) => Promise<void>
 }
 
-export function enumerateProcesses(platform: NodeJS.Platform = process.platform): Promise<ProcessInfo[]> {
-  return platform === "win32" ? enumerateWindowsProcesses() : enumeratePosixProcesses()
+export function enumerateProcesses(
+  platform: NodeJS.Platform = process.platform,
+  signal?: AbortSignal,
+): Promise<ProcessInfo[]> {
+  return platform === "win32" ? enumerateWindowsProcesses(signal) : enumeratePosixProcesses(signal)
 }
 
 export function createDefaultProcessKiller(platform: NodeJS.Platform = process.platform): ProcessKiller {
@@ -26,17 +29,17 @@ export function defaultIsProcessAlive(pid: number): boolean {
   }
 }
 
-function enumeratePosixProcesses(): Promise<ProcessInfo[]> {
-  return execFileText("ps", ["-eo", "pid=,ppid=,command="]).then(parsePosixProcessTable)
+function enumeratePosixProcesses(signal: AbortSignal | undefined): Promise<ProcessInfo[]> {
+  return execFileText("ps", ["-eo", "pid=,ppid=,command="], signal).then(parsePosixProcessTable)
 }
 
-function enumerateWindowsProcesses(): Promise<ProcessInfo[]> {
+function enumerateWindowsProcesses(signal: AbortSignal | undefined): Promise<ProcessInfo[]> {
   const command = [
     "Get-CimInstance Win32_Process",
     "Select-Object ProcessId,ParentProcessId,CommandLine",
     "ConvertTo-Json -Compress -Depth 2",
   ].join(" | ")
-  return execFileText("powershell.exe", ["-NoProfile", "-Command", command]).then(parseWindowsProcessTable)
+  return execFileText("powershell.exe", ["-NoProfile", "-Command", command], signal).then(parseWindowsProcessTable)
 }
 
 function createPosixKiller(): ProcessKiller {
@@ -61,18 +64,21 @@ function createWindowsKiller(): ProcessKiller {
   }
 }
 
-function execFileText(command: string, args: readonly string[]): Promise<string> {
+function execFileText(command: string, args: readonly string[], signal?: AbortSignal): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    execFile(
+    const child = execFile(
       command,
       [...args],
-      { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, windowsHide: true },
+      { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, windowsHide: true, ...(signal === undefined ? {} : { signal }) },
       (error, stdout) => {
-        if (error !== null) {
-          reject(error)
+        if (error === null) {
+          resolvePromise(stdout)
           return
         }
-        resolvePromise(stdout)
+        // An abort reports before the killed child has exited; settle only once it is gone.
+        if (signal?.aborted === true && child.pid !== undefined && child.exitCode === null && child.signalCode === null)
+          child.once("exit", () => reject(error))
+        else reject(error)
       },
     )
   })

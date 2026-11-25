@@ -13,6 +13,7 @@ export interface ProcessFamilySweepOptions {
   readonly log?: (message: string) => void
   readonly nowMs?: number
   readonly platform?: NodeJS.Platform
+  readonly signal?: AbortSignal
   readonly throttleMs?: number
 }
 
@@ -106,10 +107,11 @@ async function killTargets<TTarget extends { readonly pid: number }>(
     log: options.log,
   }
   for (const target of targets) {
+    options.signal?.throwIfAborted()
     if (!(await passesSignalAttestation(target, config.attestBeforeSignal, options.log, "SIGTERM"))) continue
     const terminated = await safelyTerminate(target.pid, context)
     if (!terminated) continue
-    await delay(options.graceMs ?? DEFAULT_GRACE_MS)
+    await delay(options.graceMs ?? DEFAULT_GRACE_MS, options.signal)
     if (!(await context.killer.isAlive(target.pid))) {
       killed.push(target)
       continue
@@ -173,9 +175,15 @@ function writeSweepStamp(stampFile: string, nowMs: number): void {
   utimesSync(stampFile, stampDate, stampDate)
 }
 
-function delay(ms: number): Promise<void> {
-  if (ms <= 0) return Promise.resolve()
+function delay(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (ms <= 0 || signal?.aborted === true) return Promise.resolve()
   return new Promise((resolvePromise) => {
-    setTimeout(resolvePromise, ms)
+    const done = (): void => {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", done)
+      resolvePromise()
+    }
+    const timer = setTimeout(done, ms)
+    signal?.addEventListener("abort", done, { once: true })
   })
 }

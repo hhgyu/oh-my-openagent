@@ -381,6 +381,22 @@ export class GatewayMigrationError extends Error {
 
 export async function migrate(ctx: StoreContext): Promise<void> {
   if (schemaVersion(ctx) >= GATEWAY_MIGRATIONS.length) return
+  // One schema step per transaction, each flushed to disk under synchronous=FULL, made a fresh store's open cost one
+  // flush per version: tens of seconds on a loaded Windows disk. In WAL mode NORMAL keeps every step atomic; a crash can
+  // only drop the newest steps, and the next open re-applies them from user_version. The prior level is restored before
+  // any non-migration write, whose first FULL commit flushes the whole WAL, migration frames included.
+  const priorSynchronous = Number(
+    ctx.sql.one(["synchronous"], "SELECT synchronous FROM pragma_synchronous")?.synchronous ?? 2,
+  )
+  ctx.sql.exec("PRAGMA synchronous = NORMAL")
+  try {
+    await migrateSteps(ctx)
+  } finally {
+    ctx.sql.exec(`PRAGMA synchronous = ${Math.trunc(priorSynchronous)}`)
+  }
+}
+
+async function migrateSteps(ctx: StoreContext): Promise<void> {
   for (;;) {
     const version = schemaVersion(ctx)
     if (version >= GATEWAY_MIGRATIONS.length) return
