@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { execFileSync, spawnSync } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { markerLine, splitFragment } from "./package-log-blocks.ts"
 import { removeTempRoot } from "./remove-temp-root.ts"
 import { CHANGELOG_PULL_URL } from "./changelog-gate.config.ts"
+import { copyScriptImportClosure } from "./script-import-closure.ts"
 
 // The migration (#10841) and the bundle train both run this CLI on real branches, so every case drives a real git
 // repository and then the real PR gate, the way CI judges the converted or folded branch.
-const SCRIPT_DIR = import.meta.dir
 const LOG = "packages/omo-senpi/changes.md"
 const PULL = CHANGELOG_PULL_URL
 const ENV = {
@@ -51,7 +51,7 @@ function scratch(): string {
   git(dir, "init", "-q", "-b", "dev")
   // A runner's global core.autocrlf=true (windows-latest) would check files out with CRLF; the expectations are bytes.
   git(dir, "config", "core.autocrlf", "false")
-  cpSync(SCRIPT_DIR, join(dir, "script"), { recursive: true, filter: (p) => !p.includes("node_modules") })
+  copyScriptImportClosure(["changelog-fragments-cli.ts", "check-pr-changelog.ts"], join(dir, "script"))
   write(dir, "package.json", JSON.stringify({ files: ["packages/omo-senpi/src"] }))
   write(dir, "packages/omo-senpi/src/index.ts", "export const v = 1\n")
   write(dir, LOG, "# omo-senpi changes\n\n## 2026-10-01 - old\n")
