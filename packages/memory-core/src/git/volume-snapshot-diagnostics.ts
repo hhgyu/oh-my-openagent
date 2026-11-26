@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { readFile, writeFile } from "node:fs/promises"
+import { readFile, writeFile } from "../fs/resilient"
 
 // Windows CI attributed a stalled `git add` to a Volume Shadow Copy snapshot only by process start times: VSSVC.exe
 // started in the same second as the git that then waited past its timeout. The timeout's record therefore carries
