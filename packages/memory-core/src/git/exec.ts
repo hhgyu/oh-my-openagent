@@ -4,6 +4,7 @@ import { win32 } from "node:path"
 import { GitAbortedError, GitNotFoundError, GitTimeoutError } from "./errors"
 import { memoryGitEnvironment } from "./exec-environment"
 import { holdGitActivityShared } from "./git-activity-lock"
+import { stopGitProcess } from "./stop-git-tree"
 import { recordGitTimeout } from "./timeout-diagnostics"
 import { publishVolumeSnapshotEvidence } from "./volume-snapshot-diagnostics"
 
@@ -140,17 +141,22 @@ function spawnGitCommand(
     let exitDrain: ReturnType<typeof setTimeout> | undefined
 
     let killTimer: ReturnType<typeof setTimeout> | undefined
+    // Set when the stop ends git's whole process tree (Windows); the call then settles once its stdio closes.
+    let treeStop: Promise<void> | undefined
+    const stop = () => {
+      treeStop ??= stopGitProcess(child, "SIGTERM", process.platform, environment)
+      return treeStop === undefined
+    }
     const timer = setTimeout(() => {
       timedOut = true
       const timeoutRecord = recordGitTimeout(environment, child.pid, argv, options.cwd, options.timeoutMs)
-      child.kill("SIGTERM")
-      killTimer = setTimeout(() => child.kill("SIGKILL"), options.killGraceMs ?? GIT_KILL_GRACE_MS)
+      if (stop()) killTimer = setTimeout(() => child.kill("SIGKILL"), options.killGraceMs ?? GIT_KILL_GRACE_MS)
       if (timeoutRecord !== undefined) void publishVolumeSnapshotEvidence(timeoutRecord)
     }, options.timeoutMs)
     let aborted = false
     const onAbort = () => {
       aborted = true
-      child.kill("SIGTERM")
+      stop()
     }
     if (options.signal?.aborted === true) onAbort()
     else options.signal?.addEventListener("abort", onAbort, { once: true })
@@ -216,11 +222,27 @@ function spawnGitCommand(
         termination: { signal, elapsedMs: Date.now() - startedAt },
       })
     }
+    const drainThenSettle = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (settled) return
+      exitDrain = setTimeout(() => {
+        // Still open past the drain: a hook child holds them. Destroy them so it cannot keep us.
+        child.stdout!.destroy()
+        child.stderr!.destroy()
+        settleWithResult(code, signal)
+      }, options.exitDrainMs ?? GIT_EXIT_DRAIN_MS)
+    }
     // Git has exited even while a hook it started still holds its stdout/stderr open, so `close`
-    // may never come. A stopped git (timeout or abort) settles at once; a git that finished
+    // may never come. A stopped git (timeout or abort) settles at once on POSIX and, on Windows, once its
+    // stopped process tree has released its stdio (stop-git-tree.ts); a git that finished
     // normally settles on `close`, or with what it wrote once the bounded drain runs out.
     child.on("exit", (code, signal) => {
       if (settled) return
+      if ((timedOut || aborted) && treeStop !== undefined) {
+        // The launcher is gone but its tree may still hold the repository until taskkill has ended it.
+        clearTimeout(timer)
+        void treeStop.then(() => drainThenSettle(code, signal))
+        return
+      }
       if (timedOut || aborted) {
         settled = true
         clearTimeout(timer)
@@ -230,12 +252,7 @@ function spawnGitCommand(
         return
       }
       clearTimeout(timer)
-      exitDrain = setTimeout(() => {
-        // Still open past the drain: a hook child holds them. Destroy them so it cannot keep us.
-        child.stdout!.destroy()
-        child.stderr!.destroy()
-        settleWithResult(code, signal)
-      }, options.exitDrainMs ?? GIT_EXIT_DRAIN_MS)
+      drainThenSettle(code, signal)
     })
     child.on("close", (code, signal) => settleWithResult(code, signal))
   })
