@@ -18,7 +18,16 @@
 //       [--loose-objects <n>] [--senpi-cli <cli.js>]`. Exit 0 only when every check passes.
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { deflateSync } from "node:zlib"
@@ -130,20 +139,6 @@ function processTable() {
     .map((match) => ({ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] }))
 }
 
-function descendants(rootPid, table = processTable()) {
-  const found = []
-  const queue = [rootPid]
-  while (queue.length > 0) {
-    const parent = queue.shift()
-    for (const row of table)
-      if (row.ppid === parent && !found.some((seen) => seen.pid === row.pid)) {
-        found.push(row)
-        queue.push(row.pid)
-      }
-  }
-  return found
-}
-
 const isMaintenanceGit = (row) => /maintenance run|pack-objects|prune-packed/.test(row.command)
 const isGit = (row) => /(?:^|[\\/\s"])git(?:\.exe)?(?:["\s]|$)/i.test(row.command)
 
@@ -195,15 +190,70 @@ function writeConfig(sandbox) {
   )
 }
 
-async function waitForMaintenanceGit(session) {
+/**
+ * Every process ever seen below senpi, tracked by parent pid. Each sample walks the tree from senpi AND from
+ * every pid already known, so a child whose parent has died is still followed: Windows keeps the dead
+ * parent's pid in its children's ParentProcessId. On Linux an orphan is reparented, so a sample there also
+ * takes any process whose cwd lies in the sandbox. A pid counts as a survivor only while it is alive with
+ * the same command line it was first seen with (no pid reuse).
+ */
+function createTreeTracker(rootPid, sandboxRoot) {
+  const started = Date.now()
+  const known = new Map()
+  const samples = []
+  const inSandboxByCwd = () => {
+    if (process.platform !== "linux") return new Set()
+    const pids = new Set()
+    for (const name of readdirSync("/proc")) {
+      if (!/^\d+$/.test(name)) continue
+      try {
+        if (readlinkSync(`/proc/${name}/cwd`).startsWith(sandboxRoot)) pids.add(Number(name))
+      } catch {
+        // gone, or another user's process
+      }
+    }
+    return pids
+  }
+  const sample = (phase) => {
+    const table = processTable()
+    const tree = new Set([rootPid, ...known.keys(), ...inSandboxByCwd()])
+    for (let grew = true; grew;) {
+      grew = false
+      for (const row of table)
+        if (tree.has(row.ppid) && !tree.has(row.pid)) {
+          tree.add(row.pid)
+          grew = true
+        }
+    }
+    const atMs = Date.now() - started
+    const live = []
+    for (const row of table) {
+      if (row.pid === rootPid || row.pid === process.pid || !tree.has(row.pid)) continue
+      const seen = known.get(row.pid)
+      if (seen === undefined) known.set(row.pid, { ...row, firstSeenMs: atMs, firstSeenPhase: phase, lastSeenMs: atMs })
+      else if (seen.command === row.command) seen.lastSeenMs = atMs
+      else continue
+      live.push(row.pid)
+    }
+    samples.push({ atMs, phase, live })
+    return table
+  }
+  const survivors = (table) =>
+    [...known.values()].filter((entry) => table.some((row) => row.pid === entry.pid && row.command === entry.command))
+  return { sample, survivors, known: () => [...known.values()], samples }
+}
+
+async function waitForMaintenanceGit(session, tracker) {
   const deadline = Date.now() + PASS_START_DEADLINE_MS
   for (;;) {
-    const table = processTable()
-    const tree = descendants(session.pid, table)
-    if (tree.some(isMaintenanceGit)) return tree
+    tracker.sample("before-pass")
+    const running = tracker.known().filter((entry) => isMaintenanceGit(entry))
+    if (running.length > 0) return running
     if (session.child.exitCode !== null) throw new Error("senpi exited before the maintenance pass started")
     if (Date.now() > deadline)
-      throw new Error(`no maintenance git under senpi within ${PASS_START_DEADLINE_MS}ms; tree=${JSON.stringify(tree)}`)
+      throw new Error(
+        `no maintenance git under senpi within ${PASS_START_DEADLINE_MS}ms; seen=${JSON.stringify(tracker.known())}`,
+      )
     await new Promise((resolve) => setTimeout(resolve, POLL_MS))
   }
 }
@@ -266,27 +316,37 @@ async function main() {
     facts.sessionId = state.sessionId
     facts.senpiPid = session.pid
     const started = Date.now()
-    const treeAtPass = await waitForMaintenanceGit(session)
-    const gitAtPass = treeAtPass.filter(isGit)
+    const tracker = createTreeTracker(session.pid, sandbox.root)
+    facts.processTree = { samples: tracker.samples }
+    const maintenanceAtPass = await waitForMaintenanceGit(session, tracker)
     facts.passStartedAfterMs = Date.now() - started
-    facts.treeAtPass = treeAtPass
     record(
       "maintenance git running under the live session",
-      gitAtPass.some(isMaintenanceGit),
-      gitAtPass.map((row) => `${row.pid} ${row.command.slice(0, 120)}`).join(" | "),
+      maintenanceAtPass.length > 0,
+      maintenanceAtPass.map((row) => `${row.pid} ${row.command.slice(0, 120)}`).join(" | "),
     )
-    const aliveAtShutdown = gitAtPass.filter((row) => isAlive(row.pid))
-    facts.gitAliveAtShutdown = aliveAtShutdown.map((row) => row.pid)
+    // One more walk right before shutdown, so a pack worker git has just started is in the tree too.
+    const aliveAtShutdown = tracker.survivors(tracker.sample("at-shutdown")).filter(isGit)
+    facts.gitAliveAtShutdown = aliveAtShutdown.map((row) => `${row.pid} ${row.command.slice(0, 120)}`)
     record(
       "the pass is still running when shutdown starts",
-      aliveAtShutdown.length > 0,
-      `alive=${facts.gitAliveAtShutdown.join(",")}`,
+      aliveAtShutdown.some(isMaintenanceGit),
+      facts.gitAliveAtShutdown.join(" | "),
     )
 
     // Shutdown exactly as a host closing the RPC channel does: input ends, senpi runs its own shutdown.
+    // The tree keeps being sampled until senpi has exited, so anything git starts during the stop is tracked.
     const shutdownStarted = Date.now()
     session.child.stdin.end()
-    const exitedOnItsOwn = await waitForExit(session.child, NATURAL_EXIT_WINDOW_MS)
+    const exited = waitForExit(session.child, NATURAL_EXIT_WINDOW_MS)
+    let exitedOnItsOwn
+    exited.then((value) => {
+      exitedOnItsOwn = value
+    })
+    while (exitedOnItsOwn === undefined) {
+      tracker.sample("during-shutdown")
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS))
+    }
     facts.shutdownMs = Date.now() - shutdownStarted
     facts.sessionExit = exitedOnItsOwn
       ? { code: session.child.exitCode, signal: session.child.signalCode }
@@ -298,14 +358,28 @@ async function main() {
       exitedOnItsOwn,
       `after ${facts.shutdownMs}ms exit=${JSON.stringify(facts.sessionExit)}`,
     )
-    const survivors = gitAtPass.filter((row) => isAlive(row.pid))
-    facts.gitSurvivorsAfterExit = survivors
-    const strays = processTable().filter((row) => row.command.includes(repo) || row.command.includes(sandbox.root))
+    // Two walks after exit: anything still alive below any pid ever seen, orphans included.
+    tracker.sample("after-exit")
+    const afterExit = tracker.sample("after-exit-confirm")
+    const everSeen = tracker.known()
+    const survivors = tracker.survivors(afterExit)
+    facts.processTree.everSeen = everSeen
+    facts.processTree.gitEverSeen = everSeen.filter(isGit)
+    facts.processTree.survivorsAfterExit = survivors
+    facts.gitSurvivorsAfterExit = survivors.filter(isGit)
+    const strays = afterExit.filter((row) => row.command.includes(repo) || row.command.includes(sandbox.root))
     facts.processesNamingTheSandboxAfterExit = strays
     record(
-      "no git process from the pass survives senpi's exit",
+      "every git process seen in senpi's tree (pack-objects included) is gone after its exit",
+      facts.gitSurvivorsAfterExit.length === 0,
+      facts.gitSurvivorsAfterExit.length === 0
+        ? `tracked ${facts.processTree.gitEverSeen.length} git pids over ${tracker.samples.length} tree samples: ${facts.processTree.gitEverSeen.map((row) => `${row.pid} ${row.command.slice(0, 60)}`).join(" | ")}`
+        : JSON.stringify(facts.gitSurvivorsAfterExit),
+    )
+    record(
+      "no process of senpi's tree survives its exit",
       survivors.length === 0,
-      survivors.length === 0 ? `checked ${gitAtPass.length} pids` : JSON.stringify(survivors),
+      survivors.length === 0 ? `tracked ${everSeen.length} pids` : JSON.stringify(survivors),
     )
     record("no process names the sandbox after exit", strays.length === 0, JSON.stringify(strays))
     const looseAfter = looseCount(repo)
@@ -328,7 +402,7 @@ async function main() {
   } finally {
     for (const session of live) facts[`cleanup-${session.pid}`] = await teardown(session)
     server.close()
-    for (const row of facts.gitSurvivorsAfterExit ?? []) {
+    for (const row of facts.processTree?.survivorsAfterExit ?? []) {
       if (!isAlive(row.pid)) continue
       try {
         if (process.platform === "win32")
