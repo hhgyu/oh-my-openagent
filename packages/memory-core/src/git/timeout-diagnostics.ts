@@ -64,13 +64,14 @@ export function recordGitTimeout(
   cwd: string,
   timeoutMs: number,
   snapshot: (pid: number) => string = processSnapshot,
-): void {
+): string | undefined {
   const directory = environment[GIT_TIMEOUT_DIAGNOSTICS_ENV]
-  if (!directory || pid === undefined) return
+  if (!directory || pid === undefined) return undefined
+  const recordPath = join(directory, `git-timeout-${pid}-${Date.now()}.json`)
   try {
     mkdirSync(directory, { recursive: true })
     writeFileSync(
-      join(directory, `git-timeout-${pid}-${Date.now()}.json`),
+      recordPath,
       `${JSON.stringify(
         {
           at: new Date().toISOString(),
@@ -85,7 +86,9 @@ export function recordGitTimeout(
         2,
       )}\n`,
     )
+    return recordPath
   } catch (error) {
     process.stderr.write(`git timeout diagnostics could not be written to ${directory}: ${String(error)}\n`)
+    return undefined
   }
 }
