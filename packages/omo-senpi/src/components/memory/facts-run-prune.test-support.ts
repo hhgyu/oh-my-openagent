@@ -1,7 +1,7 @@
 // Shared fixtures for the facts run pruning tests: temp identities, seeded terminal run dirs
 // and a REAL child process holding a lock (readiness is signalled on stdout, never timed).
 
-import { afterEach, expect } from "bun:test"
+import { expect, onTestFinished } from "bun:test"
 import type { ChildProcessWithoutNullStreams } from "node:child_process"
 import { spawn } from "node:child_process"
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
@@ -16,12 +16,26 @@ import { writeRunJsonAtomic } from "./worker/run-artifacts"
 import { remainingTestTime } from "../../../../../test-support/test-deadline"
 
 const holdLockFixture = join(import.meta.dir, "worker", "__fixtures__", "hold-lock.ts")
-const temporaryRoots: string[] = []
-const children = new Set<ChildProcessWithoutNullStreams>()
-
 const TEARDOWN_GRACE_MS = 2_000
 
-afterEach(async () => {
+type TestResources = { readonly roots: string[]; readonly children: Set<ChildProcessWithoutNullStreams> }
+
+// A module-level afterEach binds only to the first test file that imports this module, so a second importer
+// ran without teardown. Each test that takes a resource instead registers one cleanup on itself.
+let current: TestResources | undefined
+
+function testResources(): TestResources {
+  if (current !== undefined) return current
+  const resources: TestResources = { roots: [], children: new Set() }
+  current = resources
+  onTestFinished(async () => {
+    if (current === resources) current = undefined
+    await releaseResources(resources)
+  })
+  return resources
+}
+
+async function releaseResources({ roots, children }: TestResources): Promise<void> {
   // Temp roots die only after every tracked child is confirmed exited: rm under a live holder strands it.
   const tracked = [...children]
   children.clear()
@@ -35,12 +49,13 @@ afterEach(async () => {
       }
     }
   }
-  await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
-})
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+}
 
 export async function fixture(): Promise<{ readonly factsDir: string; readonly locksDir: string }> {
+  const resources = testResources()
   const root = await mkdtemp(join(tmpdir(), "omo-facts-prune-"))
-  temporaryRoots.push(root)
+  resources.roots.push(root)
   const factsDir = join(root, "facts")
   const locksDir = join(root, "locks")
   await mkdir(join(factsDir, "runs"), { recursive: true })
@@ -120,11 +135,30 @@ export function instant(index: number): string {
   return new Date(Date.parse("2026-08-01T00:00:00.000Z") + index * 60_000).toISOString()
 }
 
-/** Spawns a live process that holds `lockPath` until killed; resolves once it is held. */
-export async function holdLock(lockPath: string): Promise<void> {
+const spawnedHolders: ChildProcessWithoutNullStreams[] = []
+
+function osProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Every holder spawned so far whose process the OS still reports, whatever its ChildProcess object says. */
+export function lockHoldersStillRunning(): number[] {
+  return spawnedHolders
+    .map((child) => child.pid)
+    .filter((pid): pid is number => pid !== undefined && osProcessAlive(pid))
+}
+
+/** Spawns a live process that holds `lockPath` until killed; resolves with its pid once it is held. */
+export async function holdLock(lockPath: string): Promise<number> {
+  const { children } = testResources()
   const child = spawn(process.execPath, [holdLockFixture, lockPath], { stdio: ["pipe", "pipe", "pipe"] })
+  spawnedHolders.push(child)
   children.add(child)
-  child.once("exit", () => children.delete(child))
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("lock holder never reported ready")), remainingTestTime())
     let output = ""
@@ -141,6 +175,8 @@ export async function holdLock(lockPath: string): Promise<void> {
       reject(new Error(`lock holder exited early: ${code}`))
     })
   })
+  if (child.pid === undefined) throw new Error("lock holder has no pid")
+  return child.pid
 }
 
 export function runName(runDir: string): string {

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
@@ -15,6 +15,7 @@ import {
   fixture,
   holdLock,
   instant,
+  lockHoldersStillRunning,
   reserveRun,
   runName,
   runNames,
@@ -23,6 +24,52 @@ import {
 } from "./facts-run-prune.test-support"
 import { writeRunJsonAtomic } from "./worker/run-artifacts"
 import { useTestTimeout } from "../../../../../test-support/test-deadline"
+
+// Every lock holder a test here spawned has exited by the end of that test, whichever file loaded the
+// fixtures first: a module-level hook binds only to the first importer, which left them running until bun exited.
+beforeEach(() => {
+  expect(lockHoldersStillRunning()).toEqual([])
+})
+
+afterAll(() => {
+  expect(lockHoldersStillRunning()).toEqual([])
+})
+
+function osProcessAlive(pid: number): boolean {
+  return lockHoldersStillRunning().includes(pid)
+}
+
+// Each test here hands its holder pid to the next one, which runs only after the previous test's cleanup
+// settled; the OS is asked directly, so a holder reaped only when bun exits fails the next test.
+describe("lock holders end with the test that spawned them", () => {
+  let passingHolder: number | undefined
+  let failingHolder: number | undefined
+
+  test("#given a test that holds a lock #when it passes #then its holder is recorded for the next test", async () => {
+    const { locksDir } = await fixture()
+    passingHolder = await holdLock(factsRunsLockPath(locksDir))
+    expect(osProcessAlive(passingHolder)).toBe(true)
+  })
+
+  test("#given the previous test passed holding a lock #when this test starts #then that holder is gone", () => {
+    if (passingHolder === undefined) throw new Error("the previous test recorded no holder")
+    expect(osProcessAlive(passingHolder)).toBe(false)
+  })
+
+  test.failing(
+    "#given a test that holds a lock #when its body throws #then the failure is the test's own",
+    async () => {
+      const { locksDir } = await fixture()
+      failingHolder = await holdLock(factsRunsLockPath(locksDir))
+      throw new Error("controlled failure while the lock is held")
+    },
+  )
+
+  test("#given the previous test failed holding a lock #when this test starts #then that holder is gone", () => {
+    if (failingHolder === undefined) throw new Error("the failing test recorded no holder")
+    expect(osProcessAlive(failingHolder)).toBe(false)
+  })
+})
 
 describe("terminal facts run pruning", () => {
   test("#given 25 terminal runs #when pruning keeps the last 20 #then the newest 20 survive deterministically", async () => {

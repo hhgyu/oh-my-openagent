@@ -6,7 +6,7 @@ import { MemoryFakeExtensionAPI } from "../memory.test-support"
 import { fakeCommandContext, fakeDeps, invoke, seededRepo, tempIdentity } from "./commands.test-support"
 import { registerPeopleCommand } from "./people"
 import { derivePeopleGraph, resolvePersonQuery } from "./people-runtime"
-import { LIMITS, peopleFixture, tempDirs } from "./people.test-support"
+import { LIMITS, peopleFixture } from "./people.test-support"
 
 describe("people graph derivation", () => {
   test("#given three cards with four RELATIONSHIP lines #when the graph is derived #then nodes and edges match those lines exactly", async () => {
@@ -29,8 +29,7 @@ describe("people graph derivation", () => {
 
   test("#given a repository without any card #when the graph is derived #then it holds no node and no edge", async () => {
     // given
-    const { root, identity } = await tempIdentity()
-    tempDirs.push(root)
+    const { identity } = await tempIdentity()
     await seededRepo(identity, [{ relativePath: "system/persona.md", content: "---\ndescription: P\n---\nbody\n" }])
     const deps = fakeDeps(identity)
 
@@ -114,8 +113,7 @@ describe("/people command", () => {
   test("#given a card line carrying an aws key #when /people renders the card #then the key is masked", async () => {
     // given
     // given: a card committed before secret screening existed, so the repo has no screening hook
-    const { root, identity } = await tempIdentity()
-    tempDirs.push(root)
+    const { identity } = await tempIdentity()
     await new GitMemoryRepo({ dir: identity.identityPaths.repo, agentId: identity.identity, installHooks: () => undefined }).init({
       seedFiles: [
         {
