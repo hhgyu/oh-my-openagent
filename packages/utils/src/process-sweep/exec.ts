@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+
 import { runOwnedProcess } from "./owned-process"
 import { parsePosixProcessTable, parseWindowsProcessTable, type ProcessInfo } from "./process-table"
 
@@ -18,14 +20,32 @@ export function createDefaultProcessKiller(platform: NodeJS.Platform = process.p
   return platform === "win32" ? createWindowsKiller() : createPosixKiller()
 }
 
+/**
+ * A zombie is dead: it already exited and only waits for its reaper (init or a subreaper) to collect its
+ * status, which can take arbitrarily long. `kill(pid, 0)` still succeeds for it, so on Linux the
+ * process state in `/proc/<pid>/stat` decides.
+ */
 export function defaultIsProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
-    return true
   } catch (error) {
     if (!(error instanceof Error)) throw error
     return processKillErrorMeansAlive(error)
   }
+  return process.platform !== "linux" || !isLinuxZombie(pid)
+}
+
+function isLinuxZombie(pid: number): boolean {
+  let stat: string
+  try {
+    stat = readFileSync(`/proc/${pid}/stat`, "utf8")
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? error.code : undefined
+    return code === "ENOENT" || code === "ESRCH"
+  }
+  // The command name in parentheses may contain spaces or parentheses; the state follows the last ")".
+  const state = stat.charAt(stat.lastIndexOf(")") + 2)
+  return state === "Z" || state === "X"
 }
 
 function enumeratePosixProcesses(signal: AbortSignal | undefined): Promise<ProcessInfo[]> {
