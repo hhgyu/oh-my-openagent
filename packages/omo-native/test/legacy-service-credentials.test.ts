@@ -3,18 +3,22 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, wri
 import { spawnSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { remainingTestTime } from "../../../test-support/test-deadline"
+import { DEFAULT_TEST_TIMEOUT_MS, remainingTestTime } from "../../../test-support/test-deadline"
 import { removeLegacyServiceCredentials } from "../bin/lib/legacy-service-credentials.js"
 
 const homes: string[] = []
 const RUNTIME_READY = "[startup-phase] runtime ready"
+// Every spawning test declares this timeout itself, so the child bound below is derived from the deadline actually in
+// force under any invocation (a package-local `bun test` would otherwise apply bun's 5 s default). It equals the
+// budget CI already passes with --timeout, so no deadline grows there.
+const FIRST_COMMAND_TIMEOUT_MS = DEFAULT_TEST_TIMEOUT_MS
 
-// Bounded below the test's own budget so a stalled child is stopped here, with its output and the startup phase it
+// Bounded below the test's own budget so a stalled child is stopped here, with its output and the checkpoints it
 // reached, instead of being reaped as a dangling process after the test already timed out (run 45432342382).
 function runFirstCommand(entry: string, args: readonly string[], env: NodeJS.ProcessEnv, home: string, legacy: string) {
   const preload = join(home, "startup-phase.preload.ts")
   writeFileSync(preload, `process.stderr.write(${JSON.stringify(`${RUNTIME_READY}\n`)})\n`)
-  const bound = Math.max(1, Math.floor(remainingTestTime()))
+  const bound = Math.max(1, Math.floor(remainingTestTime(FIRST_COMMAND_TIMEOUT_MS)))
   const result = spawnSync(process.execPath, ["--preload", preload, join(import.meta.dir, "..", entry), ...args], {
     env,
     encoding: "utf8",
@@ -23,13 +27,10 @@ function runFirstCommand(entry: string, args: readonly string[], env: NodeJS.Pro
     killSignal: "SIGKILL",
   })
   if (result.error === undefined) return
-  const phase = !result.stderr?.includes(RUNTIME_READY)
-    ? "before the bun runtime ran any JavaScript"
-    : existsSync(legacy)
-      ? "after the runtime started and before main() removed the legacy file (loading the entry's imports)"
-      : "after main() removed the legacy file"
+  const marker = result.stderr?.includes(RUNTIME_READY) ? "runtime marker received" : "no runtime marker"
+  const file = existsSync(legacy) ? "legacy file still present" : "legacy file removed"
   throw new Error(
-    `${entry} ${args.join(" ")} was stopped at its ${bound} ms bound (${result.error.message}, signal ${String(result.signal)}); it stalled ${phase}\nstderr:\n${result.stderr ?? ""}\nstdout:\n${result.stdout ?? ""}`,
+    `${entry} ${args.join(" ")} was stopped at its ${bound} ms bound (${result.error.message}, signal ${String(result.signal)}); checkpoints: ${marker}; ${file}\nstderr:\n${result.stderr ?? ""}\nstdout:\n${result.stdout ?? ""}`,
   )
 }
 
@@ -70,36 +71,48 @@ describe("a first command after upgrading", () => {
   const isolatedEnv = (home: string) => ({ PATH: process.env.PATH, HOME: home, USERPROFILE: home, OMO_RUNTIME: "bun" })
 
   for (const args of FIRST_COMMANDS) {
-    test(`#given the legacy file #when \`omo ${args.join(" ")}\` runs through bin/omo.js #then the file is removed`, () => {
-      const { home, path } = homeWith(LEGACY)
-      runFirstCommand(join("bin", "omo.js"), args, isolatedEnv(home), home, path)
-      expect(existsSync(path)).toBe(false)
-    })
+    test(
+      `#given the legacy file #when \`omo ${args.join(" ")}\` runs through bin/omo.js #then the file is removed`,
+      () => {
+        const { home, path } = homeWith(LEGACY)
+        runFirstCommand(join("bin", "omo.js"), args, isolatedEnv(home), home, path)
+        expect(existsSync(path)).toBe(false)
+      },
+      FIRST_COMMAND_TIMEOUT_MS,
+    )
 
     // Run as the main module, like the release binary: its main() answers some commands before runCompiledLauncher.
-    test(`#given the legacy file #when \`omo ${args.join(" ")}\` runs through the compiled entry's main #then the file is removed`, () => {
-      const { home, path } = homeWith(LEGACY)
-      runFirstCommand("compile-entry.ts", args, isolatedEnv(home), home, path)
-      expect(existsSync(path)).toBe(false)
-    })
+    test(
+      `#given the legacy file #when \`omo ${args.join(" ")}\` runs through the compiled entry's main #then the file is removed`,
+      () => {
+        const { home, path } = homeWith(LEGACY)
+        runFirstCommand("compile-entry.ts", args, isolatedEnv(home), home, path)
+        expect(existsSync(path)).toBe(false)
+      },
+      FIRST_COMMAND_TIMEOUT_MS,
+    )
   }
 })
 
 describe("a first command the release entry answers before any launch", () => {
   // A refused extra-CA value makes main() answer and return before the launcher (#10215). The legacy cleanup must
   // already have run (#10658 round 2): it is main()'s first step, shared by every command and every early return.
-  test("#given the legacy file and a refused extra-CA value #when the compiled entry's main answers --version #then the file is removed", () => {
-    const { home, path } = homeWith(LEGACY)
-    const env = {
-      PATH: process.env.PATH,
-      HOME: home,
-      USERPROFILE: home,
-      OMO_RUNTIME: "bun",
-      OMO_EXTRA_CA_CERTIFICATES: "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
-    }
-    runFirstCommand("compile-entry.ts", ["--version"], env, home, path)
-    expect(existsSync(path)).toBe(false)
-  })
+  test(
+    "#given the legacy file and a refused extra-CA value #when the compiled entry's main answers --version #then the file is removed",
+    () => {
+      const { home, path } = homeWith(LEGACY)
+      const env = {
+        PATH: process.env.PATH,
+        HOME: home,
+        USERPROFILE: home,
+        OMO_RUNTIME: "bun",
+        OMO_EXTRA_CA_CERTIFICATES: "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
+      }
+      runFirstCommand("compile-entry.ts", ["--version"], env, home, path)
+      expect(existsSync(path)).toBe(false)
+    },
+    FIRST_COMMAND_TIMEOUT_MS,
+  )
 })
 
 describe("removeLegacyServiceCredentials", () => {
