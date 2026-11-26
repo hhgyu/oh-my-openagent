@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 // allow: SIZE_OK - this live driver keeps its before/run/after isolation evidence lifecycle in one auditable flow.
-import { spawnSync } from "node:child_process"
 import {
   existsSync,
   mkdirSync,
@@ -28,6 +27,7 @@ import {
   snapshotProtectedState,
   directoryIdentityAvailable,
 } from "./isolation-state.mjs"
+import { runBoundedSenpi } from "./bounded-senpi-run.mjs"
 import { isolatedChildEnv } from "./sandbox-child-env.mjs"
 
 export { changedSnapshotPaths, credentialDigest, digestDirectory, snapshotDirectory } from "./isolation-state.mjs"
@@ -110,7 +110,7 @@ function runSelfTest() {
 
 function runSenpi(senpiBin, sandbox, prompt, script, extraEnv = {}) {
   writeFileSync(join(sandbox.cwd, "mock-script.json"), `${JSON.stringify(script, null, 2)}\n`)
-  return spawnSync(
+  return runBoundedSenpi(
     senpiBin,
     [
       "-e",
@@ -140,12 +140,14 @@ function runSenpi(senpiBin, sandbox, prompt, script, extraEnv = {}) {
         PI_OFFLINE: "1",
         OMO_SENPI_QA: "1",
       },
-      encoding: "utf8",
-      // Without it every senpi launch opens a visible console window on win32 when the driver has none.
-      windowsHide: true,
-      timeout: 60_000,
+      timeoutMs: 60_000,
     },
   )
+}
+
+/** A launch that ran out of its budget, named for the result's `reason`; undefined when none did. */
+function timeoutReason(label, run) {
+  return run.timedOut ? `${label} exceeded its 60000ms budget; ${run.treeStop}` : undefined
 }
 
 function seedCertificationRoots(sandbox) {
@@ -220,7 +222,7 @@ function certificationEnvironmentObserved(sandbox) {
   return Object.entries(expected).every(([name, value]) => receipt[name] === value)
 }
 
-function main() {
+async function main() {
   const providedSenpiCodingAgentDir = process.env.SENPI_CODING_AGENT_DIR ? "IGNORED" : "unset"
   const isolationBefore = {
     senpiProtected: snapshotProtectedState(realSenpiAgentDir),
@@ -272,16 +274,17 @@ function main() {
       })
     }
 
-    const ultrawork = runSenpi(resolvedSenpi, sandbox, "ulw please respond", {
+    const ultrawork = await runSenpi(resolvedSenpi, sandbox, "ulw please respond", {
       steps: [{ type: "text", text: "ultrawork scenario complete" }],
     })
     ultraworkInjected = ultrawork.status === 0 && readSandboxText(sandbox.agentDir).includes("<ultrawork-mode>")
+    const timeouts = [timeoutReason("ultrawork print run", ultrawork)]
 
     const checkerBin = resolveCommentCheckerBin()
     if (checkerBin === null) {
       commentChecker = "SKIPPED-no-binary"
     } else {
-      const checker = runSenpi(
+      const checker = await runSenpi(
         resolvedSenpi,
         sandbox,
         "write qa slop",
@@ -301,11 +304,14 @@ function main() {
         },
         { OMO_COMMENT_CHECKER_BIN: checkerBin },
       )
+      timeouts.push(timeoutReason("comment-checker print run", checker))
       commentChecker =
         checker.status === 0 && readSandboxText(sandbox.agentDir).includes(commentCheckerHeader) ? "PASS" : "FAIL"
     }
 
-    const scenario = runScenarioFile(resolvedSenpi, sandbox)
+    const scenario = await runScenarioFile(resolvedSenpi, sandbox)
+    if (scenario?.timeout !== undefined) timeouts.push(scenario.timeout)
+    reason = timeouts.filter((entry) => entry !== undefined).join("; ") || undefined
     result =
       ultraworkInjected &&
       (commentChecker === "PASS" || commentChecker === "SKIPPED-no-binary") &&
@@ -331,11 +337,11 @@ function main() {
 // `--scenario <file.json>` = {prompt, steps, expect: string[], transcriptOut?}: one extra scripted
 // session in the same sandbox (for example a prompt that loads a bundled skill and runs its scripts);
 // PASS when it exits 0 and every expected string appears in the sandbox agent-dir text.
-function runScenarioFile(senpiBin, sandbox) {
+async function runScenarioFile(senpiBin, sandbox) {
   const index = process.argv.indexOf("--scenario")
   if (index < 0) return null
   const spec = JSON.parse(readFileSync(process.argv[index + 1], "utf8"))
-  const run = runSenpi(senpiBin, sandbox, spec.prompt, { steps: spec.steps })
+  const run = await runSenpi(senpiBin, sandbox, spec.prompt, { steps: spec.steps })
   const text = readSandboxText(sandbox.agentDir)
   if (spec.transcriptOut) writeFileSync(spec.transcriptOut, text)
   const missing = spec.expect.filter((needle) => !text.includes(needle))
@@ -344,6 +350,7 @@ function runScenarioFile(senpiBin, sandbox) {
     exitStatus: run.status,
     expected: spec.expect,
     missing,
+    ...(run.timedOut ? { timeout: timeoutReason("scenario print run", run) } : {}),
     ...(spec.transcriptOut ? { transcriptOut: spec.transcriptOut } : {}),
   }
 }
@@ -496,6 +503,6 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
     runSelfTest()
     console.log("SELF-TEST OK")
   } else {
-    main()
+    await main()
   }
 }
