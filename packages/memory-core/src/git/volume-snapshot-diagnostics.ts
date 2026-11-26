@@ -5,7 +5,7 @@ import { readFile, writeFile } from "node:fs/promises"
 // started in the same second as the git that then waited past its timeout. The timeout's record therefore carries
 // the snapshot evidence itself, collected after the git is signalled: recent VSS / volsnap events and the VSSVC
 // process. Only the event log and the process table are read, so the VSS service is never started.
-export const VOLUME_SNAPSHOT_DEADLINE_MS = 10_000
+const VOLUME_SNAPSHOT_DEADLINE_MS = 10_000
 const EVENT_WINDOW_MINUTES = 10
 const MAX_EVENTS_PER_PROVIDER = 50
 const MAX_OUTPUT_BYTES = 512 * 1024
@@ -42,10 +42,7 @@ function volumeSnapshotScript(windowMinutes: number): string {
   ].join("; ")
 }
 
-export function parseVolumeSnapshotOutput(
-  output: string,
-  windowMinutes = EVENT_WINDOW_MINUTES,
-): VolumeSnapshotEvidence {
+function parseVolumeSnapshotOutput(output: string, windowMinutes = EVENT_WINDOW_MINUTES): VolumeSnapshotEvidence {
   const events: VolumeSnapshotEvent[] = []
   const providerErrors: { provider: string; error: string }[] = []
   const vssvc: { pid: number; ppid: number; createdUtc: string }[] = []
