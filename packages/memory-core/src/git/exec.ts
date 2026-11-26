@@ -5,7 +5,7 @@ import { GitAbortedError, GitNotFoundError, GitTimeoutError } from "./errors"
 import { memoryGitEnvironment } from "./exec-environment"
 import { holdGitActivityShared } from "./git-activity-lock"
 import { recordGitTimeout } from "./timeout-diagnostics"
-import { appendVolumeSnapshotEvidence } from "./volume-snapshot-diagnostics"
+import { publishVolumeSnapshotEvidence } from "./volume-snapshot-diagnostics"
 
 export interface GitExecOptions {
   cwd: string
@@ -145,7 +145,7 @@ function spawnGitCommand(
       const timeoutRecord = recordGitTimeout(environment, child.pid, argv, options.cwd, options.timeoutMs)
       child.kill("SIGTERM")
       killTimer = setTimeout(() => child.kill("SIGKILL"), options.killGraceMs ?? GIT_KILL_GRACE_MS)
-      if (timeoutRecord !== undefined) void appendVolumeSnapshotEvidence(timeoutRecord)
+      if (timeoutRecord !== undefined) void publishVolumeSnapshotEvidence(timeoutRecord)
     }, options.timeoutMs)
     let aborted = false
     const onAbort = () => {

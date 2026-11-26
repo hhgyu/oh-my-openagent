@@ -1,10 +1,13 @@
 import { spawn } from "node:child_process"
-import { readFile, writeFile } from "../fs/resilient"
+import { randomUUID } from "node:crypto"
+
+import { rename, rm, writeFile } from "../fs/resilient"
 
 // Windows CI attributed a stalled `git add` to a Volume Shadow Copy snapshot only by process start times: VSSVC.exe
-// started in the same second as the git that then waited past its timeout. The timeout's record therefore carries
-// the snapshot evidence itself, collected after the git is signalled: recent VSS / volsnap events and the VSSVC
-// process. Only the event log and the process table are read, so the VSS service is never started.
+// started in the same second as the git that then waited past its timeout. The snapshot evidence itself (recent
+// VSS / volsnap events and the VSSVC process) is collected after the git is signalled and published next to the
+// timeout's record, which is never modified. Only the event log and the process table are read, so the VSS service
+// is never started.
 const VOLUME_SNAPSHOT_DEADLINE_MS = 10_000
 const EVENT_WINDOW_MINUTES = 10
 const MAX_EVENTS_PER_PROVIDER = 50
@@ -28,8 +31,32 @@ export interface VolumeSnapshotEvidence {
   readonly unparsed: readonly string[]
 }
 
-/** Runs the collector command and resolves with its stdout; it must settle by the given deadline. */
-export type VolumeSnapshotRunner = (args: readonly string[], deadlineMs: number) => Promise<string>
+export interface CollectorRun {
+  readonly stdout: string
+  readonly stderr: string
+  readonly exitCode: number | null
+}
+
+/** Runs the collector command; must settle (or reject) by the given deadline. */
+export type VolumeSnapshotRunner = (args: readonly string[], deadlineMs: number) => Promise<CollectorRun>
+
+export class VolumeSnapshotCollectorError extends Error {
+  override readonly name = "VolumeSnapshotCollectorError"
+  readonly exitCode: number | null
+  readonly stderr: string
+  readonly partial: VolumeSnapshotEvidence
+
+  constructor(run: CollectorRun, partial: VolumeSnapshotEvidence) {
+    super(
+      run.exitCode === 0
+        ? "volume snapshot collector wrote to stderr"
+        : `volume snapshot collector exited ${String(run.exitCode)}`,
+    )
+    this.exitCode = run.exitCode
+    this.stderr = run.stderr.slice(-4000)
+    this.partial = partial
+  }
+}
 
 function volumeSnapshotScript(windowMinutes: number): string {
   const providers = EVENT_PROVIDERS.map((name) => `'${name}'`).join(",")
@@ -42,7 +69,7 @@ function volumeSnapshotScript(windowMinutes: number): string {
   ].join("; ")
 }
 
-function parseVolumeSnapshotOutput(output: string, windowMinutes = EVENT_WINDOW_MINUTES): VolumeSnapshotEvidence {
+function parseVolumeSnapshotOutput(output: string, windowMinutes: number): VolumeSnapshotEvidence {
   const events: VolumeSnapshotEvent[] = []
   const providerErrors: { provider: string; error: string }[] = []
   const vssvc: { pid: number; ppid: number; createdUtc: string }[] = []
@@ -79,90 +106,147 @@ function parseVolumeSnapshotOutput(output: string, windowMinutes = EVENT_WINDOW_
 const runPowerShell: VolumeSnapshotRunner = (args, deadlineMs) =>
   new Promise((resolve, reject) => {
     const child = spawn("powershell", [...args], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true })
-    const chunks: Buffer[] = []
+    const stdout: Buffer[] = []
+    const stderr: Buffer[] = []
     let bytes = 0
+    const keep = (sink: Buffer[]) => (chunk: Buffer) => {
+      if (bytes < MAX_OUTPUT_BYTES) sink.push(chunk)
+      bytes += chunk.length
+    }
     const timer = setTimeout(() => {
       child.kill()
       reject(new Error(`volume snapshot collector did not finish within ${deadlineMs} ms`))
     }, deadlineMs)
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (bytes < MAX_OUTPUT_BYTES) chunks.push(chunk)
-      bytes += chunk.length
-    })
-    child.stderr.resume()
+    child.stdout.on("data", keep(stdout))
+    child.stderr.on("data", keep(stderr))
     child.once("error", (error) => {
       clearTimeout(timer)
       reject(error)
     })
-    child.once("close", () => {
+    child.once("close", (exitCode) => {
       clearTimeout(timer)
-      resolve(Buffer.concat(chunks).toString("utf8"))
+      resolve({
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+        exitCode,
+      })
     })
   })
 
+/** Resolves with parsed evidence; rejects with VolumeSnapshotCollectorError on a nonzero exit or any stderr. */
 export async function collectVolumeSnapshotEvidence(
   run: VolumeSnapshotRunner = runPowerShell,
   deadlineMs = VOLUME_SNAPSHOT_DEADLINE_MS,
   windowMinutes = EVENT_WINDOW_MINUTES,
 ): Promise<VolumeSnapshotEvidence> {
-  const output = await run(
+  const result = await run(
     ["-NoProfile", "-NonInteractive", "-Command", volumeSnapshotScript(windowMinutes)],
     deadlineMs,
   )
-  return parseVolumeSnapshotOutput(output, windowMinutes)
+  const evidence = parseVolumeSnapshotOutput(result.stdout, windowMinutes)
+  if (result.exitCode !== 0 || result.stderr.trim() !== "") throw new VolumeSnapshotCollectorError(result, evidence)
+  return evidence
 }
 
-export interface AppendVolumeSnapshotOptions {
+export interface EvidenceFiles {
+  readonly write: (path: string, data: string) => Promise<void>
+  readonly rename: (from: string, to: string) => Promise<void>
+  readonly remove: (path: string) => Promise<void>
+}
+
+const realFiles: EvidenceFiles = {
+  write: (path, data) => writeFile(path, data, { flag: "wx" }),
+  rename: (from, to) => rename(from, to),
+  remove: (path) => rm(path, { force: true }),
+}
+
+export interface PublishVolumeSnapshotOptions {
   readonly platform?: NodeJS.Platform
   readonly collect?: (deadlineMs: number) => Promise<VolumeSnapshotEvidence>
   readonly deadlineMs?: number
+  readonly files?: EvidenceFiles
+  readonly schedule?: (callback: () => void, delayMs: number) => () => void
+}
+
+export function volumeSnapshotEvidencePath(recordPath: string): string {
+  return `${recordPath}.vss.json`
+}
+
+function failureEvidence(error: unknown): Record<string, unknown> {
+  if (error instanceof VolumeSnapshotCollectorError)
+    return { error: error.message, exitCode: error.exitCode, stderr: error.stderr, partial: error.partial }
+  return { error: error instanceof Error ? error.message : String(error) }
 }
 
 /**
- * Adds `volumeShadowCopy` (or `volumeShadowCopyError`) to a git timeout record that is already on disk. One
- * deadline covers the collection and the record update; a late collection never writes. Never rejects, and the
- * record's existing fields, the process snapshot among them, are kept whatever the collector does.
+ * Publishes the volume snapshot evidence of a git timeout to `<record>.vss.json`, never touching the record itself.
+ * Every publish writes a temp file and renames it into place, so the sibling is either absent or complete. The
+ * collector's result (or its failure) is published only while the deadline has not passed; at the deadline a
+ * timeout marker is published instead, and a later result is discarded with its temp file. Never rejects.
  */
-export async function appendVolumeSnapshotEvidence(
+export async function publishVolumeSnapshotEvidence(
   recordPath: string,
-  options: AppendVolumeSnapshotOptions = {},
+  options: PublishVolumeSnapshotOptions = {},
 ): Promise<void> {
   if ((options.platform ?? process.platform) !== "win32") return
   const deadlineMs = options.deadlineMs ?? VOLUME_SNAPSHOT_DEADLINE_MS
   const collect = options.collect ?? ((deadline: number) => collectVolumeSnapshotEvidence(runPowerShell, deadline))
+  const files = options.files ?? realFiles
+  const schedule =
+    options.schedule ??
+    ((callback: () => void, delayMs: number) => {
+      const timer = setTimeout(callback, delayMs)
+      return () => clearTimeout(timer)
+    })
+  const target = volumeSnapshotEvidencePath(recordPath)
   const startedAt = Date.now()
-  let expired = false
-  const update = async (field: Record<string, unknown>): Promise<void> => {
-    if (expired) return
-    const record = JSON.parse(await readFile(recordPath, "utf8")) as Record<string, unknown>
-    if (expired) return
-    await writeFile(recordPath, `${JSON.stringify({ ...record, ...field }, null, 2)}\n`)
-  }
-  const work = (async () => {
+  // collecting -> publishing -> done, or collecting -> expired. Only the side that leaves `collecting` publishes,
+  // and the check and the transition are one synchronous step, so the result and the timeout marker never race.
+  const phase: { state: "collecting" | "publishing" | "expired" | "done" } = { state: "collecting" }
+  const currentPhase = () => phase.state
+
+  const publish = async (payload: Record<string, unknown>, claim: () => boolean): Promise<void> => {
+    const temp = `${target}.tmp-${process.pid}-${randomUUID()}`
     try {
-      const evidence = await collect(deadlineMs)
-      await update({ volumeShadowCopy: { ...evidence, collectedInMs: Date.now() - startedAt } })
+      await files.write(temp, `${JSON.stringify(payload, null, 2)}\n`)
+      if (!claim()) return
+      await files.rename(temp, target)
     } catch (error) {
-      await update({ volumeShadowCopyError: error instanceof Error ? error.message : String(error) })
+      process.stderr.write(`volume snapshot evidence could not be published to ${target}: ${String(error)}\n`)
+    } finally {
+      await files.remove(temp).catch(() => undefined)
     }
-  })()
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const deadline = new Promise<"expired">((resolve) => {
-    timer = setTimeout(() => resolve("expired"), deadlineMs)
-  })
-  try {
-    const outcome = await Promise.race([work.then(() => "done" as const), deadline])
-    if (outcome === "expired") {
-      expired = true
-      const record = JSON.parse(await readFile(recordPath, "utf8")) as Record<string, unknown>
-      await writeFile(
-        recordPath,
-        `${JSON.stringify({ ...record, volumeShadowCopyError: `not collected within ${deadlineMs} ms` }, null, 2)}\n`,
-      )
-    }
-  } catch (error) {
-    process.stderr.write(`volume snapshot evidence could not be added to ${recordPath}: ${String(error)}\n`)
-  } finally {
-    clearTimeout(timer)
   }
+
+  const fromCollector = (async () => {
+    let payload: Record<string, unknown>
+    try {
+      payload = { volumeShadowCopy: await collect(deadlineMs), collectedInMs: Date.now() - startedAt }
+    } catch (error) {
+      payload = failureEvidence(error)
+    }
+    if (phase.state !== "collecting") return
+    await publish(payload, () => {
+      if (phase.state !== "collecting") return false
+      phase.state = "publishing"
+      return true
+    })
+    if (currentPhase() === "publishing") phase.state = "done"
+  })()
+
+  const atDeadline = new Promise<void>((resolve) => {
+    const cancel = schedule(() => {
+      if (phase.state !== "collecting") return resolve()
+      phase.state = "expired"
+      void publish({ error: `not collected within ${deadlineMs} ms` }, () => true).then(resolve)
+    }, deadlineMs)
+    void fromCollector.then(() => {
+      if (phase.state === "done" || phase.state === "collecting") {
+        cancel()
+        resolve()
+      }
+    })
+  })
+
+  await atDeadline
 }

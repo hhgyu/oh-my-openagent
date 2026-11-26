@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 import {
-  appendVolumeSnapshotEvidence,
   collectVolumeSnapshotEvidence,
+  publishVolumeSnapshotEvidence,
+  type CollectorRun,
+  type EvidenceFiles,
   type VolumeSnapshotEvidence,
+  volumeSnapshotEvidencePath,
 } from "./volume-snapshot-diagnostics"
 
 const roots: string[] = []
@@ -17,7 +20,7 @@ afterEach(async () => {
 const json = (row: Record<string, unknown>) => JSON.stringify(row)
 
 // What the PowerShell collector prints: one JSON object per line, in whatever order the providers answered.
-const COLLECTOR_OUTPUT = [
+const COLLECTOR_STDOUT = [
   json({
     kind: "event",
     provider: "volsnap",
@@ -45,24 +48,56 @@ const COLLECTOR_OUTPUT = [
   "WARNING: something PowerShell printed that is not a record",
 ].join("\r\n")
 
+const runner = (run: CollectorRun) => async () => run
 const EMPTY: VolumeSnapshotEvidence = { windowMinutes: 10, events: [], providerErrors: [], vssvc: [], unparsed: [] }
+const RECORD_BODY = `${JSON.stringify({ pid: 9008, processes: "the process table taken before the kill" }, null, 2)}\n`
 
 async function timeoutRecord(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "volume-snapshot-record-"))
   roots.push(root)
   const path = join(root, "git-timeout-9008.json")
-  await writeFile(path, `${JSON.stringify({ pid: 9008, processes: "the process table taken before the kill" })}\n`)
+  await writeFile(path, RECORD_BODY)
   return path
 }
 
-async function readRecord(path: string): Promise<Record<string, unknown>> {
-  return JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>
+async function published(recordPath: string): Promise<Record<string, unknown>> {
+  return JSON.parse(await readFile(volumeSnapshotEvidencePath(recordPath), "utf8")) as Record<string, unknown>
+}
+
+/** The real files, with hooks that can stall or fail a write and observe each removal. */
+function files(onWrite?: (path: string) => Promise<void> | void, onRemoved?: (path: string) => void): EvidenceFiles {
+  return {
+    write: async (path, data) => {
+      await onWrite?.(path)
+      await writeFile(path, data, { flag: "wx" })
+    },
+    rename: (from, to) => rename(from, to),
+    remove: async (path) => {
+      await rm(path, { force: true })
+      onRemoved?.(path)
+    },
+  }
+}
+
+/** A deadline the test fires by hand. */
+function manualDeadline() {
+  let fire: (() => void) | undefined
+  return {
+    schedule: (callback: () => void) => {
+      fire = callback
+      return () => {
+        fire = undefined
+      }
+    },
+    fire: () => fire?.(),
+    armed: () => fire !== undefined,
+  }
 }
 
 describe("volume snapshot evidence collection", () => {
-  test("#given collector output with events, a provider error and a VSSVC row #when parsed #then events are ordered by UTC time and the provider error stays isolated", async () => {
+  test("#given output with events, a provider error and a VSSVC row #when collected #then events are UTC-ordered and the provider error stays isolated", async () => {
     // #when
-    const evidence = await collectVolumeSnapshotEvidence(async () => COLLECTOR_OUTPUT)
+    const evidence = await collectVolumeSnapshotEvidence(runner({ stdout: COLLECTOR_STDOUT, stderr: "", exitCode: 0 }))
 
     // #then
     expect(evidence.events.map((event) => [event.timeUtc, event.provider, event.id])).toEqual([
@@ -76,84 +111,158 @@ describe("volume snapshot evidence collection", () => {
     expect(evidence.unparsed).toEqual(["WARNING: something PowerShell printed that is not a record"])
   })
 
-  test("#given a runner that fails #when collected #then the failure propagates to the caller", async () => {
+  test("#given a collector that exits nonzero with no stdout #when collected #then it fails with the exit code and stderr", async () => {
     // #when
-    const outcome = await collectVolumeSnapshotEvidence(async () => {
-      throw new Error("powershell missing")
-    }).then(
-      () => "collected",
-      (error: unknown) => (error instanceof Error ? error.message : String(error)),
-    )
+    const failure = await collectVolumeSnapshotEvidence(
+      runner({ stdout: "", stderr: "Get-WinEvent : Access is denied", exitCode: 1 }),
+    ).catch((error: unknown) => error)
 
     // #then
-    expect(outcome).toBe("powershell missing")
+    expect(failure).toMatchObject({
+      name: "VolumeSnapshotCollectorError",
+      exitCode: 1,
+      stderr: "Get-WinEvent : Access is denied",
+      partial: { events: [] },
+    })
   })
 })
 
-describe("volume snapshot evidence in a git timeout record", () => {
-  test("#given a collected result #when appended #then the record keeps its process snapshot and gains the evidence", async () => {
+describe("volume snapshot evidence publishing", () => {
+  test("#given a collected result before the deadline #when published #then the sibling holds it and the record is byte-identical", async () => {
     // #given
     const path = await timeoutRecord()
-    const evidence = await collectVolumeSnapshotEvidence(async () => COLLECTOR_OUTPUT)
+    const deadline = manualDeadline()
+    const evidence = await collectVolumeSnapshotEvidence(runner({ stdout: COLLECTOR_STDOUT, stderr: "", exitCode: 0 }))
 
     // #when
-    await appendVolumeSnapshotEvidence(path, { platform: "win32", collect: async () => evidence })
-
-    // #then
-    const record = await readRecord(path)
-    expect(record["processes"]).toBe("the process table taken before the kill")
-    expect(record["volumeShadowCopy"]).toMatchObject({ events: evidence.events, vssvc: evidence.vssvc })
-  })
-
-  test("#given a collector that throws #when appended #then the process snapshot is kept and the failure is marked", async () => {
-    // #given
-    const path = await timeoutRecord()
-
-    // #when
-    await appendVolumeSnapshotEvidence(path, {
+    await publishVolumeSnapshotEvidence(path, {
       platform: "win32",
-      collect: async () => {
-        throw new Error("Get-WinEvent exploded")
-      },
+      collect: async () => evidence,
+      schedule: deadline.schedule,
     })
 
     // #then
-    const record = await readRecord(path)
-    expect(record["processes"]).toBe("the process table taken before the kill")
-    expect(record["volumeShadowCopyError"]).toBe("Get-WinEvent exploded")
-    expect(Object.keys(record)).not.toContain("volumeShadowCopy")
+    expect(await readFile(path, "utf8")).toBe(RECORD_BODY)
+    expect(await published(path)).toMatchObject({
+      volumeShadowCopy: { events: evidence.events, vssvc: evidence.vssvc },
+    })
+    expect(deadline.armed()).toBe(false)
+    expect((await readdir(dirname(path))).sort()).toEqual([basename(path), basename(volumeSnapshotEvidencePath(path))])
   })
 
-  test("#given a collector that outlives the deadline #when appended #then it settles at the deadline and a late result never writes", async () => {
+  test("#given a collector that exits nonzero #when published #then the sibling records the error with exit code and stderr", async () => {
     // #given
     const path = await timeoutRecord()
-    const late = Promise.withResolvers<VolumeSnapshotEvidence>()
-    const deadlineMs = 200
+    const deadline = manualDeadline()
 
     // #when
-    const startedAt = performance.now()
-    await appendVolumeSnapshotEvidence(path, { platform: "win32", deadlineMs, collect: () => late.promise })
-    const elapsedMs = performance.now() - startedAt
+    await publishVolumeSnapshotEvidence(path, {
+      platform: "win32",
+      collect: () =>
+        collectVolumeSnapshotEvidence(runner({ stdout: "", stderr: "Get-WinEvent : Access is denied", exitCode: 1 })),
+      schedule: deadline.schedule,
+    })
+
+    // #then
+    expect(await readFile(path, "utf8")).toBe(RECORD_BODY)
+    expect(await published(path)).toEqual({
+      error: "volume snapshot collector exited 1",
+      exitCode: 1,
+      stderr: "Get-WinEvent : Access is denied",
+      partial: EMPTY,
+    })
+  })
+
+  test("#given a result whose write stalls past the deadline #when the deadline fires #then the timeout marker is published and the late result never is", async () => {
+    // #given
+    const path = await timeoutRecord()
+    const deadline = manualDeadline()
+    const stalled = Promise.withResolvers<void>()
+    const staleTempRemoved = Promise.withResolvers<string>()
+    let stalledTemp = ""
+    let writes = 0
+    const publishing = publishVolumeSnapshotEvidence(path, {
+      platform: "win32",
+      deadlineMs: 50,
+      collect: async () => EMPTY,
+      schedule: deadline.schedule,
+      files: files(
+        async (temp) => {
+          writes += 1
+          if (writes !== 1) return
+          stalledTemp = temp
+          await stalled.promise
+        },
+        (removed) => {
+          if (removed === stalledTemp) staleTempRemoved.resolve(removed)
+        },
+      ),
+    })
+    while (writes === 0) await Promise.resolve()
+
+    // #when
+    deadline.fire()
+    await publishing
+    stalled.resolve()
+    await staleTempRemoved.promise
+
+    // #then
+    expect(await readFile(path, "utf8")).toBe(RECORD_BODY)
+    expect(await published(path)).toEqual({ error: "not collected within 50 ms" })
+    expect((await readdir(dirname(path))).sort()).toEqual([basename(path), basename(volumeSnapshotEvidencePath(path))])
+  })
+
+  test("#given a collector still running at the deadline #when it finishes later #then its result is discarded without touching the disk", async () => {
+    // #given
+    const path = await timeoutRecord()
+    const deadline = manualDeadline()
+    const late = Promise.withResolvers<VolumeSnapshotEvidence>()
+    const publishing = publishVolumeSnapshotEvidence(path, {
+      platform: "win32",
+      deadlineMs: 50,
+      collect: () => late.promise,
+      schedule: deadline.schedule,
+    })
+
+    // #when
+    deadline.fire()
+    await publishing
     late.resolve(EMPTY)
     for (let tick = 0; tick < 5; tick++) await Promise.resolve()
 
     // #then
-    expect(elapsedMs).toBeGreaterThanOrEqual(deadlineMs - 5)
-    expect(elapsedMs).toBeLessThan(deadlineMs + 1_000)
-    const record = await readRecord(path)
-    expect(record["processes"]).toBe("the process table taken before the kill")
-    expect(record["volumeShadowCopyError"]).toBe(`not collected within ${deadlineMs} ms`)
-    expect(Object.keys(record)).not.toContain("volumeShadowCopy")
+    expect(await published(path)).toEqual({ error: "not collected within 50 ms" })
+    expect((await readdir(dirname(path))).sort()).toEqual([basename(path), basename(volumeSnapshotEvidencePath(path))])
   })
 
-  test("#given a non-Windows platform #when appended #then nothing is collected and the record is untouched", async () => {
+  test("#given the evidence write fails #when published #then the record is byte-identical and no partial sibling exists", async () => {
     // #given
     const path = await timeoutRecord()
-    const before = await readFile(path, "utf8")
+    const deadline = manualDeadline()
+
+    // #when
+    await publishVolumeSnapshotEvidence(path, {
+      platform: "win32",
+      collect: async () => EMPTY,
+      schedule: deadline.schedule,
+      files: files(() => {
+        throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" })
+      }),
+    })
+
+    // #then
+    expect(await readFile(path, "utf8")).toBe(RECORD_BODY)
+    expect(await readdir(dirname(path))).toEqual([basename(path)])
+    expect(deadline.armed()).toBe(false)
+  })
+
+  test("#given a non-Windows platform #when published #then nothing is collected or written", async () => {
+    // #given
+    const path = await timeoutRecord()
     let collected = false
 
     // #when
-    await appendVolumeSnapshotEvidence(path, {
+    await publishVolumeSnapshotEvidence(path, {
       platform: "linux",
       collect: async () => {
         collected = true
@@ -163,7 +272,7 @@ describe("volume snapshot evidence in a git timeout record", () => {
 
     // #then
     expect(collected).toBe(false)
-    expect(await readFile(path, "utf8")).toBe(before)
+    expect(await readdir(dirname(path))).toEqual([basename(path)])
   })
 })
 
