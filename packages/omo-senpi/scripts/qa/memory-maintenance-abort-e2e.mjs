@@ -41,6 +41,7 @@ import {
   writeEvidence,
 } from "./kibitzer-sidecar-support.mjs"
 import { startMockCompletionsServer } from "./mock-completions-server.mjs"
+import { withTelemetryOptOut } from "./telemetry-opt-out-env.mjs"
 
 const IDENTITY = "maintenance-abort-qa"
 const PASS_START_DEADLINE_MS = 120_000
@@ -115,7 +116,7 @@ function processTable() {
         "-Command",
         'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)" }',
       ],
-      { encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024 },
+      { encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024, env: withTelemetryOptOut(process.env) },
     )
       .split(/\r?\n/)
       .map((line) => line.split("\t"))

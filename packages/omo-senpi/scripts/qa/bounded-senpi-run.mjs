@@ -6,6 +6,7 @@
 import { execFileSync, spawn } from "node:child_process"
 
 import { killSenpiRunTree, senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
+import { withTelemetryOptOut } from "./telemetry-opt-out-env.mjs"
 
 // Windows keeps a dead parent's pid in its children's ParentProcessId, so a shim that already exited still
 // names the engine it left behind.
@@ -17,7 +18,7 @@ function windowsChildren(pid) {
       "-Command",
       `Get-CimInstance Win32_Process -Filter 'ParentProcessId=${pid}' | ForEach-Object { $_.ProcessId }`,
     ],
-    { encoding: "utf8", windowsHide: true },
+    { encoding: "utf8", windowsHide: true, env: withTelemetryOptOut(process.env) },
   )
     .split(/\r?\n/)
     .map((line) => Number(line.trim()))
