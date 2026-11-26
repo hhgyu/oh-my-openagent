@@ -1,73 +1,35 @@
-# oh-my-opencode — OpenCode Plugin
+# Oh My OpenAgent for OpenCode 2
 
-> **HOLD THE FUCK UP. THIS ENTIRE GODDAMN CODEBASE IS BEING RIPPED APART AND REBUILT RIGHT NOW. A MASSIVE MULTI-HARNESS AGENT OS REFACTOR IS IN PROGRESS — WE ARE RESTRUCTURING EVERYTHING TO SUPPORT MULTIPLE AGENT HARNESSES (OPENCODE, CODEX, PI, AND OTHERS). DO NOT TRUST THE STRUCTURE BELOW AS STABLE. READ THE [ROADMAP](./ROADMAP.md) BEFORE YOU TOUCH ANYTHING OR SO HELP ME GOD.**
+This fork adds a native OpenCode 2 host and integrates reviewed upstream changes on `v2/dev`. Read the [roadmap](ROADMAP.md) before editing the repository. See the [README](README.md) for source installation, the [OpenCode 2 parity register](docs/reference/opencode-v2-parity.md) for supported behavior, and the [decision log](docs/DECISIONS_V2.md) for design rationale.
 
-**Generated:** 2026-08-24 | **Source snapshot:** f3642fcda | **Branch:** initdeep-refresh-20260824 | **Release:** v5.0.0-beta.18
+## Where to start
 
-## STOP. QA IS MANDATORY. NON-NEGOTIABLE. EVERY SINGLE TIME YOU TOUCH AN OPENCODE-, CODEX-, OR SENPI-CONNECTED COMPONENT.
+| Surface | Entry point |
+|---------|-------------|
+| OpenCode 2 server | [Compatibility entry](packages/omo-opencode/src/opencode-v2/server-entry.ts) and [native runtime](packages/omo-opencode/src/v2/index.ts) |
+| OpenCode 2 terminal | [TUI entry](packages/omo-opencode/src/opencode-v2/tui-entry.ts) |
+| OpenCode 1 server | [Package entry](packages/omo-opencode/src/index.ts) and [plugin factory](packages/omo-opencode/src/testing/create-plugin-module.ts) |
+| Build outputs | [Build graph](script/build-nodes.ts) emits the root, v2 and TUI bundles |
+| Configuration | [Unified OmO config](docs/reference/omo-json.md) and [OpenCode options](docs/reference/configuration.md) |
 
-> **IF YOUR CHANGE TOUCHES ANYTHING WIRED INTO OPENCODE, INTO THE CODEX LIGHT EDITION, OR INTO THE SENPI ADAPTER, YOU MUST QA IT. ALWAYS. EVERY SINGLE TIME. NO EXCEPTIONS. THERE IS NO "TOO SMALL TO SKIP". THERE IS NO "IT OBVIOUSLY WORKS".**
+## Change workflow
 
-**"It typechecks" is NOT QA. "`bun test` is green" is NOT QA.** YOU MUST DRIVE THE REAL HARNESS, and then **YOU MUST WRITE THE EVIDENCE TO DISK.** If there is no evidence file, **the QA DID NOT HAPPEN**, and **YOU ARE NOT ALLOWED TO COMMIT OR PUSH.**
+1. Trace the real entry points and callers before editing. Write a file-by-file plan with verification steps to disk, then track each edit and check as a separate todo.
+2. Use a fresh task-owned worktree and follow [work-with-pr](.agents/skills/work-with-pr/SKILL.md). Normal fork PRs target `v2/dev`. Follow explicit user instructions or the urgent hotfix exception when applicable.
+3. Register the goal and run `ulw-loop` with evidence for every success criterion. Update todo status as each step starts and finishes.
+4. Run the applicable QA before committing or pushing. Open an English PR with reviewer-readable evidence. Resolve conflicts through `smart-rebase`, rerun applicable QA, and follow the merge policy below.
 
-This is repeated on purpose, because it is the single most ignored rule in this repo. **CHANGE A HOOK, A TOOL, AN AGENT, A FEATURE, A CONFIG SCHEMA, AN MCP, A CLI COMMAND, AN INSTALLER, A PROMPT, OR ANYTHING ELSE THAT REACHES OPENCODE, CODEX, OR SENPI, THEN: RUN QA, THEN RECORD EVIDENCE.** Always. Every time. No exceptions.
+## Required harness QA
 
-### OPENCODE side (`packages/omo-opencode/`): ALWAYS run the `opencode-qa` skill
+Drive the real harness for every change that reaches it, including shared components. Apply each affected skill before and after the edit. Unit tests and typechecks supplement live QA.
 
-1. **ALWAYS RUN THE `opencode-qa` SKILL** (`.agents/skills/opencode-qa/`) to map the EXPECTED IMPACT and the FULL CHANGE SCOPE of your edit BEFORE and AFTER. Pick the right case: CLI (`opencode run --format json`), server + SSE hook proof, TUI smoke, or DB inspection.
-2. **ISOLATE EVERYTHING.** Any QA that SPAWNS opencode MUST run in an isolated XDG sandbox (`XDG_DATA_HOME` / `XDG_CONFIG_HOME` / `XDG_STATE_HOME` / `XDG_CACHE_HOME` pointed at temp dirs). The bundled scripts already do this. **NEVER pollute the real `~/.local/share/opencode/opencode.db`.** PROVE isolation by comparing `SELECT count(*) FROM session` before and after.
-3. **USE tmux** for the TUI smoke (`scripts/tui-smoke.sh`) and for any interactive driving. tmux is for SMOKE (did it boot, render, accept a key); assert REAL behavior via `opencode run --format json` or the server API + SSE.
-4. **PROVE THE HOOK FIRED.** If you changed a lifecycle hook, prove the matching event hit the wire (`scripts/sse-hook-probe.sh --event <name>`). Seeing the event proves the hook would fire.
+| Harness | Required checks |
+|---------|-----------------|
+| OpenCode | [opencode-qa](.agents/skills/opencode-qa/SKILL.md). Isolate XDG data, config, state and cache. Compare real SQLite session counts before and after. Use tmux for interactive smoke tests and the CLI or HTTP/SSE for behavior. Assert the matching SSE event for lifecycle hook changes. |
+| Codex Light | [codex-qa](.agents/skills/codex-qa/SKILL.md). Drive the real app-server with an isolated `CODEX_HOME` and a local mock model. Assert `hook/started` and `hook/completed` for the affected hook. Run `bun run test:codex` and verify the real config checksum is unchanged. |
+| Senpi | [senpi-qa](.agents/skills/senpi-qa/SKILL.md). Drive the real binary with the skill’s isolated agent directory. Run `tsgo --noEmit -p packages/omo-senpi/tsconfig.json` and `bun run test:senpi`. Record the isolation path and `realSenpiUntouched` or changed paths. A skipped driver leaves live QA incomplete. |
 
-### CODEX side (`packages/omo-codex/`): ALWAYS run the `codex-qa` skill
-
-1. **ALWAYS RUN THE `codex-qa` SKILL** (`.agents/skills/codex-qa/`) to map the EXPECTED IMPACT and the FULL CHANGE SCOPE of your edit BEFORE and AFTER. It exercises ONLY our plugin in strict isolation — an isolated `CODEX_HOME` + a LOCAL mock model (no real API call) — so the real `~/.codex` is NEVER read or written. NEVER QA against your real `~/.codex`; NEVER the published package.
-2. **PROVE THE HOOK FIRED, FIRST-PARTY.** The skill drives the real `codex app-server` and asserts `hook/started` / `hook/completed` notifications for our components (`scripts/app-server-drive.sh --plugin`). Deterministic per-component checks: `scripts/hook-unit-probe.sh`. Installer + `config.toml` landing: `scripts/install-verify.sh`. tmux TUI smoke: `scripts/tui-smoke.sh`. Each script ships a `--self-test`.
-3. **RUN THE CODEX GATE:** `bun run test:codex` (installer + config migration + plugin component suite). This is the hermetic UNIT gate; it does NOT prove a live session — the `codex-qa` skill does.
-4. **CONFIRM THE REAL `~/.codex/config.toml` WAS NOT TOUCHED** — every `codex-qa` script asserts this automatically (shasum before/after).
-
-### SENPI side (`packages/omo-senpi/`, `packages/senpi-task/`): ALWAYS run the `senpi-qa` skill
-
-1. **ALWAYS RUN THE `senpi-qa` SKILL** (`.agents/skills/senpi-qa/`) to map the EXPECTED IMPACT and the FULL CHANGE SCOPE of your edit BEFORE and AFTER. It drives the REAL `senpi` binary through the drivers in `packages/omo-senpi/scripts/qa/`, which build their own isolated `SENPI_CODING_AGENT_DIR` and IGNORE a caller-provided one, so the real `~/.senpi/agent` is NEVER written.
-2. **RESOLVE THE EVIDENCE DIRECTORY WITH THE SKILL'S SCRIPT.** `node .agents/skills/senpi-qa/scripts/resolve-evidence-dir.mjs --repo-root "$(git rev-parse --show-toplevel)" --slug <YYYYMMDD>-<short-slug>` is the ONLY sanctioned way to pick the path. It returns an absolute path under `.omo/evidence/omo-senpi-adapter/<slug>/`, creates nothing, and rejects traversal, separators, absolute paths, and stray roots such as `local-ignore/qa-evidence`.
-3. **RUN THE SENPI GATE:** `tsgo --noEmit -p packages/omo-senpi/tsconfig.json` then `bun run test:senpi`. This is the hermetic UNIT gate; it does NOT prove a live session — the `senpi-qa` skill does.
-4. **CONFIRM THE REAL `~/.senpi/agent` WAS NOT TOUCHED** — record the live driver's `realSenpiUntouched` / changed-path fields and isolated agent-dir path. A whole-directory digest is supporting evidence only because live debug/cache files may change. A driver reporting `SKIP` because the `senpi` binary is absent is NOT a pass; say so in the evidence.
-
-### EVIDENCE: write it under `.omo/evidence/` (local, NEVER committed) or it DID NOT HAPPEN
-
-**WRITE EVERY QA ARTIFACT TO `.omo/evidence/<YYYYMMDD>-<short-slug>/`** (one subfolder per change, keep it ORGANIZED). Live Senpi QA is the one scoped exception: it goes under `.omo/evidence/omo-senpi-adapter/<slug>/`, resolved by the `senpi-qa` skill's script. **THE EVIDENCE FILES STAY LOCAL.** `.omo/evidence/` is gitignored and `script/tracked-evidence-paths-audit.test.ts` fails the build the moment any evidence path is tracked (#8703): never `git add -f` an evidence file, and never invent another capture root inside the worktree (`.qa-evidence/`, `qa-evidence/`, a RED/GREEN `.txt` next to the sources). What reaches the reviewer is the **QA & Evidence section of the PR body**: the four items below, the decisive sanitized excerpt of each capture (the RED failure line, the GREEN pass count, the driver's final JSON, the isolation proof), and one `sha256sum <artifact>` line per local evidence file so the summary is checkable against the file that produced it. For EVERY change you MUST record reviewer-readable plain files locally and summarize them there:
-- **WHAT WAS TESTED:** the command or manual action, the surface driven, and the behavior it was meant to prove.
-- **WHAT WAS OBSERVED:** the before/after or new behavior, isolation proof such as unchanged session counts, and the artifact path for the exact captured output.
-- **WHY IT IS ENOUGH:** how the evidence covers the intended behavior and remaining regression risk.
-- **WHAT WAS OMITTED:** redact or summarize raw secret-bearing logs, env dumps, tokens, auth headers, and private credentials instead of copying them.
-
-**NO EVIDENCE FILE == NO QA == NO COMMIT == NO PUSH.** ALWAYS. EVERY TIME. NO EXCEPTIONS. **AND AN EVIDENCE FILE INSIDE THE COMMIT == A REJECTED PR.**
-
-## MANDATORY CHANGE-EXECUTION PROTOCOL. EVERY USER-ORDERED PATCH FOLLOWS THIS. NO EXCEPTIONS.
-
-> **THE MOMENT A TASK REQUIRES PRODUCING A PATCH THAT MODIFIES THIS REPOSITORY, AND THE USER HAS EXPLICITLY INSTRUCTED THAT MODIFICATION, THIS PROTOCOL IS LAW. IT IS NOT A SUGGESTION. IT IS NOT OPTIONAL. THERE IS NO "TOO SMALL TO BOTHER", NO "JUST THIS ONCE", NO "I ALREADY KNOW THE CODEBASE". YOU RUN EVERY STEP, IN ORDER, EVERY SINGLE TIME.**
-
-1. **EXPLORE.** MAP the code you are about to touch BEFORE editing a single line: read the real files, trace the call paths, measure the blast radius. NEVER patch from memory.
-2. **MAKE A PLAN.** Write the full plan down BEFORE the first edit: every file, every change, the verification for each. NO PLAN ON DISK MEANS YOU DO NOT START.
-3. **ADD TODOS IN ULTRA-DETAIL.** Mirror EVERY atomic step of the plan into the todo list: one todo per edit-plus-verification unit. Vague todos like "implement feature" are FORBIDDEN.
-4. **MAKE A NEW WORKTREE.** ALL implementation happens in a fresh, task-owned git worktree. NEVER edit the main checkout in place, NEVER hand-commit to `dev`.
-5. **MAKE A PR AND WORK UNTIL IT GETS MERGED.** Open a reviewer-readable PR and STAY ON IT until it is MERGED: fix CI, answer review, re-run QA, resolve conflicts via `smart-rebase`. AN UNMERGED PR IS UNFINISHED WORK.
-6. **SET A GOAL AND RUN THE ULW LOOP.** Register the goal with binding success criteria and drive the work through the `ulw-loop`: evidence-bound, reproduce-first, real-surface QA. "IT SHOULD WORK" IS NOT EVIDENCE.
-7. **MANAGE THE TODO LIST OBSESSIVELY.** Mark a step in progress the instant it begins, done the instant it finishes, append new steps the moment they surface. THE TODO LIST NEVER LAGS REALITY. EVER.
-
-## DEFAULT WORKFLOW — how to take on any task
-
-Unless the user EXPLICITLY says otherwise, or the task is an urgent must-fix-now hotfix, deliver every change through the **`work-with-pr`** skill: it works in an isolated git worktree, implements with evidence-bound manual QA, opens a reviewer-readable English PR (what changed, why, observed behavior, QA/evidence, residual risk), runs the verification loop, and merges. Do NOT hand-commit normal work straight to `dev`.
-
-- **QA is the evidence gate, scoped to what you touched.** A change under `packages/omo-opencode/` MUST run the **`opencode-qa`** skill; a change under `packages/omo-codex/` (lazycodex) MUST run the **`codex-qa`** skill; a change under `packages/omo-senpi/` or `packages/senpi-task/` MUST run the **`senpi-qa`** skill (see the QA section above for each). Run the matching skill, and treat its captured output (written under the gitignored `.omo/evidence/`, summarized in the PR body, never committed) as the QA evidence `work-with-pr` requires. A change touching more than one runs each.
-- **Conflicts → `smart-rebase`.** If the worktree branch conflicts with its base, resolve it with the **`smart-rebase`** skill, then re-run the scoped QA. Never hand-resolve by force-pushing shared history.
-- **Merge → merge commit, ALWAYS.** Land the PR with a merge commit per **PR MERGE POLICY** below. NEVER squash-merge or rebase-merge, even if a generic workflow, skill, or GitHub default suggests it.
-
-## OVERVIEW
-
-OpenCode plugin (npm: `oh-my-opencode`, dual-published as `oh-my-openagent` during the rename transition) extending OpenCode with 11 agents, ~54-62 lifecycle hooks (54 base / 61 team / 62 monitor) across 62 dirs, 12-38 registry tools (gated by config flags including team-mode and goal; 8 `lsp_*` aliases served via the built-in lsp MCP), 3-tier MCP system (built-in + .mcp.json + skill-embedded), Hashline LINE#ID edit tool, IntentGate keyword detector, Team Mode (parallel multi-agent coordination, OFF by default), Boulder feature (boulder-state work tracking + cli/boulder subcommand), configurable agent ordering, and Claude Code compatibility.
-
-**The package layering refactor moved the entire plugin out of root `src/` into [`packages/omo-opencode/src/`](packages/omo-opencode/src/AGENTS.md)** (a 100% git rename — there is NO root `src/` anymore). That adapter tree is now the OpenCode-facing shim over 20 Core packages + 4 MCP packages + sibling adapters (Codex, Senpi, native). Build entry: `packages/omo-opencode/src/index.ts`, a thin wrapper that delegates to `packages/omo-opencode/src/testing/create-plugin-module.ts` `createPluginModule()` → staged plugin init (see INITIALIZATION FLOW). Ships in two editions of one product: **Ultimate** (omo for OpenCode, this plugin = `packages/omo-opencode/`) and **Light** (omo for Codex CLI = [`packages/omo-codex/`](packages/omo-codex/AGENTS.md), with `lazycodex` as the repository/bin identity and `lazycodex-ai` as the live npm alias; see CODEX LIGHT EDITION below).
+Keep QA artifacts under gitignored `.omo/evidence/<YYYYMMDD>-<short-slug>/`. For live Senpi runs, resolve the path under `.omo/evidence/omo-senpi-adapter/` with the skill’s `scripts/resolve-evidence-dir.mjs`. Keep evidence out of commits. Include the command or action, observation and isolation proof, coverage and remaining risk, and redactions or omissions in the PR’s **QA & Evidence** section. Quote decisive sanitized output and include one `sha256sum` line per artifact. Record evidence before committing or pushing.
 
 ## STRUCTURE
 
@@ -76,6 +38,7 @@ oh-my-opencode/                      # workspace root (no root src/ — it moved
 ├── packages/                        # 45 sibling packages across Core/MCP/Skills/Adapters/Platform/Web. See packages/AGENTS.md
 │   ├── omo-opencode/                # ★ THE OpenCode plugin adapter (formerly root src/). Build entry: src/index.ts
 │   │   ├── src/                     # plugin source and OpenCode-facing adapter shims. Full breakdown → packages/omo-opencode/src/AGENTS.md
+│   │       ├── v2/                  # Native OpenCode 2 runtime and components
 │   │       ├── index.ts             # Plugin entry; thin wrapper re-exporting createPluginModule() from src/testing/
 │   │       ├── plugin-interface.ts  # 12 OpenCode hook handlers (+2 wired in testing/create-plugin-module.ts)
 │   │       ├── create-{managers,tools,hooks}.ts  # 4 managers / ToolRegistry / 5-tier hook composition
@@ -114,7 +77,7 @@ oh-my-opencode/                      # workspace root (no root src/ — it moved
 └── .local-ignore/                   # Dev-only test fixtures + PR worktrees (NOT part of the real AGENTS.md hierarchy)
 ```
 
-## INITIALIZATION FLOW
+## OPENCODE 1 INITIALIZATION FLOW
 
 ```
 pluginModule.server(input, options)   # serverPlugin() in packages/omo-opencode/src/testing/create-plugin-module.ts
@@ -142,7 +105,7 @@ pluginModule.server(input, options)   # serverPlugin() in packages/omo-opencode/
   └─→ createPluginDispose()           # final pluginHooks adds session.compacting + compaction.autocontinue + dispose
 ```
 
-## 14 OPENCODE HOOK HANDLERS
+## OPENCODE 1 HOOK HANDLERS
 
 12 wired in [`packages/omo-opencode/src/plugin-interface.ts`](packages/omo-opencode/src/plugin-interface.ts) + 2 wired directly in [`packages/omo-opencode/src/testing/create-plugin-module.ts`](packages/omo-opencode/src/testing/create-plugin-module.ts) (`experimental.session.compacting` + `experimental.compaction.autocontinue`).
 
@@ -163,7 +126,7 @@ pluginModule.server(input, options)   # serverPlugin() in packages/omo-opencode/
 | `experimental.session.compacting` | `experimental.session.compacting` | Context + todo preservation across compaction |
 | `experimental.compaction.autocontinue` | `experimental.compaction.autocontinue` | Auto-resume after compaction completes |
 
-## TOOL CATALOG (config-gated)
+## OPENCODE 1 TOOL CATALOG
 
 **Always on (12 registry tools):** `grep`, `glob`, `session_list`, `session_read`, `session_search`, `session_info`, `background_output`, `background_cancel`, `call_omo_agent`, `task` (delegate), `skill`, `skill_mcp`.
 
@@ -171,7 +134,7 @@ pluginModule.server(input, options)   # serverPlugin() in packages/omo-opencode/
 
 **Conditional (up to 38 total):** `look_at` (+1, multimodal-looker not disabled), `interactive_bash` (+1, `tmux` binary available on PATH via `isInteractiveBashEnabled()`), `monitor_start`/`monitor_stop`/`monitor_list`/`monitor_output` (+4, `monitor.enabled`), `task_create`/`task_get`/`task_list`/`task_update` (+4, `experimental.task_system`), `edit` (+1, `hashline_edit`), `team_create`/`team_delete`/`team_shutdown_request`/`team_approve_shutdown`/`team_reject_shutdown`/`team_send_message`/`team_task_create`/`team_task_list`/`team_task_update`/`team_task_get`/`team_status`/`team_list` (+12, `team_mode.enabled`), `create_goal`/`update_goal`/`get_goal` (+3, `goal.enabled`).
 
-## TEAM MODE
+## OPENCODE 1 TEAM MODE
 
 OFF by default. Parallel multi-agent coordination, modeled after Claude Code Agent Teams. Enable via `team_mode.enabled` in `.opencode/oh-my-opencode.jsonc` or user config; restart OpenCode after change.
 
@@ -207,6 +170,8 @@ Teams live as directories under `~/.omo/teams/{name}/config.json` (user) or `<pr
 **Implementation:** [`packages/omo-opencode/src/features/team-mode/`](packages/omo-opencode/src/features/team-mode/AGENTS.md). User docs: [`docs/guide/team-mode.md`](docs/guide/team-mode.md).
 
 ## CODEX LIGHT EDITION (omo-codex / lazycodex)
+
+The package and release details below describe the inherited upstream adapter.
 
 oh-my-openagent ships in two editions of one product. **Ultimate** = this OpenCode plugin (omo for OpenCode = `packages/omo-opencode/`). **Light** = omo for the OpenAI Codex CLI, vendored under [`packages/omo-codex/`](packages/omo-codex/AGENTS.md). "omo in Codex" / "omo for Codex" = **lazycodex**, and the public GitHub repo [`code-yeongyu/lazycodex`](https://github.com/code-yeongyu/lazycodex) is the thin marketplace/distribution layer over `omo-codex`; `lazycodex-ai` is the live npm alias and `lazycodex` is the repository/bin identity.
 
@@ -405,7 +370,7 @@ Adding the `ci:full-matrix` label (the only opt-in label for macOS/Windows on a 
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | push/PR to master/dev | `block-master-pr` guard, root `bun test` (fast-path matrix via `script/ci-fast-path.mjs`; full OS matrix on push, merge group, a release-state head, or the `ci:full-matrix` label; pull requests otherwise run Linux only; a leg that skipped its tests never reports a plain pass), typecheck, codex-compatibility (full `bun run test:codex` plus per-component `npm run check` on ubuntu; platform smoke on macos/windows), senpi-compatibility (bundle `--check` + `bun test packages/omo-senpi`), lazycodex-published-smoke, build, omo-ai-payload-check (npm dry-run payload), auto-commit schema on master push, draft "next" release on dev push |
+| `ci.yml` | push/PR to master, dev and v2/dev | `block-master-pr` guard, root `bun test` (fast-path matrix via `script/ci-fast-path.mjs`; full OS matrix on push, merge group, a release-state head, or the `ci:full-matrix` label; pull requests otherwise run Linux only; a leg that skipped its tests never reports a plain pass), typecheck, codex-compatibility (full `bun run test:codex` plus per-component `npm run check` on ubuntu; platform smoke on macos/windows), senpi-compatibility (bundle `--check` + `bun test packages/omo-senpi`), lazycodex-published-smoke, build, omo-ai-payload-check (npm dry-run payload), auto-commit schema on master push, draft "next" release on dev push |
 | `publish.yml` | manual dispatch | Test, typecheck, preflight-trust (OIDC verify workspace packages), dual npm publish (`oh-my-opencode` + `oh-my-openagent`) + `lazycodex-ai` npm alias (`publish_lazycodex`, default on) + automatic Codex marketplace sync to `code-yeongyu/lazycodex` on every **stable** release (no toggle; gated on empty `dist_tag`, needs `LAZYCODEX_SYNC_TOKEN`), 12 platform launcher packages, GitHub release, merge to master |
 | `publish-platform.yml` | called by publish.yml | 12 generated Node launcher packages for darwin/linux/windows |
 | `sisyphus-agent.yml` | @mention or manual dispatch | AI agent handles issues/PRs |
@@ -414,7 +379,7 @@ Adding the `ci:full-matrix` label (the only opt-in label for macOS/Windows on a 
 | `pr-automation-signal.yml` | PR events (read-only, no secrets) | Signal that wakes the privileged PR consumer; one run per PR (newer event cancels the older) |
 | `pr-automation.yml` | workflow_run on PR Automation Signal / dispatch (`pr_number`) | ONE job per PR event: CLA check (`cla`), review-claim reconcile (`Review claim gate`), package labels; each part posts its own check and the job fails if any part failed |
 | `lint-workflows.yml` | push/PR touching `.github/workflows/**` | actionlint only (`shellcheck=""` disables shellcheck) |
-| `web-ci.yml` | push/PR to master/dev touching `packages/web/**`, `docs/**`, or the workflow file itself | format-check, lint, type-check, next build, opennextjs-cloudflare build |
+| `web-ci.yml` | push/PR to master, dev and v2/dev touching `packages/web/**`, `docs/**`, or the workflow file itself | format-check, lint, type-check, next build, opennextjs-cloudflare build |
 | `web-deploy.yml` | push to master/dev touching `packages/web/**`, `docs/**`, or the workflow file itself, OR manual dispatch | Cloudflare Workers deploy via `cloudflare/wrangler-action@v4` to the Sisyphus Labs account (`omo-production` environment, `CLOUDFLARE_API_TOKEN` scoped to Workers scripts + omo.dev zone routes) |
 | `package-labels.yml` | issues opened/edited | Auto-applies package labels to issues (PR labels: `pr-automation.yml`) |
 | `stats.yml` | weekly cron (Sun) / dispatch | Runs `script/stats.ts` (npm + GitHub-release download counts) |
@@ -425,12 +390,12 @@ Never edit `CHANGELOG.md`, the root `changes.md` or any `packages/<name>/changes
 
 ## PR MERGE POLICY
 
-- **PRs into `dev` MUST use merge commits.**
+- **Fork PRs target `v2/dev` and must use merge commits.**
 - Use `gh pr merge <number> --merge --delete-branch` after CI, review-work, and Cubic pass.
 - **NEVER squash merge or rebase merge** PRs in this repository, even if a generic workflow, skill, or GitHub default suggests it.
 - If another instruction says `--squash` or `--rebase`, this repo-level rule overrides it.
 - **NEVER use `gh pr merge --admin` or any required-check override.** Do not request or act on authorization to bypass a gate.
-- A required check that is already red on `dev` is a base-branch defect and remains a merge blocker. Inspect the latest `dev` run, reproduce the failure on the matching platform and toolchain, root-fix it in the current PR or a separate atomic PR, rebase onto the repaired `dev`, rerun every required check, and record the evidence.
+- A required check that already fails on the base branch remains a merge blocker. Reproduce and fix it on the matching platform and toolchain, rebase onto the repaired base, rerun required checks, and record the evidence.
 - Reducing the failure count is not a green result. Never make a gate disappear through `test.skip`, weakened assertions, retry loops, `continue-on-error`, platform or shell exclusion, or an environment-specific workaround.
 
 ## NOTES
@@ -462,7 +427,7 @@ Never edit `CHANGELOG.md`, the root `changes.md` or any `packages/<name>/changes
 - **ParentWakeNotifier:** Background-agent parent-wake state in `packages/omo-opencode/src/features/background-agent/parent-wake-notifier.ts` with dependency-injected client and enqueue callback.
 - **Agent state directory:** ONE canonical location, `~/.omo/agent`, resolved through `canonicalAgentDir()` in [`packages/omo-native/bin/lib/agent-dir.js`](packages/omo-native/bin/lib/agent-dir.js) (and its adapter-side twin `resolveAgentHome()` in `packages/omo-senpi/src/components/agent-home/`). EVERY omo entry point - the spawned engine, `omo doctor`, `omo setup`, the local launcher, the local installer - MUST resolve the directory through that helper instead of composing its own default; an explicit `OMO_CODING_AGENT_DIR` (or the legacy `SENPI_CODING_AGENT_DIR` / `PI_CODING_AGENT_DIR`) still wins. Composing a private default is what made settings look erased on update.
 - **Workspace migration:** Runtime state migrated from `.sisyphus/` → `.omo/`. Legacy `.sisyphus/` still exists during transition; `packages/omo-opencode/src/shared/legacy-workspace-migration.ts` copies it forward on first load.
-- **CI nuance:** PRs targeting `master` are hard-blocked — they MUST target `dev`. CI auto-commits schema changes on master push and creates a draft "next" release on dev push.
+- **Inherited release automation:** CI commits generated schemas on pushes to `master` and creates a draft release on pushes to `dev`.
 
 ## Review claim labels (merge-gating)
 
