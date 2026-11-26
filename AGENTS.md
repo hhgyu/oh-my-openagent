@@ -1,6 +1,6 @@
 # Oh My OpenAgent for OpenCode 2
 
-This fork adds a native OpenCode 2 host and integrates reviewed upstream changes on `v2/dev`. Read the [roadmap](ROADMAP.md) before changing package boundaries. See the [README](README.md) for source installation, the [OpenCode 2 parity register](docs/reference/opencode-v2-parity.md) for supported behavior, and the [decision log](docs/DECISIONS_V2.md) for design rationale.
+This fork adds a native OpenCode 2 host and integrates reviewed upstream changes on `v2/dev`. Read the [roadmap](ROADMAP.md) before editing the repository. See the [README](README.md) for source installation, the [OpenCode 2 parity register](docs/reference/opencode-v2-parity.md) for supported behavior, and the [decision log](docs/DECISIONS_V2.md) for design rationale.
 
 ## Where to start
 
@@ -38,6 +38,7 @@ oh-my-opencode/                      # workspace root (no root src/ — it moved
 ├── packages/                        # 45 sibling packages across Core/MCP/Skills/Adapters/Platform/Web. See packages/AGENTS.md
 │   ├── omo-opencode/                # ★ THE OpenCode plugin adapter (formerly root src/). Build entry: src/index.ts
 │   │   ├── src/                     # plugin source and OpenCode-facing adapter shims. Full breakdown → packages/omo-opencode/src/AGENTS.md
+│   │       ├── v2/                  # Native OpenCode 2 runtime and components
 │   │       ├── index.ts             # Plugin entry; thin wrapper re-exporting createPluginModule() from src/testing/
 │   │       ├── plugin-interface.ts  # 12 OpenCode hook handlers (+2 wired in testing/create-plugin-module.ts)
 │   │       ├── create-{managers,tools,hooks}.ts  # 4 managers / ToolRegistry / 5-tier hook composition
