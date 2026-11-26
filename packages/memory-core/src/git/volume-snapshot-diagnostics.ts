@@ -40,7 +40,7 @@ export interface CollectorRun {
 /** Runs the collector command; must settle (or reject) by the given deadline. */
 export type VolumeSnapshotRunner = (args: readonly string[], deadlineMs: number) => Promise<CollectorRun>
 
-export class VolumeSnapshotCollectorError extends Error {
+class VolumeSnapshotCollectorError extends Error {
   override readonly name = "VolumeSnapshotCollectorError"
   readonly exitCode: number | null
   readonly stderr: string
