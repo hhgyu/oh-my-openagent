@@ -64,14 +64,21 @@ async function published(recordPath: string): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(volumeSnapshotEvidencePath(recordPath), "utf8")) as Record<string, unknown>
 }
 
-/** The real files, with hooks that can stall or fail a write and observe each removal. */
-function files(onWrite?: (path: string) => Promise<void> | void, onRemoved?: (path: string) => void): EvidenceFiles {
+/** The real files, with hooks that can stall or fail a write or a rename and observe each removal. */
+function files(
+  onWrite?: (path: string) => Promise<void> | void,
+  onRemoved?: (path: string) => void,
+  onRename?: () => Promise<void>,
+): EvidenceFiles {
   return {
     write: async (path, data) => {
       await onWrite?.(path)
       await writeFile(path, data, { flag: "wx" })
     },
-    rename: (from, to) => rename(from, to),
+    rename: async (from, to) => {
+      await onRename?.()
+      await rename(from, to)
+    },
     remove: async (path) => {
       await rm(path, { force: true })
       onRemoved?.(path)
@@ -208,8 +215,77 @@ describe("volume snapshot evidence publishing", () => {
 
     // #then
     expect(await readFile(path, "utf8")).toBe(RECORD_BODY)
-    expect(await published(path)).toEqual({ error: "not collected within 50 ms" })
+    expect(await published(path)).toEqual({
+      error: "not collected within 50 ms",
+      exitCode: null,
+      stderr: null,
+      partial: null,
+    })
     expect((await readdir(dirname(path))).sort()).toEqual([basename(path), basename(volumeSnapshotEvidencePath(path))])
+  })
+
+  test("#given a rename admitted before the deadline that stalls past it #when the deadline fires #then it settles at once, and after release the sibling holds the complete collector evidence with no marker and no temp", async () => {
+    // #given
+    const path = await timeoutRecord()
+    const deadline = manualDeadline()
+    const renameStarted = Promise.withResolvers<void>()
+    const releaseRename = Promise.withResolvers<void>()
+    const tempRemoved = Promise.withResolvers<void>()
+    const evidence = await collectVolumeSnapshotEvidence(runner({ stdout: COLLECTOR_STDOUT, stderr: "", exitCode: 0 }))
+    const publishing = publishVolumeSnapshotEvidence(path, {
+      platform: "win32",
+      deadlineMs: 50,
+      collect: async () => evidence,
+      schedule: deadline.schedule,
+      files: files(
+        undefined,
+        () => tempRemoved.resolve(),
+        async () => {
+          renameStarted.resolve()
+          await releaseRename.promise
+        },
+      ),
+    })
+    await renameStarted.promise
+
+    // #when
+    deadline.fire()
+    await publishing
+    const settledBeforeRelease = await readdir(dirname(path))
+    releaseRename.resolve()
+    await tempRemoved.promise
+
+    // #then
+    expect(settledBeforeRelease.some((name) => name === basename(volumeSnapshotEvidencePath(path)))).toBe(false)
+    expect(await readFile(path, "utf8")).toBe(RECORD_BODY)
+    expect(await published(path)).toMatchObject({
+      volumeShadowCopy: { events: evidence.events, vssvc: evidence.vssvc },
+    })
+    expect(Object.keys(await published(path))).not.toContain("error")
+    expect((await readdir(dirname(path))).sort()).toEqual([basename(path), basename(volumeSnapshotEvidencePath(path))])
+  })
+
+  test("#given a thrown collector error #when published #then the sibling carries the same four fields as any failure", async () => {
+    // #given
+    const path = await timeoutRecord()
+    const deadline = manualDeadline()
+
+    // #when
+    await publishVolumeSnapshotEvidence(path, {
+      platform: "win32",
+      collect: async () => {
+        throw new Error("spawn powershell ENOENT")
+      },
+      schedule: deadline.schedule,
+    })
+
+    // #then
+    expect(await published(path)).toEqual({
+      error: "spawn powershell ENOENT",
+      exitCode: null,
+      stderr: null,
+      partial: null,
+    })
   })
 
   test("#given a collector still running at the deadline #when it finishes later #then its result is discarded without touching the disk", async () => {
@@ -231,7 +307,12 @@ describe("volume snapshot evidence publishing", () => {
     for (let tick = 0; tick < 5; tick++) await Promise.resolve()
 
     // #then
-    expect(await published(path)).toEqual({ error: "not collected within 50 ms" })
+    expect(await published(path)).toEqual({
+      error: "not collected within 50 ms",
+      exitCode: null,
+      stderr: null,
+      partial: null,
+    })
     expect((await readdir(dirname(path))).sort()).toEqual([basename(path), basename(volumeSnapshotEvidencePath(path))])
   })
 

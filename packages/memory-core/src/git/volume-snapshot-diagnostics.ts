@@ -175,14 +175,16 @@ export function volumeSnapshotEvidencePath(recordPath: string): string {
 function failureEvidence(error: unknown): Record<string, unknown> {
   if (error instanceof VolumeSnapshotCollectorError)
     return { error: error.message, exitCode: error.exitCode, stderr: error.stderr, partial: error.partial }
-  return { error: error instanceof Error ? error.message : String(error) }
+  return { error: error instanceof Error ? error.message : String(error), exitCode: null, stderr: null, partial: null }
 }
 
 /**
  * Publishes the volume snapshot evidence of a git timeout to `<record>.vss.json`, never touching the record itself.
  * Every publish writes a temp file and renames it into place, so the sibling is either absent or complete. The
- * collector's result (or its failure) is published only while the deadline has not passed; at the deadline a
- * timeout marker is published instead, and a later result is discarded with its temp file. Never rejects.
+ * deadline controls admission: the collector's result (or its failure) is admitted only while the deadline has not
+ * passed, and at the deadline, if nothing was admitted, a timeout marker is published instead. A rename admitted before
+ * the deadline cannot be cancelled and may finish after it; it then publishes the complete collector evidence. A
+ * result that is not admitted is discarded with its temp file. Never rejects.
  */
 export async function publishVolumeSnapshotEvidence(
   recordPath: string,
@@ -238,7 +240,7 @@ export async function publishVolumeSnapshotEvidence(
     const cancel = schedule(() => {
       if (phase.state !== "collecting") return resolve()
       phase.state = "expired"
-      void publish({ error: `not collected within ${deadlineMs} ms` }, () => true).then(resolve)
+      void publish(failureEvidence(new Error(`not collected within ${deadlineMs} ms`)), () => true).then(resolve)
     }, deadlineMs)
     void fromCollector.then(() => {
       if (phase.state === "done" || phase.state === "collecting") {
