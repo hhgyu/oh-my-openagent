@@ -277,7 +277,6 @@
     "packages/memory-core/src/fs/write-all.ts",
     "packages/memory-core/src/git/commit-outcome.ts",
     "packages/memory-core/src/git/config-lock.ts",
-    "packages/memory-core/src/git/diagnostic-capture.ts",
     "packages/memory-core/src/git/errors.ts",
     "packages/memory-core/src/git/exec-environment.ts",
     "packages/memory-core/src/git/exec.ts",
