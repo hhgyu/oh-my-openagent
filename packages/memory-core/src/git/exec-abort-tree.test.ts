@@ -13,9 +13,7 @@ import { createNodeGitExec } from "./exec"
 const tempDirs: string[] = []
 
 afterEach(async () => {
-  await Promise.all(
-    tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })),
-  )
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
 async function initRepo(): Promise<string> {
