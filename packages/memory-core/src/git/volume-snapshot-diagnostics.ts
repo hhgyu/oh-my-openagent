@@ -13,7 +13,7 @@ export const VOLUME_SNAPSHOT_SECTIONS = {
   shadows: "== vssadmin list shadows",
 } as const
 
-export function volumeSnapshotScript(): string {
+function volumeSnapshotScript(): string {
   const providers = EVENT_PROVIDERS.map((name) => `'${name}'`).join(",")
   return [
     `$since = (Get-Date).AddMinutes(-${EVENT_WINDOW_MINUTES})`,
