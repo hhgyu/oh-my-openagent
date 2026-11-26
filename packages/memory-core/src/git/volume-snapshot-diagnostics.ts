@@ -20,7 +20,7 @@ function volumeSnapshotScript(): string {
     `"${VOLUME_SNAPSHOT_SECTIONS.events} (Application, System; since $($since.ToUniversalTime().ToString('o')))"`,
     // One query per provider: a provider that is not registered on this host must not hide the others. The time window is an
     // XPath timediff in milliseconds, which does not depend on the host's locale the way a StartTime DateTime does.
-    `foreach ($provider in @(${providers})) { try { Get-WinEvent -LogName Application,System -FilterXPath "*[System[Provider[@Name='$provider'] and TimeCreated[timediff(@SystemTime) &lt;= ${EVENT_WINDOW_MINUTES * 60_000}]]]" -ErrorAction Stop | ForEach-Object { '{0} {1} {2} id={3} {4}: {5}' -f $_.TimeCreated.ToUniversalTime().ToString('o'), $_.LogName, $_.ProviderName, $_.Id, $_.LevelDisplayName, ($_.Message -replace '\\s+', ' ') } } catch { "$($provider): $($_.Exception.Message)" } }`,
+    `foreach ($provider in @(${providers})) { $failure = $null; Get-WinEvent -LogName Application,System -FilterXPath "*[System[Provider[@Name='$provider'] and TimeCreated[timediff(@SystemTime) &lt;= ${EVENT_WINDOW_MINUTES * 60_000}]]]" -ErrorAction SilentlyContinue -ErrorVariable failure | ForEach-Object { '{0} {1} {2} id={3} {4}: {5}' -f $_.TimeCreated.ToUniversalTime().ToString('o'), $_.LogName, $_.ProviderName, $_.Id, $_.LevelDisplayName, ($_.Message -replace '\\s+', ' ') }; if ($failure) { "$($provider): $($failure[0].Exception.Message)" } }`,
     `"${VOLUME_SNAPSHOT_SECTIONS.process}"`,
     `Get-CimInstance Win32_Process -Filter "Name='VSSVC.exe'" | ForEach-Object { '{0} ppid={1} created={2}' -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.ToUniversalTime().ToString('o') }`,
     `"${VOLUME_SNAPSHOT_SECTIONS.shadows}"`,
