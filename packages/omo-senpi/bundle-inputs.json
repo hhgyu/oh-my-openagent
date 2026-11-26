@@ -309,6 +309,7 @@
     "packages/memory-core/src/git/secret.ts",
     "packages/memory-core/src/git/stable-log-output.ts",
     "packages/memory-core/src/git/timeout-diagnostics.ts",
+    "packages/memory-core/src/git/volume-snapshot-diagnostics.ts",
     "packages/memory-core/src/git/worktree-mutation-queue.ts",
     "packages/memory-core/src/git/worktree-restore.ts",
     "packages/memory-core/src/identity/git-layout.ts",
