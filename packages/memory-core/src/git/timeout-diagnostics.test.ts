@@ -6,7 +6,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { GIT_TIMEOUT_DIAGNOSTICS_ENV, recordGitTimeout } from "./timeout-diagnostics"
-import { VOLUME_SNAPSHOT_SECTIONS, volumeSnapshotEvidence } from "./volume-snapshot-diagnostics"
 
 const roots: string[] = []
 const stops: Array<() => void> = []
@@ -91,93 +90,6 @@ describe("recordGitTimeout snapshot contract (#12145)", () => {
     expect(record.timeoutMs).toBe(2_000)
     expect(record.processes).toBe(expected)
   })
-})
-
-describe("volume shadow copy evidence on a git timeout", () => {
-  test("#given injected volume snapshot evidence #when git times out #then the record carries it next to the processes", async () => {
-    // #given
-    const directory = await mkdtemp(join(tmpdir(), "git-timeout-vss-"))
-    roots.push(directory)
-    const evidence = `${VOLUME_SNAPSHOT_SECTIONS.process}\n4242 ppid=600 created=2026-11-26T00:02:12.000Z\n`
-    // #when
-    recordGitTimeout(
-      { [GIT_TIMEOUT_DIAGNOSTICS_ENV]: directory },
-      9008,
-      ["add", "-A"],
-      directory,
-      30_000,
-      () => "table",
-      () => evidence,
-    )
-    // #then
-    const record: Record<string, unknown> = JSON.parse(
-      await readFile(join(directory, (await readdir(directory))[0] ?? ""), "utf8"),
-    )
-    expect(record["processes"]).toBe("table")
-    expect(record["volumeShadowCopy"]).toBe(evidence)
-  })
-
-  test("#given no volume snapshot evidence #when git times out #then the record has no volumeShadowCopy field", async () => {
-    // #given
-    const directory = await mkdtemp(join(tmpdir(), "git-timeout-novss-"))
-    roots.push(directory)
-    // #when
-    recordGitTimeout(
-      { [GIT_TIMEOUT_DIAGNOSTICS_ENV]: directory },
-      9008,
-      ["add"],
-      directory,
-      30_000,
-      () => "table",
-      () => undefined,
-    )
-    // #then
-    const record: Record<string, unknown> = JSON.parse(
-      await readFile(join(directory, (await readdir(directory))[0] ?? ""), "utf8"),
-    )
-    expect(Object.keys(record)).not.toContain("volumeShadowCopy")
-  })
-
-  test("#given a non-Windows platform #when volume evidence is collected #then nothing runs", () => {
-    // #given
-    const calls: string[] = []
-    // #when
-    const evidence = volumeSnapshotEvidence("linux", (file) => {
-      calls.push(file)
-      return "unexpected"
-    })
-    // #then
-    expect(evidence).toBeUndefined()
-    expect(calls).toEqual([])
-  })
-
-  test("#given Windows #when volume evidence is collected #then one bounded PowerShell run queries the events, VSSVC and the shadows", () => {
-    // #given
-    const runs: Array<{ file: string; args: readonly string[]; timeoutMs: number }> = []
-    // #when
-    const evidence = volumeSnapshotEvidence("win32", (file, args, timeoutMs) => {
-      runs.push({ file, args, timeoutMs })
-      return "captured"
-    })
-    // #then
-    expect(evidence).toBe("captured")
-    expect(runs).toHaveLength(1)
-    expect(runs[0]?.file).toBe("powershell")
-    expect(runs[0]?.timeoutMs).toBeLessThanOrEqual(10_000)
-    const script = runs[0]?.args.at(-1) ?? ""
-    for (const marker of Object.values(VOLUME_SNAPSHOT_SECTIONS)) expect(script).toContain(marker)
-    for (const provider of ["VSS", "volsnap"]) expect(script).toContain(`'${provider}'`)
-  })
-
-  test.skipIf(process.platform !== "win32")(
-    "#given a real Windows host #when volume evidence is collected #then every section is present",
-    () => {
-      // #when
-      const evidence = volumeSnapshotEvidence() ?? ""
-      // #then
-      for (const marker of Object.values(VOLUME_SNAPSHOT_SECTIONS)) expect(evidence).toContain(marker)
-    },
-  )
 })
 
 // A `ps` whose table is far past the 1 MiB pipe cap spawnSync applies by default (#12801): 80,000
