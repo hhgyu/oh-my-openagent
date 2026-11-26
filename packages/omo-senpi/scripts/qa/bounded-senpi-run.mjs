@@ -5,6 +5,8 @@
 // shim is still alive. A run past its budget is ended entirely and reported as timed out, never leaked.
 import { execFileSync, spawn } from "node:child_process"
 
+import { killSenpiRunTree, senpiRunSpawnOptions } from "./senpi-run-spawn.mjs"
+
 // Windows keeps a dead parent's pid in its children's ParentProcessId, so a shim that already exited still
 // names the engine it left behind.
 function windowsChildren(pid) {
@@ -25,12 +27,11 @@ function windowsChildren(pid) {
 function stopTree(child, platform) {
   try {
     if (platform !== "win32") {
-      process.kill(-child.pid, "SIGKILL")
+      killSenpiRunTree(child.pid, "SIGKILL", platform)
       return `SIGKILL to process group ${child.pid}`
     }
     const roots = child.exitCode === null && child.signalCode === null ? [child.pid] : windowsChildren(child.pid)
-    for (const pid of roots)
-      execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true })
+    for (const pid of roots) killSenpiRunTree(pid, "SIGKILL", platform)
     return `taskkill /T ended ${roots.length === 0 ? "nothing (no live tree)" : `pid ${roots.join(", ")} and descendants`}`
   } catch (error) {
     return `tree stop FAILED: ${error instanceof Error ? error.message : String(error)}`
@@ -47,9 +48,7 @@ export function runBoundedSenpi(file, args, { cwd, env, timeoutMs, platform = pr
       cwd,
       env,
       stdio: ["ignore", "pipe", "pipe"],
-      // Without it every senpi launch opens a visible console window on win32 when the driver has none.
-      windowsHide: true,
-      detached: platform !== "win32",
+      ...senpiRunSpawnOptions(platform),
     })
     let stdout = ""
     let stderr = ""
