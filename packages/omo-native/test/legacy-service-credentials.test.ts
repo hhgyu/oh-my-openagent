@@ -3,9 +3,35 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, wri
 import { spawnSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { remainingTestTime } from "../../../test-support/test-deadline"
 import { removeLegacyServiceCredentials } from "../bin/lib/legacy-service-credentials.js"
 
 const homes: string[] = []
+const RUNTIME_READY = "[startup-phase] runtime ready"
+
+// Bounded below the test's own budget so a stalled child is stopped here, with its output and the startup phase it
+// reached, instead of being reaped as a dangling process after the test already timed out (run 45432342382).
+function runFirstCommand(entry: string, args: readonly string[], env: NodeJS.ProcessEnv, home: string, legacy: string) {
+  const preload = join(home, "startup-phase.preload.ts")
+  writeFileSync(preload, `process.stderr.write(${JSON.stringify(`${RUNTIME_READY}\n`)})\n`)
+  const bound = Math.max(1, Math.floor(remainingTestTime()))
+  const result = spawnSync(process.execPath, ["--preload", preload, join(import.meta.dir, "..", entry), ...args], {
+    env,
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: bound,
+    killSignal: "SIGKILL",
+  })
+  if (result.error === undefined) return
+  const phase = !result.stderr?.includes(RUNTIME_READY)
+    ? "before the bun runtime ran any JavaScript"
+    : existsSync(legacy)
+      ? "after the runtime started and before main() removed the legacy file (loading the entry's imports)"
+      : "after main() removed the legacy file"
+  throw new Error(
+    `${entry} ${args.join(" ")} was stopped at its ${bound} ms bound (${result.error.message}, signal ${String(result.signal)}); it stalled ${phase}\nstderr:\n${result.stderr ?? ""}\nstdout:\n${result.stdout ?? ""}`,
+  )
+}
 
 afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
@@ -46,22 +72,14 @@ describe("a first command after upgrading", () => {
   for (const args of FIRST_COMMANDS) {
     test(`#given the legacy file #when \`omo ${args.join(" ")}\` runs through bin/omo.js #then the file is removed`, () => {
       const { home, path } = homeWith(LEGACY)
-      spawnSync(process.execPath, [join(import.meta.dir, "..", "bin", "omo.js"), ...args], {
-        env: isolatedEnv(home),
-        encoding: "utf8",
-        windowsHide: true,
-      })
+      runFirstCommand(join("bin", "omo.js"), args, isolatedEnv(home), home, path)
       expect(existsSync(path)).toBe(false)
     })
 
     // Run as the main module, like the release binary: its main() answers some commands before runCompiledLauncher.
     test(`#given the legacy file #when \`omo ${args.join(" ")}\` runs through the compiled entry's main #then the file is removed`, () => {
       const { home, path } = homeWith(LEGACY)
-      spawnSync(process.execPath, [join(import.meta.dir, "..", "compile-entry.ts"), ...args], {
-        env: isolatedEnv(home),
-        encoding: "utf8",
-        windowsHide: true,
-      })
+      runFirstCommand("compile-entry.ts", args, isolatedEnv(home), home, path)
       expect(existsSync(path)).toBe(false)
     })
   }
@@ -79,11 +97,7 @@ describe("a first command the release entry answers before any launch", () => {
       OMO_RUNTIME: "bun",
       OMO_EXTRA_CA_CERTIFICATES: "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
     }
-    spawnSync(process.execPath, [join(import.meta.dir, "..", "compile-entry.ts"), "--version"], {
-      env,
-      encoding: "utf8",
-      windowsHide: true,
-    })
+    runFirstCommand("compile-entry.ts", ["--version"], env, home, path)
     expect(existsSync(path)).toBe(false)
   })
 })
