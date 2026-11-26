@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { runBoundedSenpi } from "./bounded-senpi-run.mjs"
+import { stopSenpiRunTree } from "./senpi-run-spawn.mjs"
 
 const dirs = []
 const strays = []
@@ -49,8 +50,38 @@ describe("bounded senpi launch", () => {
     strays.push(grandchild)
     expect(run.timedOut).toBe(true)
     expect(run.status).toBeNull()
-    expect(run.treeStop).not.toContain("FAILED")
+    expect(run.treeStop.ok).toBe(true)
     expect(alive(grandchild)).toBe(false)
+  })
+
+  test("#given a launch past its budget whose tree stop fails #when the stop rejects #then the launch resolves at once and reports the failure", async () => {
+    // given
+    const cwd = mkdtempSync(join(tmpdir(), "bounded-senpi-run-"))
+    dirs.push(cwd)
+    const stopped = []
+    const stopTreeOf = async (pid) => {
+      stopped.push(pid)
+      throw new Error(`taskkill exited with code 1 for pid ${pid}`)
+    }
+
+    // when
+    const run = await runBoundedSenpi(process.execPath, ["-e", PARENT], {
+      cwd,
+      env: process.env,
+      timeoutMs: 3_000,
+      stopTreeOf,
+    })
+
+    // then
+    strays.push(Number(readFileSync(join(cwd, "grandchild.pid"), "utf8")))
+    // The fake stop left the real tree running; end it for real before the temp dir is removed.
+    await stopSenpiRunTree(stopped[0])
+    expect(run.timedOut).toBe(true)
+    expect(run.status).toBeNull()
+    expect(run.treeStop).toEqual({
+      ok: false,
+      detail: `tree stop FAILED, descendants may still be alive: taskkill exited with code 1 for pid ${stopped[0]}`,
+    })
   })
 
   test("#given a launch that finishes within its budget #when it exits #then its status and output are returned untouched", async () => {

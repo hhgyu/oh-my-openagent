@@ -1,0 +1,104 @@
+import { describe, expect, test } from "bun:test"
+import { ChildProcess } from "node:child_process"
+
+import { SenpiRunTreeStopError, stopSenpiRunTree } from "./senpi-run-spawn.mjs"
+
+function fakeTaskkill() {
+  const fake = new ChildProcess()
+  const killed = []
+  const calls = []
+  fake.kill = (signal) => {
+    killed.push(signal)
+    return true
+  }
+  return {
+    process: fake,
+    killed,
+    calls,
+    spawnProcess: (executable, args) => {
+      calls.push([executable, ...args])
+      return fake
+    },
+  }
+}
+
+const settle = (promise) =>
+  promise.then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  )
+
+describe("checked senpi run tree stop on win32", () => {
+  test("#given taskkill exits 0 #when the tree is stopped #then it resolves after targeting the run's whole tree", async () => {
+    // given
+    const taskkill = fakeTaskkill()
+
+    // when
+    const stopped = stopSenpiRunTree(4242, { platform: "win32", spawnProcess: taskkill.spawnProcess })
+    taskkill.process.emit("exit", 0, null)
+
+    // then
+    expect((await settle(stopped)).value).toBe("taskkill /T /F ended pid 4242 and its descendants")
+    expect(taskkill.calls).toEqual([["taskkill", "/T", "/F", "/PID", "4242"]])
+  })
+
+  test("#given taskkill cannot be spawned #when the tree is stopped #then it rejects naming the pid", async () => {
+    // given
+    const spawnProcess = () => {
+      throw Object.assign(new Error("spawn taskkill ENOENT"), { code: "ENOENT" })
+    }
+
+    // when
+    const { error } = await settle(stopSenpiRunTree(4242, { platform: "win32", spawnProcess }))
+
+    // then
+    expect(error).toBeInstanceOf(SenpiRunTreeStopError)
+    expect(error.message).toBe("taskkill could not start for pid 4242")
+    expect(error.cause.code).toBe("ENOENT")
+  })
+
+  test("#given taskkill reports a spawn error event #when the tree is stopped #then it rejects with that cause", async () => {
+    // given
+    const taskkill = fakeTaskkill()
+    const cause = new Error("EACCES")
+
+    // when
+    const stopped = stopSenpiRunTree(4242, { platform: "win32", spawnProcess: taskkill.spawnProcess })
+    taskkill.process.emit("error", cause)
+
+    // then
+    const { error } = await settle(stopped)
+    expect(error).toBeInstanceOf(SenpiRunTreeStopError)
+    expect(error.cause).toBe(cause)
+  })
+
+  test("#given taskkill exits nonzero #when the tree is stopped #then it rejects naming the exit code", async () => {
+    // given
+    const taskkill = fakeTaskkill()
+
+    // when
+    const stopped = stopSenpiRunTree(4242, { platform: "win32", spawnProcess: taskkill.spawnProcess })
+    taskkill.process.emit("exit", 128, null)
+
+    // then
+    const { error } = await settle(stopped)
+    expect(error).toBeInstanceOf(SenpiRunTreeStopError)
+    expect(error.message).toBe("taskkill exited with code 128 for pid 4242")
+  })
+
+  test("#given taskkill never finishes #when its deadline passes #then taskkill is killed and the stop rejects", async () => {
+    // given
+    const taskkill = fakeTaskkill()
+
+    // when
+    const { error } = await settle(
+      stopSenpiRunTree(4242, { platform: "win32", spawnProcess: taskkill.spawnProcess, deadlineMs: 50 }),
+    )
+
+    // then
+    expect(error).toBeInstanceOf(SenpiRunTreeStopError)
+    expect(error.message).toBe("taskkill did not finish within 50ms for pid 4242")
+    expect(taskkill.killed).toEqual(["SIGKILL"])
+    taskkill.process.emit("exit", 0, null)
+  })
+})

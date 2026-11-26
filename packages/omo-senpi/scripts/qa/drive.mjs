@@ -147,7 +147,9 @@ function runSenpi(senpiBin, sandbox, prompt, script, extraEnv = {}) {
 
 /** A launch that ran out of its budget, named for the result's `reason`; undefined when none did. */
 function timeoutReason(label, run) {
-  return run.timedOut ? `${label} exceeded its 60000ms budget; ${run.treeStop}` : undefined
+  return run.timedOut
+    ? `${label} exceeded its 60000ms budget; ${run.treeStop?.detail ?? "tree stop pending"}`
+    : undefined
 }
 
 function seedCertificationRoots(sandbox) {
