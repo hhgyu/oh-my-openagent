@@ -14,8 +14,6 @@
         "scripts/qa/fused-equivalence-e2e.mjs",
         // run by path as the bunshin-ts eval SDK's live QA driver (scripts/qa/AGENTS.md)
         "scripts/qa/bunshin-ts-eval-sdk-qa.mjs",
-        // run by path as the memory maintenance shutdown-abort live QA driver (scripts/qa/AGENTS.md)
-        "scripts/qa/memory-maintenance-abort-e2e.mjs",
         // run by path as computer-use v2 row 9's live macOS capture-consent and SkyLight measurement
         "scripts/qa/capture-consent-probe-macos.mjs",
         // run by path from .github/workflows/desktop-bench.yml as computer-use v2 row 38's base-vs-head latency bench
@@ -57,6 +55,8 @@
       "ignoreFiles": [
         // fork V2 (hhgyu/oh-my-openagent v2/dev): live QA driver run by hand
         "scripts/qa/memory-sync-fresh-device-e2e.mjs",
+        // fork V2 (hhgyu/oh-my-openagent v2/dev): live QA driver run by hand
+        "scripts/qa/memory-maintenance-abort-e2e.mjs",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
         "scripts/expect-exit.mjs",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
