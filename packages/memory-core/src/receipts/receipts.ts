@@ -3,10 +3,11 @@
 // lock so concurrent processes never interleave a line; the file is never rotated or truncated.
 
 import { hostname } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { appendFile, chmod, mkdir, readFile } from "../fs/resilient"
 import { createLockRecord, receiptsLockPath, withLock } from "../locks"
 import { redactSecretLikeMaterial } from "../sync/redact"
+import { createCoalescingQueue } from "./append-queue"
 
 export type MemoryReceiptKind = "reflection" | "dream" | "facts"
 export type MemoryReceiptEvent =
@@ -69,8 +70,8 @@ export function receiptIdentity(receipt: MemoryReceiptIdentityInput): string {
     : JSON.stringify([receipt.kind, receipt.runId, receipt.event, receipt.generation])
 }
 
-export function appendMemoryReceipt(runtimeDir: string, input: MemoryReceiptInput): Promise<void> {
-  return underReceiptsLock(runtimeDir, () => writeLine(runtimeDir, toReceipt(input)))
+export async function appendMemoryReceipt(runtimeDir: string, input: MemoryReceiptInput): Promise<void> {
+  await appendQueue.submit(resolve(runtimeDir), { input, once: false })
 }
 
 /**
@@ -79,13 +80,35 @@ export function appendMemoryReceipt(runtimeDir: string, input: MemoryReceiptInpu
  * line was written.
  */
 export function appendMemoryReceiptOnce(runtimeDir: string, input: MemoryReceiptInput): Promise<boolean> {
-  return underReceiptsLock(runtimeDir, async () => {
+  return appendQueue.submit(resolve(runtimeDir), { input, once: true })
+}
+
+interface QueuedAppend {
+  readonly input: MemoryReceiptInput
+  readonly once: boolean
+}
+
+// Same-process appends share one lock acquisition and one flushed write; each caller resolves only after
+// that write is durable. Lines keep submission order, and a "once" append is checked against the file
+// plus the lines queued ahead of it, exactly as if each append had taken the lock in turn.
+const appendQueue = createCoalescingQueue<QueuedAppend, boolean>((runtimeDir, take) =>
+  underReceiptsLock(runtimeDir, () => writeBatch(runtimeDir, take())),
+)
+
+async function writeBatch(runtimeDir: string, batch: readonly QueuedAppend[]): Promise<boolean[]> {
+  const recorded = batch.some((append) => append.once)
+    ? new Set(parseReceipts(await readText(runtimeDir)).receipts.map(receiptIdentity))
+    : undefined
+  let text = ""
+  const written = batch.map(({ input, once }) => {
     const identity = receiptIdentity(input)
-    const { receipts } = parseReceipts(await readText(runtimeDir))
-    if (receipts.some((receipt) => receiptIdentity(receipt) === identity)) return false
-    await writeLine(runtimeDir, toReceipt(input))
+    if (once && recorded?.has(identity)) return false
+    recorded?.add(identity)
+    text += `${JSON.stringify(toReceipt(input))}\n`
     return true
   })
+  if (text.length > 0) await writeLines(runtimeDir, text)
+  return written
 }
 
 export interface ReadMemoryReceiptsOptions {
@@ -135,9 +158,9 @@ function boundDetail(detail: string): string {
   return masked.length <= DETAIL_LIMIT ? masked : `${masked.slice(0, DETAIL_LIMIT - 3)}...`
 }
 
-async function writeLine(runtimeDir: string, receipt: MemoryReceipt): Promise<void> {
+async function writeLines(runtimeDir: string, text: string): Promise<void> {
   const path = receiptsPath(runtimeDir)
-  await appendFile(path, `${JSON.stringify(receipt)}\n`, { encoding: "utf8", mode: 0o600, flush: true })
+  await appendFile(path, text, { encoding: "utf8", mode: 0o600, flush: true })
   if (process.platform !== "win32") await chmod(path, 0o600)
 }
 

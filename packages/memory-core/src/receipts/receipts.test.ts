@@ -14,6 +14,8 @@ import {
   receiptIdentity,
   receiptsPath,
 } from "./index"
+import { link, writeHandleAll } from "../fs/resilient"
+import { setLockCandidateFsForTests } from "../locks"
 import { removeTree } from "../../../../test-support/remove-tree"
 
 const worker = fileURLToPath(new URL("./receipts-worker.test-support.ts", import.meta.url))
@@ -106,6 +108,56 @@ describe("memory receipts", () => {
     expect(written.every((line) => JSON.parse(line).event === "launched")).toBe(true)
     expect(new Set(written.map((line) => JSON.parse(line).runId)).size).toBe(50)
   }, 30_000)
+
+  test("#given many concurrent appends in one process #when they finish #then they took the receipts lock once and kept submission order", async () => {
+    // given
+    const dir = await runtimeDir()
+    let acquisitions = 0
+    const countReceiptsLock = (target: string) => {
+      if (target.endsWith("receipts.lock")) acquisitions++
+    }
+    const restore = setLockCandidateFsForTests({
+      link: async (existing, target) => {
+        await link(existing, target)
+        countReceiptsLock(String(target))
+      },
+      writeFallback: async (handle, data, encoding) => {
+        await writeHandleAll(handle, data, encoding)
+        acquisitions++
+      },
+    })
+    const merged = { kind: "dream" as const, runId: "m", trigger: "idle", event: "merged" as const, generation: "g1" }
+
+    // when
+    let onceResults: boolean[]
+    try {
+      ;[, onceResults] = await Promise.all([
+        Promise.all(
+          Array.from({ length: 30 }, (_, index) =>
+            appendMemoryReceipt(dir, {
+              kind: "dream",
+              runId: `local-${index}`,
+              trigger: "idle",
+              event: "launched",
+              generation: "g1",
+            }),
+          ),
+        ),
+        Promise.all([appendMemoryReceiptOnce(dir, merged), appendMemoryReceiptOnce(dir, merged)]),
+      ])
+    } finally {
+      restore()
+    }
+
+    // then
+    expect(acquisitions).toBe(1)
+    expect(onceResults).toEqual([true, false])
+    const written = (await lines(dir)).map((line) => JSON.parse(line))
+    expect(written.map((receipt) => receipt.runId)).toEqual([
+      ...Array.from({ length: 30 }, (_, i) => `local-${i}`),
+      "m",
+    ])
+  })
 
   test("#given a long or secret-bearing detail #when appended #then it is cut to 400 characters and masked", async () => {
     // given
