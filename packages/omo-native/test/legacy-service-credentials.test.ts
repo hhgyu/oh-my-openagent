@@ -1,41 +1,81 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
-import { spawnSync } from "node:child_process"
+import { type ChildProcess, spawn, spawnSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DEFAULT_TEST_TIMEOUT_MS, remainingTestTime } from "../../../test-support/test-deadline"
+import { testBudgetSignal } from "../../../test-support/test-deadline"
 import { removeLegacyServiceCredentials } from "../bin/lib/legacy-service-credentials.js"
 
 const homes: string[] = []
 const RUNTIME_READY = "[startup-phase] runtime ready"
-// Every spawning test declares this timeout itself, so the child bound below is derived from the deadline actually in
-// force under any invocation (a package-local `bun test` would otherwise apply bun's 5 s default). It equals the
-// budget CI already passes with --timeout, so no deadline grows there.
-const FIRST_COMMAND_TIMEOUT_MS = DEFAULT_TEST_TIMEOUT_MS
 
-// Bounded below the test's own budget so a stalled child is stopped here, with its output and the checkpoints it
-// reached, instead of being reaped as a dangling process after the test already timed out (run 45432342382).
-function runFirstCommand(entry: string, args: readonly string[], env: NodeJS.ProcessEnv, home: string, legacy: string) {
-  const preload = join(home, "startup-phase.preload.ts")
-  writeFileSync(preload, `process.stderr.write(${JSON.stringify(`${RUNTIME_READY}\n`)})\n`)
-  const bound = Math.max(1, Math.floor(remainingTestTime(FIRST_COMMAND_TIMEOUT_MS)))
-  const result = spawnSync(process.execPath, ["--preload", preload, join(import.meta.dir, "..", entry), ...args], {
-    env,
-    encoding: "utf8",
-    windowsHide: true,
-    timeout: bound,
-    killSignal: "SIGKILL",
-  })
-  if (result.error === undefined) return
-  const marker = result.stderr?.includes(RUNTIME_READY) ? "runtime marker received" : "no runtime marker"
-  const file = existsSync(legacy) ? "legacy file still present" : "legacy file removed"
-  throw new Error(
-    `${entry} ${args.join(" ")} was stopped at its ${bound} ms bound (${result.error.message}, signal ${String(result.signal)}); checkpoints: ${marker}; ${file}\nstderr:\n${result.stderr ?? ""}\nstdout:\n${result.stdout ?? ""}`,
-  )
+interface FirstCommandRun {
+  readonly label: string
+  readonly legacy: string
+  readonly child: ChildProcess
+  readonly closed: Promise<NodeJS.Signals | null>
+  stdout: string
+  stderr: string
+}
+const running = new Set<FirstCommandRun>()
+
+function describeRun(run: FirstCommandRun, outcome: string): string {
+  const marker = run.stderr.includes(RUNTIME_READY) ? "runtime marker received" : "no runtime marker"
+  const file = existsSync(run.legacy) ? "legacy file still present" : "legacy file removed"
+  return `${run.label} ${outcome}; checkpoints: ${marker}; ${file}\nstderr:\n${run.stderr}\nstdout:\n${run.stdout}`
 }
 
-afterEach(() => {
+// A stalled child is stopped at the test budget (run 45432342382 was reaped as a bare dangling process). A test cannot
+// read the deadline bun actually applies, so a shorter one (a package-local run's 5 s default) is caught in afterEach.
+async function runFirstCommand(
+  entry: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  home: string,
+  legacy: string,
+) {
+  const preload = join(home, "startup-phase.preload.ts")
+  writeFileSync(preload, `process.stderr.write(${JSON.stringify(`${RUNTIME_READY}\n`)})\n`)
+  const signal = testBudgetSignal(`omo ${args.join(" ")} through ${entry}`)
+  const child = spawn(process.execPath, ["--preload", preload, join(import.meta.dir, "..", entry), ...args], {
+    env,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    signal,
+    killSignal: "SIGKILL",
+  })
+  const closed = new Promise<NodeJS.Signals | null>((resolve) =>
+    child.once("close", (_code, exitSignal) => resolve(exitSignal)),
+  )
+  child.once("error", () => {})
+  const run: FirstCommandRun = { label: `${entry} ${args.join(" ")}`, legacy, child, closed, stdout: "", stderr: "" }
+  child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+    run.stdout += chunk
+  })
+  child.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
+    run.stderr += chunk
+  })
+  running.add(run)
+  const exitSignal = await closed
+  running.delete(run)
+  if (signal.aborted)
+    throw new Error(
+      describeRun(run, `was stopped at the test budget (${String(signal.reason)}, signal ${String(exitSignal)})`),
+    )
+}
+
+afterEach(async () => {
+  const stalled = [...running]
+  running.clear()
+  for (const run of stalled) {
+    run.child.kill("SIGKILL")
+    await run.closed
+  }
+  const reports = stalled.map((run) =>
+    describeRun(run, "was still running when the test's deadline passed; stopped in teardown"),
+  )
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
+  if (reports.length > 0) throw new Error(reports.join("\n\n"))
 })
 
 function homeWith(content?: string): { home: string; path: string } {
@@ -71,48 +111,36 @@ describe("a first command after upgrading", () => {
   const isolatedEnv = (home: string) => ({ PATH: process.env.PATH, HOME: home, USERPROFILE: home, OMO_RUNTIME: "bun" })
 
   for (const args of FIRST_COMMANDS) {
-    test(
-      `#given the legacy file #when \`omo ${args.join(" ")}\` runs through bin/omo.js #then the file is removed`,
-      () => {
-        const { home, path } = homeWith(LEGACY)
-        runFirstCommand(join("bin", "omo.js"), args, isolatedEnv(home), home, path)
-        expect(existsSync(path)).toBe(false)
-      },
-      FIRST_COMMAND_TIMEOUT_MS,
-    )
+    test(`#given the legacy file #when \`omo ${args.join(" ")}\` runs through bin/omo.js #then the file is removed`, async () => {
+      const { home, path } = homeWith(LEGACY)
+      await runFirstCommand(join("bin", "omo.js"), args, isolatedEnv(home), home, path)
+      expect(existsSync(path)).toBe(false)
+    })
 
     // Run as the main module, like the release binary: its main() answers some commands before runCompiledLauncher.
-    test(
-      `#given the legacy file #when \`omo ${args.join(" ")}\` runs through the compiled entry's main #then the file is removed`,
-      () => {
-        const { home, path } = homeWith(LEGACY)
-        runFirstCommand("compile-entry.ts", args, isolatedEnv(home), home, path)
-        expect(existsSync(path)).toBe(false)
-      },
-      FIRST_COMMAND_TIMEOUT_MS,
-    )
+    test(`#given the legacy file #when \`omo ${args.join(" ")}\` runs through the compiled entry's main #then the file is removed`, async () => {
+      const { home, path } = homeWith(LEGACY)
+      await runFirstCommand("compile-entry.ts", args, isolatedEnv(home), home, path)
+      expect(existsSync(path)).toBe(false)
+    })
   }
 })
 
 describe("a first command the release entry answers before any launch", () => {
   // A refused extra-CA value makes main() answer and return before the launcher (#10215). The legacy cleanup must
   // already have run (#10658 round 2): it is main()'s first step, shared by every command and every early return.
-  test(
-    "#given the legacy file and a refused extra-CA value #when the compiled entry's main answers --version #then the file is removed",
-    () => {
-      const { home, path } = homeWith(LEGACY)
-      const env = {
-        PATH: process.env.PATH,
-        HOME: home,
-        USERPROFILE: home,
-        OMO_RUNTIME: "bun",
-        OMO_EXTRA_CA_CERTIFICATES: "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
-      }
-      runFirstCommand("compile-entry.ts", ["--version"], env, home, path)
-      expect(existsSync(path)).toBe(false)
-    },
-    FIRST_COMMAND_TIMEOUT_MS,
-  )
+  test("#given the legacy file and a refused extra-CA value #when the compiled entry's main answers --version #then the file is removed", async () => {
+    const { home, path } = homeWith(LEGACY)
+    const env = {
+      PATH: process.env.PATH,
+      HOME: home,
+      USERPROFILE: home,
+      OMO_RUNTIME: "bun",
+      OMO_EXTRA_CA_CERTIFICATES: "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
+    }
+    await runFirstCommand("compile-entry.ts", ["--version"], env, home, path)
+    expect(existsSync(path)).toBe(false)
+  })
 })
 
 describe("removeLegacyServiceCredentials", () => {
