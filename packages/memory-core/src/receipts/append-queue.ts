@@ -4,7 +4,9 @@
 //
 // Every caller keeps the bound it had when it waited on the lock by itself: its deadline starts when it
 // submits, and a caller whose batch has not been taken by then is removed from the queue and rejected, so
-// its input is never written after it has been told it failed. A taken input is never dropped: its caller
+// its input is never written after it has been told it failed. `take` re-checks every deadline against
+// the clock, so a late timer callback cannot let an overdue input through, and a full queue rejects new
+// submissions at once instead of growing without bound. A taken input is never dropped: its caller
 // resolves after the flush succeeds or rejects with the flush's error.
 
 export type CoalescedFlush<I, R> = (
@@ -18,7 +20,9 @@ export interface CoalescingQueueOptions {
   readonly deadlineMs: number
   /** The most inputs one flush takes; the rest wait for the next flush. */
   readonly maxBatch: number
-  /** The error a caller gets when its deadline passes before its batch is taken. */
+  /** The most inputs one key holds waiting to be taken; a submission past it is rejected at once. */
+  readonly maxPending: number
+  /** The error a caller gets when its deadline passes before its batch is taken, or the queue is full. */
   readonly expired: (key: string) => Error
   readonly now?: () => number
   readonly schedule?: (delayMs: number, run: () => void) => () => void
@@ -36,9 +40,24 @@ interface Pending<I, R> {
   cancelTimer: () => void
 }
 
+function rejectOverdue<I, R>(queue: Pending<I, R>[], at: number, error: unknown): void {
+  rejectAll(
+    queue,
+    queue.filter((pending) => pending.deadline <= at),
+    error,
+  )
+}
+
 function rejectCoveredBy<I, R>(queue: Pending<I, R>[], latestDeadline: number, error: unknown): void {
-  const covered = queue.filter((pending) => pending.deadline <= latestDeadline)
-  for (const pending of covered) {
+  rejectAll(
+    queue,
+    queue.filter((pending) => pending.deadline <= latestDeadline),
+    error,
+  )
+}
+
+function rejectAll<I, R>(queue: Pending<I, R>[], rejected: readonly Pending<I, R>[], error: unknown): void {
+  for (const pending of rejected) {
     queue.splice(queue.indexOf(pending), 1)
     pending.cancelTimer()
     pending.reject(error)
@@ -53,7 +72,8 @@ function scheduleWithTimer(delayMs: number, run: () => void): () => void {
 /**
  * `flush` receives a `take` callback and calls it at most once, after it holds whatever exclusion it
  * needs, and a `waitTimeoutMs` it must not wait longer than for that exclusion (the latest deadline among
- * the queued callers). `take` hands over up to `maxBatch` inputs in submission order; `flush` returns one
+ * the queued callers). `take` rejects every input already past its deadline, then hands over up to
+ * `maxBatch` of the rest in submission order; `flush` returns one
  * result per taken input, in the same order. A flush that throws before `take` rejects, with its error,
  * every queued caller whose deadline its wait covered; callers that arrived later get a flush of their own.
  */
@@ -63,8 +83,9 @@ export function createCoalescingQueue<I, R>(
 ): CoalescingQueue<I, R> {
   const now = options.now ?? Date.now
   const schedule = options.schedule ?? scheduleWithTimer
-  if (options.deadlineMs <= 0 || !Number.isInteger(options.maxBatch) || options.maxBatch < 1)
-    throw new Error("coalescing queue needs a positive deadline and batch size")
+  const positiveInteger = (value: number) => Number.isInteger(value) && value >= 1
+  if (options.deadlineMs <= 0 || !positiveInteger(options.maxBatch) || !positiveInteger(options.maxPending))
+    throw new Error("coalescing queue needs a positive deadline, batch size and pending limit")
   const queues = new Map<string, Pending<I, R>[]>()
 
   async function drain(key: string, queue: Pending<I, R>[]): Promise<void> {
@@ -76,6 +97,7 @@ export function createCoalescingQueue<I, R>(
           key,
           () => {
             if (taken !== undefined) throw new Error("coalesced flush took its batch twice")
+            rejectOverdue(queue, now(), options.expired(key))
             taken = queue.splice(0, options.maxBatch)
             for (const pending of taken) pending.cancelTimer()
             return taken.map((pending) => pending.input)
@@ -96,6 +118,11 @@ export function createCoalescingQueue<I, R>(
   return {
     submit(key, input) {
       return new Promise<R>((resolve, reject) => {
+        const existing = queues.get(key)
+        if (existing !== undefined && existing.length >= options.maxPending) {
+          reject(options.expired(key))
+          return
+        }
         const pending: Pending<I, R> = {
           input,
           deadline: now() + options.deadlineMs,
@@ -103,7 +130,6 @@ export function createCoalescingQueue<I, R>(
           reject,
           cancelTimer: () => undefined,
         }
-        const existing = queues.get(key)
         const queue = existing ?? []
         queue.push(pending)
         pending.cancelTimer = schedule(options.deadlineMs, () => {

@@ -59,6 +59,7 @@ const RECEIPTS_FILE = "receipts.jsonl"
 const DETAIL_LIMIT = 400
 const LOCK_WAIT_MS = 30_000
 const MAX_APPENDS_PER_FLUSH = 256
+const MAX_PENDING_APPENDS = 4096
 
 export function receiptsPath(runtimeDir: string): string {
   return join(runtimeDir, RECEIPTS_FILE)
@@ -99,6 +100,7 @@ const appendQueue = createCoalescingQueue<QueuedAppend, boolean>(
   {
     deadlineMs: LOCK_WAIT_MS,
     maxBatch: MAX_APPENDS_PER_FLUSH,
+    maxPending: MAX_PENDING_APPENDS,
     expired: (runtimeDir) => new LockContentionError(receiptsLockPath(join(runtimeDir, "locks")), null),
   },
 )

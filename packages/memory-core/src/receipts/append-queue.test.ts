@@ -16,15 +16,24 @@ function fakeClock() {
         timer.live = false
       }
     },
-    advanceTo(next: number) {
+    setTime(next: number) {
       time = next
+    },
+    deliverDueTimers() {
       for (const timer of timers.filter((candidate) => candidate.live && candidate.at <= time)) {
         timer.live = false
         timer.run()
       }
     },
+    advanceTo(next: number) {
+      this.setTime(next)
+      this.deliverDueTimers()
+    },
+    liveTimers: () => timers.filter((timer) => timer.live).length,
   }
 }
+
+const QUEUE_LIMITS = { maxBatch: 10, maxPending: 100 }
 
 function gate() {
   let open: () => void = () => undefined
@@ -68,7 +77,7 @@ describe("coalescing append queue", () => {
     const { flush, written, waits } = blockedFlush(lock.opened)
     const queue = createCoalescingQueue(flush, {
       deadlineMs: 100,
-      maxBatch: 10,
+      ...QUEUE_LIMITS,
       expired: () => new Expired("expired"),
       now: clock.now,
       schedule: clock.schedule,
@@ -106,6 +115,7 @@ describe("coalescing append queue", () => {
     const queue = createCoalescingQueue(flush, {
       deadlineMs: 100,
       maxBatch: 2,
+      maxPending: 100,
       expired: () => new Expired("expired"),
       now: clock.now,
       schedule: clock.schedule,
@@ -140,7 +150,7 @@ describe("coalescing append queue", () => {
       },
       {
         deadlineMs: 100,
-        maxBatch: 10,
+        ...QUEUE_LIMITS,
         expired: () => new Expired("expired"),
         now: clock.now,
         schedule: clock.schedule,
@@ -160,6 +170,73 @@ describe("coalescing append queue", () => {
     expect(written).toEqual([["b"]])
   })
 
+  test("#given the clock past some deadlines but no timer delivered yet #when the stalled flush takes #then only callers still in time are written and the overdue ones reject", async () => {
+    // given
+    const clock = fakeClock()
+    const lock = gate()
+    const { flush, written } = blockedFlush(lock.opened)
+    const queue = createCoalescingQueue(flush, {
+      deadlineMs: 100,
+      ...QUEUE_LIMITS,
+      expired: () => new Expired("expired"),
+      now: clock.now,
+      schedule: clock.schedule,
+    })
+    const overdue = [outcome(queue.submit("k", "a")), outcome(queue.submit("k", "b"))]
+    clock.setTime(50)
+    const inTime = outcome(queue.submit("k", "c"))
+    clock.setTime(120)
+
+    // when
+    lock.open()
+    await settle()
+
+    // then
+    expect(written).toEqual([["c"]])
+    expect(overdue.map((state) => state.error)).toEqual([expect.any(Expired), expect.any(Expired)])
+    expect(inTime.value).toBe("ok:c")
+
+    // when
+    clock.deliverDueTimers()
+    await settle()
+
+    // then
+    expect(written).toEqual([["c"]])
+    expect(clock.liveTimers()).toBe(0)
+  })
+
+  test("#given a full queue behind a stalled flush #when more callers submit #then they reject at once with no timer, and the admitted callers are written in order", async () => {
+    // given
+    const clock = fakeClock()
+    const lock = gate()
+    const { flush, written } = blockedFlush(lock.opened)
+    const queue = createCoalescingQueue(flush, {
+      deadlineMs: 100,
+      maxBatch: 2,
+      maxPending: 3,
+      expired: () => new Expired("expired"),
+      now: clock.now,
+      schedule: clock.schedule,
+    })
+    const admitted = ["1", "2", "3"].map((input) => queue.submit("k", input))
+
+    // when
+    const overflow = Array.from({ length: 1000 }, (_, index) => outcome(queue.submit("k", `x${index}`)))
+    await settle()
+
+    // then
+    expect(overflow.every((state) => state.error instanceof Expired)).toBe(true)
+    expect(clock.liveTimers()).toBe(3)
+
+    // when
+    lock.open()
+
+    // then
+    expect(await Promise.all(admitted)).toEqual(["ok:1", "ok:2", "ok:3"])
+    expect(written).toEqual([["1", "2"], ["3"]])
+    expect(clock.liveTimers()).toBe(0)
+  })
+
   test("#given a flush that fails after taking its batch #when it throws #then every taken caller rejects with that error", async () => {
     // given
     const failure = new Error("append failed")
@@ -168,7 +245,7 @@ describe("coalescing append queue", () => {
         take()
         throw failure
       },
-      { deadlineMs: 100, maxBatch: 10, expired: () => new Expired("expired") },
+      { deadlineMs: 100, ...QUEUE_LIMITS, expired: () => new Expired("expired") },
     )
 
     // when
