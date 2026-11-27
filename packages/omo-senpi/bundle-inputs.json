@@ -2205,6 +2205,7 @@
     "packages/senpi-task/src/planning/fast-mode-inheritance.ts",
     "packages/senpi-task/src/planning/model-error-text.ts",
     "packages/senpi-task/src/platform/native-process.ts",
+    "packages/senpi-task/src/platform/process-tree-cpu.ts",
     "packages/senpi-task/src/progress.ts",
     "packages/senpi-task/src/renderer-text.ts",
     "packages/senpi-task/src/run-stats.ts",
