@@ -1,0 +1,44 @@
+name: stall stats (DO NOT MERGE)
+
+on:
+  pull_request:
+    branches: [v2/dev]
+
+permissions:
+  contents: read
+
+jobs:
+  shard1:
+    name: shard1 omo-opencode (${{ matrix.variant }} #${{ matrix.attempt }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [orig, fix, origabort]
+        attempt: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.4"
+      - name: Share Bun's transpiler cache with test children
+        run: echo "BUN_RUNTIME_TRANSPILER_CACHE_PATH=$RUNNER_TEMP/bun-transpiler-cache" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Remove stale self-package test copies
+        run: bun run script/remove-stale-self-package-tests.ts
+      - name: Select the exec.ts variant
+        run: |
+          cp ".github/stall-variants/exec.${{ matrix.variant }}.ts" packages/memory-core/src/git/exec.ts
+          sha256sum packages/memory-core/src/git/exec.ts
+      - name: Run vendored lsp-daemon tests
+        run: npm test
+        working-directory: packages/lsp-daemon
+      - name: Run shard 1 omo-opencode tests
+        run: |
+          set -euo pipefail
+          bun test --timeout 20000 packages/omo-opencode
