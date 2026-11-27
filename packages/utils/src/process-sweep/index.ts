@@ -6,7 +6,8 @@ export {
   splitCommandTokens,
   tokenLooksExecutable,
 } from "./command-match"
-export { createDefaultProcessKiller, defaultIsProcessAlive, enumerateProcesses, type ProcessKiller } from "./exec"
+export { createDefaultProcessKiller, enumerateProcesses, type ProcessKiller } from "./exec"
+export { defaultIsProcessAlive } from "./process-liveness"
 export {
   attestLspDaemonCliProcess,
   listLspDaemonVersionDirs,

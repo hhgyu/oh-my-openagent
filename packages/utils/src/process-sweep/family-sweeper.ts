@@ -120,7 +120,7 @@ async function killTargets<TTarget extends { readonly pid: number }>(
     if (!terminated) continue
     await delay(options.graceMs ?? DEFAULT_GRACE_MS, options.signal)
     options.signal?.throwIfAborted()
-    if (!(await bounded(Promise.resolve(context.killer.isAlive(target.pid)), context))) {
+    if (!(await bounded(Promise.resolve(context.killer.isAlive(target.pid, context.signal)), context))) {
       killed.push(target)
       continue
     }
