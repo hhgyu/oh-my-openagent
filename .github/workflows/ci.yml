@@ -317,7 +317,39 @@ jobs:
             bun test --timeout 20000 packages/omo-opencode packages/memory-core
             exit 0
           fi
-          bun test --timeout 20000 packages/omo-opencode
+          # DIAGNOSTIC (#127 hang): same command, same pipe to the runner, plus a stall watchdog.
+          { bun test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait; } | tee /tmp/omo-shard1.log &
+          teepid=$!
+          sleep 2
+          bunpid=$(cat /tmp/omo-shard1.pid)
+          last=-1; idle=0
+          while kill -0 "$bunpid" 2>/dev/null; do
+            sleep 5
+            size=$(stat -c %s /tmp/omo-shard1.log)
+            if [ "$size" = "$last" ]; then idle=$((idle + 5)); else idle=0; last=$size; fi
+            if [ "$idle" -ge 90 ]; then
+              echo "::group::STALL diagnostics (output idle ${idle}s)"
+              ps -eo pid,ppid,stat,etime,wchan:32,args --forest
+              for t in /proc/$bunpid/task/*; do
+                echo "--- task $(basename "$t") comm=$(cat "$t/comm") state=$(awk '{print $3}' "$t/stat") wchan=$(cat "$t/wchan")"
+                sudo cat "$t/stack" || true
+              done
+              echo "--- fds"; sudo ls -l /proc/$bunpid/fd || true
+              for c in $(pgrep -P "$bunpid"); do
+                echo "--- child $c: $(tr '\0' ' ' < /proc/$c/cmdline) state=$(awk '{print $3}' /proc/$c/stat) wchan=$(cat /proc/$c/wchan)"
+                sudo cat /proc/$c/stack || true
+              done
+              echo "--- gdb backtrace of every bun thread"
+              sudo apt-get install -y -qq gdb > /dev/null 2>&1 && sudo gdb -p "$bunpid" -batch -ex "thread apply all bt 12" 2>&1 | tail -400 || true
+              echo "::endgroup::"
+              kill -9 "$bunpid"
+              wait "$teepid" || true
+              echo "::error::bun test stalled (diagnostic run)"
+              exit 1
+            fi
+          done
+          wait "$teepid"
+          if grep -a -qE '^ *[1-9][0-9]* fail$' /tmp/omo-shard1.log; then exit 1; fi
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
