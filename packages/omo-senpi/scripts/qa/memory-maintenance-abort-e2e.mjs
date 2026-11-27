@@ -481,7 +481,7 @@ async function main() {
     for (const session of live) facts[`cleanup-${session.pid}`] = await teardown(session)
     server.close()
     for (const row of facts.processTree?.survivorsAfterExit ?? []) {
-      if (!isAlive(row.pid)) continue
+      if (!(row.pid > 0) || !isAlive(row.pid)) continue
       try {
         if (process.platform === "win32")
           execFileSync("taskkill", ["/PID", String(row.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true })
@@ -493,7 +493,7 @@ async function main() {
     }
     if (sandbox !== undefined && existsSync(sandbox.root)) {
       // Cleanup after a failed run only: the verdict above was already recorded.
-      for (const row of processTable().filter((entry) => entry.command.includes(sandbox.root))) {
+      for (const row of processTable().filter((entry) => entry.pid > 0 && entry.command.includes(sandbox.root))) {
         facts[`cleanup-stray-${row.pid}`] = row.command
         try {
           if (process.platform === "win32")

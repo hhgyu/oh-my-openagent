@@ -42,6 +42,22 @@ describe("checked senpi run tree stop on win32", () => {
     expect(taskkill.calls).toEqual([["taskkill", "/T", "/F", "/PID", "4242"]])
   })
 
+  test("#given a pid of 0 or none #when the tree is stopped #then it rejects without signalling anything", async () => {
+    // given
+    const taskkill = fakeTaskkill()
+
+    // when
+    const results = await Promise.all(
+      [0, -1, undefined].map((pid) =>
+        settle(stopSenpiRunTree(pid, { platform: "win32", spawnProcess: taskkill.spawnProcess })),
+      ),
+    )
+
+    // then
+    for (const { error } of results) expect(error).toBeInstanceOf(SenpiRunTreeStopError)
+    expect(taskkill.calls).toEqual([])
+  })
+
   test("#given taskkill cannot be spawned #when the tree is stopped #then it rejects naming the pid", async () => {
     // given
     const spawnProcess = () => {

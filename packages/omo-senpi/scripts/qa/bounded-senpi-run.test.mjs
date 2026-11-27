@@ -29,10 +29,20 @@ function alive(pid) {
   }
 }
 
+function readGrandchildPid(cwd) {
+  const text = readFileSync(join(cwd, "grandchild.pid"), "utf8")
+  const pid = Number(text)
+  if (!Number.isSafeInteger(pid) || pid <= 0)
+    throw new Error(`grandchild.pid does not hold a process id: ${JSON.stringify(text)}`)
+  return pid
+}
+
 const PARENT = `
 const { spawn } = require("node:child_process")
+const fs = require("node:fs")
 const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: ["ignore", "inherit", "inherit"] })
-require("node:fs").writeFileSync("grandchild.pid", String(grandchild.pid))
+fs.writeFileSync("grandchild.pid.tmp", String(grandchild.pid))
+fs.renameSync("grandchild.pid.tmp", "grandchild.pid")
 setInterval(() => {}, 1000)
 `
 
@@ -46,7 +56,7 @@ describe("bounded senpi launch", () => {
     const run = await runBoundedSenpi(process.execPath, ["-e", PARENT], { cwd, env: process.env, timeoutMs: 3_000 })
 
     // then
-    const grandchild = Number(readFileSync(join(cwd, "grandchild.pid"), "utf8"))
+    const grandchild = readGrandchildPid(cwd)
     strays.push(grandchild)
     expect(run.timedOut).toBe(true)
     expect(run.status).toBeNull()
@@ -73,7 +83,7 @@ describe("bounded senpi launch", () => {
     })
 
     // then
-    strays.push(Number(readFileSync(join(cwd, "grandchild.pid"), "utf8")))
+    strays.push(readGrandchildPid(cwd))
     // The fake stop left the real tree running; end it for real before the temp dir is removed.
     await stopSenpiRunTree(stopped[0])
     expect(run.timedOut).toBe(true)

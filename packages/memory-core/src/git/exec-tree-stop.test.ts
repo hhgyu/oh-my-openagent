@@ -42,6 +42,15 @@ async function initRepo(): Promise<string> {
   return dir
 }
 
+// A pid of 0 or below would make process.kill signal a whole process group; from inside the CI PID namespace that
+// group reaches the step shell outside it.
+function parseHolderPid(text: string): number {
+  const pid = Number(text)
+  if (!Number.isSafeInteger(pid) || pid <= 0)
+    throw new Error(`hold.pid does not hold a process id: ${JSON.stringify(text)}`)
+  return pid
+}
+
 async function waitFor(condition: () => boolean, budgetMs: number): Promise<void> {
   const deadline = Date.now() + budgetMs
   while (!condition()) {
@@ -101,7 +110,7 @@ describe("git tree stop settlement", () => {
     const dir = await initRepo()
     writeFileSync(
       join(dir, "hold.js"),
-      'require("fs").writeFileSync("hold.pid", String(process.pid)); setInterval(() => {}, 1000)\n',
+      'const fs = require("fs"); fs.writeFileSync("hold.pid.tmp", String(process.pid)); fs.renameSync("hold.pid.tmp", "hold.pid"); setInterval(() => {}, 1000)\n',
     )
     let stopperCalls = 0
     const treeStopper: GitTreeStopper = async () => {
@@ -122,7 +131,7 @@ describe("git tree stop settlement", () => {
       env: { ...process.env, OMO_TEST_NODE: process.execPath.replaceAll("\\", "/") },
     })
     await waitFor(() => existsSync(join(dir, "hold.pid")), 30_000)
-    const holder = Number(readFileSync(join(dir, "hold.pid"), "utf8"))
+    const holder = parseHolderPid(readFileSync(join(dir, "hold.pid"), "utf8"))
     strayPids.push(holder)
     if (launcher === undefined) throw new Error("git was not spawned")
     // The exec's own exit listener was attached before onSpawn, so it has run once this resolves.

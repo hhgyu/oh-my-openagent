@@ -32,6 +32,7 @@ export const SENPI_TREE_STOP_DEADLINE_MS = 10_000
 // taskkill /T /F, bounded by SENPI_TREE_STOP_DEADLINE_MS so a hung taskkill cannot hang the driver. A caller
 // that must know the tree is gone uses stopSenpiRunTree instead.
 export function killSenpiRunTree(pid, signal = "SIGKILL", platform = process.platform) {
+  assertRunPid(pid)
   if (platform === "win32") {
     spawnSync("taskkill", senpiTreeKill(pid, platform).args, {
       stdio: "ignore",
@@ -50,6 +51,13 @@ export class SenpiRunTreeStopError extends Error {
   }
 }
 
+// `-pid` for a pid of 0 (or a missing one coerced to it) is the caller's own process group, which from
+// inside a PID namespace still reaches the processes outside it.
+function assertRunPid(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0)
+    throw new SenpiRunTreeStopError(`not a run process id: ${JSON.stringify(pid)}`)
+}
+
 const spawnTaskkill = (executable, args) =>
   spawn(executable, [...args], { stdio: "ignore", windowsHide: true, env: withTelemetryOptOut(process.env) })
 
@@ -64,6 +72,11 @@ export function stopSenpiRunTree(
   pid,
   { deadlineMs = SENPI_TREE_STOP_DEADLINE_MS, platform = process.platform, spawnProcess = spawnTaskkill } = {},
 ) {
+  try {
+    assertRunPid(pid)
+  } catch (error) {
+    return Promise.reject(error)
+  }
   if (platform !== "win32") {
     try {
       process.kill(-pid, "SIGKILL")
