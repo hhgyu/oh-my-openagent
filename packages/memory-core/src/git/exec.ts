@@ -2,7 +2,9 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { existsSync } from "../fs/resilient"
 import { win32 } from "node:path"
 import { GitAbortedError, GitNotFoundError, GitStopFailedError, GitTimeoutError } from "./errors"
+import { describeStdinError, GIT_EXIT_DRAIN_MS, GIT_KILL_GRACE_MS } from "./exec-constants"
 import { memoryGitEnvironment } from "./exec-environment"
+import { spawnGitWithSignalStop } from "./exec-signal-stop"
 import { holdGitActivityShared } from "./git-activity-lock"
 import { createWindowsGitTreeStopper, GitTreeStopError, type GitTreeStopper } from "./stop-git-tree"
 import { recordGitTimeout } from "./timeout-diagnostics"
@@ -21,15 +23,7 @@ export interface GitExecOptions {
   exitDrainMs?: number
 }
 
-// A timed-out git first gets SIGTERM, on which it removes its own lock and temp files; SIGKILL
-// follows only if it is still running after this grace. Killing outright stranded a HEAD.lock
-// when a slow `git commit` was killed right after updating HEAD (omo #10199 field incident).
-export const GIT_KILL_GRACE_MS = 10_000
-
-// A hook's background child can inherit git's stdout/stderr and hold them open long after git has
-// exited, so `close` may never come while it lives. Git's own output is written before it exits;
-// this bounded drain only catches the last buffered chunks (omo #10199 review LOW 1).
-export const GIT_EXIT_DRAIN_MS = 2_000
+export { GIT_EXIT_DRAIN_MS, GIT_KILL_GRACE_MS } from "./exec-constants"
 
 export interface GitExecResult {
   code: number
@@ -112,7 +106,12 @@ async function runGitCommand(
 ): Promise<GitExecResult> {
   const activity = await holdGitActivityShared(options.cwd)
   try {
-    return await spawnGitCommand(executable, argv, options, environment, activity?.fd, hooks)
+    return hooks.treeStopper === undefined
+      ? await spawnGitWithSignalStop(executable, argv, options, environment, activity?.fd, hooks.onSpawn)
+      : await spawnGitWithTreeStop(executable, argv, options, environment, activity?.fd, {
+          treeStopper: hooks.treeStopper,
+          onSpawn: hooks.onSpawn,
+        })
   } finally {
     await activity?.release()
   }
@@ -125,13 +124,13 @@ interface GitChildHooks {
 
 type ChildEnd = { readonly code: number | null; readonly signal: NodeJS.Signals | null }
 
-function spawnGitCommand(
+function spawnGitWithTreeStop(
   executable: string,
   argv: readonly string[],
   options: GitExecOptions,
   environment: NodeJS.ProcessEnv,
   activityFd: number | undefined,
-  { treeStopper, onSpawn }: GitChildHooks,
+  { treeStopper, onSpawn }: GitChildHooks & { readonly treeStopper: GitTreeStopper },
 ): Promise<GitExecResult> {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now()
@@ -154,18 +153,16 @@ function spawnGitCommand(
     let timedOut = false
     let aborted = false
     let exitDrain: ReturnType<typeof setTimeout> | undefined
-    let killTimer: ReturnType<typeof setTimeout> | undefined
     let exited: ChildEnd | undefined
     let closed: ChildEnd | undefined
-    // "none": no tree stop (POSIX signals git directly). Otherwise the call settles only after the stop has
-    // ended git's whole process tree, or with GitStopFailedError when that could not be proven.
+    // "none": no stop was needed. Once a stop starts, the call settles only after it has ended git's whole
+    // process tree, or with GitStopFailedError when that could not be proven.
     let treeStop: "none" | "pending" | "done" | GitTreeStopError = "none"
 
     const finish = (outcome: () => void) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      clearTimeout(killTimer)
       clearTimeout(exitDrain)
       options.signal?.removeEventListener("abort", onAbort)
       outcome()
@@ -189,7 +186,7 @@ function spawnGitCommand(
     // The one settlement path: every completion signal (exit, close, the drain, the tree stop) lands here.
     // Git has exited even while a hook it started still holds its stdout/stderr open, so `close` may never
     // come: a git that finished normally settles on `close`, or with what it wrote once the bounded drain
-    // runs out. A stopped git settles at exit on POSIX; with a tree stop it waits for that stop first.
+    // runs out. A stopped git settles only once its tree stop has finished.
     const advance = () => {
       if (settled || treeStop === "pending") return
       if (treeStop instanceof GitTreeStopError) {
@@ -214,13 +211,9 @@ function spawnGitCommand(
         settleWith(end)
       }, options.exitDrainMs ?? GIT_EXIT_DRAIN_MS)
     }
-    /** Stops a git that is still running; true when SIGTERM went to git itself (POSIX), so SIGKILL may follow. */
-    const stop = (): boolean => {
-      if (exited !== undefined || treeStop !== "none") return false
-      if (treeStopper === undefined) {
-        child.kill("SIGTERM")
-        return true
-      }
+    /** Ends a git that is still running, with its whole process tree; bounded by the stopper's own deadline. */
+    const stop = (): void => {
+      if (exited !== undefined || treeStop !== "none") return
       treeStop = "pending"
       treeStopper(child, killGraceMs).then(
         () => {
@@ -235,12 +228,11 @@ function spawnGitCommand(
           advance()
         },
       )
-      return false
     }
     const timer = setTimeout(() => {
       timedOut = true
       const timeoutRecord = recordGitTimeout(environment, child.pid, argv, options.cwd, options.timeoutMs)
-      if (stop()) killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs)
+      stop()
       if (timeoutRecord !== undefined) void publishVolumeSnapshotEvidence(timeoutRecord)
     }, options.timeoutMs)
     // An abort before settlement always yields GitAbortedError, through the same close/drain settlement as any
@@ -338,8 +330,4 @@ export function createNodeGitExec(runtime: NodeGitExecRuntime = {}): GitExec {
       }
     },
   }
-}
-
-function describeStdinError(error: NodeJS.ErrnoException | undefined): string {
-  return error === undefined ? "" : `\nomo: git stdin was not fully delivered (${error.code ?? error.message})\n`
 }
