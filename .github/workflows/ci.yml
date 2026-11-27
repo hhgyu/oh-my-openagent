@@ -319,8 +319,36 @@ jobs:
           fi
           # DIAGNOSTIC (#127 stall, variant J): the omo-opencode run writes to a file only, never to the runner.
           set +e
-          bun test --timeout 20000 packages/omo-opencode > /tmp/omo-shard1.log 2>&1
-          bunexit=$?
+          # J3: bun writes into a pipe (as under the runner), but the reader is cat, so the Worker stays healthy.
+          { bun test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait $!; echo "BUN_EXIT=$?"; } | cat > /tmp/omo-shard1.log &
+          pipeline=$!
+          sleep 2
+          bunpid=$(cat /tmp/omo-shard1.pid)
+          last=-1; idle=0; stalled=0
+          while kill -0 "$bunpid" 2>/dev/null; do
+            sleep 5
+            size=$(stat -c %s /tmp/omo-shard1.log)
+            if [ "$size" = "$last" ]; then idle=$((idle + 5)); else idle=0; last=$size; fi
+            if [ "$idle" -ge 60 ]; then
+              stalled=1
+              echo "::group::J3 STALL (output idle ${idle}s)"
+              echo "bun pid $bunpid; its fd 1 flags: $(grep -a flags /proc/$bunpid/fdinfo/1 2>/dev/null)"
+              for t in /proc/$bunpid/task/*; do echo "task $(basename "$t") $(cut -d' ' -f3 "$t/stat") wchan=$(cat "$t/wchan" 2>/dev/null)"; done | sort | uniq -c -f2 | awk 'NR <= 20'
+              echo "--- descendants of bun (pid ppid state comm wchan, fd1 target and flags)"
+              for c in $(ps -o pid= --ppid "$bunpid") ; do echo "$c $(cut -d' ' -f3-5 /proc/$c/stat 2>/dev/null) wchan=$(cat /proc/$c/wchan 2>/dev/null) fd1=$(readlink /proc/$c/fd/1 2>/dev/null) $(grep -a flags /proc/$c/fdinfo/1 2>/dev/null)"; done
+              echo "--- every process holding the same pipe as bun's fd 1 ($(readlink /proc/$bunpid/fd/1))"
+              target=$(readlink /proc/$bunpid/fd/1)
+              for f in /proc/[0-9]*/fd/*; do [ "$(readlink "$f" 2>/dev/null)" = "$target" ] && echo "$f $(cat $(dirname $(dirname "$f"))/comm 2>/dev/null) $(grep -a flags $(dirname $(dirname "$f"))/fdinfo/$(basename "$f") 2>/dev/null)"; done | awk 'NR <= 40'
+              echo "--- last 15 lines of output"; tail -15 /tmp/omo-shard1.log | cut -c1-200
+              echo "::endgroup::"
+              kill -9 "$bunpid" || true
+              break
+            fi
+          done
+          wait "$pipeline" || true
+          bunexit=$(grep -a -oE '^BUN_EXIT=[0-9]+' /tmp/omo-shard1.log | cut -d= -f2)
+          [ "$stalled" -eq 1 ] && bunexit=124
+          bunexit=${bunexit:-1}
           set -e
           echo "::group::shard 1 omo-opencode output summary (exit $bunexit)"
           echo "bytes=$(stat -c %s /tmp/omo-shard1.log) lines=$(wc -l < /tmp/omo-shard1.log)"
@@ -331,11 +359,11 @@ jobs:
           awk 'length($0) > 10000 { print "line " NR ", " length($0) " chars: " substr($0, 1, 300) }' /tmp/omo-shard1.log | awk 'NR <= 6' | tr -cd '[:print:]\n'
           echo "--- control characters other than tab/newline: $(tr -d '\t\n[:print:]' < /tmp/omo-shard1.log | wc -c) bytes"
           echo "--- workflow-command lines (leading ::) by command"
-          grep -a -oE '^::[a-zA-Z-]+' /tmp/omo-shard1.log | sort | uniq -c | sort -rn | awk 'NR <= 15'
+          grep -a -oE '^::[a-zA-Z-]+' /tmp/omo-shard1.log | sort | uniq -c | sort -rn | awk 'NR <= 15' || true
           echo "--- workflow commands anywhere in a line (not at its start), by command"
-          grep -a -oE '.::[a-zA-Z-]+::' /tmp/omo-shard1.log | sed 's/^.//' | sort | uniq -c | sort -rn | awk 'NR <= 15'
+          grep -a -oE '.::[a-zA-Z-]+::' /tmp/omo-shard1.log | sed 's/^.//' | sort | uniq -c | sort -rn | awk 'NR <= 15' || true
           echo "--- failing tests"
-          grep -a '^(fail)' /tmp/omo-shard1.log | sort -u | awk 'NR <= 20' | cut -c1-220
+          grep -a '^(fail)' /tmp/omo-shard1.log | sort -u | awk 'NR <= 20' | cut -c1-220 || true
           echo "::endgroup::"
           mkdir -p /tmp/omo-shard1-artifact && cp /tmp/omo-shard1.log /tmp/omo-shard1-artifact/omo-shard1.log
           [ "$bunexit" -eq 0 ] || exit "$bunexit"
