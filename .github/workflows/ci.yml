@@ -320,23 +320,27 @@ jobs:
           # DIAGNOSTIC (#127 hang): same command, same pipe to the runner, plus a stall watchdog.
           # Run 1 froze the whole runner (the watchdog never ran): sample resources to stderr every 10 s and cap
           # the test run's memory and task count so a runaway is killed visibly instead of freezing the VM.
-          ( while true; do
-              echo "[diag $(date -u +%H:%M:%S)] $(free -m | awk '/Mem:/{print "mem used="$3"MB avail="$7"MB"}') $(free -m | awk '/Swap:/{print "swap used="$3"MB"}') tasks=$(ps -eLf | wc -l) procs=$(ps -e | wc -l) load=$(cut -d' ' -f1-3 /proc/loadavg)" >&2
-              ps -eo pid,ppid,rss,nlwp,etime,args --sort=-rss | head -6 | cut -c1-200 | sed 's/^/[diag]   /' >&2
-              ps -eo comm | sort | uniq -c | sort -rn | head -5 | tr '\n' ' ' | sed 's/^/[diag] top comms: /' >&2; echo >&2
-              sleep 10
-            done ) &
+          cat > /tmp/diag-sampler.sh <<'SAMPLER'
+          while true; do
+            echo "[diag $(date -u +%H:%M:%S)] $(free -m | awk '/Mem:/{print "mem used="$3"MB avail="$7"MB"}') tasks=$(ps -eLf | wc -l) procs=$(ps -e | wc -l) load=$(cut -d' ' -f1-3 /proc/loadavg)" >&2
+            ps -eo pid,ppid,pgid,rss,etime,args --sort=-rss | head -6 | cut -c1-200 | sed 's/^/[diag]   /' >&2
+            sleep 10
+          done
+          SAMPLER
+          setsid bash /tmp/diag-sampler.sh &
           samplerpid=$!
           bunbin="$(command -v bun)"
           # Variant E: trace every kill()/tgkill() on the host (who signals whom), and run the tests in their own
           # PID namespace so a stray kill(-1) or a signal to a host pid cannot reach the runner.
           sudo apt-get install -y -qq bpftrace > /dev/null 2>&1 || echo "[diag] bpftrace install failed" >&2
           echo "[diag] runner pids: $(pgrep -f Runner.Worker | tr '\n' ' ') $(pgrep -f Runner.Listener | tr '\n' ' ') step shell=$$ pgid=$(ps -o pgid= -p $$)" >&2
-          sudo bpftrace -q -e 'tracepoint:syscalls:sys_enter_kill /args->sig != 0/ { printf("[kill] %s(%d) kill(%d, %d)\n", comm, pid, args->pid, args->sig); } tracepoint:syscalls:sys_enter_tgkill /args->sig != 0 && args->sig != 33 && args->sig != 32/ { printf("[kill] %s(%d) tgkill(%d, %d, %d)\n", comm, pid, args->tgid, args->pid, args->sig); }' >&2 &
+          steppgid=$(ps -o pgid= -p $$ | tr -d ' ')
+          echo "[diag] step pgid=$steppgid" >&2
+          setsid sudo bpftrace -q -e 'tracepoint:syscalls:sys_enter_kill /args->sig != 0/ { printf("[kill] %s(%d) kill(%d, %d)\n", comm, pid, args->pid, args->sig); } tracepoint:syscalls:sys_enter_tgkill /args->sig != 0 && args->sig != 33 && args->sig != 32/ { printf("[kill] %s(%d) tgkill(%d, %d, %d)\n", comm, pid, args->tgid, args->pid, args->sig); }' >&2 &
           tracerpid=$!
           sleep 5
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0; fi
-          { unshare -Upf --mount-proc --map-current-user -- "$bunbin" test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait $!; echo "BUN_EXIT=$?"; } | tee /tmp/omo-shard1.log &
+          { "$bunbin" test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait $!; echo "BUN_EXIT=$?"; } | tee /tmp/omo-shard1.log &
           teepid=$!
           sleep 2
           bunpid=$(cat /tmp/omo-shard1.pid)
