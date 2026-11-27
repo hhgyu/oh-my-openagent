@@ -115,7 +115,7 @@ function spawnGitWithTreeStop(
     }
     /** Ends a git that is still running, with its whole process tree; bounded by the stopper's own deadline. */
     const stop = (): void => {
-      if (exited !== undefined || treeStop !== "none") return
+      if (exited !== undefined || child.exitCode !== null || child.signalCode !== null || treeStop !== "none") return
       treeStop = "pending"
       treeStopper(child, killGraceMs).then(
         () => {
