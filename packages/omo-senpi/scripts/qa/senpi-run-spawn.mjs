@@ -58,6 +58,46 @@ function assertRunPid(pid) {
     throw new SenpiRunTreeStopError(`not a run process id: ${JSON.stringify(pid)}`)
 }
 
+/**
+ * Ends one leftover process (its whole tree on win32) for a cleanup path that cannot await, and says whether
+ * it worked: win32 runs `taskkill /T /F` bounded by `timeoutMs`; POSIX sends SIGKILL to the pid, and ESRCH
+ * (already gone) counts as ended. Never throws, so a caller can always go on to write its evidence.
+ */
+export function endTreeSync(
+  pid,
+  { platform = process.platform, timeoutMs = SENPI_TREE_STOP_DEADLINE_MS, spawnSyncImpl = spawnSync } = {},
+) {
+  try {
+    assertRunPid(pid)
+  } catch (error) {
+    return { ok: false, detail: error.message }
+  }
+  if (platform !== "win32") {
+    try {
+      process.kill(pid, "SIGKILL")
+      return { ok: true, detail: `SIGKILL to pid ${pid}` }
+    } catch (error) {
+      if (error?.code === "ESRCH") return { ok: true, detail: `pid ${pid} already gone` }
+      return { ok: false, detail: `pid ${pid} could not be signalled: ${error?.message ?? String(error)}` }
+    }
+  }
+  const result = spawnSyncImpl("taskkill", ["/PID", String(pid), "/T", "/F"], {
+    stdio: "ignore",
+    windowsHide: true,
+    timeout: timeoutMs,
+    env: withTelemetryOptOut(process.env),
+  })
+  if (result.error?.code === "ETIMEDOUT")
+    return { ok: false, detail: `taskkill did not finish within ${timeoutMs}ms for pid ${pid}` }
+  if (result.error !== undefined)
+    return { ok: false, detail: `taskkill could not start for pid ${pid}: ${result.error.message}` }
+  if (result.status !== 0) {
+    const how = result.status === null ? `signal ${result.signal}` : `code ${result.status}`
+    return { ok: false, detail: `taskkill exited with ${how} for pid ${pid}` }
+  }
+  return { ok: true, detail: `taskkill /T /F ended pid ${pid} and its descendants` }
+}
+
 const spawnTaskkill = (executable, args) =>
   spawn(executable, [...args], { stdio: "ignore", windowsHide: true, env: withTelemetryOptOut(process.env) })
 

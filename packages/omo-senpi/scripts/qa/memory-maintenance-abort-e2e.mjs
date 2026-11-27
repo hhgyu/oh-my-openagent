@@ -50,6 +50,7 @@ import {
   writeEvidence,
 } from "./kibitzer-sidecar-support.mjs"
 import { startMockCompletionsServer } from "./mock-completions-server.mjs"
+import { endTreeSync } from "./senpi-run-spawn.mjs"
 import { withTelemetryOptOut } from "./telemetry-opt-out-env.mjs"
 
 const IDENTITY = "maintenance-abort-qa"
@@ -173,6 +174,8 @@ function laneIdentitiesIn(memoryHome) {
   return existsSync(agents) ? readdirSync(agents).filter((name) => name.startsWith(IDENTITY)) : []
 }
 
+const PROCESS_TABLE_TIMEOUT_MS = 60_000
+
 /** Every process on the host: `{ pid, ppid, command }`. */
 function processTable() {
   if (process.platform === "win32") {
@@ -183,14 +186,24 @@ function processTable() {
         "-Command",
         'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)" }',
       ],
-      { encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024, env: withTelemetryOptOut(process.env) },
+      {
+        encoding: "utf8",
+        windowsHide: true,
+        maxBuffer: 64 * 1024 * 1024,
+        timeout: PROCESS_TABLE_TIMEOUT_MS,
+        env: withTelemetryOptOut(process.env),
+      },
     )
       .split(/\r?\n/)
       .map((line) => line.split("\t"))
       .filter((cols) => cols.length >= 3)
       .map(([pid, ppid, command]) => ({ pid: Number(pid), ppid: Number(ppid), command: command ?? "" }))
   }
-  return execFileSync("ps", ["-A", "-o", "pid=,ppid=,args="], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+  return execFileSync("ps", ["-A", "-o", "pid=,ppid=,args="], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: PROCESS_TABLE_TIMEOUT_MS,
+  })
     .split("\n")
     .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
     .filter((match) => match !== null)
@@ -480,27 +493,29 @@ async function main() {
   } finally {
     for (const session of live) facts[`cleanup-${session.pid}`] = await teardown(session)
     server.close()
+    const cleanupFailures = []
     for (const row of facts.processTree?.survivorsAfterExit ?? []) {
       if (!(row.pid > 0) || !isAlive(row.pid)) continue
-      try {
-        if (process.platform === "win32")
-          execFileSync("taskkill", ["/PID", String(row.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true })
-        else process.kill(row.pid, "SIGKILL")
-        facts[`cleanup-survivor-${row.pid}`] = "ended"
-      } catch (error) {
-        facts[`cleanup-survivor-${row.pid}`] = error instanceof Error ? error.message : String(error)
-      }
+      const ended = endTreeSync(row.pid)
+      facts[`cleanup-survivor-${row.pid}`] = ended.ok ? "ended" : `FAILED: ${ended.detail}`
+      if (!ended.ok) cleanupFailures.push(ended.detail)
     }
     if (sandbox !== undefined && existsSync(sandbox.root)) {
       // Cleanup after a failed run only: the verdict above was already recorded.
-      for (const row of processTable().filter((entry) => entry.pid > 0 && entry.command.includes(sandbox.root))) {
+      let strays = []
+      try {
+        strays = processTable().filter((entry) => entry.pid > 0 && entry.command.includes(sandbox.root))
+      } catch (error) {
+        const detail = `process table for stray cleanup unavailable: ${error instanceof Error ? error.message : String(error)}`
+        facts.cleanupStrayScanError = detail
+        cleanupFailures.push(detail)
+      }
+      for (const row of strays) {
         facts[`cleanup-stray-${row.pid}`] = row.command
-        try {
-          if (process.platform === "win32")
-            execFileSync("taskkill", ["/PID", String(row.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true })
-          else process.kill(row.pid, "SIGKILL")
-        } catch (error) {
-          facts[`cleanup-stray-${row.pid}-error`] = error instanceof Error ? error.message : String(error)
+        const ended = endTreeSync(row.pid)
+        if (!ended.ok) {
+          facts[`cleanup-stray-${row.pid}-error`] = ended.detail
+          cleanupFailures.push(ended.detail)
         }
       }
       try {
@@ -535,6 +550,11 @@ async function main() {
       "the real memory home never gained this lane's identity",
       memoryAfter.laneIdentities.length === 0,
       `${REAL_MEMORY_HOME}: ${JSON.stringify(memoryAfter.laneIdentities)}`,
+    )
+    record(
+      "lane cleanup ended every leftover process it found",
+      cleanupFailures.length === 0,
+      cleanupFailures.join(" | "),
     )
     facts.sandboxLeft = sandbox !== undefined && existsSync(sandbox.root)
     facts.checks = checks

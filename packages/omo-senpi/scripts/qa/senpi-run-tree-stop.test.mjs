@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { ChildProcess } from "node:child_process"
+import { ChildProcess, spawnSync } from "node:child_process"
 
-import { SenpiRunTreeStopError, stopSenpiRunTree } from "./senpi-run-spawn.mjs"
+import { endTreeSync, SenpiRunTreeStopError, stopSenpiRunTree } from "./senpi-run-spawn.mjs"
 
 function fakeTaskkill() {
   const fake = new ChildProcess()
@@ -116,5 +116,57 @@ describe("checked senpi run tree stop on win32", () => {
     expect(error.message).toBe("taskkill did not finish within 50ms for pid 4242")
     expect(taskkill.killed).toEqual(["SIGKILL"])
     taskkill.process.emit("exit", 0, null)
+  })
+})
+
+describe("bounded synchronous cleanup kill on win32", () => {
+  test("#given taskkill exits 0 #when a leftover is ended #then it reports success after targeting the tree", () => {
+    // given
+    const calls = []
+    const spawnSyncImpl = (command, args, options) => {
+      calls.push([command, ...args, options.timeout])
+      return { status: 0, signal: null }
+    }
+
+    // when
+    const ended = endTreeSync(4242, { platform: "win32", timeoutMs: 1_000, spawnSyncImpl })
+
+    // then
+    expect(ended).toEqual({ ok: true, detail: "taskkill /T /F ended pid 4242 and its descendants" })
+    expect(calls).toEqual([["taskkill", "/PID", "4242", "/T", "/F", 1_000]])
+  })
+
+  test("#given taskkill exits nonzero or cannot start #when a leftover is ended #then each failure is reported, not thrown", () => {
+    // given
+    const exitsNonzero = () => ({ status: 128, signal: null })
+    const cannotStart = () => ({
+      status: null,
+      signal: null,
+      error: Object.assign(new Error("spawnSync taskkill ENOENT"), { code: "ENOENT" }),
+    })
+
+    // when
+    const nonzero = endTreeSync(4242, { platform: "win32", spawnSyncImpl: exitsNonzero })
+    const missing = endTreeSync(4242, { platform: "win32", spawnSyncImpl: cannotStart })
+    const noPid = endTreeSync(0, { platform: "win32", spawnSyncImpl: exitsNonzero })
+
+    // then
+    expect(nonzero).toEqual({ ok: false, detail: "taskkill exited with code 128 for pid 4242" })
+    expect(missing).toEqual({ ok: false, detail: "taskkill could not start for pid 4242: spawnSync taskkill ENOENT" })
+    expect(noPid.ok).toBe(false)
+  })
+
+  test("#given a taskkill that hangs #when its timeout passes #then the call returns at the deadline and reports the timeout", () => {
+    // given
+    const hangingTaskkill = (_command, _args, options) =>
+      spawnSync(process.execPath, ["-e", "setInterval(() => {}, 1000)"], options)
+    const startedAt = Date.now()
+
+    // when
+    const ended = endTreeSync(4242, { platform: "win32", timeoutMs: 300, spawnSyncImpl: hangingTaskkill })
+
+    // then
+    expect(ended).toEqual({ ok: false, detail: "taskkill did not finish within 300ms for pid 4242" })
+    expect(Date.now() - startedAt).toBeLessThan(10_000)
   })
 })
