@@ -243,10 +243,12 @@ function spawnGitCommand(
       if (stop()) killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs)
       if (timeoutRecord !== undefined) void publishVolumeSnapshotEvidence(timeoutRecord)
     }, options.timeoutMs)
+    // An abort before settlement always yields GitAbortedError. A git that already exited is never stopped:
+    // its pid may be reused, so the call just settles as aborted.
     function onAbort() {
-      if (exited !== undefined) return
       aborted = true
-      stop()
+      if (exited === undefined) stop()
+      else advance()
     }
     if (options.signal?.aborted === true) onAbort()
     else options.signal?.addEventListener("abort", onAbort, { once: true })
@@ -287,8 +289,6 @@ function spawnGitCommand(
     child.on("exit", (code, signal) => {
       exited = { code, signal }
       clearTimeout(timer)
-      // The launcher is gone and its pid may be reused: a later abort must never stop "it" again.
-      options.signal?.removeEventListener("abort", onAbort)
       advance()
     })
     child.on("close", (code, signal) => {

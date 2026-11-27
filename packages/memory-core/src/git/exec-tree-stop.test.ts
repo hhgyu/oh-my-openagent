@@ -96,7 +96,7 @@ describe("git tree stop settlement", () => {
     expect(descendantAliveAtSettle).toBe(false)
   })
 
-  test("#given git exited normally and a hook child still holds its stdout #when the caller aborts during the drain #then the stopper is never invoked and the result stands", async () => {
+  test("#given git exited normally and a hook child still holds its stdout #when the caller aborts during the drain #then the exited pid is never stopped and the call still settles as aborted", async () => {
     // given
     const dir = await initRepo()
     writeFileSync(
@@ -133,10 +133,13 @@ describe("git tree stop settlement", () => {
     // when
     controller.abort()
     process.kill(holder, "SIGKILL")
-    const result = await run
+    const outcome = await run.then(
+      () => undefined,
+      (error: unknown) => error,
+    )
 
     // then
     expect(stopperCalls).toBe(0)
-    expect(result.code).toBe(0)
+    expect(outcome).toBeInstanceOf(GitAbortedError)
   })
 })
