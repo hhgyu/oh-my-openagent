@@ -328,7 +328,15 @@ jobs:
             done ) &
           samplerpid=$!
           bunbin="$(command -v bun)"
-          { sudo systemd-run --scope --quiet -p MemoryMax=10G -p TasksMax=8000 --uid="$(id -u)" --gid="$(id -g)" --setenv=PATH="$PATH" --setenv=HOME="$HOME" --setenv=CI=true --setenv=GITHUB_ACTIONS=true --setenv=BUN_RUNTIME_TRANSPILER_CACHE_PATH="${BUN_RUNTIME_TRANSPILER_CACHE_PATH:-}" --working-directory="$PWD" -- "$bunbin" test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait $!; echo "BUN_EXIT=$?"; } | tee /tmp/omo-shard1.log &
+          # Variant E: trace every kill()/tgkill() on the host (who signals whom), and run the tests in their own
+          # PID namespace so a stray kill(-1) or a signal to a host pid cannot reach the runner.
+          sudo apt-get install -y -qq bpftrace > /dev/null 2>&1 || echo "[diag] bpftrace install failed" >&2
+          echo "[diag] runner pids: $(pgrep -f Runner.Worker | tr '\n' ' ') $(pgrep -f Runner.Listener | tr '\n' ' ') step shell=$$ pgid=$(ps -o pgid= -p $$)" >&2
+          sudo bpftrace -q -e 'tracepoint:syscalls:sys_enter_kill /args->sig != 0/ { printf("[kill] %s(%d) kill(%d, %d)\n", comm, pid, args->pid, args->sig); } tracepoint:syscalls:sys_enter_tgkill /args->sig != 0 && args->sig != 33 && args->sig != 32/ { printf("[kill] %s(%d) tgkill(%d, %d, %d)\n", comm, pid, args->tgid, args->pid, args->sig); }' >&2 &
+          tracerpid=$!
+          sleep 5
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0; fi
+          { unshare -Upf --mount-proc --map-current-user -- "$bunbin" test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait $!; echo "BUN_EXIT=$?"; } | tee /tmp/omo-shard1.log &
           teepid=$!
           sleep 2
           bunpid=$(cat /tmp/omo-shard1.pid)
@@ -360,6 +368,7 @@ jobs:
           done
           wait "$teepid"
           kill "$samplerpid" || true
+          sudo kill "$tracerpid" || true
           grep -a -q '^BUN_EXIT=0$' /tmp/omo-shard1.log || { echo "::error::shard 1 omo-opencode run did not exit 0: $(grep -a '^BUN_EXIT=' /tmp/omo-shard1.log)"; exit 1; }
           grep -a -qE '^Ran [0-9]+ tests across [0-9]+ files' /tmp/omo-shard1.log || { echo "::error::shard 1 omo-opencode run printed no summary"; exit 1; }
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
