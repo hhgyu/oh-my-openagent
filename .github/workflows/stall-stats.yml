@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [orig, fix, origabort]
+        variant: [hang, fix]
         attempt: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
