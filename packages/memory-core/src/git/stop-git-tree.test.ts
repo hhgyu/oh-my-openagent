@@ -247,7 +247,7 @@ describe("Windows git tree stop", () => {
     expect(error).toBeInstanceOf(GitTreeStopError)
     expect((error as Error).message).toBe(`taskkill exited with code 128 for git pid ${launcher.pid}`)
     await launcherExit
-  }, 5_000)
+  })
 
   test("#given a launcher without a positive pid #when the tree is stopped #then it rejects without running taskkill", async () => {
     // given
