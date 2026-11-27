@@ -39,7 +39,11 @@ export function defaultIsProcessAlive(pid: number): boolean {
 }
 
 function isPosixZombie(pid: number): boolean {
-  const result = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8", timeout: 5_000 })
+  const result = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], {
+    encoding: "utf8",
+    timeout: 5_000,
+    windowsHide: true,
+  })
   if (result.error !== undefined || result.signal !== null) return false
   const state = result.stdout.trim()
   if (result.status !== 0 && state === "") return true
