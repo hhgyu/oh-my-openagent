@@ -298,7 +298,16 @@ function createTreeTracker(rootPid, sandboxRoot) {
   }
   const survivors = (table) =>
     [...known.values()].filter((entry) => table.some((row) => row.pid === entry.pid && row.command === entry.command))
-  return { sample, survivors, known: () => [...known.values()], samples }
+  // A process alive in a sample while its parent, also tracked, is already gone from that sample: what a
+  // stop that ends only git's launcher leaves behind (the real git and pack-objects running on).
+  const orphans = () =>
+    samples.flatMap((entry) =>
+      entry.live
+        .map((pid) => known.get(pid))
+        .filter((row) => known.has(row.ppid) && !entry.live.includes(row.ppid))
+        .map((row) => ({ atMs: entry.atMs, phase: entry.phase, pid: row.pid, ppid: row.ppid, command: row.command })),
+    )
+  return { sample, survivors, orphans, known: () => [...known.values()], samples }
 }
 
 async function waitForMaintenanceGit(session, tracker) {
@@ -433,6 +442,17 @@ async function main() {
       facts.gitSurvivorsAfterExit.length === 0
         ? `tracked ${facts.processTree.gitEverSeen.length} git pids over ${tracker.samples.length} tree samples: ${facts.processTree.gitEverSeen.map((row) => `${row.pid} ${row.command.slice(0, 60)}`).join(" | ")}`
         : JSON.stringify(facts.gitSurvivorsAfterExit),
+    )
+    const orphanedGit = tracker.orphans().filter(isGit)
+    facts.processTree.orphanedGit = orphanedGit
+    record(
+      "no git process ever outlived its parent in senpi's tree (the stop ended git's whole tree at once)",
+      orphanedGit.length === 0,
+      orphanedGit.length === 0
+        ? `checked ${tracker.samples.length} samples`
+        : orphanedGit
+            .map((row) => `+${row.atMs}ms ${row.phase} ${row.pid}<-${row.ppid} ${row.command.slice(0, 60)}`)
+            .join(" | "),
     )
     record(
       "no process of senpi's tree survives its exit",
