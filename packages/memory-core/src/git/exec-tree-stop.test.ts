@@ -50,15 +50,6 @@ async function waitFor(condition: () => boolean, budgetMs: number): Promise<void
   }
 }
 
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
 describe("git tree stop settlement", () => {
   test("#given git closes its stdio while the tree stop is still running and a descendant lives #when the stop finishes #then the call settles only after it", async () => {
     // given
@@ -153,9 +144,9 @@ describe("git tree stop settlement", () => {
     await new Promise((resolve) => setImmediate(resolve))
     await new Promise((resolve) => setImmediate(resolve))
     const settledWhileStdioHeld = settled
-    const holderExit = waitFor(() => !alive(holder), 30_000)
+    // Killing the holder closes git's stdio; the call settles on that close. (Its liveness is no signal here: in
+    // a PID namespace whose init does not reap, the killed holder stays a zombie that kill(pid, 0) still finds.)
     process.kill(holder, "SIGKILL")
-    await holderExit
     const error = await outcome
 
     // then
