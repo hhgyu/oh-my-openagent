@@ -322,11 +322,7 @@ jobs:
           # the test run's memory and task count so a runaway is killed visibly instead of freezing the VM.
           cat > /tmp/diag-sampler.sh <<'SAMPLER'
           while true; do
-            echo "[diag $(date -u +%H:%M:%S)] $(free -m | awk '/Mem:/{print "mem used="$3"MB avail="$7"MB"}') tasks=$(ps -eLf | wc -l) procs=$(ps -e | wc -l) load=$(cut -d' ' -f1-3 /proc/loadavg)" >&2
-            ps -eo pid,ppid,pgid,rss,etime,args --sort=-rss | head -4 | cut -c1-200 | sed 's/^/[diag]   /' >&2
-            echo "[diag] disk: $(df -h --output=target,size,used,avail,pcent / /tmp /home/runner/work 2>/dev/null | tail -n +2 | tr -s ' ' | tr '\n' ';') inodes: $(df -i --output=target,ipcent / /tmp 2>/dev/null | tail -n +2 | tr -s ' ' | tr '\n' ';')" >&2
-            echo "[diag] big dirs: $(sudo du -xsm /tmp /home/runner/work/_temp /home/runner/.cache /home/runner/.local 2>/dev/null | sort -rn | head -4 | tr '\t\n' ' ;')" >&2
-            sudo find /tmp /home/runner -xdev -type f -size +200M -newer /tmp/diag-sampler.sh -printf "[diag] growing %s bytes %p\n" 2>/dev/null | head -5 >&2
+            echo "[diag $(date -u +%H:%M:%S)] $(free -m | awk '/Mem:/{print "mem used="$3"MB avail="$7"MB"}') load=$(cut -d' ' -f1-3 /proc/loadavg) D-state=$(timeout 3 sh -c 'grep -l "^[0-9]* ([^)]*) D" /proc/[0-9]*/stat 2>/dev/null | wc -l')" >&2
             sleep 5
           done
           SAMPLER
@@ -362,23 +358,25 @@ jobs:
             sleep 5
             size=$(stat -c %s /tmp/omo-shard1.log)
             if [ "$size" = "$last" ]; then idle=$((idle + 5)); else idle=0; last=$size; fi
-            if [ "$idle" -ge 90 ]; then
-              echo "::group::STALL diagnostics (output idle ${idle}s)"
-              ps -eo pid,ppid,stat,etime,wchan:32,args --forest
-              for t in /proc/$bunpid/task/*; do
-                echo "--- task $(basename "$t") comm=$(cat "$t/comm") state=$(awk '{print $3}' "$t/stat") wchan=$(cat "$t/wchan")"
-                sudo cat "$t/stack" || true
-              done
-              echo "--- fds"; sudo ls -l /proc/$bunpid/fd || true
-              for c in $(pgrep -P "$bunpid"); do
-                echo "--- child $c: $(tr '\0' ' ' < /proc/$c/cmdline) state=$(awk '{print $3}' /proc/$c/stat) wchan=$(cat /proc/$c/wchan)"
-                sudo cat /proc/$c/stack || true
-              done
-              echo "--- gdb backtrace of every bun thread"
-              sudo apt-get install -y -qq gdb > /dev/null 2>&1 && sudo gdb -p "$bunpid" -batch -ex "thread apply all bt 12" 2>&1 | tail -400 || true
+            if [ "$idle" -ge 45 ]; then
+              {
+                echo "STALL after output idle ${idle}s at $(date -u +%H:%M:%S)"
+                for st in /proc/[0-9]*/stat; do
+                  line=$(timeout 2 cat "$st" 2>/dev/null) || { echo "UNREADABLE $st"; continue; }
+                  pid=${st#/proc/}; pid=${pid%/stat}
+                  state=$(echo "$line" | sed -E 's/^[0-9]+ \(.*\) ([A-Z]) .*/\1/')
+                  comm=$(echo "$line" | sed -E 's/^[0-9]+ \((.*)\) [A-Z] .*/\1/')
+                  ppid=$(echo "$line" | sed -E 's/^[0-9]+ \(.*\) [A-Z] ([0-9]+) .*/\1/')
+                  uid=$(timeout 2 awk '/^Uid:/{print $2}' /proc/$pid/status 2>/dev/null)
+                  echo "$pid ppid=$ppid uid=$uid state=$state comm=$comm wchan=$(timeout 2 cat /proc/$pid/wchan 2>/dev/null)"
+                  case "$state" in D|T|t|Z) echo "  kernel stack:"; sudo timeout 3 cat /proc/$pid/stack 2>/dev/null | sed 's/^/    /' ;; esac
+                done
+              } > /tmp/stall.txt 2>&1
+              sudo pkill -9 -u omoqa || true
+              sleep 3
+              echo "::group::STALL diagnostics"
+              cat /tmp/stall.txt
               echo "::endgroup::"
-              kill -9 "$bunpid"
-              wait "$teepid" || true
               echo "::error::bun test stalled (diagnostic run)"
               exit 1
             fi
