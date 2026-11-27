@@ -348,12 +348,12 @@ jobs:
           tracerpid=$!
           sleep 5
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0; fi
-                    sudo useradd -m -s /bin/bash omoqa
+          sudo useradd -m -s /bin/bash omoqa
           sudo chmod -R a+rwX "$PWD"
           sudo chmod o+rx /home/runner /home/runner/.bun /home/runner/.bun/bin
           sudo mkdir -p /tmp/omoqa-transpiler && sudo chown omoqa /tmp/omoqa-transpiler
           echo "[diag] tests run as $(id -u omoqa) (runner uid $(id -u)); Worker=$(pgrep -f Runner.Worker) Listener=$(pgrep -f Runner.Listener) step=$$ pgid=$(ps -o pgid= -p $$ | tr -d ' ')" >&2
-{ sudo -u omoqa -H env PATH="$PATH" CI=true GITHUB_ACTIONS=true BUN_RUNTIME_TRANSPILER_CACHE_PATH=/tmp/omoqa-transpiler "$bunbin" test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait $!; echo "BUN_EXIT=$?"; } | tee /tmp/omo-shard1.log &
+          { sudo -u omoqa -H env PATH="$PATH" CI=true GITHUB_ACTIONS=true BUN_RUNTIME_TRANSPILER_CACHE_PATH=/tmp/omoqa-transpiler "$bunbin" test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait $!; echo "BUN_EXIT=$?"; } | tee /tmp/omo-shard1.log &
           teepid=$!
           sleep 2
           bunpid=$(cat /tmp/omo-shard1.pid)
