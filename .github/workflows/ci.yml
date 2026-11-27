@@ -328,7 +328,7 @@ jobs:
             done ) &
           samplerpid=$!
           bunbin="$(command -v bun)"
-          { sudo systemd-run --scope --quiet -p MemoryMax=10G -p TasksMax=8000 --uid="$(id -u)" --gid="$(id -g)" --setenv=PATH="$PATH" --setenv=HOME="$HOME" --setenv=CI=true --setenv=GITHUB_ACTIONS=true --setenv=BUN_RUNTIME_TRANSPILER_CACHE_PATH="${BUN_RUNTIME_TRANSPILER_CACHE_PATH:-}" --working-directory="$PWD" -- "$bunbin" test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait $!; echo "BUN_EXIT=$?"; } | tee /tmp/omo-shard1.log &
+          { "$bunbin" test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait $!; echo "BUN_EXIT=$?"; } | tee /tmp/omo-shard1.log &
           teepid=$!
           sleep 2
           bunpid=$(cat /tmp/omo-shard1.pid)
