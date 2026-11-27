@@ -317,7 +317,23 @@ jobs:
             bun test --timeout 20000 packages/omo-opencode packages/memory-core
             exit 0
           fi
-          bun test --timeout 20000 packages/omo-opencode
+          # DIAGNOSTIC (#127 stall, variant J): the omo-opencode run writes to a file only, never to the runner.
+          set +e
+          bun test --timeout 20000 packages/omo-opencode > /tmp/omo-shard1.log 2>&1
+          bunexit=$?
+          set -e
+          echo "::group::shard 1 omo-opencode output summary (exit $bunexit)"
+          echo "bytes=$(stat -c %s /tmp/omo-shard1.log) lines=$(wc -l < /tmp/omo-shard1.log)"
+          grep -a -E '^ *[0-9]+ (pass|fail)$|^Ran [0-9]+ tests' /tmp/omo-shard1.log | tail -4
+          echo "--- longest lines (length, line number)"
+          awk '{ print length($0), NR }' /tmp/omo-shard1.log | sort -rn | head -8
+          echo "--- lines over 10000 characters: $(awk 'length($0) > 10000' /tmp/omo-shard1.log | wc -l)"
+          awk 'length($0) > 10000 { print "line " NR ", " length($0) " chars: " substr($0, 1, 300) }' /tmp/omo-shard1.log | head -6 | tr -cd '[:print:]\n'
+          echo "--- control characters other than tab/newline: $(tr -d '\t\n[:print:]' < /tmp/omo-shard1.log | wc -c) bytes"
+          echo "--- failing tests"
+          grep -a '^(fail)' /tmp/omo-shard1.log | sort -u | head -20 | cut -c1-220
+          echo "::endgroup::"
+          [ "$bunexit" -eq 0 ] || exit "$bunexit"
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
