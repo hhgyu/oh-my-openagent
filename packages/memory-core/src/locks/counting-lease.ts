@@ -39,7 +39,11 @@ export type CountingLease = {
   readonly release: () => Promise<boolean>
   /** Exit handlers cannot await; only this owner's nonce may be removed. */
   readonly releaseSync: () => boolean
-  /** Keep the slot occupied if the supervisor dies while its gated child survives. */
+  /**
+   * Hand the slot to a gated child: it stays occupied while the child OR this process lives, so
+   * the slot survives this process's death and is never reclaimed while this process may still
+   * release it.
+   */
   readonly retainFor: (pid: number, processStart: string | null) => Promise<void>
 }
 
@@ -150,9 +154,14 @@ async function takeAnySlot(
     try {
       // One pass per slot: publish, or recover a proven-dead owner and publish, or report contention.
       await acquireLock(lockPath, record, { waitTimeoutMs: 0, ...(signal === undefined ? {} : { signal }) })
+      let released = false
       return {
         slot,
-        release: () => releaseLock(lockPath, record),
+        release: async () => {
+          const removed = await releaseLock(lockPath, record)
+          released = true
+          return removed
+        },
         retainFor: async (pid, processStart) => {
           const staging = `${lockPath}.handoff-${record.nonce}`
           try {
@@ -163,6 +172,7 @@ async function takeAnySlot(
                 pid,
                 process_start: processStart ?? "unavailable",
                 git_activity_lock: undefined,
+                co_owner: { pid: record.pid, process_start: record.process_start },
               })}\n`,
               { mode: 0o600 },
             )
@@ -172,6 +182,9 @@ async function takeAnySlot(
           }
         },
         releaseSync: () => {
+          // After release the path may belong to a successor mid-publish or mid-delete; reading it
+          // from an exit handler could only fail (Windows EPERM) or report someone else's lock.
+          if (released) return false
           try {
             if (parseLockRecord(readFileSync(lockPath, "utf8"))?.nonce !== record.nonce) return false
             unlinkSync(lockPath)
