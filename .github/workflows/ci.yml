@@ -323,8 +323,11 @@ jobs:
           cat > /tmp/diag-sampler.sh <<'SAMPLER'
           while true; do
             echo "[diag $(date -u +%H:%M:%S)] $(free -m | awk '/Mem:/{print "mem used="$3"MB avail="$7"MB"}') tasks=$(ps -eLf | wc -l) procs=$(ps -e | wc -l) load=$(cut -d' ' -f1-3 /proc/loadavg)" >&2
-            ps -eo pid,ppid,pgid,rss,etime,args --sort=-rss | head -6 | cut -c1-200 | sed 's/^/[diag]   /' >&2
-            sleep 10
+            ps -eo pid,ppid,pgid,rss,etime,args --sort=-rss | head -4 | cut -c1-200 | sed 's/^/[diag]   /' >&2
+            echo "[diag] disk: $(df -h --output=target,size,used,avail,pcent / /tmp /home/runner/work 2>/dev/null | tail -n +2 | tr -s ' ' | tr '\n' ';') inodes: $(df -i --output=target,ipcent / /tmp 2>/dev/null | tail -n +2 | tr -s ' ' | tr '\n' ';')" >&2
+            echo "[diag] big dirs: $(sudo du -xsm /tmp /home/runner/work/_temp /home/runner/.cache /home/runner/.local 2>/dev/null | sort -rn | head -4 | tr '\t\n' ' ;')" >&2
+            sudo find /tmp /home/runner -xdev -type f -size +200M -newer /tmp/diag-sampler.sh -printf "[diag] growing %s bytes %p\n" 2>/dev/null | head -5 >&2
+            sleep 5
           done
           SAMPLER
           setsid bash /tmp/diag-sampler.sh &
