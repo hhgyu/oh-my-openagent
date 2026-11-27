@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { existsSync } from "../fs/resilient"
 import { win32 } from "node:path"
-import { GitAbortedError, GitNotFoundError, GitTimeoutError } from "./errors"
+import { GitAbortedError, GitNotFoundError, GitStopFailedError, GitTimeoutError } from "./errors"
 import { memoryGitEnvironment } from "./exec-environment"
 import { holdGitActivityShared } from "./git-activity-lock"
+import { createWindowsGitTreeStopper, GitTreeStopError, type GitTreeStopper } from "./stop-git-tree"
 import { recordGitTimeout } from "./timeout-diagnostics"
 import { publishVolumeSnapshotEvidence } from "./volume-snapshot-diagnostics"
 
@@ -51,6 +52,10 @@ export interface GitExec {
 
 export interface NodeGitExecRuntime {
   platform?: NodeJS.Platform
+  /** How a stopped git's process tree is ended; defaults to taskkill on win32 and none (SIGTERM to git) elsewhere. */
+  treeStopper?: GitTreeStopper
+  /** Observes each spawned git child once every exec listener is attached (tests order events against it). */
+  onSpawn?: (child: ChildProcess) => void
   runCommand?: (
     executable: string,
     argv: readonly string[],
@@ -103,14 +108,22 @@ async function runGitCommand(
   argv: readonly string[],
   options: GitExecOptions,
   environment: NodeJS.ProcessEnv,
+  hooks: GitChildHooks,
 ): Promise<GitExecResult> {
   const activity = await holdGitActivityShared(options.cwd)
   try {
-    return await spawnGitCommand(executable, argv, options, environment, activity?.fd)
+    return await spawnGitCommand(executable, argv, options, environment, activity?.fd, hooks)
   } finally {
     await activity?.release()
   }
 }
+
+interface GitChildHooks {
+  readonly treeStopper: GitTreeStopper | undefined
+  readonly onSpawn: ((child: ChildProcess) => void) | undefined
+}
+
+type ChildEnd = { readonly code: number | null; readonly signal: NodeJS.Signals | null }
 
 function spawnGitCommand(
   executable: string,
@@ -118,10 +131,12 @@ function spawnGitCommand(
   options: GitExecOptions,
   environment: NodeJS.ProcessEnv,
   activityFd: number | undefined,
+  { treeStopper, onSpawn }: GitChildHooks,
 ): Promise<GitExecResult> {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now()
     const hasStdin = options.stdin !== undefined
+    const killGraceMs = options.killGraceMs ?? GIT_KILL_GRACE_MS
     // git.exe is a console-subsystem binary: without windowsHide every memory auto-commit and
     // sync allocates a fresh console window that Windows foregrounds, stealing the user's focus
     // (#8501). Inert on posix, load-bearing on win32 - do not drop it.
@@ -137,20 +152,103 @@ function spawnGitCommand(
     const stderr: Buffer[] = []
     let settled = false
     let timedOut = false
+    let aborted = false
     let exitDrain: ReturnType<typeof setTimeout> | undefined
-
     let killTimer: ReturnType<typeof setTimeout> | undefined
+    let exited: ChildEnd | undefined
+    let closed: ChildEnd | undefined
+    // "none": no tree stop (POSIX signals git directly). Otherwise the call settles only after the stop has
+    // ended git's whole process tree, or with GitStopFailedError when that could not be proven.
+    let treeStop: "none" | "pending" | "done" | GitTreeStopError = "none"
+
+    const finish = (outcome: () => void) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      clearTimeout(killTimer)
+      clearTimeout(exitDrain)
+      options.signal?.removeEventListener("abort", onAbort)
+      outcome()
+    }
+    const stoppedError = () => (aborted ? new GitAbortedError(argv) : new GitTimeoutError(argv, options.timeoutMs))
+    const settleWith = (end: ChildEnd) =>
+      finish(() => {
+        if (aborted || timedOut) {
+          reject(stoppedError())
+          return
+        }
+        const stdoutBytes = Buffer.concat(stdout)
+        resolve({
+          code: end.code ?? 1,
+          stdout: stdoutBytes.toString("utf8"),
+          stderr: Buffer.concat(stderr).toString("utf8") + describeStdinError(stdinError),
+          stdoutBytes,
+          termination: { signal: end.signal, elapsedMs: Date.now() - startedAt },
+        })
+      })
+    // The one settlement path: every completion signal (exit, close, the drain, the tree stop) lands here.
+    // Git has exited even while a hook it started still holds its stdout/stderr open, so `close` may never
+    // come: a git that finished normally settles on `close`, or with what it wrote once the bounded drain
+    // runs out. A stopped git settles at exit on POSIX; with a tree stop it waits for that stop first.
+    const advance = () => {
+      if (settled || treeStop === "pending") return
+      if (treeStop instanceof GitTreeStopError) {
+        const cause = treeStop
+        finish(() => reject(new GitStopFailedError(argv, aborted ? "aborted" : "timed out", { cause })))
+        return
+      }
+      if (closed !== undefined) {
+        settleWith(closed)
+        return
+      }
+      if (exited === undefined) return
+      if ((aborted || timedOut) && treeStop === "none") {
+        settleWith(exited)
+        return
+      }
+      const end = exited
+      exitDrain ??= setTimeout(() => {
+        // Still open past the drain: a hook child holds them. Destroy them so it cannot keep us.
+        child.stdout!.destroy()
+        child.stderr!.destroy()
+        settleWith(end)
+      }, options.exitDrainMs ?? GIT_EXIT_DRAIN_MS)
+    }
+    /** Stops a git that is still running; true when SIGTERM went to git itself (POSIX), so SIGKILL may follow. */
+    const stop = (): boolean => {
+      if (exited !== undefined || treeStop !== "none") return false
+      if (treeStopper === undefined) {
+        child.kill("SIGTERM")
+        return true
+      }
+      treeStop = "pending"
+      treeStopper(child, killGraceMs).then(
+        () => {
+          treeStop = "done"
+          advance()
+        },
+        (error: unknown) => {
+          treeStop =
+            error instanceof GitTreeStopError
+              ? error
+              : new GitTreeStopError(error instanceof Error ? error.message : String(error), { cause: error })
+          advance()
+        },
+      )
+      return false
+    }
     const timer = setTimeout(() => {
       timedOut = true
       const timeoutRecord = recordGitTimeout(environment, child.pid, argv, options.cwd, options.timeoutMs)
-      child.kill("SIGTERM")
-      killTimer = setTimeout(() => child.kill("SIGKILL"), options.killGraceMs ?? GIT_KILL_GRACE_MS)
+      if (stop()) killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs)
       if (timeoutRecord !== undefined) void publishVolumeSnapshotEvidence(timeoutRecord)
     }, options.timeoutMs)
-    let aborted = false
-    const onAbort = () => {
+    // An abort before settlement always yields GitAbortedError. A git that already exited is never stopped:
+    // its pid may be reused, so the call just settles as aborted.
+    function onAbort() {
       aborted = true
-      child.kill("SIGTERM")
+      if (exited === undefined) stop()
+      else advance()
     }
     if (options.signal?.aborted === true) onAbort()
     else options.signal?.addEventListener("abort", onAbort, { once: true })
@@ -169,75 +267,35 @@ function spawnGitCommand(
       stdin.end(options.stdin)
     }
     child.on("error", (error: NodeJS.ErrnoException) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      clearTimeout(killTimer)
-      clearTimeout(exitDrain)
-      options.signal?.removeEventListener("abort", onAbort)
-      if (error.code === "ENOENT") {
-        // spawn reports ENOENT for a missing cwd as much as for a missing git binary. A fresh
-        // memory identity has no repo dir yet, and calling that "git not found on PATH" surfaced a
-        // bogus extension error on every first session. Behave like git itself: report the absent
-        // cwd as exit 128 so head() reads it as no-repo-yet, and reserve GitNotFoundError for a cwd
-        // that exists while the binary genuinely cannot spawn.
-        if (!existsSync(options.cwd)) {
-          resolve({
-            code: 128,
-            stdout: "",
-            stderr: `fatal: cannot change to '${options.cwd}': No such file or directory`,
-          })
-          return
-        }
-        reject(new GitNotFoundError({ cause: error }))
-      } else reject(error)
-    })
-    const settleWithResult = (code: number | null, signal: NodeJS.Signals | null) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      clearTimeout(killTimer)
-      clearTimeout(exitDrain)
-      options.signal?.removeEventListener("abort", onAbort)
-      if (aborted) {
-        reject(new GitAbortedError(argv))
-        return
-      }
-      if (timedOut) {
-        reject(new GitTimeoutError(argv, options.timeoutMs))
-        return
-      }
-      const stdoutBytes = Buffer.concat(stdout)
-      resolve({
-        code: code ?? 1,
-        stdout: stdoutBytes.toString("utf8"),
-        stderr: Buffer.concat(stderr).toString("utf8") + describeStdinError(stdinError),
-        stdoutBytes,
-        termination: { signal, elapsedMs: Date.now() - startedAt },
+      finish(() => {
+        if (error.code === "ENOENT") {
+          // spawn reports ENOENT for a missing cwd as much as for a missing git binary. A fresh
+          // memory identity has no repo dir yet, and calling that "git not found on PATH" surfaced a
+          // bogus extension error on every first session. Behave like git itself: report the absent
+          // cwd as exit 128 so head() reads it as no-repo-yet, and reserve GitNotFoundError for a cwd
+          // that exists while the binary genuinely cannot spawn.
+          if (!existsSync(options.cwd)) {
+            resolve({
+              code: 128,
+              stdout: "",
+              stderr: `fatal: cannot change to '${options.cwd}': No such file or directory`,
+            })
+            return
+          }
+          reject(new GitNotFoundError({ cause: error }))
+        } else reject(error)
       })
-    }
-    // Git has exited even while a hook it started still holds its stdout/stderr open, so `close`
-    // may never come. A stopped git (timeout or abort) settles at once; a git that finished
-    // normally settles on `close`, or with what it wrote once the bounded drain runs out.
-    child.on("exit", (code, signal) => {
-      if (settled) return
-      if (timedOut || aborted) {
-        settled = true
-        clearTimeout(timer)
-        clearTimeout(killTimer)
-        options.signal?.removeEventListener("abort", onAbort)
-        reject(aborted ? new GitAbortedError(argv) : new GitTimeoutError(argv, options.timeoutMs))
-        return
-      }
-      clearTimeout(timer)
-      exitDrain = setTimeout(() => {
-        // Still open past the drain: a hook child holds them. Destroy them so it cannot keep us.
-        child.stdout!.destroy()
-        child.stderr!.destroy()
-        settleWithResult(code, signal)
-      }, options.exitDrainMs ?? GIT_EXIT_DRAIN_MS)
     })
-    child.on("close", (code, signal) => settleWithResult(code, signal))
+    child.on("exit", (code, signal) => {
+      exited = { code, signal }
+      clearTimeout(timer)
+      advance()
+    })
+    child.on("close", (code, signal) => {
+      closed = { code, signal }
+      advance()
+    })
+    onSpawn?.(child)
   })
 }
 
@@ -248,7 +306,14 @@ const NO_FSMONITOR = ["-c", "core.fsmonitor=false"] as const
 
 export function createNodeGitExec(runtime: NodeGitExecRuntime = {}): GitExec {
   const platform = runtime.platform ?? process.platform
-  const runCommand = runtime.runCommand ?? runGitCommand
+  const runCommand =
+    runtime.runCommand ??
+    ((executable: string, argv: readonly string[], options: GitExecOptions, environment: NodeJS.ProcessEnv) =>
+      runGitCommand(executable, argv, options, environment, {
+        treeStopper:
+          runtime.treeStopper ?? (platform === "win32" ? createWindowsGitTreeStopper(environment) : undefined),
+        onSpawn: runtime.onSpawn,
+      }))
 
   return {
     async run(callerArgv, options) {
