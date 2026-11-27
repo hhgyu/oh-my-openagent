@@ -407,6 +407,9 @@ jobs:
         run: |
           $diagnostics = Join-Path $env:RUNNER_TEMP "git-timeout-diagnostics"
           if (-not (Test-Path $diagnostics)) { "no git timed out"; exit 0 }
+          $treeStops = @(Get-ChildItem $diagnostics -Filter 'tree-stop-*.json' -File | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json })
+          "TREE-STOP-DIAG total=$($treeStops.Count) staleAtStop=$(@($treeStops | Where-Object staleAtStop).Count) launcherExitedBeforeTaskkillClosed=$(@($treeStops | Where-Object launcherExitedBeforeTaskkillClosed).Count) killedForeignProcess=$(@($treeStops | Where-Object killedForeignProcess).Count)"
+          foreach ($stop in $treeStops) { "TREE-STOP-DIAG-RECORD $($stop | ConvertTo-Json -Compress -Depth 5)" }
           $unfinished = Join-Path $diagnostics "trace2-unfinished"
           New-Item -ItemType Directory -Force -Path $unfinished | Out-Null
           Get-ChildItem (Join-Path $env:RUNNER_TEMP "git-trace2") -File -ErrorAction SilentlyContinue |

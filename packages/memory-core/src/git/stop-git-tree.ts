@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { win32 } from "node:path"
 
 import { GitError } from "./errors"
+import { startTreeStopDiagnostic } from "./tree-stop-diagnostics"
 
 // On Windows `git` is the Git for Windows launcher (`cmd\git.exe`), which starts the real git as its own
 // child; git then starts pack-objects, hooks and the like. Terminating the launcher alone leaves all of
@@ -56,8 +57,16 @@ export function createWindowsGitTreeStopper(
         reject(error)
       }
       let taskkill: ChildProcess
+      const diagnostic = startTreeStopDiagnostic(environment, child, pid)
       try {
-        taskkill = spawnProcess(taskkillPath(environment), ["/PID", String(pid), "/T", "/F"])
+        taskkill =
+          diagnostic === undefined
+            ? spawnProcess(taskkillPath(environment), ["/PID", String(pid), "/T", "/F"])
+            : spawn(taskkillPath(environment), ["/PID", String(pid), "/T", "/F"], {
+                stdio: ["ignore", "pipe", "pipe"],
+                windowsHide: true,
+              })
+        diagnostic?.onTaskkillSpawned(taskkill)
       } catch (error) {
         fail(new GitTreeStopError(`taskkill could not start for git pid ${pid}`, { cause: error }))
         return
