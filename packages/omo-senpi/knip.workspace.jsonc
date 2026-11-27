@@ -55,6 +55,8 @@
       "ignoreFiles": [
         // fork V2 (hhgyu/oh-my-openagent v2/dev): live QA driver run by hand
         "scripts/qa/memory-sync-fresh-device-e2e.mjs",
+        // fork V2 (hhgyu/oh-my-openagent v2/dev): live QA driver run by hand
+        "scripts/qa/memory-maintenance-abort-e2e.mjs",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
         "scripts/expect-exit.mjs",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
