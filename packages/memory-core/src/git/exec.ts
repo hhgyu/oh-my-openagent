@@ -243,12 +243,12 @@ function spawnGitCommand(
       if (stop()) killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs)
       if (timeoutRecord !== undefined) void publishVolumeSnapshotEvidence(timeoutRecord)
     }, options.timeoutMs)
-    // An abort before settlement always yields GitAbortedError. A git that already exited is never stopped:
-    // its pid may be reused, so the call just settles as aborted.
+    // An abort before settlement always yields GitAbortedError, through the same close/drain settlement as any
+    // exit, so a hook child still holding git's stdio keeps its bounded drain. A git that already exited is
+    // never signalled: its pid may be reused.
     function onAbort() {
       aborted = true
       if (exited === undefined) stop()
-      else advance()
     }
     if (options.signal?.aborted === true) onAbort()
     else options.signal?.addEventListener("abort", onAbort, { once: true })

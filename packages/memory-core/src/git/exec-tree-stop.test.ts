@@ -50,6 +50,15 @@ async function waitFor(condition: () => boolean, budgetMs: number): Promise<void
   }
 }
 
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 describe("git tree stop settlement", () => {
   test("#given git closes its stdio while the tree stop is still running and a descendant lives #when the stop finishes #then the call settles only after it", async () => {
     // given
@@ -96,7 +105,7 @@ describe("git tree stop settlement", () => {
     expect(descendantAliveAtSettle).toBe(false)
   })
 
-  test("#given git exited normally and a hook child still holds its stdout #when the caller aborts during the drain #then the exited pid is never stopped and the call still settles as aborted", async () => {
+  test("#given git exited normally and a hook child still holds its stdout #when the caller aborts during the drain #then the exited pid is never stopped and the call settles as aborted only once the stdio closes", async () => {
     // given
     const dir = await initRepo()
     writeFileSync(
@@ -131,15 +140,27 @@ describe("git tree stop settlement", () => {
     await launcherExit
 
     // when
-    controller.abort()
-    process.kill(holder, "SIGKILL")
-    const outcome = await run.then(
+    let settled = false
+    const outcome = run.then(
       () => undefined,
       (error: unknown) => error,
     )
+    void outcome.finally(() => {
+      settled = true
+    })
+    controller.abort()
+    // An abort that settled the call on the spot would have run its handlers by now.
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+    const settledWhileStdioHeld = settled
+    const holderExit = waitFor(() => !alive(holder), 30_000)
+    process.kill(holder, "SIGKILL")
+    await holderExit
+    const error = await outcome
 
     // then
     expect(stopperCalls).toBe(0)
-    expect(outcome).toBeInstanceOf(GitAbortedError)
+    expect(settledWhileStdioHeld).toBe(false)
+    expect(error).toBeInstanceOf(GitAbortedError)
   })
 })
