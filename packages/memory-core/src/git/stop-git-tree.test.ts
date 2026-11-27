@@ -226,6 +226,29 @@ describe("Windows git tree stop", () => {
     await launcherExit
   })
 
+  test("#given taskkill used the whole budget and found no such process #when the launcher keeps running #then the stop rejects at once instead of waiting a second budget", async () => {
+    // given
+    const launcher = startLauncher()
+    const launcherExit = once(launcher, "exit")
+    let clock = 0
+    const stop = createWindowsGitTreeStopper(
+      {},
+      recordingRunner({ status: 128, signal: null }, () => {
+        clock += 60_000
+      }).runner,
+      () => true,
+      () => clock,
+    )
+
+    // when
+    const error = await settle(stop(launcher, 60_000))
+
+    // then
+    expect(error).toBeInstanceOf(GitTreeStopError)
+    expect((error as Error).message).toBe(`taskkill exited with code 128 for git pid ${launcher.pid}`)
+    await launcherExit
+  }, 5_000)
+
   test("#given a launcher without a positive pid #when the tree is stopped #then it rejects without running taskkill", async () => {
     // given
     const launcher = Object.defineProperty(new ChildProcess(), "pid", { value: 0 })

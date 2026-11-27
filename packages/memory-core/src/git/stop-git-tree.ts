@@ -56,7 +56,8 @@ const isProcessRunning: ProcessRunningProbe = (pid) => {
 const hasEnded = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null
 
 /**
- * `taskkill /T /F` over the launcher's tree, bounded by `deadlineMs` (the caller's kill-grace budget).
+ * `taskkill /T /F` over the launcher's tree, bounded as a whole by `deadlineMs` (the caller's kill-grace
+ * budget): taskkill and any wait for the launcher's exit afterwards share that one budget.
  * Resolves on exit code 0, and without any taskkill for a launcher that has already exited. A taskkill
  * that cannot start, fails, or outlives the deadline rejects with a GitTreeStopError; the launcher
  * itself is then killed so it cannot linger, but its descendants are not proven gone and the caller
@@ -66,9 +67,11 @@ export function createWindowsGitTreeStopper(
   environment: NodeJS.ProcessEnv = process.env,
   runProcess: TaskkillRunner = runTaskkill,
   isRunning: ProcessRunningProbe = isProcessRunning,
+  now: () => number = Date.now,
 ): GitTreeStopper {
   return (child, deadlineMs) =>
     new Promise<void>((resolve, reject) => {
+      const deadlineAt = now() + deadlineMs
       const pid = child.pid
       if (pid === undefined || pid <= 0) {
         reject(new GitTreeStopError("git has no process id to stop"))
@@ -84,7 +87,7 @@ export function createWindowsGitTreeStopper(
         reject(error)
       }
       const settleOnLauncherEnd = (failure: GitTreeStopError) =>
-        awaitLauncherEnd(child, deadlineMs).then((ended) => (ended ? resolve() : fail(failure)))
+        awaitLauncherEnd(child, Math.max(0, deadlineAt - now())).then((ended) => (ended ? resolve() : fail(failure)))
       // Not yet reaped, so the runtime still holds the launcher's handle and its pid is ours. A launcher that
       // exited on its own already waited for the git it started; only its exit event is still to come.
       if (!isRunning(pid)) {
