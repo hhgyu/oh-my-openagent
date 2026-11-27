@@ -41,18 +41,6 @@ export class GitAbortedError extends GitError {
   }
 }
 
-/** A stopped git (abort or timeout) whose process tree could not be proven ended; descendants may still run. */
-export class GitStopFailedError extends GitError {
-  constructor(
-    readonly argv: readonly string[],
-    readonly stopReason: "aborted" | "timed out",
-    options?: ErrorOptions,
-  ) {
-    const detail = options?.cause instanceof Error ? `: ${options.cause.message}` : ""
-    super(`git ${argv.join(" ")} ${stopReason}, but its process tree could not be stopped${detail}`, options)
-  }
-}
-
 export class GitNotFoundError extends GitError {
   constructor(options?: ErrorOptions) {
     super("Git is required for memory storage but was not found on PATH.", options)
