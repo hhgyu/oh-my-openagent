@@ -2,6 +2,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { defaultIsProcessAlive as isProcessAlive } from "./process-liveness"
+
 // A process tree that never ends on its own. POSIX: the child ignores SIGTERM and starts a descendant that does
 // too. Windows: the child is cmd.exe waiting on a Bun descendant; a Bun child would take its descendants down
 // with its own job object, which would hide a missing tree kill.
@@ -35,15 +37,6 @@ export interface WedgedTree {
   readonly command: string
   readonly args: readonly string[]
   readonly pids: () => Promise<{ readonly child: number; readonly descendant: number }>
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
 }
 
 export function createWedgedTrees(): {
@@ -85,18 +78,32 @@ export function createWedgedTrees(): {
         pidFile,
       ]),
     dispose() {
-      for (const pid of started.splice(0)) if (isProcessAlive(pid)) process.kill(pid, "SIGKILL")
+      for (const pid of started.splice(0)) killIfPresent(pid)
       for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
     },
   }
 }
 
+function killIfPresent(pid: number): void {
+  try {
+    process.kill(pid, "SIGKILL")
+  } catch {
+    // ESRCH: the process already exited.
+    return
+  }
+}
+
+async function stillAlive(pids: readonly number[]): Promise<number[]> {
+  const verdicts = await Promise.all(pids.map((pid) => isProcessAlive(pid)))
+  return pids.filter((_, index) => verdicts[index])
+}
+
 export async function aliveAfter(pids: readonly number[], ms: number): Promise<number[]> {
   const deadline = Date.now() + ms
-  let alive = pids.filter(isProcessAlive)
+  let alive = await stillAlive(pids)
   while (alive.length > 0 && Date.now() < deadline) {
     await Bun.sleep(25)
-    alive = alive.filter(isProcessAlive)
+    alive = await stillAlive(alive)
   }
   return alive
 }
