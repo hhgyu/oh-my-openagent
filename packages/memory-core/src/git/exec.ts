@@ -273,8 +273,7 @@ export function createNodeGitExec(runtime: NodeGitExecRuntime = {}): GitExec {
       onSpawn: runtime.onSpawn,
     })
   }
-  const runCommand =
-    runtime.runCommand ?? (platform === "win32" || runtime.treeStopper !== undefined ? runWithTreeStop : runGitCommand)
+  const runCommand = runtime.runCommand ?? (runtime.treeStopper !== undefined ? runWithTreeStop : runGitCommand)
 
   return {
     async run(callerArgv, options) {
