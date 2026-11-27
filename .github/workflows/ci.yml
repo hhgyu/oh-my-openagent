@@ -326,13 +326,18 @@ jobs:
           echo "bytes=$(stat -c %s /tmp/omo-shard1.log) lines=$(wc -l < /tmp/omo-shard1.log)"
           grep -a -E '^ *[0-9]+ (pass|fail)$|^Ran [0-9]+ tests' /tmp/omo-shard1.log | tail -4
           echo "--- longest lines (length, line number)"
-          awk '{ print length($0), NR }' /tmp/omo-shard1.log | sort -rn | head -8
+          awk '{ print length($0), NR }' /tmp/omo-shard1.log | sort -rn | awk 'NR <= 8'
           echo "--- lines over 10000 characters: $(awk 'length($0) > 10000' /tmp/omo-shard1.log | wc -l)"
-          awk 'length($0) > 10000 { print "line " NR ", " length($0) " chars: " substr($0, 1, 300) }' /tmp/omo-shard1.log | head -6 | tr -cd '[:print:]\n'
+          awk 'length($0) > 10000 { print "line " NR ", " length($0) " chars: " substr($0, 1, 300) }' /tmp/omo-shard1.log | awk 'NR <= 6' | tr -cd '[:print:]\n'
           echo "--- control characters other than tab/newline: $(tr -d '\t\n[:print:]' < /tmp/omo-shard1.log | wc -c) bytes"
+          echo "--- workflow-command lines (leading ::) by command"
+          grep -a -oE '^::[a-zA-Z-]+' /tmp/omo-shard1.log | sort | uniq -c | sort -rn | awk 'NR <= 15'
+          echo "--- workflow commands anywhere in a line (not at its start), by command"
+          grep -a -oE '.::[a-zA-Z-]+::' /tmp/omo-shard1.log | sed 's/^.//' | sort | uniq -c | sort -rn | awk 'NR <= 15'
           echo "--- failing tests"
-          grep -a '^(fail)' /tmp/omo-shard1.log | sort -u | head -20 | cut -c1-220
+          grep -a '^(fail)' /tmp/omo-shard1.log | sort -u | awk 'NR <= 20' | cut -c1-220
           echo "::endgroup::"
+          mkdir -p /tmp/omo-shard1-artifact && cp /tmp/omo-shard1.log /tmp/omo-shard1-artifact/omo-shard1.log
           [ "$bunexit" -eq 0 ] || exit "$bunexit"
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -347,6 +352,15 @@ jobs:
           fi
           echo "PID namespace ready ($procs processes visible)"
           unshare -Upf --mount-proc --map-current-user -- env CI=1 bun test --timeout 20000 packages/memory-core
+
+      - name: Upload shard 1 omo-opencode output (diagnostic)
+        if: always() && runner.os != 'Windows' && matrix.shard == '1/2'
+        uses: actions/upload-artifact@v6
+        with:
+          name: omo-shard1-output
+          path: /tmp/omo-shard1-artifact/omo-shard1.log
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Run tests with Windows telemetry
         id: root-tests-windows-1
