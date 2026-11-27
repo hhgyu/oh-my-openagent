@@ -327,7 +327,8 @@ jobs:
               sleep 10
             done ) &
           samplerpid=$!
-          { sudo systemd-run --scope --quiet -p MemoryMax=10G -p TasksMax=8000 --uid="$(id -u)" --gid="$(id -g)" --setenv=PATH="$PATH" --setenv=HOME="$HOME" --setenv=CI=true --working-directory="$PWD" -- bun test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait; } | tee /tmp/omo-shard1.log &
+          bunbin="$(command -v bun)"
+          { sudo systemd-run --scope --quiet -p MemoryMax=10G -p TasksMax=8000 --uid="$(id -u)" --gid="$(id -g)" --setenv=PATH="$PATH" --setenv=HOME="$HOME" --setenv=CI=true --setenv=GITHUB_ACTIONS=true --setenv=BUN_RUNTIME_TRANSPILER_CACHE_PATH="${BUN_RUNTIME_TRANSPILER_CACHE_PATH:-}" --working-directory="$PWD" -- "$bunbin" test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait $!; echo "BUN_EXIT=$?"; } | tee /tmp/omo-shard1.log &
           teepid=$!
           sleep 2
           bunpid=$(cat /tmp/omo-shard1.pid)
@@ -358,7 +359,9 @@ jobs:
             fi
           done
           wait "$teepid"
-          if grep -a -qE '^ *[1-9][0-9]* fail$' /tmp/omo-shard1.log; then exit 1; fi
+          kill "$samplerpid" || true
+          grep -a -q '^BUN_EXIT=0$' /tmp/omo-shard1.log || { echo "::error::shard 1 omo-opencode run did not exit 0: $(grep -a '^BUN_EXIT=' /tmp/omo-shard1.log)"; exit 1; }
+          grep -a -qE '^Ran [0-9]+ tests across [0-9]+ files' /tmp/omo-shard1.log || { echo "::error::shard 1 omo-opencode run printed no summary"; exit 1; }
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
