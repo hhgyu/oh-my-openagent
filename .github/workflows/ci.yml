@@ -318,7 +318,16 @@ jobs:
             exit 0
           fi
           # DIAGNOSTIC (#127 hang): same command, same pipe to the runner, plus a stall watchdog.
-          { bun test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait; } | tee /tmp/omo-shard1.log &
+          # Run 1 froze the whole runner (the watchdog never ran): sample resources to stderr every 10 s and cap
+          # the test run's memory and task count so a runaway is killed visibly instead of freezing the VM.
+          ( while true; do
+              echo "[diag $(date -u +%H:%M:%S)] $(free -m | awk '/Mem:/{print "mem used="$3"MB avail="$7"MB"}') $(free -m | awk '/Swap:/{print "swap used="$3"MB"}') tasks=$(ps -eLf | wc -l) procs=$(ps -e | wc -l) load=$(cut -d' ' -f1-3 /proc/loadavg)" >&2
+              ps -eo pid,ppid,rss,nlwp,etime,args --sort=-rss | head -6 | cut -c1-200 | sed 's/^/[diag]   /' >&2
+              ps -eo comm | sort | uniq -c | sort -rn | head -5 | tr '\n' ' ' | sed 's/^/[diag] top comms: /' >&2; echo >&2
+              sleep 10
+            done ) &
+          samplerpid=$!
+          { sudo systemd-run --scope --quiet -p MemoryMax=10G -p TasksMax=8000 --uid="$(id -u)" --gid="$(id -g)" --setenv=PATH="$PATH" --setenv=HOME="$HOME" --setenv=CI=true --working-directory="$PWD" -- bun test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait; } | tee /tmp/omo-shard1.log &
           teepid=$!
           sleep 2
           bunpid=$(cat /tmp/omo-shard1.pid)
