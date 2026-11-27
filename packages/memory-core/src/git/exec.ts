@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { existsSync } from "../fs/resilient"
 import { win32 } from "node:path"
-import { GitAbortedError, GitNotFoundError, GitTimeoutError } from "./errors"
+import { GitAbortedError, GitNotFoundError, GitStopFailedError, GitTimeoutError } from "./errors"
 import { memoryGitEnvironment } from "./exec-environment"
 import { holdGitActivityShared } from "./git-activity-lock"
+import { createWindowsGitTreeStopper, GitTreeStopError, type GitTreeStopper } from "./stop-git-tree"
 import { recordGitTimeout } from "./timeout-diagnostics"
 import { publishVolumeSnapshotEvidence } from "./volume-snapshot-diagnostics"
 
@@ -51,6 +52,10 @@ export interface GitExec {
 
 export interface NodeGitExecRuntime {
   platform?: NodeJS.Platform
+  /** How a stopped git's process tree is ended; defaults to taskkill on win32 and none (SIGTERM to git) elsewhere. */
+  treeStopper?: GitTreeStopper
+  /** Observes each spawned git child once every exec listener is attached (tests order events against it). */
+  onSpawn?: (child: ChildProcess) => void
   runCommand?: (
     executable: string,
     argv: readonly string[],
@@ -103,14 +108,22 @@ async function runGitCommand(
   argv: readonly string[],
   options: GitExecOptions,
   environment: NodeJS.ProcessEnv,
+  hooks: GitChildHooks,
 ): Promise<GitExecResult> {
   const activity = await holdGitActivityShared(options.cwd)
   try {
-    return await spawnGitCommand(executable, argv, options, environment, activity?.fd)
+    return await spawnGitCommand(executable, argv, options, environment, activity?.fd, hooks)
   } finally {
     await activity?.release()
   }
 }
+
+interface GitChildHooks {
+  readonly treeStopper: GitTreeStopper | undefined
+  readonly onSpawn: ((child: ChildProcess) => void) | undefined
+}
+
+type ChildEnd = { readonly code: number | null; readonly signal: NodeJS.Signals | null }
 
 function spawnGitCommand(
   executable: string,
@@ -118,6 +131,7 @@ function spawnGitCommand(
   options: GitExecOptions,
   environment: NodeJS.ProcessEnv,
   activityFd: number | undefined,
+  _hooks: GitChildHooks,
 ): Promise<GitExecResult> {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now()
@@ -248,7 +262,14 @@ const NO_FSMONITOR = ["-c", "core.fsmonitor=false"] as const
 
 export function createNodeGitExec(runtime: NodeGitExecRuntime = {}): GitExec {
   const platform = runtime.platform ?? process.platform
-  const runCommand = runtime.runCommand ?? runGitCommand
+  const runCommand =
+    runtime.runCommand ??
+    ((executable: string, argv: readonly string[], options: GitExecOptions, environment: NodeJS.ProcessEnv) =>
+      runGitCommand(executable, argv, options, environment, {
+        treeStopper:
+          runtime.treeStopper ?? (platform === "win32" ? createWindowsGitTreeStopper(environment) : undefined),
+        onSpawn: runtime.onSpawn,
+      }))
 
   return {
     async run(callerArgv, options) {
