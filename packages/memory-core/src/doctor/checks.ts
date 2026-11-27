@@ -155,8 +155,10 @@ export async function checkLocks(
       continue
     }
     if (record.hostname !== hostname()) continue
-    if (isAlive(record.pid)) continue
-    stale.push(`${path} (pid ${record.pid} is not running)`)
+    if (isAlive(record.pid) || (record.co_owner !== undefined && isAlive(record.co_owner.pid))) continue
+    stale.push(
+      `${path} (pid ${record.pid}${record.co_owner === undefined ? " is" : ` and pid ${record.co_owner.pid} are`} not running)`,
+    )
   }
 
   if (stale.length === 0) return { name: "locks", level: "ok", detail: "no stale locks" }

@@ -20,13 +20,18 @@ function errorCode(error: unknown): string | undefined {
  */
 export async function isLockOwnerProvenDead(owner: LockRecord): Promise<boolean> {
   if (owner.hostname !== hostname()) return false
-  const liveness = getPidLiveness(owner.pid)
+  if (!(await isProcessProvenDead(owner.pid, owner.process_start))) return false
+  return owner.co_owner === undefined || isProcessProvenDead(owner.co_owner.pid, owner.co_owner.process_start)
+}
+
+async function isProcessProvenDead(pid: number, recordedStart: string): Promise<boolean> {
+  const liveness = getPidLiveness(pid)
   if (liveness === "dead") return true
   if (liveness === "unknown") return false
 
-  const actualStart = await getProcessStartIdentity(owner.pid)
-  if (actualStart === null || owner.process_start === "unavailable") return false
-  return startIdentitiesConflict(owner.process_start, actualStart)
+  const actualStart = await getProcessStartIdentity(pid)
+  if (actualStart === null || recordedStart === "unavailable") return false
+  return startIdentitiesConflict(recordedStart, actualStart)
 }
 
 // The recovery lock's only remover is its holder's nonce-matched releaseLock, so a holder
