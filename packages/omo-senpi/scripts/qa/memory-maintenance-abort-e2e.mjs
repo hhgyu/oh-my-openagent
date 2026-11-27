@@ -29,7 +29,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { join, relative } from "node:path"
 import { deflateSync } from "node:zlib"
 
 import {
@@ -105,6 +105,64 @@ function digest(root) {
   }
   walk(root)
   return hash.digest("hex")
+}
+
+/** `relative path -> { sha256, endpoint? }` for every non-volatile file under `root`. */
+function manifest(root) {
+  const files = new Map()
+  if (!existsSync(root)) return files
+  const walk = (dir) => {
+    for (const name of readdirSync(dir).toSorted()) {
+      if (VOLATILE.has(name)) continue
+      const full = join(dir, name)
+      if (statSync(full).isDirectory()) {
+        walk(full)
+        continue
+      }
+      const bytes = readFileSync(full)
+      const rel = relative(root, full).replaceAll("\\", "/")
+      files.set(rel, { sha256: createHash("sha256").update(bytes).digest("hex"), endpoint: endpointOwner(rel, bytes) })
+    }
+  }
+  walk(root)
+  return files
+}
+
+// An OpenCode 2 server registers itself at `gateway/opencode-v2-endpoints/<instance>.json` with its own pid
+// and the directory it serves. Only the owner fields are kept; the registration's secret never is.
+function endpointOwner(rel, bytes) {
+  if (!/^gateway\/opencode-v2-endpoints\/[^/]+\.json$/.test(rel)) return undefined
+  try {
+    const parsed = JSON.parse(bytes.toString("utf8"))
+    return typeof parsed.pid === "number" && typeof parsed.directory === "string"
+      ? { pid: parsed.pid, directory: parsed.directory }
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Real agent-home paths that changed during the run, each attributed. A change is the host's own when it is an
+ * OpenCode 2 endpoint registration whose owner pid is not in the lane's process tree and whose directory is
+ * outside the sandbox (this lane starts no OpenCode server). Anything else is unattributed and fails isolation.
+ */
+function attributeChanges(before, after, lanePids, sandboxRoot) {
+  const changes = []
+  for (const rel of new Set([...before.keys(), ...after.keys()])) {
+    const was = before.get(rel)
+    const now = after.get(rel)
+    if (was?.sha256 === now?.sha256) continue
+    const owner = now?.endpoint ?? was?.endpoint
+    const hostOwned = owner !== undefined && !lanePids.has(owner.pid) && !owner.directory.startsWith(sandboxRoot)
+    changes.push({
+      path: rel,
+      change: was === undefined ? "added" : now === undefined ? "removed" : "modified",
+      owner,
+      attribution: hostOwned ? "host OpenCode 2 endpoint outside the lane" : "UNATTRIBUTED",
+    })
+  }
+  return changes
 }
 
 const REAL_AGENT_HOMES = [join(homedir(), ".senpi", "agent"), join(homedir(), ".omo", "agent")]
@@ -262,7 +320,7 @@ async function main() {
   const options = parseArgs(process.argv.slice(2))
   mkdirSync(options.evidenceDir, { recursive: true })
   const facts = { platform: process.platform, looseObjects: options.looseObjects }
-  const homesBefore = Object.fromEntries(REAL_AGENT_HOMES.map((home) => [home, digest(home)]))
+  const homesBefore = Object.fromEntries(REAL_AGENT_HOMES.map((home) => [home, manifest(home)]))
   const memoryBefore = { digest: digest(REAL_MEMORY_HOME), laneIdentities: laneIdentitiesIn(REAL_MEMORY_HOME) }
   const router = createRouter()
   const server = startMockCompletionsServer({ steps: router.steps, classifyRequest: router.classify })
@@ -431,14 +489,27 @@ async function main() {
         facts.cleanupSandboxError = error instanceof Error ? error.message : String(error)
       }
     }
-    const homesAfter = Object.fromEntries(REAL_AGENT_HOMES.map((home) => [home, digest(home)]))
+    const lanePids = new Set([
+      ...live.map((session) => session.pid),
+      ...(facts.processTree?.everSeen ?? []).map((row) => row.pid),
+    ])
+    const homesAfter = Object.fromEntries(REAL_AGENT_HOMES.map((home) => [home, manifest(home)]))
     const memoryAfter = { digest: digest(REAL_MEMORY_HOME), laneIdentities: laneIdentitiesIn(REAL_MEMORY_HOME) }
-    facts.realHomes = { before: homesBefore, after: homesAfter }
+    const changes = Object.fromEntries(
+      REAL_AGENT_HOMES.map((home) => [
+        home,
+        attributeChanges(homesBefore[home], homesAfter[home], lanePids, sandbox?.root ?? "\0"),
+      ]),
+    )
+    const unattributed = Object.values(changes)
+      .flat()
+      .filter((change) => change.attribution === "UNATTRIBUTED")
+    facts.realHomes = { changedPaths: changes, lanePids: [...lanePids] }
     facts.realMemoryHome = { path: REAL_MEMORY_HOME, before: memoryBefore, after: memoryAfter }
     record(
-      "real ~/.senpi/agent and ~/.omo/agent unchanged",
-      REAL_AGENT_HOMES.every((home) => homesBefore[home] === homesAfter[home]),
-      JSON.stringify(homesAfter),
+      "real ~/.senpi/agent and ~/.omo/agent: no change attributable to the lane",
+      unattributed.length === 0,
+      `changed=${Object.values(changes).flat().length} unattributed=${JSON.stringify(unattributed)}`,
     )
     record(
       "the real memory home never gained this lane's identity",
