@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, join, resolve } from "node:path"
 
-import { defaultIsProcessAlive } from "./exec"
+import { defaultIsProcessAlive } from "./process-liveness"
 import { attestLspDaemonOwner, parseLspDaemonOwner, type LspDaemonOwnerTarget } from "./lsp-daemon-owner-attestation"
 
 /**
@@ -147,9 +147,10 @@ export interface PlanStaleLspDaemonVersionSweepOptions {
   readonly attestTarget?: (target: StaleLspDaemonVersionTarget, platform: NodeJS.Platform) => Promise<boolean>
   readonly baseDir: string
   readonly currentVersion: string
-  readonly isAlive?: (pid: number) => boolean
+  readonly isAlive?: (pid: number, signal?: AbortSignal) => boolean | Promise<boolean>
   readonly log?: (message: string) => void
   readonly platform?: NodeJS.Platform
+  readonly signal?: AbortSignal
 }
 
 /**
@@ -162,7 +163,9 @@ export async function planStaleLspDaemonVersionSweep(
   options: PlanStaleLspDaemonVersionSweepOptions,
 ): Promise<StaleLspDaemonVersionSweepPlan> {
   const platform = options.platform ?? process.platform
-  const isAlive = options.isAlive ?? defaultIsProcessAlive
+  const isAlive =
+    options.isAlive ??
+    ((pid: number, signal?: AbortSignal) => defaultIsProcessAlive(pid, signal === undefined ? {} : { signal }))
   const attestTarget =
     options.attestTarget ??
     (options.attest === undefined
@@ -175,7 +178,8 @@ export async function planStaleLspDaemonVersionSweep(
     if (entry.version === options.currentVersion) continue
     const ownerTarget = readLspDaemonOwnerTarget(entry.dir)
     if (ownerTarget === null) continue
-    if (!isAlive(ownerTarget.pid)) continue
+    options.signal?.throwIfAborted()
+    if (!(await isAlive(ownerTarget.pid, options.signal))) continue
     const target = { ...ownerTarget, version: entry.version, versionDir: entry.dir }
     const pid = target.pid
     if (platform === "win32") {
