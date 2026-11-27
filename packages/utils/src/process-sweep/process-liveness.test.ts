@@ -1,12 +1,22 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { spawn, type ChildProcess } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  type FSWatcher,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  watch,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { createDefaultProcessKiller, type ProcessKiller } from "./exec"
 import { runProcessFamilySweep } from "./family-sweeper"
-import { defaultIsProcessAlive, type PsRunner } from "./process-liveness"
+import { createPsRunner, defaultIsProcessAlive, type PsRunner } from "./process-liveness"
 import { sweepStaleLspDaemonVersions } from "./sweeper"
 
 // The parent forks a child that exits at once, then blocks in waitid(WEXITED | WNOWAIT): it returns only
@@ -26,8 +36,10 @@ sys.stdin.read()
 const groups: number[] = []
 const children: ChildProcess[] = []
 const dirs: string[] = []
+const watchers: FSWatcher[] = []
 
 afterEach(() => {
+  for (const watcher of watchers.splice(0)) watcher.close()
   for (const group of groups.splice(0)) {
     try {
       process.kill(-group, "SIGKILL")
@@ -72,15 +84,33 @@ function tempDir(prefix: string): string {
   return dir
 }
 
-// Never settles; records the signal it was handed so the test can see the abort reach the ps child.
-function stalledPs(): { readonly runPs: PsRunner; readonly started: Promise<AbortSignal | undefined> } {
-  const started = Promise.withResolvers<AbortSignal | undefined>()
-  return {
-    runPs: (_args, signal) => {
-      started.resolve(signal)
-      return new Promise(() => {})
-    },
-    started: started.promise,
+const STALL_BOUND_MS = 1_000
+
+// A real stand-in for ps that never answers: it publishes its pid, then becomes `cat` blocked reading the
+// stdin pipe the production runner holds open, so only the runner's abort can end it.
+function stalledRealPs(): { readonly runPs: PsRunner; readonly pid: Promise<number> } {
+  const dir = tempDir("stalled-ps-")
+  const executable = join(dir, "ps")
+  const pidFile = join(dir, "pid")
+  writeFileSync(executable, `#!/bin/sh\necho $$ > "${pidFile}.tmp"\nmv "${pidFile}.tmp" "${pidFile}"\nexec cat\n`)
+  chmodSync(executable, 0o755)
+  const pid = new Promise<number>((resolve) => {
+    const watcher = watch(dir, () => {
+      if (!existsSync(pidFile)) return
+      watcher.close()
+      resolve(Number(readFileSync(pidFile, "utf8")))
+    })
+    watchers.push(watcher)
+  })
+  return { runPs: createPsRunner(executable), pid }
+}
+
+function signalZero(pid: number): string {
+  try {
+    process.kill(pid, 0)
+    return "running"
+  } catch (error) {
+    return error instanceof Error && "code" in error ? String(error.code) : String(error)
   }
 }
 
@@ -174,82 +204,95 @@ describe("process sweep liveness probe", () => {
     },
   )
 
-  test("#given a sweep whose post-SIGTERM liveness probe never returns #when the sweep is aborted #then it settles within its stop bound and the abort reaches the probe", async () => {
-    // given
-    const stalled = stalledPs()
-    const controller = new AbortController()
-    const sweep = runProcessFamilySweep(
-      {
-        familyLabel: "liveness stalled probe",
-        stampFile: join(tempDir("liveness-stalled-"), "stamp"),
-        collect: () =>
-          Promise.resolve({ candidates: [{ pid: process.pid }], killList: [{ pid: process.pid }], spared: [] }),
-      },
-      {
-        force: true,
-        graceMs: 0,
-        signal: controller.signal,
-        stopBoundMs: 200,
-        killer: {
-          isAlive: (pid, signal) =>
-            defaultIsProcessAlive(pid, {
-              platform: "darwin",
-              runPs: stalled.runPs,
-              ...(signal === undefined ? {} : { signal }),
-            }),
-          kill: () => Promise.resolve(),
-          terminate: () => Promise.resolve(),
+  // The ps probe path is POSIX-only; on Windows liveness is answered by kill(pid, 0) and no ps child exists.
+  test.skipIf(process.platform === "win32")(
+    "#given a family sweep whose post-SIGTERM ps probe is a real child that never answers #when the sweep is aborted #then the abort ends the ps child and the sweep settles before its stop bound",
+    async () => {
+      // given
+      const stalled = stalledRealPs()
+      const controller = new AbortController()
+      const sweep = runProcessFamilySweep(
+        {
+          familyLabel: "liveness stalled probe",
+          stampFile: join(tempDir("liveness-stalled-"), "stamp"),
+          collect: () =>
+            Promise.resolve({ candidates: [{ pid: process.pid }], killList: [{ pid: process.pid }], spared: [] }),
         },
-      },
-    )
-    const probeSignal = await stalled.started
+        {
+          force: true,
+          graceMs: 0,
+          signal: controller.signal,
+          stopBoundMs: STALL_BOUND_MS,
+          killer: {
+            isAlive: (pid, signal) =>
+              defaultIsProcessAlive(pid, {
+                platform: "darwin",
+                runPs: stalled.runPs,
+                ...(signal === undefined ? {} : { signal }),
+              }),
+            kill: () => Promise.resolve(),
+            terminate: () => Promise.resolve(),
+          },
+        },
+      )
+      const psPid = await stalled.pid
+      const psRunningBeforeAbort = signalZero(psPid)
 
-    // when
-    const abortedAt = Date.now()
-    controller.abort()
-    const result = await sweep
+      // when
+      const abortedAt = Date.now()
+      controller.abort()
+      const result = await sweep
+      const settledMs = Date.now() - abortedAt
 
-    // then
-    expect(result.action).toBe("failed")
-    expect(Date.now() - abortedAt).toBeLessThan(2_000)
-    expect(probeSignal?.aborted).toBe(true)
-  })
+      // then
+      expect(psRunningBeforeAbort).toBe("running")
+      expect(result.action).toBe("failed")
+      expect(settledMs).toBeLessThan(STALL_BOUND_MS)
+      expect(signalZero(psPid)).toBe("ESRCH")
+    },
+  )
 
-  test("#given a stale-version sweep whose owner liveness probe never returns #when the sweep is aborted #then it settles within its stop bound and the abort reaches the probe", async () => {
-    // given
-    const homeDir = tempDir("liveness-stale-version-")
-    const versionDir = join(homeDir, ".omo", "lsp-daemon", "v0.0.1")
-    mkdirSync(versionDir, { recursive: true })
-    writeFileSync(
-      join(versionDir, "daemon.owner"),
-      `${JSON.stringify({ endpoint: { kind: "unix", path: "/tmp/daemon.sock", dev: 1, ino: 1 }, nonce: "nonce", pid: process.pid, startedAt: "2026-07-21T00:00:00.000Z" })}\n`,
-    )
-    const stalled = stalledPs()
-    const controller = new AbortController()
-    const sweep = sweepStaleLspDaemonVersions({
-      currentVersion: "9.9.9",
-      force: true,
-      homeDir,
-      platform: "linux",
-      signal: controller.signal,
-      stopBoundMs: 200,
-      isAlive: (pid, signal) =>
-        defaultIsProcessAlive(pid, {
-          platform: "darwin",
-          runPs: stalled.runPs,
-          ...(signal === undefined ? {} : { signal }),
-        }),
-    })
-    const probeSignal = await stalled.started
+  test.skipIf(process.platform === "win32")(
+    "#given a stale-version sweep whose owner ps probe is a real child that never answers #when the sweep is aborted #then the abort ends the ps child and the sweep settles before its stop bound",
+    async () => {
+      // given
+      const homeDir = tempDir("liveness-stale-version-")
+      const versionDir = join(homeDir, ".omo", "lsp-daemon", "v0.0.1")
+      mkdirSync(versionDir, { recursive: true })
+      writeFileSync(
+        join(versionDir, "daemon.owner"),
+        `${JSON.stringify({ endpoint: { kind: "unix", path: "/tmp/daemon.sock", dev: 1, ino: 1 }, nonce: "nonce", pid: process.pid, startedAt: "2026-07-21T00:00:00.000Z" })}\n`,
+      )
+      const stalled = stalledRealPs()
+      const controller = new AbortController()
+      const sweep = sweepStaleLspDaemonVersions({
+        currentVersion: "9.9.9",
+        force: true,
+        homeDir,
+        platform: "linux",
+        signal: controller.signal,
+        stopBoundMs: STALL_BOUND_MS,
+        isAlive: (pid, signal) =>
+          defaultIsProcessAlive(pid, {
+            platform: "darwin",
+            runPs: stalled.runPs,
+            ...(signal === undefined ? {} : { signal }),
+          }),
+      })
+      const psPid = await stalled.pid
+      const psRunningBeforeAbort = signalZero(psPid)
 
-    // when
-    const abortedAt = Date.now()
-    controller.abort()
-    const result = await sweep
+      // when
+      const abortedAt = Date.now()
+      controller.abort()
+      const result = await sweep
+      const settledMs = Date.now() - abortedAt
 
-    // then
-    expect(result.action).toBe("failed")
-    expect(Date.now() - abortedAt).toBeLessThan(2_000)
-    expect(probeSignal?.aborted).toBe(true)
-  })
+      // then
+      expect(psRunningBeforeAbort).toBe("running")
+      expect(result.action).toBe("failed")
+      expect(settledMs).toBeLessThan(STALL_BOUND_MS)
+      expect(signalZero(psPid)).toBe("ESRCH")
+    },
+  )
 })

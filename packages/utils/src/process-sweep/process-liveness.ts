@@ -35,8 +35,8 @@ export async function defaultIsProcessAlive(pid: number, options: ProcessLivenes
 
 async function isPosixZombie(pid: number, options: ProcessLivenessOptions): Promise<boolean> {
   options.signal?.throwIfAborted()
-  const runPs = options.runPs ?? runPsCommand
-  const result = await runPs(["-o", "stat=", "-p", String(pid)], options.signal)
+  const probe = options.runPs ?? runPsCommand
+  const result = await probe(["-o", "stat=", "-p", String(pid)], options.signal)
   options.signal?.throwIfAborted()
   const state = result.stdout.trim()
   if (result.status === 0 && state !== "") return state.startsWith("Z")
@@ -66,20 +66,29 @@ function isLinuxZombie(pid: number): boolean {
   return state === "Z" || state === "X"
 }
 
-function runPsCommand(args: readonly string[], signal: AbortSignal | undefined): Promise<PsResult> {
+export function createPsRunner(executable: string): PsRunner {
+  return (args, signal) => runPs(executable, args, signal)
+}
+
+const runPsCommand = createPsRunner("ps")
+
+function runPs(executable: string, args: readonly string[], signal: AbortSignal | undefined): Promise<PsResult> {
   return new Promise((resolve, reject) => {
-    execFile(
-      "ps",
+    const child = execFile(
+      executable,
       [...args],
       {
         encoding: "utf8",
+        killSignal: "SIGKILL",
         timeout: PS_PROBE_TIMEOUT_MS,
         windowsHide: true,
         ...(signal === undefined ? {} : { signal }),
       },
       (error, stdout) => {
         if (signal?.aborted === true) {
-          reject(signal.reason)
+          // An abort reports before the killed child exits; settle only once it is gone.
+          if (child.exitCode !== null || child.signalCode !== null) reject(signal.reason)
+          else child.once("exit", () => reject(signal.reason))
           return
         }
         if (error === null) {
