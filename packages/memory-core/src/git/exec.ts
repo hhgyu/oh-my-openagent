@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { existsSync } from "../fs/resilient"
 import { win32 } from "node:path"
 import { GitAbortedError, GitNotFoundError, GitTimeoutError } from "./errors"
 import { memoryGitEnvironment } from "./exec-environment"
 import { holdGitActivityShared } from "./git-activity-lock"
+import type { GitTreeStopper } from "./stop-git-tree"
 import { recordGitTimeout } from "./timeout-diagnostics"
 import { publishVolumeSnapshotEvidence } from "./volume-snapshot-diagnostics"
 
@@ -51,6 +52,13 @@ export interface GitExec {
 
 export interface NodeGitExecRuntime {
   platform?: NodeJS.Platform
+  /**
+   * Ends a stopped git with its whole process tree. Windows uses taskkill by default; elsewhere git is signalled
+   * directly unless a stopper is injected.
+   */
+  treeStopper?: GitTreeStopper
+  /** Observes each git child a tree-stopped run spawns, once its exec listeners are attached (tests). */
+  onSpawn?: (child: ChildProcess) => void
   runCommand?: (
     executable: string,
     argv: readonly string[],
@@ -248,7 +256,25 @@ const NO_FSMONITOR = ["-c", "core.fsmonitor=false"] as const
 
 export function createNodeGitExec(runtime: NodeGitExecRuntime = {}): GitExec {
   const platform = runtime.platform ?? process.platform
-  const runCommand = runtime.runCommand ?? runGitCommand
+  // Windows (or an injected stopper) runs git through the tree-stop runner, loaded only then; every other host
+  // keeps the signal-stop run above.
+  const runWithTreeStop: NonNullable<NodeGitExecRuntime["runCommand"]> = async (
+    executable,
+    argv,
+    options,
+    environment,
+  ) => {
+    const [{ runGitWithTreeStop }, { createWindowsGitTreeStopper }] = await Promise.all([
+      import("./exec-tree-stop-run"),
+      import("./stop-git-tree"),
+    ])
+    return runGitWithTreeStop(executable, argv, options, environment, {
+      treeStopper: runtime.treeStopper ?? createWindowsGitTreeStopper(environment),
+      onSpawn: runtime.onSpawn,
+    })
+  }
+  const runCommand =
+    runtime.runCommand ?? (platform === "win32" || runtime.treeStopper !== undefined ? runWithTreeStop : runGitCommand)
 
   return {
     async run(callerArgv, options) {
