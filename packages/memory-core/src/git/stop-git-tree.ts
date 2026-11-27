@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import { win32 } from "node:path"
 
+import { GitError } from "./errors"
+
 // On Windows `git` is the Git for Windows launcher (`cmd\git.exe`), which starts the real git as its own
 // child; git then starts pack-objects, hooks and the like. Terminating the launcher alone leaves all of
 // them running in the repository after the call has settled (measured: the real git and pack-objects
@@ -82,4 +84,16 @@ export function createWindowsGitTreeStopper(
         )
       })
     })
+}
+
+/** A stopped git (abort or timeout) whose process tree could not be proven ended; descendants may still run. */
+export class GitStopFailedError extends GitError {
+  constructor(
+    readonly argv: readonly string[],
+    readonly stopReason: "aborted" | "timed out",
+    options?: ErrorOptions,
+  ) {
+    const detail = options?.cause instanceof Error ? `: ${options.cause.message}` : ""
+    super(`git ${argv.join(" ")} ${stopReason}, but its process tree could not be stopped${detail}`, options)
+  }
 }
