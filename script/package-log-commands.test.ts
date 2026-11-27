@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { execFileSync, spawnSync } from "node:child_process"
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { markerLine, splitFragment } from "./package-log-blocks.ts"
 import { removeTempRoot } from "./remove-temp-root.ts"
+import { copyScriptImportClosure } from "./script-import-closure.ts"
 
 // Each case spawns git and bun several times (about 4 s alone), so it gets a budget above bun's 5 s default.
 const SPAWN_TIMEOUT_MS = 30_000
-const SCRIPT_DIR = import.meta.dir
+const SCRIPT_ENTRIES = ["check-pr-changelog.ts", "stamp-release-changelog.ts", "changelog-fragments-cli.ts"]
 const LOG = "packages/omo-senpi/changes.md"
 const ENV = {
   ...process.env,
@@ -40,7 +41,7 @@ const scratch = () => {
   git(dir, "init", "-q", "-b", "dev")
   // A runner's global core.autocrlf=true (windows-latest) would check files out with CRLF; the expectations are bytes.
   git(dir, "config", "core.autocrlf", "false")
-  cpSync(SCRIPT_DIR, join(dir, "script"), { recursive: true, filter: (p) => !p.includes("node_modules") })
+  copyScriptImportClosure(SCRIPT_ENTRIES, join(dir, "script"))
   mkdirSync(join(dir, "packages/omo-senpi"), { recursive: true })
   mkdirSync(join(dir, "changes/unreleased"), { recursive: true })
   writeFileSync(join(dir, LOG), "# omo-senpi changes\n\n## 2026-10-01 - old\n")
@@ -109,6 +110,7 @@ describe("stamp-release-changelog.ts with package-log blocks", () => {
       const before = readFileSync(join(dir, LOG), "utf8")
       const result = bun(dir, ["script/stamp-release-changelog.ts", "9.9.9", "2026-10-20"])
       expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain("no CHANGELOG paragraph")
       expect(readFileSync(join(dir, LOG), "utf8")).toBe(before)
     },
     SPAWN_TIMEOUT_MS,
