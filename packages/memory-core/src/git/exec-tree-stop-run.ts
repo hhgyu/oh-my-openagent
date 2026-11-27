@@ -42,6 +42,13 @@ function spawnGitWithTreeStop(
       stdio: [hasStdin ? "pipe" : "ignore", "pipe", "pipe", ...(activityFd === undefined ? [] : [activityFd])],
       windowsHide: true,
     })
+    const stdoutPipe = child.stdout
+    const stderrPipe = child.stderr
+    if (stdoutPipe === null || stderrPipe === null) {
+      child.kill("SIGKILL")
+      reject(new Error("git was spawned without stdout and stderr pipes"))
+      return
+    }
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
     let settled = false
@@ -101,8 +108,8 @@ function spawnGitWithTreeStop(
       const end = exited
       exitDrain ??= setTimeout(() => {
         // Still open past the drain: a hook child holds them. Destroy them so it cannot keep us.
-        child.stdout!.destroy()
-        child.stderr!.destroy()
+        stdoutPipe.destroy()
+        stderrPipe.destroy()
         settleWith(end)
       }, options.exitDrainMs ?? GIT_EXIT_DRAIN_MS)
     }
@@ -140,8 +147,8 @@ function spawnGitWithTreeStop(
     if (options.signal?.aborted === true) onAbort()
     else options.signal?.addEventListener("abort", onAbort, { once: true })
 
-    child.stdout!.on("data", (chunk: Buffer) => stdout.push(chunk))
-    child.stderr!.on("data", (chunk: Buffer) => stderr.push(chunk))
+    stdoutPipe.on("data", (chunk: Buffer) => stdout.push(chunk))
+    stderrPipe.on("data", (chunk: Buffer) => stderr.push(chunk))
     // An unlistened stdin 'error' would crash the process (#11129). EPIPE means git exited before
     // reading all of its stdin (a bad path, a held index.lock), which git's own exit code already
     // reports. Any other stdin error is recorded and reported in the result's stderr.
