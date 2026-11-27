@@ -1,69 +1,65 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { spawn, type ChildProcess } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { spawn } from "node:child_process"
 
 import { defaultIsProcessAlive } from "./exec"
 
-const parents: ChildProcess[] = []
+// The parent forks a child that exits at once, then blocks in waitid(WEXITED | WNOWAIT): it returns only
+// once the child is a zombie and leaves it unreaped. The parent prints the pid after that, and stays until
+// its stdin closes, so the zombie exists exactly while the test reads it.
+const NON_REAPING_PARENT = `
+import os, sys
+child = os.fork()
+if child == 0:
+    os._exit(0)
+os.waitid(os.P_PID, child, os.WEXITED | os.WNOWAIT)
+sys.stdout.write(f"{child}\\n")
+sys.stdout.flush()
+sys.stdin.read()
+`
+
+const groups: number[] = []
 
 afterEach(() => {
-  for (const parent of parents.splice(0)) parent.kill("SIGKILL")
+  for (const group of groups.splice(0)) {
+    try {
+      process.kill(-group, "SIGKILL")
+    } catch {
+      // ESRCH: the parent already exited and init reaped the zombie.
+      continue
+    }
+  }
 })
 
-function procField(pid: number, read: (stat: string) => string): string | null {
-  try {
-    return read(readFileSync(`/proc/${pid}/stat`, "utf8"))
-  } catch {
-    return null
-  }
-}
-
-const procState = (pid: number): string | null => procField(pid, (stat) => stat.charAt(stat.lastIndexOf(")") + 2))
-const procComm = (pid: number): string | null =>
-  procField(pid, (stat) => stat.slice(stat.indexOf("(") + 1, stat.lastIndexOf(")")))
-
-async function until(condition: () => boolean, what: string): Promise<void> {
-  const deadline = Date.now() + 5_000
-  while (!condition()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
-    await Bun.sleep(10)
-  }
-}
-
-// A zombie needs a parent that never waits: `sh` starts the background child, then becomes `sleep` by exec.
-async function startNonReapingParent(): Promise<{ readonly parent: number; readonly child: number }> {
-  const parent = spawn("/bin/sh", ["-c", "sleep 600 & echo $!; exec sleep 600"], {
-    stdio: ["ignore", "pipe", "ignore"],
-  })
-  parents.push(parent)
-  const firstLine = await new Promise<string>((resolve, reject) => {
+async function startUnreapedZombie(): Promise<{ readonly parent: number; readonly zombie: number }> {
+  const parent = spawn("python3", ["-c", NON_REAPING_PARENT], { detached: true, stdio: ["pipe", "pipe", "inherit"] })
+  if (parent.pid !== undefined) groups.push(parent.pid)
+  const line = await new Promise<string>((resolve, reject) => {
     let buffered = ""
-    parent.stdout?.on("data", (chunk: Buffer) => {
+    parent.stdout.on("data", (chunk: Buffer) => {
       buffered += chunk.toString("utf8")
-      if (buffered.includes("\n")) resolve(buffered.split("\n")[0] ?? "")
+      if (buffered.includes("\n")) resolve(buffered.slice(0, buffered.indexOf("\n")))
     })
     parent.once("error", reject)
+    parent.once("exit", (code, signal) => reject(new Error(`zombie parent exited early: ${code ?? signal}`)))
   })
-  const parentPid = parent.pid ?? 0
-  await until(() => procComm(parentPid) === "sleep", "the parent to exec sleep")
-  return { parent: parentPid, child: Number(firstLine.trim()) }
+  return { parent: parent.pid ?? 0, zombie: Number(line) }
 }
 
 describe("defaultIsProcessAlive", () => {
-  test.skipIf(process.platform !== "linux")(
-    "#given a child killed while its parent never reaps it #when liveness is checked #then the zombie counts as dead",
+  // Windows is not applicable: kill(pid, 0) already fails there once a process stopped running.
+  test.skipIf(process.platform === "win32")(
+    "#given a POSIX child that exited and whose parent never reaps it #when liveness is checked #then the zombie counts as dead and its parent as alive",
     async () => {
       // given
-      const { child } = await startNonReapingParent()
-      expect(defaultIsProcessAlive(child)).toBe(true)
-      process.kill(child, "SIGKILL")
-      await until(() => procState(child) === "Z", "the child to become a zombie")
+      const { parent, zombie } = await startUnreapedZombie()
 
       // when
-      const alive = defaultIsProcessAlive(child)
+      const zombieAlive = defaultIsProcessAlive(zombie)
+      const parentAlive = defaultIsProcessAlive(parent)
 
       // then
-      expect(alive).toBe(false)
+      expect(zombieAlive).toBe(false)
+      expect(parentAlive).toBe(true)
     },
   )
 })

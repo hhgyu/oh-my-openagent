@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 
 import { runOwnedProcess } from "./owned-process"
@@ -22,8 +23,9 @@ export function createDefaultProcessKiller(platform: NodeJS.Platform = process.p
 
 /**
  * A zombie is dead: it already exited and only waits for its reaper (init or a subreaper) to collect its
- * status, which can take arbitrarily long. `kill(pid, 0)` still succeeds for it, so on Linux the
- * process state in `/proc/<pid>/stat` decides.
+ * status, which can take arbitrarily long. On POSIX `kill(pid, 0)` still succeeds for it, so the process
+ * state decides: `/proc/<pid>/stat` on Linux, `ps` elsewhere. Windows has no such state for this check:
+ * `kill(pid, 0)` fails with ESRCH once the process stopped running, even while a handle keeps it around.
  */
 export function defaultIsProcessAlive(pid: number): boolean {
   try {
@@ -32,7 +34,16 @@ export function defaultIsProcessAlive(pid: number): boolean {
     if (!(error instanceof Error)) throw error
     return processKillErrorMeansAlive(error)
   }
-  return process.platform !== "linux" || !isLinuxZombie(pid)
+  if (process.platform === "win32") return true
+  return process.platform === "linux" ? !isLinuxZombie(pid) : !isPosixZombie(pid)
+}
+
+function isPosixZombie(pid: number): boolean {
+  const result = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8", timeout: 5_000 })
+  if (result.error !== undefined || result.signal !== null) return false
+  const state = result.stdout.trim()
+  if (result.status !== 0 && state === "") return true
+  return state.startsWith("Z")
 }
 
 function isLinuxZombie(pid: number): boolean {
