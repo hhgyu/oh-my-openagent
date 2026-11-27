@@ -339,11 +339,21 @@ jobs:
           echo "[diag] runner pids: $(pgrep -f Runner.Worker | tr '\n' ' ') $(pgrep -f Runner.Listener | tr '\n' ' ') step shell=$$ pgid=$(ps -o pgid= -p $$)" >&2
           steppgid=$(ps -o pgid= -p $$ | tr -d ' ')
           echo "[diag] step pgid=$steppgid" >&2
-          setsid sudo bpftrace -q -e 'tracepoint:syscalls:sys_enter_kill /args->sig != 0/ { printf("[kill] %s(%d) kill(%d, %d)\n", comm, pid, args->pid, args->sig); } tracepoint:syscalls:sys_enter_tgkill /args->sig != 0 && args->sig != 33 && args->sig != 32/ { printf("[kill] %s(%d) tgkill(%d, %d, %d)\n", comm, pid, args->tgid, args->pid, args->sig); }' >&2 &
+          cat > /tmp/kill-trace.bt <<'BT'
+          tracepoint:syscalls:sys_enter_kill /args->sig != 0/ { @tgt[tid] = args->pid; @sig[tid] = args->sig; }
+          tracepoint:syscalls:sys_exit_kill /@sig[tid] != 0/ { printf("%s kill %s(%d uid=%d) target=%d sig=%d ret=%d\n", strftime("%H:%M:%S", nsecs), comm, pid, uid, @tgt[tid], @sig[tid], args->ret); delete(@tgt[tid]); delete(@sig[tid]); }
+          tracepoint:syscalls:sys_enter_tgkill /args->sig != 0 && args->sig != 23 && args->sig != 17 && args->sig != 32 && args->sig != 33/ { printf("%s tgkill %s(%d uid=%d) tgid=%d tid=%d sig=%d\n", strftime("%H:%M:%S", nsecs), comm, pid, uid, args->tgid, args->pid, args->sig); }
+          BT
+          sudo setsid bpftrace -q -o /tmp/kill-trace.log /tmp/kill-trace.bt &
           tracerpid=$!
           sleep 5
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0; fi
-          { "$bunbin" test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait $!; echo "BUN_EXIT=$?"; } | tee /tmp/omo-shard1.log &
+                    sudo useradd -m -s /bin/bash omoqa
+          sudo chmod -R a+rwX "$PWD"
+          sudo chmod o+rx /home/runner /home/runner/.bun /home/runner/.bun/bin
+          sudo mkdir -p /tmp/omoqa-transpiler && sudo chown omoqa /tmp/omoqa-transpiler
+          echo "[diag] tests run as $(id -u omoqa) (runner uid $(id -u)); Worker=$(pgrep -f Runner.Worker) Listener=$(pgrep -f Runner.Listener) step=$$ pgid=$(ps -o pgid= -p $$ | tr -d ' ')" >&2
+{ sudo -u omoqa -H env PATH="$PATH" CI=true GITHUB_ACTIONS=true BUN_RUNTIME_TRANSPILER_CACHE_PATH=/tmp/omoqa-transpiler "$bunbin" test --timeout 20000 packages/omo-opencode 2>&1 & echo $! > /tmp/omo-shard1.pid; wait $!; echo "BUN_EXIT=$?"; } | tee /tmp/omo-shard1.log &
           teepid=$!
           sleep 2
           bunpid=$(cat /tmp/omo-shard1.pid)
@@ -375,7 +385,13 @@ jobs:
           done
           wait "$teepid"
           kill "$samplerpid" || true
-          sudo kill "$tracerpid" || true
+          sudo kill -INT "$tracerpid" || true
+          sleep 2
+          echo "::group::kill trace (non-zero returns first)"
+          grep -a ' ret=-' /tmp/kill-trace.log || echo "(no failed kill)"
+          echo "--- every kill by the test user"
+          grep -a "uid=$(id -u omoqa)" /tmp/kill-trace.log | tail -400
+          echo "::endgroup::"
           grep -a -q '^BUN_EXIT=0$' /tmp/omo-shard1.log || { echo "::error::shard 1 omo-opencode run did not exit 0: $(grep -a '^BUN_EXIT=' /tmp/omo-shard1.log)"; exit 1; }
           grep -a -qE '^Ran [0-9]+ tests across [0-9]+ files' /tmp/omo-shard1.log || { echo "::error::shard 1 omo-opencode run printed no summary"; exit 1; }
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
