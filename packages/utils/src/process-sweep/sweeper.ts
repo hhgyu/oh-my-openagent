@@ -64,7 +64,7 @@ export interface SweepStaleLspDaemonVersionsOptions extends ProcessFamilySweepOp
   readonly attest?: (pid: number, platform: NodeJS.Platform) => Promise<boolean>
   readonly attestTarget?: (target: StaleLspDaemonVersionTarget, platform: NodeJS.Platform) => Promise<boolean>
   readonly currentVersion?: string
-  readonly isAlive?: (pid: number) => boolean
+  readonly isAlive?: (pid: number, signal?: AbortSignal) => boolean | Promise<boolean>
 }
 
 export interface SweepStaleLspDaemonVersionsResult extends Omit<
@@ -108,6 +108,7 @@ export async function sweepStaleLspDaemonVersions(
           attestTarget,
           ...(options.isAlive === undefined ? {} : { isAlive: options.isAlive }),
           ...(options.log === undefined ? {} : { log: options.log }),
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
           platform,
         })
         return { candidates: [...plan.targets, ...plan.spared], killList: plan.targets, spared: plan.spared }

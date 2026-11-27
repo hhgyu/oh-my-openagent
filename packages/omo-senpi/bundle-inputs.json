@@ -2735,6 +2735,7 @@
     "packages/utils/src/process-sweep/lsp-daemon-owner-attestation.ts",
     "packages/utils/src/process-sweep/lsp-proxy-family.ts",
     "packages/utils/src/process-sweep/owned-process.ts",
+    "packages/utils/src/process-sweep/process-liveness.ts",
     "packages/utils/src/process-sweep/process-table.ts",
     "packages/utils/src/process-sweep/roots.ts",
     "packages/utils/src/process-sweep/sweeper.ts",
