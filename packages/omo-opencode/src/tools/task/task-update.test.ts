@@ -56,6 +56,8 @@ describe("task_update tool", () => {
       }
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result).toHaveProperty("task")
@@ -85,6 +87,8 @@ describe("task_update tool", () => {
       }
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result.task.description).toBe("Updated description")
@@ -112,6 +116,8 @@ describe("task_update tool", () => {
       }
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result).toHaveProperty("task")
@@ -140,6 +146,8 @@ describe("task_update tool", () => {
       }
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result.task.blocks).toContain("T-existing-1")
@@ -170,6 +178,8 @@ describe("task_update tool", () => {
       }
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result.task.blocks).toContain("T-existing-1")
@@ -199,6 +209,8 @@ describe("task_update tool", () => {
       }
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result.task.blockedBy).toContain("T-blocker-1")
@@ -236,6 +248,8 @@ describe("task_update tool", () => {
       }
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result.task.metadata.priority).toBe("low")
@@ -272,6 +286,8 @@ describe("task_update tool", () => {
       }
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result.task.metadata.priority).toBe("high")
@@ -301,6 +317,8 @@ describe("task_update tool", () => {
       }
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result.task.activeForm).toBe("implementing feature X")
@@ -328,6 +346,8 @@ describe("task_update tool", () => {
       }
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result.task.owner).toBe("sisyphus")
@@ -342,6 +362,8 @@ describe("task_update tool", () => {
       //#when
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result).toHaveProperty("error")
@@ -357,6 +379,8 @@ describe("task_update tool", () => {
       //#when
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result).toHaveProperty("error")
@@ -383,7 +407,8 @@ describe("task_update tool", () => {
         id: taskId,
         subject: "Updated subject",
       }
-      await tool.execute(args, TEST_CONTEXT)
+      const persisted = await tool.execute(args, TEST_CONTEXT)
+      if (!persisted.includes('"task"')) console.error("DIAG_RESULT", persisted)
 
       //#then
       const savedContent = await Bun.file(taskPath).text()
@@ -416,6 +441,8 @@ describe("task_update tool", () => {
       }
       const resultStr = await tool.execute(args, TEST_CONTEXT)
       const result = JSON.parse(resultStr)
+      if (!("task" in result) && !("error" in result && String(result.error).startsWith("invalid")))
+        console.error("DIAG_RESULT", resultStr)
 
       //#then
       expect(result.task.subject).toBe("New subject")

@@ -126,7 +126,7 @@ async function handleUpdate(
     }
 
     if (!updatedTask) {
-      return JSON.stringify({ error: "task_not_found" })
+      return JSON.stringify({ error: "task_not_found", diag: require("fs").readdirSync(taskDir) })
     }
 
     // Todo sync talks to the OpenCode session API and needs no mutual exclusion, so it runs
@@ -141,6 +141,11 @@ async function handleUpdate(
         message: error.message,
       })
     }
-    return JSON.stringify({ error: "internal_error" })
+    return JSON.stringify({
+      error: "internal_error",
+      diag: String(error),
+      code: (error as NodeJS.ErrnoException)?.code,
+      stack: error instanceof Error ? error.stack : undefined,
+    })
   }
 }
