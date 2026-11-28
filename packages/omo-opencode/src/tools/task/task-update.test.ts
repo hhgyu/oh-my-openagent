@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
-import { mkdtempSync, rmSync } from "fs"
+import { mkdtempSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
 import type { TaskObject } from "./types"
@@ -47,7 +47,9 @@ describe("task_update tool", () => {
         blockedBy: [],
         threadID: TEST_SESSION_ID,
       }
-      await Bun.write(taskPath, JSON.stringify(initialTask))
+      process.env.DIAG_FIXTURE_WRITE === "sync"
+        ? writeFileSync(taskPath, JSON.stringify(initialTask))
+        : await Bun.write(taskPath, JSON.stringify(initialTask))
 
       //#when
       const args = {
@@ -78,7 +80,9 @@ describe("task_update tool", () => {
         blockedBy: [],
         threadID: TEST_SESSION_ID,
       }
-      await Bun.write(taskPath, JSON.stringify(initialTask))
+      process.env.DIAG_FIXTURE_WRITE === "sync"
+        ? writeFileSync(taskPath, JSON.stringify(initialTask))
+        : await Bun.write(taskPath, JSON.stringify(initialTask))
 
       //#when
       const args = {
@@ -107,7 +111,9 @@ describe("task_update tool", () => {
         blockedBy: [],
         threadID: TEST_SESSION_ID,
       }
-      await Bun.write(taskPath, JSON.stringify(initialTask))
+      process.env.DIAG_FIXTURE_WRITE === "sync"
+        ? writeFileSync(taskPath, JSON.stringify(initialTask))
+        : await Bun.write(taskPath, JSON.stringify(initialTask))
 
       //#when
       const args = {
@@ -137,7 +143,9 @@ describe("task_update tool", () => {
         blockedBy: [],
         threadID: TEST_SESSION_ID,
       }
-      await Bun.write(taskPath, JSON.stringify(initialTask))
+      process.env.DIAG_FIXTURE_WRITE === "sync"
+        ? writeFileSync(taskPath, JSON.stringify(initialTask))
+        : await Bun.write(taskPath, JSON.stringify(initialTask))
 
       //#when
       const args = {
@@ -169,7 +177,9 @@ describe("task_update tool", () => {
         blockedBy: [],
         threadID: TEST_SESSION_ID,
       }
-      await Bun.write(taskPath, JSON.stringify(initialTask))
+      process.env.DIAG_FIXTURE_WRITE === "sync"
+        ? writeFileSync(taskPath, JSON.stringify(initialTask))
+        : await Bun.write(taskPath, JSON.stringify(initialTask))
 
       //#when
       const args = {
@@ -200,7 +210,9 @@ describe("task_update tool", () => {
         blockedBy: ["T-blocker-1"],
         threadID: TEST_SESSION_ID,
       }
-      await Bun.write(taskPath, JSON.stringify(initialTask))
+      process.env.DIAG_FIXTURE_WRITE === "sync"
+        ? writeFileSync(taskPath, JSON.stringify(initialTask))
+        : await Bun.write(taskPath, JSON.stringify(initialTask))
 
       //#when
       const args = {
@@ -236,7 +248,9 @@ describe("task_update tool", () => {
         },
         threadID: TEST_SESSION_ID,
       }
-      await Bun.write(taskPath, JSON.stringify(initialTask))
+      process.env.DIAG_FIXTURE_WRITE === "sync"
+        ? writeFileSync(taskPath, JSON.stringify(initialTask))
+        : await Bun.write(taskPath, JSON.stringify(initialTask))
 
       //#when
       const args = {
@@ -275,7 +289,9 @@ describe("task_update tool", () => {
         },
         threadID: TEST_SESSION_ID,
       }
-      await Bun.write(taskPath, JSON.stringify(initialTask))
+      process.env.DIAG_FIXTURE_WRITE === "sync"
+        ? writeFileSync(taskPath, JSON.stringify(initialTask))
+        : await Bun.write(taskPath, JSON.stringify(initialTask))
 
       //#when
       const args = {
@@ -308,7 +324,9 @@ describe("task_update tool", () => {
         blockedBy: [],
         threadID: TEST_SESSION_ID,
       }
-      await Bun.write(taskPath, JSON.stringify(initialTask))
+      process.env.DIAG_FIXTURE_WRITE === "sync"
+        ? writeFileSync(taskPath, JSON.stringify(initialTask))
+        : await Bun.write(taskPath, JSON.stringify(initialTask))
 
       //#when
       const args = {
@@ -337,7 +355,9 @@ describe("task_update tool", () => {
         blockedBy: [],
         threadID: TEST_SESSION_ID,
       }
-      await Bun.write(taskPath, JSON.stringify(initialTask))
+      process.env.DIAG_FIXTURE_WRITE === "sync"
+        ? writeFileSync(taskPath, JSON.stringify(initialTask))
+        : await Bun.write(taskPath, JSON.stringify(initialTask))
 
       //#when
       const args = {
@@ -400,7 +420,9 @@ describe("task_update tool", () => {
         blockedBy: [],
         threadID: TEST_SESSION_ID,
       }
-      await Bun.write(taskPath, JSON.stringify(initialTask))
+      process.env.DIAG_FIXTURE_WRITE === "sync"
+        ? writeFileSync(taskPath, JSON.stringify(initialTask))
+        : await Bun.write(taskPath, JSON.stringify(initialTask))
 
       //#when
       const args = {
@@ -429,7 +451,9 @@ describe("task_update tool", () => {
         blockedBy: [],
         threadID: TEST_SESSION_ID,
       }
-      await Bun.write(taskPath, JSON.stringify(initialTask))
+      process.env.DIAG_FIXTURE_WRITE === "sync"
+        ? writeFileSync(taskPath, JSON.stringify(initialTask))
+        : await Bun.write(taskPath, JSON.stringify(initialTask))
 
       //#when
       const args = {

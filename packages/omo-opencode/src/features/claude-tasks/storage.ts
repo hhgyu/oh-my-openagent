@@ -75,7 +75,38 @@ export function writeJsonAtomic(filePath: string, data: unknown): void {
 
   try {
     writeFileSync(tempPath, JSON.stringify(data, null, 2), "utf-8")
-    renameSync(tempPath, filePath)
+    try {
+      renameSync(tempPath, filePath)
+    } catch (first) {
+      const startedAt = performance.now()
+      let attempts = 0
+      let settled = "never"
+      while (performance.now() - startedAt < 3000) {
+        attempts++
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1)
+        try {
+          renameSync(tempPath, filePath)
+          settled = "renamed"
+          break
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EPERM") {
+            settled = String((error as NodeJS.ErrnoException).code)
+            break
+          }
+        }
+      }
+      console.error(
+        "DIAG_HOLD",
+        JSON.stringify({
+          code: (first as NodeJS.ErrnoException).code,
+          settled,
+          ms: Math.round(performance.now() - startedAt),
+          attempts,
+          fixture: process.env.DIAG_FIXTURE_WRITE ?? "bun",
+        }),
+      )
+      throw first
+    }
   } catch (error) {
     try {
       if (existsSync(tempPath)) {

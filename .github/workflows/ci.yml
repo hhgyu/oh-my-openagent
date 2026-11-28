@@ -11,6 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         copy: [1, 2, 3]
+        fixture: [bun, sync]
     steps:
       - uses: actions/checkout@v7
       - name: Keep temp files off the OS volume
@@ -30,7 +31,12 @@ jobs:
       - name: real shard-1 with instrumented task_update
         shell: pwsh
         run: |
+          fltmc filters
+          fltmc instances -v C:
+          fltmc instances -v D:
+          Get-Service WSearch, SysMain -ErrorAction SilentlyContinue | Format-Table Name, Status | Out-String
+          $env:DIAG_FIXTURE_WRITE = "${{ matrix.fixture }}"
           $dir = Join-Path $env:RUNNER_TEMP "shard1"
           bun script/ci-windows-shard-1.ts $dir *> (Join-Path $env:RUNNER_TEMP "shard1-console.log")
-          Select-String -Path (Join-Path $dir "omo-opencode.log") -Pattern 'DIAG_RESULT|\(fail\)' | ForEach-Object Line
+          Select-String -Path (Join-Path $dir "omo-opencode.log") -Pattern 'DIAG_RESULT|DIAG_HOLD|\(fail\)' | ForEach-Object Line
           Get-ChildItem $dir | Select-Object Name,Length | Format-Table | Out-String
