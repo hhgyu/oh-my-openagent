@@ -1,6 +1,7 @@
 import { join, dirname, basename, isAbsolute } from "path"
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync } from "fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from "fs"
 import { randomUUID } from "crypto"
+import { renameWithWindowsRetry } from "./windows-rename"
 import { getOpenCodeConfigDir } from "../../shared/opencode-config-dir"
 import type { z } from "zod"
 import type { OhMyOpenCodeConfig } from "../../config/schema"
@@ -67,7 +68,7 @@ export function readJsonSafe<T>(filePath: string, schema: z.ZodType<T>): T | nul
   }
 }
 
-export function writeJsonAtomic(filePath: string, data: unknown): void {
+export function writeJsonAtomic(filePath: string, data: unknown, platform: NodeJS.Platform = process.platform): void {
   const dir = dirname(filePath)
   ensureDir(dir)
 
@@ -75,7 +76,7 @@ export function writeJsonAtomic(filePath: string, data: unknown): void {
 
   try {
     writeFileSync(tempPath, JSON.stringify(data, null, 2), "utf-8")
-    renameSync(tempPath, filePath)
+    renameWithWindowsRetry(tempPath, filePath, platform)
   } catch (error) {
     try {
       if (existsSync(tempPath)) {
