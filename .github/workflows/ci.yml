@@ -231,6 +231,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The host-events dump after the tests lists the scheduled tasks that ran during the job, and this log is
+      # off by default on Windows Server, so it is turned on first.
+      - name: Enable the Task Scheduler event log for host diagnostics
+        if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        continue-on-error: true
+        shell: pwsh
+        run: wevtutil set-log Microsoft-Windows-TaskScheduler/Operational /enabled:true
+
       - uses: actions/setup-node@v7
         if: needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
         with:
@@ -401,6 +409,15 @@ jobs:
             -Invocation "shard-2-remainder" `
             -TestArguments @("--config=bunfig.win2.parallel.windows.toml", "test", "--parallel")
           exit $LASTEXITCODE
+
+      - name: Record Windows host events
+        if: always() && runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          & .github/scripts/windows-host-events.ps1 `
+            -ArtifactDirectory (Join-Path $env:RUNNER_TEMP "windows-root-test-telemetry") `
+            -Invocation "host-events-shard-$("${{ matrix.shard }}".Substring(0, 1))"
 
       - name: Upload Windows post-test telemetry
         if: always() && runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
@@ -879,6 +896,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Enable the Task Scheduler event log for host diagnostics
+        if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        continue-on-error: true
+        shell: pwsh
+        run: wevtutil set-log Microsoft-Windows-TaskScheduler/Operational /enabled:true
+
       - uses: actions/setup-node@v7
         if: needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
         with:
@@ -998,6 +1021,15 @@ jobs:
             -Invocation "senpi-compatibility" `
             -TestArguments @("test", "packages/omo-senpi")
           exit $LASTEXITCODE
+
+      - name: Record Windows host events
+        if: always() && runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          & .github/scripts/windows-host-events.ps1 `
+            -ArtifactDirectory (Join-Path $env:RUNNER_TEMP "windows-senpi-compatibility-telemetry") `
+            -Invocation "host-events-senpi-compatibility"
 
       - name: Upload Windows Senpi telemetry
         if: always() && runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
