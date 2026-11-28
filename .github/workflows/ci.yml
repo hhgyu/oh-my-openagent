@@ -231,6 +231,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # First, so every later step's temp files (installs, builds, every test) stay off the OS volume.
+      - name: Keep temp files off the OS volume
+        if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        shell: pwsh
+        run: .github/scripts/windows-test-temp.ps1
+
+      # The host-events dump after the tests lists the scheduled tasks that ran during the job, and this log is
+      # off by default on Windows Server, so it is turned on first.
+      - name: Enable the Task Scheduler event log for host diagnostics
+        if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        continue-on-error: true
+        shell: pwsh
+        run: wevtutil set-log Microsoft-Windows-TaskScheduler/Operational /enabled:true
+
       - uses: actions/setup-node@v7
         if: needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
         with:
@@ -386,6 +400,15 @@ jobs:
             -TestArguments @("--config=bunfig.win2.parallel.windows.toml", "test", "--parallel")
           exit $LASTEXITCODE
 
+      - name: Record Windows host events
+        if: always() && runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          & .github/scripts/windows-host-events.ps1 `
+            -ArtifactDirectory (Join-Path $env:RUNNER_TEMP "windows-root-test-telemetry") `
+            -Invocation "host-events-shard-$("${{ matrix.shard }}".Substring(0, 1))"
+
       - name: Upload Windows post-test telemetry
         if: always() && runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
         continue-on-error: true
@@ -398,23 +421,24 @@ jobs:
           if-no-files-found: warn
           overwrite: false
 
-      # #10821: keep the evidence of any git that timed out: the recorded process tables and the
-      # trace2 logs of every git that never reached its exit event (killed or still stuck).
+      # #10821: keep the evidence of any git that timed out or stalled past half its budget: the recorded
+      # process tables, their volume snapshot evidence, and the trace2 logs of every git that never reached
+      # its exit event (killed or still stuck).
       - name: Collect timed-out git evidence
         if: always() && runner.os == 'Windows' && matrix.shard == '1/2' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
         continue-on-error: true
         shell: pwsh
         run: |
           $diagnostics = Join-Path $env:RUNNER_TEMP "git-timeout-diagnostics"
-          if (-not (Test-Path $diagnostics)) { "no git timed out"; exit 0 }
+          if (-not (Test-Path $diagnostics)) { "no git timed out or stalled"; exit 0 }
           $unfinished = Join-Path $diagnostics "trace2-unfinished"
           New-Item -ItemType Directory -Force -Path $unfinished | Out-Null
           Get-ChildItem (Join-Path $env:RUNNER_TEMP "git-trace2") -File -ErrorAction SilentlyContinue |
             Where-Object { -not (Select-String -Path $_.FullName -Pattern '\|\s*atexit\s*\|' -Quiet -ErrorAction Continue) } |
             Copy-Item -Destination $unfinished -ErrorAction Continue
           # The upload can be refused (artifact quota), so the evidence is also printed here.
-          foreach ($record in Get-ChildItem $diagnostics -Filter 'git-timeout-*.json' -File) {
-            "::group::git timeout record $($record.Name)"
+          foreach ($record in Get-ChildItem $diagnostics -Filter 'git-*.json' -File) {
+            "::group::git diagnostics record $($record.Name)"
             Get-Content $record.FullName -TotalCount 200
             "::endgroup::"
           }
@@ -761,6 +785,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # First, so every later step's temp files (installs, builds, every test) stay off the OS volume.
+      - name: Keep temp files off the OS volume
+        if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        shell: pwsh
+        run: .github/scripts/windows-test-temp.ps1
+
       - uses: actions/setup-node@v7
         if: needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
         with:
@@ -862,6 +892,18 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
+
+      # First, so every later step's temp files (installs, builds, every test) stay off the OS volume.
+      - name: Keep temp files off the OS volume
+        if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        shell: pwsh
+        run: .github/scripts/windows-test-temp.ps1
+
+      - name: Enable the Task Scheduler event log for host diagnostics
+        if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        continue-on-error: true
+        shell: pwsh
+        run: wevtutil set-log Microsoft-Windows-TaskScheduler/Operational /enabled:true
 
       - uses: actions/setup-node@v7
         if: needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
@@ -969,6 +1011,15 @@ jobs:
             -Invocation "senpi-compatibility" `
             -TestArguments @("test", "packages/omo-senpi")
           exit $LASTEXITCODE
+
+      - name: Record Windows host events
+        if: always() && runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          & .github/scripts/windows-host-events.ps1 `
+            -ArtifactDirectory (Join-Path $env:RUNNER_TEMP "windows-senpi-compatibility-telemetry") `
+            -Invocation "host-events-senpi-compatibility"
 
       - name: Upload Windows Senpi telemetry
         if: always() && runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
@@ -1270,6 +1321,12 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+
+      # First, so every later step's temp files (installs, builds, every test) stay off the OS volume.
+      - name: Keep temp files off the OS volume
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .github/scripts/windows-test-temp.ps1
 
       - uses: actions/setup-node@v7
         if: needs.ci-mode.outputs.run_heavy == 'true'

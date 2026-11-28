@@ -134,6 +134,7 @@ export const {
   stat,
   statfs,
   unlink,
+  utimes,
 } = promises
 
 export const {
