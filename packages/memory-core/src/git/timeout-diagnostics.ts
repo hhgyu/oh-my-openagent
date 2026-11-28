@@ -14,7 +14,7 @@ export const GIT_TIMEOUT_DIAGNOSTICS_ENV = "OMO_GIT_TIMEOUT_DIAGNOSTICS_DIR"
 // That cost exists only in diagnostics mode and only on an actual timeout, where the evidence matters more.
 const SNAPSHOT_TIMEOUT_MS = 15_000
 
-function snapshotCommand(pid: number): readonly [string, readonly string[]] {
+export function snapshotCommand(pid: number): readonly [string, readonly string[]] {
   return process.platform === "win32"
     ? [
         "powershell",
