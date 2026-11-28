@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { spawn, type ChildProcess } from "node:child_process"
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { existsSync, realpathSync } from "node:fs"
@@ -12,7 +12,9 @@ import { volumeSnapshotEvidencePath } from "./volume-snapshot-diagnostics"
 
 const roots: string[] = []
 const children: ChildProcess[] = []
+const restoreTimers: (() => void)[] = []
 afterEach(async () => {
+  for (const restore of restoreTimers.splice(0)) restore()
   for (const child of children.splice(0)) if (child.exitCode === null) child.kill("SIGKILL")
   await settleGitStallRecords()
   await Promise.all(
@@ -45,6 +47,31 @@ function manualScheduler() {
       }
     },
   }
+}
+
+const COMMIT_BUDGET_MS = 14_000
+
+/**
+ * Holds back the first timer armed for `delayMs` (the exec's own half-budget check), so the test fires it by hand
+ * while the git is provably still running, instead of waiting out half of a budget no shorter than
+ * GIT_STALL_MIN_BUDGET_MS. Every other timer runs untouched.
+ */
+function halfBudgetTimer(delayMs: number) {
+  const realSetTimeout = globalThis.setTimeout
+  const armed = Promise.withResolvers<() => void>()
+  let captured = false
+  const spy = spyOn(globalThis, "setTimeout").mockImplementation(((
+    callback: (...args: unknown[]) => void,
+    delay?: number,
+    ...args: unknown[]
+  ) => {
+    if (captured || delay !== delayMs) return realSetTimeout(callback, delay, ...args)
+    captured = true
+    armed.resolve(() => callback(...args))
+    return realSetTimeout(() => undefined, delayMs)
+  }) as typeof setTimeout)
+  restoreTimers.push(() => spy.mockRestore())
+  return { armed: armed.promise, restore: () => spy.mockRestore() }
 }
 
 function exited(child: ChildProcess): Promise<void> {
@@ -179,33 +206,57 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
   })
 
   test("#given diagnostics mode and a real commit whose hook outlives half the budget #when the exec runs it #then the stall is recorded while it runs and the commit still succeeds within its budget", async () => {
-    // #given
+    // #given: a pre-commit hook that holds the commit until the test releases it
     const root = await scratch("git-stall-exec-")
     const repo = join(root, "repo")
     const diagnostics = join(root, "diagnostics")
+    const release = join(root, "release")
     await mkdir(repo, { recursive: true })
     const exec = createNodeGitExec()
     const env = { ...process.env, [GIT_TIMEOUT_DIAGNOSTICS_ENV]: diagnostics }
     expect((await exec.run(["init", "-q"], { cwd: repo, timeoutMs: 30_000, env })).code).toBe(0)
     const hook = join(repo, ".git", "hooks", "pre-commit")
-    await writeFile(hook, "#!/bin/sh\nsleep 9\n", "utf8")
-    await chmod(hook, 0o755)
-
-    // #when
-    const result = await exec.run(
-      ["-c", "user.name=stall", "-c", "user.email=stall@omo.local", "commit", "-q", "--allow-empty", "-m", "slow"],
-      { cwd: repo, timeoutMs: 14_000, env },
+    const releasePath = release.replaceAll("\\", "/")
+    await writeFile(
+      hook,
+      `#!/bin/sh\nn=0\nwhile [ ! -e '${releasePath}' ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done\n`,
+      "utf8",
     )
+    await chmod(hook, 0o755)
+    const halfBudget = halfBudgetTimer(Math.floor(COMMIT_BUDGET_MS / 2))
+
+    // #when: the commit runs, and its half-budget check fires while the hook still holds it
+    let commitSettled = false
+    const commit = exec
+      .run(
+        ["-c", "user.name=stall", "-c", "user.email=stall@omo.local", "commit", "-q", "--allow-empty", "-m", "slow"],
+        {
+          cwd: repo,
+          timeoutMs: COMMIT_BUDGET_MS,
+          env,
+        },
+      )
+      .finally(() => {
+        commitSettled = true
+      })
+    const fireStallCheck = await halfBudget.armed
+    halfBudget.restore()
+    fireStallCheck()
+    const written = (await settleGitStallRecords()).filter((path) => path !== undefined)
+    const settledBeforeRelease = commitSettled
+    await writeFile(release, "", "utf8")
+    const result = await commit
 
     // #then
+    expect(settledBeforeRelease).toBe(false)
     expect(result.code).toBe(0)
-    const written = (await settleGitStallRecords()).filter((path) => path !== undefined)
+    expect(result.termination?.elapsedMs).toBeLessThan(COMMIT_BUDGET_MS)
     expect(written).toHaveLength(1)
     const recordPath = written[0] ?? ""
     expect(await readdir(diagnostics)).toContain(basename(recordPath))
     const record = JSON.parse(await readFile(recordPath, "utf8"))
     expect(record.argv).toContain("commit")
-    expect(record.timeoutMs).toBe(14_000)
+    expect(record.timeoutMs).toBe(COMMIT_BUDGET_MS)
     expect(record.processes).toContain(String(record.pid))
     // The record settles only after its volume evidence is published, which happens on Windows only.
     expect(existsSync(volumeSnapshotEvidencePath(recordPath))).toBe(process.platform === "win32")
