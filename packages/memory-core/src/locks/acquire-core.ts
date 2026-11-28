@@ -4,6 +4,7 @@ import { forgetProvenDeadTakeover } from "./proven-dead-takeovers"
 import { publishExclusive } from "./publish"
 import { delay, lockRetryDelayMs } from "./retry-delay"
 import { recoverStaleOwner } from "./stale-owner"
+import { registerWaitTicket, removeWaitTicket, ticketsAhead, type WaitTicket } from "./wait-tickets"
 
 export type AcquireLockOptions = {
   readonly waitTimeoutMs?: number
@@ -40,13 +41,22 @@ export async function acquireWithoutDirectorySweep(
   if (waitTimeoutMs < 0 || retryDelayMs <= 0 || incompleteLockGraceMs < 0)
     throw new Error("lock wait options must be positive")
   const deadline = now() + waitTimeoutMs
+  const queue: { ticket?: WaitTicket } = {}
 
   try {
-    return await acquireLoop(lockPath, record, options, { retryDelayMs, incompleteLockGraceMs, now, deadline })
+    return await acquireLoop(lockPath, record, options, {
+      retryDelayMs,
+      incompleteLockGraceMs,
+      now,
+      deadline,
+      queue: waitTimeoutMs > 0 ? queue : undefined,
+    })
   } catch (error) {
     // A takeover this contender proved but never turned into a held lock authorizes nothing.
     forgetProvenDeadTakeover(lockPath, record.nonce)
     throw error
+  } finally {
+    if (queue.ticket !== undefined) await removeWaitTicket(queue.ticket)
   }
 }
 
@@ -58,6 +68,9 @@ type LoopTiming = {
   readonly incompleteLockGraceMs: number
   readonly now: () => number
   readonly deadline: number
+  // Present when this acquisition may wait: it then queues by ticket (wait-tickets.ts). A no-wait attempt keeps the
+  // plain try-lock behaviour and neither queues nor yields.
+  readonly queue: { ticket?: WaitTicket } | undefined
 }
 
 function forfeitDeadOwnerProof(lockPath: string, record: LockRecord, recoveredDeadOwner: boolean): false {
@@ -71,7 +84,11 @@ async function acquireLoop(
   options: AcquireLockOptions,
   timing: LoopTiming,
 ): Promise<AcquireOutcome> {
-  const { retryDelayMs, incompleteLockGraceMs, now, deadline } = timing
+  const { retryDelayMs, incompleteLockGraceMs, now, deadline, queue } = timing
+  const enqueue = async (notBeforeMs = 0): Promise<void> => {
+    if (queue !== undefined && queue.ticket === undefined)
+      queue.ticket = await registerWaitTicket(lockPath, record, deadline, notBeforeMs)
+  }
   let sawOtherOwner = false
   let recoveredDeadOwner = false
   for (let attempt = 0; ; attempt += 1) {
@@ -85,6 +102,15 @@ async function acquireLoop(
     // starved the Windows shard-1 writer test out of its 30s budget (#8323); the read costs one
     // open+read and cannot block the holder.
     let owner = await readOwner(lockPath)
+    const queued = owner === null && queue !== undefined ? await ticketsAhead(lockPath, queue.ticket, now()) : undefined
+    if (queued?.ahead === true) {
+      // Free, but an older waiter is queued: let it take the lock, and queue strictly behind every live ticket.
+      await enqueue(queued.latestCreatedAtMs + 1)
+      options.signal?.throwIfAborted()
+      if (now() >= deadline) throw new LockContentionError(lockPath, null)
+      await delay(Math.min(lockRetryDelayMs(attempt, retryDelayMs), Math.max(1, deadline - now())), options.signal)
+      continue
+    }
     if (owner === null) {
       if (await publishExclusive(lockPath, record)) return { sawOtherOwner }
       options.signal?.throwIfAborted()
@@ -107,6 +133,7 @@ async function acquireLoop(
     }
     options.signal?.throwIfAborted()
     if (now() >= deadline) throw new LockContentionError(lockPath, owner.record)
+    await enqueue()
     await delay(Math.min(lockRetryDelayMs(attempt, retryDelayMs), Math.max(1, deadline - now())), options.signal)
   }
 }

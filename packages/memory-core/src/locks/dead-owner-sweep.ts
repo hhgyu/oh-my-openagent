@@ -8,6 +8,7 @@ import { isLockOwnerProvenDead } from "./stale-owner"
 import { createLockRecord, parseLockRecord, type LockRecord } from "./lock-record"
 import { getPidLiveness } from "./process-identity"
 import { provenDeadTakeoverFor } from "./proven-dead-takeovers"
+import { reapWaitTickets } from "./wait-tickets"
 
 const LOCK_FILE_SUFFIX = ".lock"
 
@@ -82,5 +83,6 @@ export async function sweepDeadOwnerLocks(lockDirectory: string, options: DeadOw
       options.onFailure?.(lockPath, error)
     }
   }
+  await reapWaitTickets(lockDirectory).catch((error: unknown) => options.onFailure?.(lockDirectory, error))
   return reclaimed
 }
