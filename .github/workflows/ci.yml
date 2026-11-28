@@ -231,6 +231,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # First, so every later step's temp files (installs, builds, every test) stay off the OS volume.
+      - name: Keep temp files off the OS volume
+        if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        shell: pwsh
+        run: .github/scripts/windows-test-temp.ps1
+
       # The host-events dump after the tests lists the scheduled tasks that ran during the job, and this log is
       # off by default on Windows Server, so it is turned on first.
       - name: Enable the Task Scheduler event log for host diagnostics
@@ -300,22 +306,6 @@ jobs:
         if: needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
         run: npm test
         working-directory: packages/lsp-daemon
-
-      # Windows shard 1 timed out on varied tests that all stalled in the same minutes, when a Volume Shadow
-      # Copy snapshot of the OS volume held the writes of every test keeping its temp files on C:. Every test
-      # temp root follows os.tmpdir() (test-temp-root.ts), so TEMP/TMP/TMPDIR under RUNNER_TEMP move them all
-      # to the runner's local D: disk, beside the checkout.
-      - name: Keep test temp files off the OS volume
-        if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
-        shell: pwsh
-        run: |
-          $testTemp = Join-Path $env:RUNNER_TEMP "test-tmp"
-          New-Item -ItemType Directory -Force -Path $testTemp | Out-Null
-          if ([System.IO.Path]::GetPathRoot($testTemp) -eq [System.IO.Path]::GetPathRoot("$env:SystemDrive\")) {
-            "::warning::RUNNER_TEMP ($env:RUNNER_TEMP) is on the system drive; test temp files stay on the OS volume"
-          }
-          foreach ($name in @("TEMP", "TMP", "TMPDIR")) { "$name=$testTemp" >> $env:GITHUB_ENV }
-          "test temp root: $testTemp"
 
       # Every OS splits the root suite into two parallel jobs (the Windows
       # shape): shard 1 runs omo-opencode + memory-core serially on POSIX and
@@ -795,6 +785,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # First, so every later step's temp files (installs, builds, every test) stay off the OS volume.
+      - name: Keep temp files off the OS volume
+        if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        shell: pwsh
+        run: .github/scripts/windows-test-temp.ps1
+
       - uses: actions/setup-node@v7
         if: needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
         with:
@@ -897,6 +893,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # First, so every later step's temp files (installs, builds, every test) stay off the OS volume.
+      - name: Keep temp files off the OS volume
+        if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
+        shell: pwsh
+        run: .github/scripts/windows-test-temp.ps1
+
       - name: Enable the Task Scheduler event log for host diagnostics
         if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
         continue-on-error: true
@@ -979,19 +981,6 @@ jobs:
           npm --prefix packages/omo-codex/plugin ci --ignore-scripts --no-audit --no-fund
           node packages/omo-senpi/scripts/qa/fused-equivalence-e2e.mjs --compare --placement fused --senpi-repo "$RUNNER_TEMP/senpi-eq" \
             --lsp-dir "$RUNNER_TEMP/eq-lsp/node_modules/.bin" --evidence-dir "$RUNNER_TEMP/eq-omo"
-
-      # The Senpi suite loads the same root preloads, so its temp roots follow os.tmpdir() as in the test job.
-      - name: Keep test temp files off the OS volume
-        if: runner.os == 'Windows' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
-        shell: pwsh
-        run: |
-          $testTemp = Join-Path $env:RUNNER_TEMP "test-tmp"
-          New-Item -ItemType Directory -Force -Path $testTemp | Out-Null
-          if ([System.IO.Path]::GetPathRoot($testTemp) -eq [System.IO.Path]::GetPathRoot("$env:SystemDrive\")) {
-            "::warning::RUNNER_TEMP ($env:RUNNER_TEMP) is on the system drive; test temp files stay on the OS volume"
-          }
-          foreach ($name in @("TEMP", "TMP", "TMPDIR")) { "$name=$testTemp" >> $env:GITHUB_ENV }
-          "test temp root: $testTemp"
 
       - name: Run Senpi compatibility tests with Windows telemetry
         id: senpi-tests-windows
@@ -1332,6 +1321,12 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+
+      # First, so every later step's temp files (installs, builds, every test) stay off the OS volume.
+      - name: Keep temp files off the OS volume
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .github/scripts/windows-test-temp.ps1
 
       - uses: actions/setup-node@v7
         if: needs.ci-mode.outputs.run_heavy == 'true'
