@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs"
+import { existsSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { mkdtempSync } from "node:fs"
@@ -130,7 +130,13 @@ describe("OmO Native product identity", () => {
   })
 
   test("#given an unwritable state path #when a session id is hashed #then fallback identity stays stable without throwing", () => {
-    process.env.SENPI_CODING_AGENT_DIR = "/dev/null"
+    // A directory under a regular file cannot be created on any platform. `/dev/null` is a writable
+    // `<drive>:\dev\null` directory on Windows, so it never exercised the fallback there and left that tree behind.
+    const root = useTemporaryAgentDir()
+    const blocker = join(root, "agent-dir-is-a-file")
+    writeFileSync(blocker, "")
+    for (const name of ["OMO_CODING_AGENT_DIR", "SENPI_CODING_AGENT_DIR", "PI_CODING_AGENT_DIR"])
+      process.env[name] = join(blocker, "agent")
 
     const first = hashSessionId("session-a")
     expect(() => hashSessionId("session-a")).not.toThrow()

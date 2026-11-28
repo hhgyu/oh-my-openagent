@@ -1,5 +1,6 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test"
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs"
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test"
+import * as fs from "fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs"
 import { join, basename } from "path"
 import { z } from "zod"
 import { getOpenCodeConfigDir } from "../../shared/opencode-config-dir"
@@ -451,6 +452,94 @@ describe("writeJsonAtomic", () => {
     //#then
     const content = await Bun.file(filePath).text()
     expect(JSON.parse(content)).toEqual(newData)
+  })
+
+  describe("rename contention", () => {
+    const spies: { mockRestore(): void }[] = []
+    afterEach(() => {
+      for (const spy of spies.splice(0)) spy.mockRestore()
+    })
+
+    function refuseRename(): ReturnType<typeof spyOn<typeof fs, "renameSync">> {
+      const spy = spyOn(fs, "renameSync")
+      spies.push(spy)
+      return spy
+    }
+
+    function renameRefusal(code: string): () => never {
+      return () => {
+        throw Object.assign(new Error(`${code}: operation not permitted, rename`), { code, syscall: "rename" })
+      }
+    }
+
+    function seeded(): string {
+      const filePath = join(TEST_DIR_ABS, "contended.json")
+      mkdirSync(TEST_DIR_ABS, { recursive: true })
+      writeFileSync(filePath, JSON.stringify({ status: "pending" }), "utf-8")
+      return filePath
+    }
+
+    const tempFiles = () => readdirSync(TEST_DIR_ABS).filter((entry) => entry.includes(".tmp."))
+
+    test("#given a win32 replace #when renameSync is refused with EPERM twice #then the new content lands and no temp file remains", () => {
+      //#given
+      const filePath = seeded()
+      const rename = refuseRename()
+        .mockImplementationOnce(renameRefusal("EPERM"))
+        .mockImplementationOnce(renameRefusal("EPERM"))
+
+      //#when
+      writeJsonAtomic(filePath, { status: "completed" }, "win32")
+
+      //#then
+      expect(rename).toHaveBeenCalledTimes(3)
+      expect(JSON.parse(readFileSync(filePath, "utf-8"))).toEqual({ status: "completed" })
+      expect(tempFiles()).toEqual([])
+    })
+
+    test("#given a win32 replace #when renameSync stays refused #then the error rethrows after the bounded attempts and no temp file remains", () => {
+      //#given
+      const filePath = seeded()
+      const rename = refuseRename().mockImplementation(renameRefusal("EBUSY"))
+
+      //#when
+      const write = () => writeJsonAtomic(filePath, { status: "completed" }, "win32")
+
+      //#then
+      expect(write).toThrow("EBUSY: operation not permitted, rename")
+      expect(rename).toHaveBeenCalledTimes(9)
+      expect(JSON.parse(readFileSync(filePath, "utf-8"))).toEqual({ status: "pending" })
+      expect(tempFiles()).toEqual([])
+    })
+
+    test("#given a POSIX replace #when renameSync is refused with EPERM once #then the error rethrows unchanged after one attempt and no temp file remains", () => {
+      //#given
+      const filePath = seeded()
+      const rename = refuseRename().mockImplementationOnce(renameRefusal("EPERM"))
+
+      //#when
+      const write = () => writeJsonAtomic(filePath, { status: "completed" }, "darwin")
+
+      //#then
+      expect(write).toThrow("EPERM: operation not permitted, rename")
+      expect(rename).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(readFileSync(filePath, "utf-8"))).toEqual({ status: "pending" })
+      expect(tempFiles()).toEqual([])
+    })
+
+    test("#given a win32 replace #when renameSync fails with a non-sharing error #then it rethrows after one attempt", () => {
+      //#given
+      const filePath = seeded()
+      const rename = refuseRename().mockImplementationOnce(renameRefusal("ENOSPC"))
+
+      //#when
+      const write = () => writeJsonAtomic(filePath, { status: "completed" }, "win32")
+
+      //#then
+      expect(write).toThrow("ENOSPC")
+      expect(rename).toHaveBeenCalledTimes(1)
+      expect(tempFiles()).toEqual([])
+    })
   })
 })
 

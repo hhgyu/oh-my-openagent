@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { colorizeDiff, gitDiffArgs, readGitDiff, UNTRACKED_DIRECTORY_FILE_CAP } from "./diff"
+import { colorizeDiff, GIT_NULL_DEVICE, gitDiffArgs, readGitDiff, UNTRACKED_DIRECTORY_FILE_CAP } from "./diff"
 import type { PanelExec } from "./read"
 
 describe("gitDiffArgs", () => {
@@ -30,7 +30,7 @@ describe("gitDiffArgs", () => {
     expect(args).toEqual(["diff", "HEAD", "-M", "--", ":(literal)renamed.txt", ":(literal)renamed-new.txt"])
   })
 
-  test("#given an untracked file #when built #then it is diffed against /dev/null", () => {
+  test("#given an untracked file #when built #then it is diffed against the null device", () => {
     // given
     const file = { xy: "??", path: "brand-new.txt" }
 
@@ -38,7 +38,7 @@ describe("gitDiffArgs", () => {
     const args = gitDiffArgs(file)
 
     // then
-    expect(args).toEqual(["diff", "--no-index", "--", "/dev/null", "brand-new.txt"])
+    expect(args).toEqual(["diff", "--no-index", "--", GIT_NULL_DEVICE, "brand-new.txt"])
   })
 
   test("#given a wildcard in a path #when built #then git treats it literally", () => {
@@ -173,7 +173,7 @@ describe("readGitDiff", () => {
     const rows = await readGitDiff(runner, "/repo", { xy: "A ", path: "new.txt" })
 
     // then
-    expect(calls[1]).toEqual(["diff", "--no-index", "--", "/dev/null", "new.txt"])
+    expect(calls[1]).toEqual(["diff", "--no-index", "--", GIT_NULL_DEVICE, "new.txt"])
     expect(rows.map((row) => row.text)).toEqual(["+++ b/new.txt", "+hello"])
   })
 
@@ -258,7 +258,7 @@ describe("readGitDiff pathspec environment", () => {
     // then
     expect(seen).toHaveLength(2)
     expect(seen[0]?.at(-1)).toBe(":(literal)new.txt")
-    expect(seen[1]).toEqual(["diff", "--no-index", "--", "/dev/null", "new.txt"])
+    expect(seen[1]).toEqual(["diff", "--no-index", "--", GIT_NULL_DEVICE, "new.txt"])
     for (const args of seen) expect(args).not.toContain("--literal-pathspecs")
   })
 
@@ -277,7 +277,7 @@ describe("readGitDiff pathspec environment", () => {
     // then
     expect(seen).toHaveLength(3)
     expect(seen[0]?.at(-1)).toBe(":(literal)build/")
-    expect(seen[1]).toEqual(["diff", "--no-index", "--", "/dev/null", "build/a.txt"])
+    expect(seen[1]).toEqual(["diff", "--no-index", "--", GIT_NULL_DEVICE, "build/a.txt"])
     for (const args of seen) expect(args).not.toContain("--literal-pathspecs")
   })
 

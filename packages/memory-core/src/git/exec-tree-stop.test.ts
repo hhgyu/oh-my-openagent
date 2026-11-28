@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { spawn, type ChildProcess } from "node:child_process"
+import { ChildProcess, spawn } from "node:child_process"
 import { once } from "node:events"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -8,7 +8,7 @@ import { join } from "node:path"
 
 import { GitAbortedError } from "./errors"
 import { createNodeGitExec, type GitExecResult } from "./exec"
-import type { GitTreeStopper } from "./stop-git-tree"
+import { createWindowsGitTreeStopper, type GitTreeStopper } from "./stop-git-tree"
 
 // The settlement contract of a stopped git with a process-tree stopper (taskkill on Windows), driven with an
 // injected stopper so it runs on every host: nothing settles while the stop is still in flight, and an
@@ -162,5 +162,35 @@ describe("git tree stop settlement", () => {
     expect(stopperCalls).toBe(0)
     expect(settledWhileStdioHeld).toBe(false)
     expect(error).toBeInstanceOf(GitAbortedError)
+  })
+
+  test("#given git ends on its own as the abort arrives #when taskkill then finds no such process #then the call settles as aborted, not as a failed stop", async () => {
+    // given
+    const dir = await initRepo()
+    const controller = new AbortController()
+    const taskkillTargets: number[] = []
+    const treeStopper = createWindowsGitTreeStopper(
+      {},
+      (_executable, args) => {
+        taskkillTargets.push(Number(args[1]))
+        const notFound = Object.assign(new ChildProcess(), { status: 128, signal: null })
+        setImmediate(() => notFound.emit("exit", 128, null))
+        return notFound
+      },
+      () => true,
+    )
+
+    // when
+    const error = await createNodeGitExec({ treeStopper, onSpawn: () => controller.abort() })
+      .run(["--version"], { cwd: dir, timeoutMs: 60_000, signal: controller.signal })
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      )
+
+    // then
+    expect(error).toBeInstanceOf(GitAbortedError)
+    expect(taskkillTargets).toHaveLength(1)
+    expect(taskkillTargets[0]).toBeGreaterThan(0)
   })
 })
