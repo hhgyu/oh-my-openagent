@@ -32,21 +32,42 @@ function standIn(script: string): ChildProcess {
   return child
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+/** A scheduler the test fires by hand, so no assertion depends on how fast the host runs. */
+function manualScheduler() {
+  const scheduled: { callback: () => void; delayMs: number; cancelled: boolean }[] = []
+  return {
+    scheduled,
+    schedule: (callback: () => void, delayMs: number) => {
+      const entry = { callback, delayMs, cancelled: false }
+      scheduled.push(entry)
+      return () => {
+        entry.cancelled = true
+      }
+    },
+  }
+}
+
+function exited(child: ChildProcess): Promise<void> {
+  return new Promise((resolve) => (child.exitCode === null ? child.once("exit", () => resolve()) : resolve()))
+}
 
 describe("a git still running at half its budget (stall diagnostics)", () => {
-  test("#given diagnostics mode and a git that keeps running #when half its budget passes #then a stall record with its pid, argv and a slowly collected process table is written before the budget and its volume evidence is requested", async () => {
+  test("#given diagnostics mode and a git that keeps running #when half its budget passes #then a stall record with its pid, argv and a slowly collected process table is written, stamped before the budget, and its volume evidence is requested", async () => {
     // #given
     const diagnostics = join(await scratch("git-stall-record-"), "diagnostics")
     const git = standIn("setInterval(() => {}, 1000)")
+    const timer = manualScheduler()
+    let clock = 1_000_000
+    const snapshotStarted = Promise.withResolvers<void>()
+    const finishSnapshot = Promise.withResolvers<void>()
     const published: string[] = []
     const recorded = Promise.withResolvers<string | undefined>()
-    const startedAt = Date.now()
-
-    // #when
     armGitStallRecord(git, { [GIT_TIMEOUT_DIAGNOSTICS_ENV]: diagnostics }, ["add", "-A"], "repo-dir", 10_000, {
+      schedule: timer.schedule,
+      now: () => clock,
       snapshot: async (pid) => {
-        await sleep(2_000)
+        snapshotStarted.resolve()
+        await finishSnapshot.promise
         return `table naming ${pid}`
       },
       publishVolume: async (path) => {
@@ -54,18 +75,25 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
       },
       onRecorded: recorded.resolve,
     })
+
+    // #when: half the budget passes, and the snapshot is still being collected
+    expect(timer.scheduled.map((entry) => entry.delayMs)).toEqual([5_000])
+    clock += 5_000
+    timer.scheduled[0]?.callback()
+    await snapshotStarted.promise
+    const beforeCollected = existsSync(diagnostics) ? await readdir(diagnostics) : []
+    finishSnapshot.resolve()
     const recordPath = await recorded.promise
 
     // #then
-    const elapsedMs = Date.now() - startedAt
-    expect(elapsedMs).toBeGreaterThanOrEqual(7_000)
-    expect(elapsedMs).toBeLessThan(10_000)
+    expect(beforeCollected).toEqual([])
     expect(recordPath).toMatch(new RegExp(`git-stall-${git.pid}-\\d+\\.json$`))
     expect(await readdir(diagnostics)).toEqual([basename(recordPath ?? "")])
     const record = JSON.parse(await readFile(recordPath ?? "", "utf8"))
     expect(record).toMatchObject({ pid: git.pid, cwd: "repo-dir", timeoutMs: 10_000, argv: ["add", "-A"] })
     expect(record.processes).toBe(`table naming ${git.pid}`)
-    expect(record.runningForMs).toBeGreaterThanOrEqual(5_000)
+    expect(record.runningForMs).toBe(5_000)
+    expect(record.runningForMs).toBeLessThan(record.timeoutMs)
     expect(published).toEqual([recordPath ?? ""])
   })
 
@@ -75,11 +103,11 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
     const diagnostics = join(root, "diagnostics")
     await writeFile(diagnostics, "a file where the directory should be", "utf8")
     const git = standIn("setInterval(() => {}, 1000)")
+    const timer = manualScheduler()
     const recorded = Promise.withResolvers<string | undefined>()
     let published = 0
-
-    // #when
     armGitStallRecord(git, { [GIT_TIMEOUT_DIAGNOSTICS_ENV]: diagnostics }, ["add"], "repo-dir", 10_000, {
+      schedule: timer.schedule,
       snapshot: async () => "table",
       publishVolume: async () => {
         published += 1
@@ -87,70 +115,67 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
       onRecorded: recorded.resolve,
     })
 
+    // #when
+    timer.scheduled[0]?.callback()
+
     // #then
     expect(await recorded.promise).toBeUndefined()
     expect(await readdir(root)).toEqual(["diagnostics"])
     expect(published).toBe(0)
   })
 
-  test("#given diagnostics mode #when the git exits before half its budget #then no stall record is written", async () => {
+  test("#given diagnostics mode #when the git exits before half its budget #then the check is cancelled and nothing is recorded", async () => {
     // #given
     const diagnostics = join(await scratch("git-stall-exited-"), "diagnostics")
-    const git = standIn("setTimeout(() => {}, 200)")
-    let calls = 0
-
-    // #when
+    const git = standIn("")
+    const timer = manualScheduler()
     armGitStallRecord(git, { [GIT_TIMEOUT_DIAGNOSTICS_ENV]: diagnostics }, ["status"], "repo-dir", 10_000, {
+      schedule: timer.schedule,
       snapshot: async () => {
-        calls += 1
-        return ""
+        throw new Error("a git that exited must not be snapshotted")
       },
     })
-    await sleep(5_500)
+
+    // #when
+    await exited(git)
 
     // #then
-    expect(git.exitCode).toBe(0)
-    expect(calls).toBe(0)
+    expect(timer.scheduled).toHaveLength(1)
+    expect(timer.scheduled[0]?.cancelled).toBe(true)
     expect(existsSync(diagnostics)).toBe(false)
   })
 
-  test("#given a budget below the stall minimum #when the git outlives half of it #then no stall record is written", async () => {
+  test("#given a budget below the stall minimum #when armed #then no check is scheduled", async () => {
     // #given
-    const diagnostics = join(await scratch("git-stall-short-"), "diagnostics")
     const git = standIn("setInterval(() => {}, 1000)")
-    const budgetMs = GIT_STALL_MIN_BUDGET_MS / 5
-    let calls = 0
+    const timer = manualScheduler()
 
     // #when
-    armGitStallRecord(git, { [GIT_TIMEOUT_DIAGNOSTICS_ENV]: diagnostics }, ["add"], "repo-dir", budgetMs, {
-      snapshot: async () => {
-        calls += 1
-        return ""
+    armGitStallRecord(
+      git,
+      { [GIT_TIMEOUT_DIAGNOSTICS_ENV]: "unused" },
+      ["add"],
+      "repo-dir",
+      GIT_STALL_MIN_BUDGET_MS - 1,
+      {
+        schedule: timer.schedule,
       },
-    })
-    await sleep(budgetMs)
+    )
 
     // #then
-    expect(calls).toBe(0)
-    expect(existsSync(diagnostics)).toBe(false)
+    expect(timer.scheduled).toEqual([])
   })
 
-  test("#given diagnostics mode is off #when a git outlives half its budget #then nothing is recorded", async () => {
+  test("#given diagnostics mode is off #when armed #then no check is scheduled", async () => {
     // #given
     const git = standIn("setInterval(() => {}, 1000)")
-    let calls = 0
+    const timer = manualScheduler()
 
     // #when
-    armGitStallRecord(git, {}, ["add"], "repo-dir", 10_000, {
-      snapshot: async () => {
-        calls += 1
-        return ""
-      },
-    })
-    await sleep(5_500)
+    armGitStallRecord(git, {}, ["add"], "repo-dir", 10_000, { schedule: timer.schedule })
 
     // #then
-    expect(calls).toBe(0)
+    expect(timer.scheduled).toEqual([])
   })
 
   test("#given diagnostics mode and a real commit whose hook outlives half the budget #when the exec runs it #then the stall is recorded while it runs and the commit still succeeds within its budget", async () => {

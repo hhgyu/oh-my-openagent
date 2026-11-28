@@ -38,6 +38,15 @@ export interface GitStallRecordOptions {
   readonly snapshot?: StallSnapshot
   readonly publishVolume?: (recordPath: string) => Promise<void>
   readonly onRecorded?: (recordPath: string | undefined) => void
+  /** Schedules the half-budget check; returns its cancel. Defaults to an unref'd timer. */
+  readonly schedule?: (callback: () => void, delayMs: number) => () => void
+  readonly now?: () => number
+}
+
+const unrefTimer = (callback: () => void, delayMs: number): (() => void) => {
+  const timer = setTimeout(callback, delayMs)
+  timer.unref()
+  return () => clearTimeout(timer)
 }
 
 function snapshotProcesses(pid: number): Promise<string> {
@@ -77,7 +86,7 @@ async function recordGitStall(
   startedAt: number,
   options: GitStallRecordOptions,
 ): Promise<string | undefined> {
-  const at = new Date()
+  const at = new Date((options.now ?? Date.now)())
   const recordPath = join(directory, `git-stall-${pid}-${at.getTime()}.json`)
   const temp = `${recordPath}.tmp-${process.pid}-${randomUUID()}`
   try {
@@ -116,8 +125,8 @@ export function armGitStallRecord(
   const directory = environment[GIT_TIMEOUT_DIAGNOSTICS_ENV]
   const pid = child.pid
   if (!directory || pid === undefined || timeoutMs < GIT_STALL_MIN_BUDGET_MS) return
-  const startedAt = Date.now()
-  const timer = setTimeout(
+  const startedAt = (options.now ?? Date.now)()
+  const cancel = (options.schedule ?? unrefTimer)(
     () => {
       const record = recordGitStall(directory, pid, argv, cwd, timeoutMs, startedAt, options)
       recordsInFlight.add(record)
@@ -130,8 +139,6 @@ export function armGitStallRecord(
     },
     Math.floor(timeoutMs / 2),
   )
-  timer.unref()
-  const disarm = () => clearTimeout(timer)
-  child.once("exit", disarm)
-  child.once("error", disarm)
+  child.once("exit", cancel)
+  child.once("error", cancel)
 }
