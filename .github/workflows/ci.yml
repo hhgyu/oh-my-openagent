@@ -28,6 +28,13 @@ jobs:
             }
             "drive $drive temp $t: $fails/40 runs with failures"
           }
+      - name: windows-path-identity on D temp
+        shell: pwsh
+        run: |
+          $t = Join-Path $env:RUNNER_TEMP "test-tmp3"; New-Item -ItemType Directory -Force $t | Out-Null
+          $env:TEMP = $env:TMP = $env:TMPDIR = $t
+          bun test --timeout 30000 packages/omo-opencode/src/hooks/prometheus-md-only/windows-path-identity.test.ts
+
       - name: full omo-opencode once on D temp
         shell: pwsh
         run: |

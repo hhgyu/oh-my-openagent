@@ -14,7 +14,7 @@ import {
 } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { tmpdir } from "node:os"
-import { join, parse, sep } from "node:path"
+import { dirname, join, parse, sep } from "node:path"
 import { clearSessionAgent, setSessionAgent } from "../../features/claude-code-session-state"
 import { createPrometheusMdOnlyHook } from "./hook"
 import { resolveAllowedFile } from "./path-policy"
@@ -46,6 +46,18 @@ function shortSpelling(directory: string): string | undefined {
   )
   const short = result.stdout.toString().trim()
   return result.success && short.length > 0 && short.toLowerCase() !== directory.toLowerCase() ? short : undefined
+}
+
+// A volume with 8.3 generation turned off (the runner's D: temp disk) still accepts an explicit short name, so
+// the fixture gives its own long-named directory one instead of relying on the volume to have made it.
+function assignShortName(directory: string): string | undefined {
+  const existing = shortSpelling(directory)
+  if (existing !== undefined) return existing
+  const name = `PF${randomUUID().slice(0, 4).toUpperCase()}~1`
+  const result = Bun.spawnSync(["fsutil", "file", "setShortName", directory, name], { stdout: "pipe", stderr: "pipe" })
+  if (!result.success)
+    throw new Error(`fsutil setShortName ${name} failed: ${result.stdout.toString()}${result.stderr.toString()}`)
+  return shortSpelling(directory)
 }
 
 // Capability probes, not platform guesses: each skipped form logs why the volume cannot build it.
@@ -203,6 +215,7 @@ describe("Windows path identity: every alias form resolves to the executor's phy
       skip: !shortNamesSupported,
       build: (project) => {
         planningWithLinks(project, "dir")
+        assignShortName(dirname(project))
         const short = shortSpelling(project)
         if (short === undefined) throw new Error("the probe found 8.3 names but the project directory has none")
         expect(short.toLowerCase()).not.toBe(realpathSync.native(project).toLowerCase())
