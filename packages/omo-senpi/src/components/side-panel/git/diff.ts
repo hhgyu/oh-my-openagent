@@ -47,16 +47,23 @@ function literalPathspecsEnabled(): boolean {
 const literalPathspec = (path: string): string => (literalPathspecsEnabled() ? path : `:(literal)${path}`)
 
 /**
+ * The empty side of a `--no-index` diff. Git for Windows resolves `/dev/null` against the current drive first, so a
+ * stray `<drive>:\\dev\\null` directory turns it into a missing `/dev/null/<file>` and the diff comes back empty; `NUL` is
+ * the device itself on every drive.
+ */
+export const GIT_NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null"
+
+/**
  * The diff git itself would print, coloured by line kind.
  *
  * A rename needs BOTH paths in the pathspec: given only the destination, git sees an
  * unrelated new file and prints the whole content as additions. An untracked file has no
- * index side at all, so it is diffed against /dev/null, which exits 1 by design.
+ * index side at all, so it is diffed against the null device, which exits 1 by design.
  */
 export function gitDiffArgs(file: PanelGitEntry): string[] {
   // `--no-index` operands are plain filesystem paths, not pathspecs: no magic
   // prefix, and no global flag to conflict with an exported pathspec switch.
-  if (file.xy === "??") return ["diff", "--no-index", "--", "/dev/null", file.path]
+  if (file.xy === "??") return ["diff", "--no-index", "--", GIT_NULL_DEVICE, file.path]
   const paths = file.from === undefined ? [file.path] : [file.from, file.path]
   return ["diff", "HEAD", "-M", "--", ...paths.map(literalPathspec)]
 }
@@ -87,7 +94,7 @@ export async function readGitDiff(exec: PanelExec, root: string, file: PanelGitE
   }
   let result = await exec("git", gitDiffArgs(file), options).catch(() => undefined)
   if (result?.code === 128 && result.stdout === "" && file.xy[0] !== " ") {
-    result = await exec("git", ["diff", "--no-index", "--", "/dev/null", file.path], options).catch(() => undefined)
+    result = await exec("git", ["diff", "--no-index", "--", GIT_NULL_DEVICE, file.path], options).catch(() => undefined)
   }
   if (result === undefined) return [{ text: "git diff could not be run", color: "error" }]
   // `--no-index` exits 1 whenever the files differ, which is the normal case here.
