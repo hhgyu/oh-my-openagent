@@ -4,6 +4,7 @@ import { existsSync } from "../fs/resilient"
 import { GitAbortedError, GitNotFoundError, GitTimeoutError } from "./errors"
 import { GIT_EXIT_DRAIN_MS, GIT_KILL_GRACE_MS, type GitExecOptions, type GitExecResult } from "./exec"
 import { holdGitActivityShared } from "./git-activity-lock"
+import { armGitStallRecord } from "./stall-diagnostics"
 import { GitStopFailedError, GitTreeStopError, type GitTreeStopper } from "./stop-git-tree"
 import { recordGitTimeout } from "./timeout-diagnostics"
 import { publishVolumeSnapshotEvidence } from "./volume-snapshot-diagnostics"
@@ -49,6 +50,7 @@ function spawnGitWithTreeStop(
       reject(new Error("git was spawned without stdout and stderr pipes"))
       return
     }
+    armGitStallRecord(child, environment, argv, options.cwd, options.timeoutMs)
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
     let settled = false

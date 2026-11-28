@@ -431,23 +431,24 @@ jobs:
           if-no-files-found: warn
           overwrite: false
 
-      # #10821: keep the evidence of any git that timed out: the recorded process tables and the
-      # trace2 logs of every git that never reached its exit event (killed or still stuck).
+      # #10821: keep the evidence of any git that timed out or stalled past half its budget: the recorded
+      # process tables, their volume snapshot evidence, and the trace2 logs of every git that never reached
+      # its exit event (killed or still stuck).
       - name: Collect timed-out git evidence
         if: always() && runner.os == 'Windows' && matrix.shard == '1/2' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
         continue-on-error: true
         shell: pwsh
         run: |
           $diagnostics = Join-Path $env:RUNNER_TEMP "git-timeout-diagnostics"
-          if (-not (Test-Path $diagnostics)) { "no git timed out"; exit 0 }
+          if (-not (Test-Path $diagnostics)) { "no git timed out or stalled"; exit 0 }
           $unfinished = Join-Path $diagnostics "trace2-unfinished"
           New-Item -ItemType Directory -Force -Path $unfinished | Out-Null
           Get-ChildItem (Join-Path $env:RUNNER_TEMP "git-trace2") -File -ErrorAction SilentlyContinue |
             Where-Object { -not (Select-String -Path $_.FullName -Pattern '\|\s*atexit\s*\|' -Quiet -ErrorAction Continue) } |
             Copy-Item -Destination $unfinished -ErrorAction Continue
           # The upload can be refused (artifact quota), so the evidence is also printed here.
-          foreach ($record in Get-ChildItem $diagnostics -Filter 'git-timeout-*.json' -File) {
-            "::group::git timeout record $($record.Name)"
+          foreach ($record in Get-ChildItem $diagnostics -Filter 'git-*.json' -File) {
+            "::group::git diagnostics record $($record.Name)"
             Get-Content $record.FullName -TotalCount 200
             "::endgroup::"
           }

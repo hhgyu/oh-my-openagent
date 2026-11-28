@@ -4,6 +4,7 @@ import { win32 } from "node:path"
 import { GitAbortedError, GitNotFoundError, GitTimeoutError } from "./errors"
 import { memoryGitEnvironment } from "./exec-environment"
 import { holdGitActivityShared } from "./git-activity-lock"
+import { armGitStallRecord } from "./stall-diagnostics"
 import type { GitTreeStopper } from "./stop-git-tree"
 import { recordGitTimeout } from "./timeout-diagnostics"
 import { publishVolumeSnapshotEvidence } from "./volume-snapshot-diagnostics"
@@ -141,6 +142,7 @@ function spawnGitCommand(
       stdio: [hasStdin ? "pipe" : "ignore", "pipe", "pipe", ...(activityFd === undefined ? [] : [activityFd])],
       windowsHide: true,
     })
+    armGitStallRecord(child, environment, argv, options.cwd, options.timeoutMs)
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
     let settled = false
