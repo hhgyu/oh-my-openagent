@@ -6,40 +6,31 @@ permissions:
 jobs:
   diag:
     runs-on: windows-latest
-    timeout-minutes: 50
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        copy: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
+      - name: Keep temp files off the OS volume
+        shell: pwsh
+        run: .github/scripts/windows-test-temp.ps1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: "1.4.4"
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - name: task-update on C and D temp, isolated, 40x each
+      - name: Share Bun's transpiler cache with test children
+        shell: bash
+        run: echo "BUN_RUNTIME_TRANSPILER_CACHE_PATH=$RUNNER_TEMP/bun-transpiler-cache" >> "$GITHUB_ENV"
+      - run: bun install --frozen-lockfile
+      - run: bun run script/remove-stale-self-package-tests.ts
+      - name: real shard-1 with instrumented task_update
         shell: pwsh
         run: |
-          fsutil 8dot3name query C: ; fsutil 8dot3name query D:
-          foreach ($drive in @("C", "D")) {
-            $t = if ($drive -eq "C") { $env:TEMP } else { Join-Path $env:RUNNER_TEMP "test-tmp" }
-            New-Item -ItemType Directory -Force $t | Out-Null
-            $env:TEMP = $env:TMP = $env:TMPDIR = $t
-            $fails = 0
-            foreach ($i in 1..40) {
-              $o = bun test --timeout 30000 packages/omo-opencode/src/tools/task 2>&1 | Out-String
-              if ($o -match ' (\d+) fail' -and $Matches[1] -ne '0') { $fails++; ($o -split "`n" | Select-String 'DIAG_RESULT|\(fail\)') -join "`n" }
-            }
-            "drive ${drive} temp ${t}: ${fails}/40 runs with failures"
-          }
-      - name: windows-path-identity on D temp
-        if: always()
-        shell: pwsh
-        run: |
-          $t = Join-Path $env:RUNNER_TEMP "test-tmp3"; New-Item -ItemType Directory -Force $t | Out-Null
-          $env:TEMP = $env:TMP = $env:TMPDIR = $t
-          bun test --timeout 30000 packages/omo-opencode/src/hooks/prometheus-md-only/windows-path-identity.test.ts
-
-      - name: full omo-opencode once on D temp
-        if: always()
-        shell: pwsh
-        run: |
-          $t = Join-Path $env:RUNNER_TEMP "test-tmp2"; New-Item -ItemType Directory -Force $t | Out-Null
-          $env:TEMP = $env:TMP = $env:TMPDIR = $t
-          bun test --timeout 30000 packages/omo-opencode 2>&1 | Select-String 'DIAG_RESULT|\(fail\)| pass$| fail$'
+          $dir = Join-Path $env:RUNNER_TEMP "shard1"
+          bun script/ci-windows-shard-1.ts $dir *> (Join-Path $env:RUNNER_TEMP "shard1-console.log")
+          Select-String -Path (Join-Path $dir "omo-opencode.log") -Pattern 'DIAG_RESULT|\(fail\)' | ForEach-Object Line
+          Get-ChildItem $dir | Select-Object Name,Length | Format-Table | Out-String
