@@ -26,9 +26,10 @@ jobs:
               $o = bun test --timeout 30000 packages/omo-opencode/src/tools/task 2>&1 | Out-String
               if ($o -match ' (\d+) fail' -and $Matches[1] -ne '0') { $fails++; ($o -split "`n" | Select-String 'DIAG_RESULT|\(fail\)') -join "`n" }
             }
-            "drive $drive temp $t: $fails/40 runs with failures"
+            "drive ${drive} temp ${t}: ${fails}/40 runs with failures"
           }
       - name: windows-path-identity on D temp
+        if: always()
         shell: pwsh
         run: |
           $t = Join-Path $env:RUNNER_TEMP "test-tmp3"; New-Item -ItemType Directory -Force $t | Out-Null
@@ -36,6 +37,7 @@ jobs:
           bun test --timeout 30000 packages/omo-opencode/src/hooks/prometheus-md-only/windows-path-identity.test.ts
 
       - name: full omo-opencode once on D temp
+        if: always()
         shell: pwsh
         run: |
           $t = Join-Path $env:RUNNER_TEMP "test-tmp2"; New-Item -ItemType Directory -Force $t | Out-Null
