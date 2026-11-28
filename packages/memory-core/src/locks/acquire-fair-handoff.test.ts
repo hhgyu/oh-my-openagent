@@ -11,8 +11,10 @@ import type { LockRecord } from "./lock-record"
 import { reapWaitTickets, registerWaitTicket, ticketsAhead } from "./wait-tickets"
 
 const temporaryDirectories: string[] = []
+const heartbeats: (() => void)[] = []
 
 afterEach(async () => {
+  for (const stop of heartbeats.splice(0)) stop()
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
@@ -101,7 +103,7 @@ describe("a waiting contender and a holder that releases and re-acquires (fair h
     // given
     const lockPath = await lockPathInFreshDirectory()
     const queued = await createLockRecord("memory-write")
-    const ticketFile = await writeTicket(lockPath, queued, Date.now() + 60_000)
+    const ticketFile = keepFresh(await writeTicket(lockPath, queued, Date.now() + 60_000))
     let acquired = false
     const record = await createLockRecord("memory-write")
     const acquisition = acquireLock(lockPath, record, { waitTimeoutMs: 10_000, retryDelayMs: 5 }).then(() => {
@@ -170,7 +172,9 @@ describe("tickets that outlive their acquisition", () => {
   test("#given an older live ticket stamped 10 s ahead of this clock #when a newcomer queues while another owner holds the lock #then after the release the older ticket still goes first", async () => {
     // given
     const lockPath = await lockPathInFreshDirectory()
-    const older = await writeTicket(lockPath, await createLockRecord("memory-write"), null, Date.now() + 10_000)
+    const older = keepFresh(
+      await writeTicket(lockPath, await createLockRecord("memory-write"), null, Date.now() + 10_000),
+    )
     const holder = await createLockRecord("memory-write")
     await acquireLock(lockPath, holder)
     const newcomer = await createLockRecord("memory-write")
@@ -206,6 +210,7 @@ describe("wait tickets", () => {
 
     // when
     const ticket = await registerWaitTicket(lockPath, record, Number.POSITIVE_INFINITY, 0)
+    keepFresh(ticket.path)
     await reapWaitTickets(path.dirname(lockPath), Date.now() + 24 * 60 * 60 * 1000)
 
     // then
@@ -219,7 +224,7 @@ describe("wait tickets", () => {
     const lockPath = await lockPathInFreshDirectory()
     const holder = await createLockRecord("memory-write")
     await acquireLock(lockPath, holder)
-    const live = await writeTicket(lockPath, await createLockRecord("memory-write"), Date.now() + 60_000)
+    const live = keepFresh(await writeTicket(lockPath, await createLockRecord("memory-write"), Date.now() + 60_000))
     await writeTicket(lockPath, await createLockRecord("memory-write"), Date.now() - 1)
     const exited = spawnSync(process.execPath, ["-e", ""], { stdio: "ignore" })
     await writeTicket(
@@ -241,11 +246,8 @@ describe("wait tickets", () => {
   test("#given a newer live ticket than the clock #when the next ticket is registered after it #then it orders strictly behind", async () => {
     // given
     const lockPath = await lockPathInFreshDirectory()
-    const ahead = await writeTicket(
-      lockPath,
-      await createLockRecord("memory-write"),
-      Date.now() + 60_000,
-      Date.now() + 10_000,
+    const ahead = keepFresh(
+      await writeTicket(lockPath, await createLockRecord("memory-write"), Date.now() + 60_000, Date.now() + 10_000),
     )
     const seen = await ticketsAhead(lockPath, undefined, Date.now())
 
@@ -267,6 +269,17 @@ describe("wait tickets", () => {
 
 async function tickets(lockPath: string): Promise<string[]> {
   return (await readdir(path.dirname(lockPath))).filter((name) => name.includes(".wait-"))
+}
+
+/** Refreshes a hand-written ticket the way a live waiter's polls do, so it keeps counting however slow the host is. */
+function keepFresh(ticketFile: string): string {
+  const touch = () => {
+    const nowSeconds = Date.now() / 1000
+    void utimes(ticketFile, nowSeconds, nowSeconds).catch(() => undefined)
+  }
+  const timer = setInterval(touch, 200)
+  heartbeats.push(() => clearInterval(timer))
+  return ticketFile
 }
 
 async function until(condition: () => Promise<boolean>, timeoutMs = 10_000): Promise<void> {
