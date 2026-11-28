@@ -4,7 +4,7 @@ import { forgetProvenDeadTakeover } from "./proven-dead-takeovers"
 import { publishExclusive } from "./publish"
 import { delay, lockRetryDelayMs } from "./retry-delay"
 import { recoverStaleOwner } from "./stale-owner"
-import { registerWaitTicket, removeWaitTicket, ticketsAhead, type WaitTicket } from "./wait-tickets"
+import { registerWaitTicket, removeWaitTicket, ticketsAhead, touchWaitTicket, type WaitTicket } from "./wait-tickets"
 
 export type AcquireLockOptions = {
   readonly waitTimeoutMs?: number
@@ -85,9 +85,13 @@ async function acquireLoop(
   timing: LoopTiming,
 ): Promise<AcquireOutcome> {
   const { retryDelayMs, incompleteLockGraceMs, now, deadline, queue } = timing
-  const enqueue = async (notBeforeMs = 0): Promise<void> => {
-    if (queue !== undefined && queue.ticket === undefined)
-      queue.ticket = await registerWaitTicket(lockPath, record, deadline, notBeforeMs)
+  // Queues this acquisition strictly behind every live ticket (even one stamped ahead of this clock), or keeps an
+  // existing ticket fresh.
+  const enqueue = async (latestLiveCreatedAtMs?: number): Promise<void> => {
+    if (queue === undefined) return
+    if (queue.ticket !== undefined) return touchWaitTicket(queue.ticket)
+    const latest = latestLiveCreatedAtMs ?? (await ticketsAhead(lockPath, undefined, now())).latestCreatedAtMs
+    queue.ticket = await registerWaitTicket(lockPath, record, deadline, latest + 1)
   }
   let sawOtherOwner = false
   let recoveredDeadOwner = false
@@ -105,7 +109,7 @@ async function acquireLoop(
     const queued = owner === null && queue !== undefined ? await ticketsAhead(lockPath, queue.ticket, now()) : undefined
     if (queued?.ahead === true) {
       // Free, but an older waiter is queued: let it take the lock, and queue strictly behind every live ticket.
-      await enqueue(queued.latestCreatedAtMs + 1)
+      await enqueue(queued.latestCreatedAtMs)
       options.signal?.throwIfAborted()
       if (now() >= deadline) throw new LockContentionError(lockPath, null)
       await delay(Math.min(lockRetryDelayMs(attempt, retryDelayMs), Math.max(1, deadline - now())), options.signal)

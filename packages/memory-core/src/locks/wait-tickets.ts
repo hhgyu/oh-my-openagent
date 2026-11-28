@@ -1,6 +1,6 @@
 import path from "node:path"
 
-import { readdir, readFile, stat, unlink, writeFile } from "../fs/resilient"
+import { readdir, readFile, stat, unlink, utimes, writeFile } from "../fs/resilient"
 import { parseLockRecord, type LockRecord } from "./lock-record"
 import { isLockOwnerProvenDead } from "./stale-owner"
 
@@ -13,8 +13,16 @@ import { isLockOwnerProvenDead } from "./stale-owner"
 // live under the identity runtime, outside the memory repository, and hold a handful of domain locks, so the scan
 // is one small readdir. Tickets never end in `.lock` or carry `.candidate-`, so no sweep mistakes one for a lock;
 // the dead-owner sweep reaps abandoned ones through `reapWaitTickets`.
+//
+// A ticket also counts only while its waiter keeps it fresh: every poll touches it, and one untouched for longer
+// than TICKET_HEARTBEAT_STALE_MS is retired. Deleting a ticket can fail (Windows refuses while another handle on it
+// denies delete sharing), and a ticket left behind by an acquisition that already finished, even one with no
+// deadline and a live owner, must not block anyone: once its waiter stops touching it, it stops counting, and the
+// next scan or sweep deletes it. In the process that failed to delete it, it stops counting at once.
 const TICKET_MARKER = ".wait-"
 const UNREADABLE_TICKET_GRACE_MS = 5_000
+const TICKET_HEARTBEAT_STALE_MS = 3_000
+const retiredTickets = new Set<string>()
 
 export type WaitTicket = {
   readonly path: string
@@ -49,8 +57,32 @@ export async function registerWaitTicket(
   return { path: filePath, nonce: record.nonce, createdAtMs }
 }
 
+/** Deletes the ticket; one that cannot be deleted now is retired in this process and deleted by a later scan. */
 export async function removeWaitTicket(ticket: WaitTicket): Promise<void> {
-  await unlink(ticket.path).catch(() => undefined)
+  try {
+    await unlink(ticket.path)
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") retiredTickets.add(ticket.path)
+  }
+}
+
+/** The waiter's heartbeat: a ticket it stops touching stops counting. */
+export async function touchWaitTicket(ticket: WaitTicket): Promise<void> {
+  const nowSeconds = Date.now() / 1000
+  await utimes(ticket.path, nowSeconds, nowSeconds).catch(() => undefined)
+}
+
+function errorCode(error: unknown): string | undefined {
+  return error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined
+}
+
+async function deleteRetired(candidatePath: string): Promise<void> {
+  try {
+    await unlink(candidatePath)
+    retiredTickets.delete(candidatePath)
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") retiredTickets.delete(candidatePath)
+  }
 }
 
 function parseTicket(raw: string): TicketFile | null {
@@ -83,17 +115,25 @@ async function liveTickets(directory: string, now: number, lockName?: string): P
     if (marker <= 0) continue
     if (lockName !== undefined && name.slice(0, marker) !== lockName) continue
     const candidatePath = path.join(directory, name)
+    if (retiredTickets.has(candidatePath)) {
+      await deleteRetired(candidatePath)
+      continue
+    }
+    const touchedAt = await stat(candidatePath).then(
+      (status) => status.mtimeMs,
+      () => undefined,
+    )
+    if (touchedAt === undefined) continue
+    if (Date.now() - touchedAt > TICKET_HEARTBEAT_STALE_MS) {
+      await unlink(candidatePath).catch(() => undefined)
+      continue
+    }
     const raw = await readFile(candidatePath, "utf8").catch(() => undefined)
     if (raw === undefined) continue
     const ticket = parseTicket(raw)
     if (ticket === null) {
       // A ticket still being written reads as partial JSON; only one that stays unreadable is removed.
-      const writtenAt = await stat(candidatePath).then(
-        (status) => status.mtimeMs,
-        () => undefined,
-      )
-      if (writtenAt !== undefined && now - writtenAt > UNREADABLE_TICKET_GRACE_MS)
-        await unlink(candidatePath).catch(() => undefined)
+      if (Date.now() - touchedAt > UNREADABLE_TICKET_GRACE_MS) await unlink(candidatePath).catch(() => undefined)
       continue
     }
     const expired = ticket.expires_at_ms !== null && ticket.expires_at_ms <= now
