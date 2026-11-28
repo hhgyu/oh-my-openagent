@@ -348,6 +348,7 @@
     "packages/memory-core/src/locks/retry-delay.ts",
     "packages/memory-core/src/locks/stale-owner.ts",
     "packages/memory-core/src/locks/sweep-memo.ts",
+    "packages/memory-core/src/locks/wait-tickets.ts",
     "packages/memory-core/src/maintenance/index.ts",
     "packages/memory-core/src/maintenance/memory-maintenance.ts",
     "packages/memory-core/src/maintenance/stamp-file.ts",
