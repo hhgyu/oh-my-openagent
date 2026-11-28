@@ -64,7 +64,7 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
     expect(record.processes).toBe(`table naming ${git.pid}`)
     expect(record.runningForMs).toBeGreaterThanOrEqual(5_000)
     expect(published).toEqual([recordPath ?? ""])
-  }, 30_000)
+  })
 
   test("#given diagnostics mode #when the git exits before half its budget #then no stall record is written", async () => {
     // #given
@@ -85,7 +85,7 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
     expect(git.exitCode).toBe(0)
     expect(calls).toBe(0)
     expect(existsSync(diagnostics)).toBe(false)
-  }, 30_000)
+  })
 
   test("#given a budget below the stall minimum #when the git outlives half of it #then no stall record is written", async () => {
     // #given
@@ -106,7 +106,7 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
     // #then
     expect(calls).toBe(0)
     expect(existsSync(diagnostics)).toBe(false)
-  }, 30_000)
+  })
 
   test("#given diagnostics mode is off #when a git outlives half its budget #then nothing is recorded", async () => {
     // #given
@@ -124,7 +124,7 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
 
     // #then
     expect(calls).toBe(0)
-  }, 30_000)
+  })
 
   test("#given diagnostics mode and a real commit whose hook outlives half the budget #when the exec runs it #then the stall is recorded while it runs and the commit still succeeds within its budget", async () => {
     // #given
@@ -136,13 +136,13 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
     const env = { ...process.env, [GIT_TIMEOUT_DIAGNOSTICS_ENV]: diagnostics }
     expect((await exec.run(["init", "-q"], { cwd: repo, timeoutMs: 30_000, env })).code).toBe(0)
     const hook = join(repo, ".git", "hooks", "pre-commit")
-    await writeFile(hook, "#!/bin/sh\nsleep 12\n", "utf8")
+    await writeFile(hook, "#!/bin/sh\nsleep 9\n", "utf8")
     await chmod(hook, 0o755)
 
     // #when
     const result = await exec.run(
       ["-c", "user.name=stall", "-c", "user.email=stall@omo.local", "commit", "-q", "--allow-empty", "-m", "slow"],
-      { cwd: repo, timeoutMs: 20_000, env },
+      { cwd: repo, timeoutMs: 14_000, env },
     )
 
     // #then
@@ -152,10 +152,10 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
     const recordPath = join(diagnostics, records[0] ?? "")
     const record = JSON.parse(await readFile(recordPath, "utf8"))
     expect(record.argv).toContain("commit")
-    expect(record.timeoutMs).toBe(20_000)
+    expect(record.timeoutMs).toBe(14_000)
     expect(record.processes).toContain(String(record.pid))
     // The volume evidence is published beside the record on Windows only; wait for it so cleanup does not race it.
     if (process.platform === "win32")
-      expect(await probeUntil(() => existsSync(volumeSnapshotEvidencePath(recordPath)), 20_000)).toBe(true)
-  }, 60_000)
+      expect(await probeUntil(() => existsSync(volumeSnapshotEvidencePath(recordPath)), 12_000)).toBe(true)
+  })
 })
