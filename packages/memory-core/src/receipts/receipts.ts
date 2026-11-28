@@ -3,10 +3,11 @@
 // lock so concurrent processes never interleave a line; the file is never rotated or truncated.
 
 import { hostname } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { appendFile, chmod, mkdir, readFile } from "../fs/resilient"
-import { createLockRecord, receiptsLockPath, withLock } from "../locks"
+import { LockContentionError, createLockRecord, receiptsLockPath, withLock } from "../locks"
 import { redactSecretLikeMaterial } from "../sync/redact"
+import { createCoalescingQueue } from "./append-queue"
 
 export type MemoryReceiptKind = "reflection" | "dream" | "facts"
 export type MemoryReceiptEvent =
@@ -57,6 +58,8 @@ export type MemoryReceiptIdentityInput =
 const RECEIPTS_FILE = "receipts.jsonl"
 const DETAIL_LIMIT = 400
 const LOCK_WAIT_MS = 30_000
+const MAX_APPENDS_PER_FLUSH = 256
+const MAX_PENDING_APPENDS = 4096
 
 export function receiptsPath(runtimeDir: string): string {
   return join(runtimeDir, RECEIPTS_FILE)
@@ -69,8 +72,8 @@ export function receiptIdentity(receipt: MemoryReceiptIdentityInput): string {
     : JSON.stringify([receipt.kind, receipt.runId, receipt.event, receipt.generation])
 }
 
-export function appendMemoryReceipt(runtimeDir: string, input: MemoryReceiptInput): Promise<void> {
-  return underReceiptsLock(runtimeDir, () => writeLine(runtimeDir, toReceipt(input)))
+export async function appendMemoryReceipt(runtimeDir: string, input: MemoryReceiptInput): Promise<void> {
+  await appendQueue.submit(resolve(runtimeDir), { input, once: false })
 }
 
 /**
@@ -79,13 +82,43 @@ export function appendMemoryReceipt(runtimeDir: string, input: MemoryReceiptInpu
  * line was written.
  */
 export function appendMemoryReceiptOnce(runtimeDir: string, input: MemoryReceiptInput): Promise<boolean> {
-  return underReceiptsLock(runtimeDir, async () => {
+  return appendQueue.submit(resolve(runtimeDir), { input, once: true })
+}
+
+interface QueuedAppend {
+  readonly input: MemoryReceiptInput
+  readonly once: boolean
+}
+
+// Same-process appends share one lock acquisition and one flushed write; each caller resolves only after
+// that write is durable. Lines keep submission order, and a "once" append is checked against the file
+// plus the lines queued ahead of it, exactly as if each append had taken the lock in turn. Each caller
+// still fails with LockContentionError once LOCK_WAIT_MS passes without its line being admitted.
+const appendQueue = createCoalescingQueue<QueuedAppend, boolean>(
+  (runtimeDir, take, waitTimeoutMs) =>
+    underReceiptsLock(runtimeDir, waitTimeoutMs, () => writeBatch(runtimeDir, take())),
+  {
+    deadlineMs: LOCK_WAIT_MS,
+    maxBatch: MAX_APPENDS_PER_FLUSH,
+    maxPending: MAX_PENDING_APPENDS,
+    expired: (runtimeDir) => new LockContentionError(receiptsLockPath(join(runtimeDir, "locks")), null),
+  },
+)
+
+async function writeBatch(runtimeDir: string, batch: readonly QueuedAppend[]): Promise<boolean[]> {
+  const recorded = batch.some((append) => append.once)
+    ? new Set(parseReceipts(await readText(runtimeDir)).receipts.map(receiptIdentity))
+    : undefined
+  let text = ""
+  const written = batch.map(({ input, once }) => {
     const identity = receiptIdentity(input)
-    const { receipts } = parseReceipts(await readText(runtimeDir))
-    if (receipts.some((receipt) => receiptIdentity(receipt) === identity)) return false
-    await writeLine(runtimeDir, toReceipt(input))
+    if (once && recorded?.has(identity)) return false
+    recorded?.add(identity)
+    text += `${JSON.stringify(toReceipt(input))}\n`
     return true
   })
+  if (text.length > 0) await writeLines(runtimeDir, text)
+  return written
 }
 
 export interface ReadMemoryReceiptsOptions {
@@ -108,12 +141,14 @@ export async function readMemoryReceipts(
   return { receipts: options.limit === undefined ? matching : matching.slice(0, options.limit), skippedPartialLines }
 }
 
-async function underReceiptsLock<T>(runtimeDir: string, operation: () => Promise<T>): Promise<T> {
+async function underReceiptsLock<T>(
+  runtimeDir: string,
+  waitTimeoutMs: number,
+  operation: () => Promise<T>,
+): Promise<T> {
   const locks = join(runtimeDir, "locks")
   await mkdir(locks, { recursive: true })
-  return withLock(receiptsLockPath(locks), await createLockRecord("receipts"), operation, {
-    waitTimeoutMs: LOCK_WAIT_MS,
-  })
+  return withLock(receiptsLockPath(locks), await createLockRecord("receipts"), operation, { waitTimeoutMs })
 }
 
 function toReceipt(input: MemoryReceiptInput): MemoryReceipt {
@@ -135,9 +170,9 @@ function boundDetail(detail: string): string {
   return masked.length <= DETAIL_LIMIT ? masked : `${masked.slice(0, DETAIL_LIMIT - 3)}...`
 }
 
-async function writeLine(runtimeDir: string, receipt: MemoryReceipt): Promise<void> {
+async function writeLines(runtimeDir: string, text: string): Promise<void> {
   const path = receiptsPath(runtimeDir)
-  await appendFile(path, `${JSON.stringify(receipt)}\n`, { encoding: "utf8", mode: 0o600, flush: true })
+  await appendFile(path, text, { encoding: "utf8", mode: 0o600, flush: true })
   if (process.platform !== "win32") await chmod(path, 0o600)
 }
 

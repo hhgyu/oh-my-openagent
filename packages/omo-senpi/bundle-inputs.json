@@ -420,6 +420,7 @@
     "packages/memory-core/src/recall/sidecar/wake-policy.ts",
     "packages/memory-core/src/recall/sidecar/wake-slot.ts",
     "packages/memory-core/src/recall/strategy.ts",
+    "packages/memory-core/src/receipts/append-queue.ts",
     "packages/memory-core/src/receipts/index.ts",
     "packages/memory-core/src/receipts/kill-point.ts",
     "packages/memory-core/src/receipts/receipts.ts",
