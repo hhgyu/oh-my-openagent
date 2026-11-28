@@ -9,12 +9,28 @@ import { publishVolumeSnapshotEvidence } from "./volume-snapshot-diagnostics"
 // The timeout record (timeout-diagnostics.ts) is written when git's own budget runs out. On Windows CI that
 // budget (30 s) equals Bun's per-test timeout, which fires first and kills the git, so a stalled git under a
 // test never reached its record. In diagnostics mode, a git still running at half its budget now records the
-// process table and the volume snapshot evidence while it is still stalled. Nothing waits for it: the record
-// is taken asynchronously and the git keeps its budget. Short budgets (tests that time a git out on purpose)
-// are left alone, since half of them is not a stall.
+// process table and the volume snapshot evidence while it is still stalled. The git keeps its budget and its
+// caller never waits for the record, and no timeout or retry changes. The half-budget timer is unref'd, but a
+// record that has started keeps its snapshot child (at most 15 s) and volume collector (at most 10 s) running,
+// which can hold the process open that long. Short budgets (tests that time a git out on purpose) are left
+// alone, since half of them is not a stall.
 export const GIT_STALL_MIN_BUDGET_MS = 10_000
 const SNAPSHOT_DEADLINE_MS = 15_000
 const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024
+
+const MAX_UNCOLLECTED_OUTCOMES = 100
+const recordsInFlight = new Set<Promise<string | undefined>>()
+const uncollectedOutcomes: (string | undefined)[] = []
+
+/**
+ * Waits for every stall record already started, then hands over (and forgets) the outcome of each record finished
+ * since the previous call: its path, or undefined when it could not be written. Bounded by the snapshot and volume
+ * collector deadlines.
+ */
+export async function settleGitStallRecords(): Promise<(string | undefined)[]> {
+  await Promise.all(recordsInFlight)
+  return uncollectedOutcomes.splice(0)
+}
 
 export type StallSnapshot = (pid: number) => Promise<string>
 
@@ -103,7 +119,14 @@ export function armGitStallRecord(
   const startedAt = Date.now()
   const timer = setTimeout(
     () => {
-      void recordGitStall(directory, pid, argv, cwd, timeoutMs, startedAt, options).then(options.onRecorded)
+      const record = recordGitStall(directory, pid, argv, cwd, timeoutMs, startedAt, options)
+      recordsInFlight.add(record)
+      void record.then((path) => {
+        recordsInFlight.delete(record)
+        uncollectedOutcomes.push(path)
+        if (uncollectedOutcomes.length > MAX_UNCOLLECTED_OUTCOMES) uncollectedOutcomes.shift()
+        options.onRecorded?.(path)
+      })
     },
     Math.floor(timeoutMs / 2),
   )

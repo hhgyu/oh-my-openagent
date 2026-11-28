@@ -6,15 +6,15 @@ import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 
 import { createNodeGitExec } from "./exec"
-import { armGitStallRecord, GIT_STALL_MIN_BUDGET_MS } from "./stall-diagnostics"
+import { armGitStallRecord, GIT_STALL_MIN_BUDGET_MS, settleGitStallRecords } from "./stall-diagnostics"
 import { GIT_TIMEOUT_DIAGNOSTICS_ENV } from "./timeout-diagnostics"
 import { volumeSnapshotEvidencePath } from "./volume-snapshot-diagnostics"
-import { probeUntil } from "../locks/process-liveness.test-support"
 
 const roots: string[] = []
 const children: ChildProcess[] = []
 afterEach(async () => {
   for (const child of children.splice(0)) if (child.exitCode === null) child.kill("SIGKILL")
+  await settleGitStallRecords()
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })),
   )
@@ -35,7 +35,7 @@ function standIn(script: string): ChildProcess {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 describe("a git still running at half its budget (stall diagnostics)", () => {
-  test("#given diagnostics mode and a git that keeps running #when half its budget passes #then a stall record with its pid, argv and process table is written before the budget and its volume evidence is requested", async () => {
+  test("#given diagnostics mode and a git that keeps running #when half its budget passes #then a stall record with its pid, argv and a slowly collected process table is written before the budget and its volume evidence is requested", async () => {
     // #given
     const diagnostics = join(await scratch("git-stall-record-"), "diagnostics")
     const git = standIn("setInterval(() => {}, 1000)")
@@ -45,7 +45,10 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
 
     // #when
     armGitStallRecord(git, { [GIT_TIMEOUT_DIAGNOSTICS_ENV]: diagnostics }, ["add", "-A"], "repo-dir", 10_000, {
-      snapshot: async (pid) => `table naming ${pid}`,
+      snapshot: async (pid) => {
+        await sleep(2_000)
+        return `table naming ${pid}`
+      },
       publishVolume: async (path) => {
         published.push(path)
       },
@@ -55,7 +58,7 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
 
     // #then
     const elapsedMs = Date.now() - startedAt
-    expect(elapsedMs).toBeGreaterThanOrEqual(5_000)
+    expect(elapsedMs).toBeGreaterThanOrEqual(7_000)
     expect(elapsedMs).toBeLessThan(10_000)
     expect(recordPath).toMatch(new RegExp(`git-stall-${git.pid}-\\d+\\.json$`))
     expect(await readdir(diagnostics)).toEqual([basename(recordPath ?? "")])
@@ -64,6 +67,30 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
     expect(record.processes).toBe(`table naming ${git.pid}`)
     expect(record.runningForMs).toBeGreaterThanOrEqual(5_000)
     expect(published).toEqual([recordPath ?? ""])
+  })
+
+  test("#given a diagnostics directory that cannot be created #when a stall is recorded #then the record reports no path and nothing is written", async () => {
+    // #given
+    const root = await scratch("git-stall-unwritable-")
+    const diagnostics = join(root, "diagnostics")
+    await writeFile(diagnostics, "a file where the directory should be", "utf8")
+    const git = standIn("setInterval(() => {}, 1000)")
+    const recorded = Promise.withResolvers<string | undefined>()
+    let published = 0
+
+    // #when
+    armGitStallRecord(git, { [GIT_TIMEOUT_DIAGNOSTICS_ENV]: diagnostics }, ["add"], "repo-dir", 10_000, {
+      snapshot: async () => "table",
+      publishVolume: async () => {
+        published += 1
+      },
+      onRecorded: recorded.resolve,
+    })
+
+    // #then
+    expect(await recorded.promise).toBeUndefined()
+    expect(await readdir(root)).toEqual(["diagnostics"])
+    expect(published).toBe(0)
   })
 
   test("#given diagnostics mode #when the git exits before half its budget #then no stall record is written", async () => {
@@ -147,15 +174,15 @@ describe("a git still running at half its budget (stall diagnostics)", () => {
 
     // #then
     expect(result.code).toBe(0)
-    const records = (await readdir(diagnostics)).filter((name) => /^git-stall-\d+-\d+\.json$/.test(name))
-    expect(records).toHaveLength(1)
-    const recordPath = join(diagnostics, records[0] ?? "")
+    const written = (await settleGitStallRecords()).filter((path) => path !== undefined)
+    expect(written).toHaveLength(1)
+    const recordPath = written[0] ?? ""
+    expect(await readdir(diagnostics)).toContain(basename(recordPath))
     const record = JSON.parse(await readFile(recordPath, "utf8"))
     expect(record.argv).toContain("commit")
     expect(record.timeoutMs).toBe(14_000)
     expect(record.processes).toContain(String(record.pid))
-    // The volume evidence is published beside the record on Windows only; wait for it so cleanup does not race it.
-    if (process.platform === "win32")
-      expect(await probeUntil(() => existsSync(volumeSnapshotEvidencePath(recordPath)), 12_000)).toBe(true)
+    // The record settles only after its volume evidence is published, which happens on Windows only.
+    expect(existsSync(volumeSnapshotEvidencePath(recordPath))).toBe(process.platform === "win32")
   })
 })
