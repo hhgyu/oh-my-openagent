@@ -309,6 +309,7 @@
     "packages/memory-core/src/git/repo.ts",
     "packages/memory-core/src/git/secret.ts",
     "packages/memory-core/src/git/stable-log-output.ts",
+    "packages/memory-core/src/git/stall-diagnostics.ts",
     "packages/memory-core/src/git/stop-git-tree.ts",
     "packages/memory-core/src/git/timeout-diagnostics.ts",
     "packages/memory-core/src/git/volume-snapshot-diagnostics.ts",
